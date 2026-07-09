@@ -1,0 +1,119 @@
+/* RESET */
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#dcdcdc;font-family:"Segoe UI",sans-serif;}
+/* WINDOW */
+.setup-window{width:1000px;height:650px;margin:0 auto;background:#e5e5e5;border:1px solid #b7b7b7;background:#efefef;}
+/* TITLE */
+.setup-title{height:34px;display:flex;align-items:center;padding-left:10px;font-size:18px;background:#f6f6f6;border-bottom:1px solid #c8c8c8;}
+/* GRID */
+.setup-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;padding:10px;}
+/* COLUMN */
+.column{display:flex;flex-direction:column;gap:4px;}
+/* GROUP TITLE */
+.group-title{margin-top:4px;margin-bottom:2px;font-size:15px;color:#222;}
+.group-title{ font-size:16px; font-weight:700; text-align:center; padding:10px; border-bottom:1px solid #444; margin-bottom:12px; width:100%; box-sizing:border-box;}
+/* BUTTON */
+.setup-btn{height:26px;border:1px solid #a8a8a8;background:#ececec;font-size:14px;cursor:pointer;transition:.15s;}
+.setup-btn:hover{background:#dfeeff;border-color:#4c8bf5;}
+.setup-btn:active{background:#cde2ff;}
+.modal-box{ width:340px; background:#efefef; border:1px solid #a8a8a8; padding:15px;}
+.modal-title{ font-size:18px; margin-bottom:12px; font-weight:600;}
+.daw-list{ display:flex; flex-direction:column; gap:10px; margin-bottom:15px;}
+.modal-buttons{ display:flex; justify-content:flex-end; gap:8px;}
+.modal-buttons button{width:90px; height:28px;}
+.modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+.modal.show { display: flex; justify-content: center; align-items: center; }
+.modal-box { background: white; padding: 20px; border-radius: 5px; width: 400px; }
+.modal { display: none; }
+.modal.show { display: flex; } /* Hoặc block */
+.footer-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 10px 10px 10px; margin-top: 10px;}
+
+/* Thêm vào cuối file setup.css */
+.setup-status{ border:1px solid #b7b7b7; background:#f6f6f6; padding:8px; display:flex; flex-direction:column; gap:4px; font-size:11px;}
+.progress-box{ margin-bottom:10px;}
+.progress-bar{
+    width:100%;
+    height:10px;
+    background:#333;
+    border-radius:10px;
+    overflow:hidden;
+}
+
+#setupProgressFill{
+    width:0%;
+    height:100%;
+    background:#00c853;
+    transition:0.3s;
+}
+
+/* thanh trạng thái*/
+.ready{ color:#00c853; font-weight:bold;}
+.missing{ color:#ff3d00; font-weight:bold;}
+.column{
+    flex:1;
+    min-width:0;
+}
+.setup-container{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:15px; align-items:stretch;}
+
+.status-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+
+    margin-bottom:8px;
+}
+
+.status-badge{
+    padding:4px 10px;
+    border-radius:6px;
+    font-size:12px;
+}
+
+.missing{
+    background:#ff5252;
+    color:white;
+}
+
+.ready{
+    background:#00c853;
+    color:white;
+}
+
+.setup-divider{
+    border:none;
+    border-top:1px solid #444;
+    margin:10px 0;
+}
+
+.setup-status-list{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+
+.status-item{
+    font-size:13px;
+    padding:2px 4px;
+}
+
+.status-ready{
+    color:#4CAF50;
+    font-weight:700;
+}
+
+.status-missing{
+    color:#ff5252;
+    font-weight:700;
+}
+
+.status-missing{
+    color:#ff5252;
+    font-weight:700;
+}
+
+.status-two-col{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    column-gap:14px;
+    row-gap:4px;
+}
