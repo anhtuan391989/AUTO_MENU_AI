@@ -94,15 +94,57 @@ class AIContext {
             needAutomation: false
         };
 
-        brain: {
+        this.brain = {
 
             initialized: false,
 
-                running: false,
+            running: false,
 
-                    version: "2.0.0"
+            version: "2.0.0"
 
-        },
+        };
+
+    }
+
+    // ==========================================================
+    // Cập nhật dữ liệu Key/BPM/MOD nhận được từ ui/js/engines/*
+    // qua IPC (xem app/main.js: ipcMain.on("ai-result")).
+    // Không đổi cấu trúc reset() phía trên, chỉ ghi đè giá trị.
+    // ==========================================================
+
+    updateKey({ key, confidence } = {}) {
+
+        this.key.previous = this.key.current;
+
+        this.key.current = key ?? this.key.current;
+
+        this.key.confidence = typeof confidence === "number" ? confidence : this.key.confidence;
+
+        this.key.stable = true;
+
+    }
+
+    updateBpm({ bpm, confidence } = {}) {
+
+        this.bpm.current = typeof bpm === "number" ? bpm : this.bpm.current;
+
+        this.bpm.confidence = typeof confidence === "number" ? confidence : this.bpm.confidence;
+
+        this.bpm.stable = true;
+
+    }
+
+    updateMod({ from, to, semitone, time } = {}) {
+
+        this.mod.detected = true;
+
+        this.mod.from = from ?? this.mod.from;
+
+        this.mod.to = to ?? this.mod.to;
+
+        this.mod.time = time ?? this.mod.time;
+
+        this.mod.confidence = 1;
 
     }
 

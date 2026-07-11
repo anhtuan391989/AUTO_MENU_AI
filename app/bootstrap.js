@@ -1,31 +1,40 @@
-const EventBus = require("./EventBus");
-const EVENTS = require("./events");
+const EventBus = require("../core/events/EventBus");
+const Events = require("../core/events/Events");
+
+/**
+ * ==========================================================
+ * Auto Menu AI
+ * App Bootstrap
+ * ----------------------------------------------------------
+ * Đăng ký các listener log cơ bản cho tầng main process.
+ * Không đụng UI/HTML.
+ * ==========================================================
+ */
 
 module.exports = function bootstrap() {
 
-    EventBus.onEvent(EVENTS.APP_READY, () => {
+    EventBus.subscribe(Events.APP_READY, () => {
 
         console.log("[AI] Ready");
 
     });
 
-    EventBus.onEvent(EVENTS.AUDIO_STARTED, () => {
+    EventBus.subscribe(Events.AUDIO_STARTED, () => {
 
         console.log("[AI] Audio Started");
 
     });
 
-    EventBus.onEvent(EVENTS.KEY_UPDATED, (data) => {
+    EventBus.subscribe(Events.KEY_UPDATED, (data) => {
 
         console.log("[AI] Key:", data);
 
     });
 
-    EventBus.onEvent(EVENTS.MOD_UPDATED, (data) => {
+    EventBus.subscribe(Events.MOD_UPDATED, (data) => {
 
         console.log("[AI] MOD:", data);
 
     });
 
-}
-;require("./WorkflowManager");
+};

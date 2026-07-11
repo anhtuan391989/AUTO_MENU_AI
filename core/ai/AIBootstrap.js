@@ -1,8 +1,9 @@
 const AIBrain = require("./AIBrain");
-const WorkflowManager = require("./WorkflowManager");
-const DecisionEngine = require("./DecisionEngine");
-const EventBus = require("./EventBus");
+const WorkflowManager = require("./managers/WorkflowManager");
+const DecisionEngine = require("./decision/DecisionEngine");
+const EventBus = require("../events/EventBus");
 const Context = require("./AIContext");
+const AnalysisState = require("./AnalysisState"); // require để kích hoạt lắng nghe KEY/BPM/MOD_UPDATED (xem AnalysisState.js)
 
 class AIBootstrap {
 
@@ -20,7 +21,7 @@ class AIBootstrap {
 
         this.ai = new AIBrain();
 
-        await this.ai.initialize();
+        await this.ai.init();
 
         this.initialized = true;
 
@@ -31,6 +32,12 @@ class AIBootstrap {
     getBrain() {
 
         return this.ai;
+
+    }
+
+    getAnalysisState() {
+
+        return AnalysisState;
 
     }
 

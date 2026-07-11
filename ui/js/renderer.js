@@ -254,12 +254,21 @@ const applyKeyBtn = document.getElementById("applyKeyBtn");
 const currentKeyEl = document.getElementById("currentKey");
 const keyInfoEl = document.getElementById("keyInfo");
 
-let autoDetectTimeout;
+// === Trạng thái Key Mode — CỜ RIÊNG cho Key, KHÔNG dùng chung với isManualOverrideActive()
+//     (cờ đó đọc modPowerBtn, chỉ dành cho việc chặn gửi lệnh Modulation, không liên quan Key). ===
+let keyMode = "AUTO"; // "AUTO" | "MANUAL"
+
+function isKeyManualModeActive() {
+    return keyMode === "MANUAL";
+}
 
 // Điểm DUY NHẤT chịu trách nhiệm bật chế độ AI Key Detect — trước đây có 2 chỗ tự chép lại
 // logic này (khi bấm Apply chọn "AI Key Detect", và khi tự động hết 10s sau khi chọn tay),
 // nên dễ bị lệch nhau. Giờ gộp về 1 chỗ để sau này nối engine AI thật chỉ cần sửa ở đây.
 function triggerAiKeyDetect() {
+    keyMode = "AUTO";
+    stopBackgroundKeyDetectForCore();
+
     if (keyInfoEl) keyInfoEl.textContent = "AI Detecting...";
     setStatus("dot-key", "pending"); // cam: đang dò tone
     console.log("AI KEY DETECT MODE (KeyEngine.detectOnce — xem ui/js/engines/keyEngine.js)");
@@ -274,10 +283,39 @@ function triggerAiKeyDetect() {
     });
 }
 
+// Vòng dò NỀN dành riêng cho Manual Key Mode: vẫn gọi KeyEngine.detectOnce() (API có sẵn,
+// không sửa keyEngine.js) để tiếp tục cập nhật AIContext qua IPC, nhưng KHÔNG đụng dropdown,
+// KHÔNG đụng keyInfoEl/status dot, và KHÔNG gửi AutoTune — đúng yêu cầu Manual Key Mode.
+//
+// Đây cũng là điểm kiến trúc dự kiến cho bước sau: 1 bộ phát hiện "đổi bài hát" (chưa xây)
+// có thể tự gọi triggerAiKeyDetect() để quay về Auto Mode khi phát hiện bài mới, thay vì
+// phải sửa lại chỗ này.
+function startBackgroundKeyDetectForCore() {
+    stopBackgroundKeyDetectForCore();
+
+    window.__keyBackgroundDetectStopWatcher = KeyEngine.detectOnce((result) => {
+        window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
+
+        if (isKeyManualModeActive()) {
+            startBackgroundKeyDetectForCore(); // vẫn Manual -> dò lại vòng kế tiếp
+        }
+    });
+}
+
+function stopBackgroundKeyDetectForCore() {
+    if (window.__keyBackgroundDetectStopWatcher) {
+        window.__keyBackgroundDetectStopWatcher();
+        window.__keyBackgroundDetectStopWatcher = null;
+    }
+}
+
 // Tách riêng khỏi triggerAiKeyDetect() để có thể tái sử dụng nếu sau này có nguồn phát
 // hiện Key khác (vd nút "bài hát mới" tự reset), không phải chỉ gọi được từ 1 chỗ.
 function applyDetectedKey(result) {
     originalKey = result.key; // vd "D Minor" — khớp đúng định dạng transposeKey/sendKeyToAutotune cần
+
+    // Gửi kết quả sang Core (AIContext) qua IPC — không ảnh hưởng logic hiển thị bên dưới
+    window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
 
     if (currentKeyEl) currentKeyEl.textContent = originalKey;
     if (keySelector) keySelector.value = originalKey; // có thể không khớp option nào nếu là dấu giáng hiếm, chỉ ảnh hưởng hiển thị dropdown, không ảnh hưởng logic
@@ -301,8 +339,17 @@ applyKeyBtn?.addEventListener("click", () => {
     const selectedKey = keySelector.value;
 
     if (selectedKey === "AI Key Detect") {
-        triggerAiKeyDetect();
+        triggerAiKeyDetect(); // tự đưa keyMode về "AUTO" bên trong
         return;
+    }
+
+    // === Chuyển sang Manual Key Mode — cờ RIÊNG cho Key (keyMode), không dùng chung với Mod ===
+    keyMode = "MANUAL";
+
+    // Nếu AI đang dò dở (foreground) từ trước -> huỷ, tránh nó tự áp kết quả đè lên Manual vừa chọn
+    if (window.__keyDetectStopWatcher) {
+        window.__keyDetectStopWatcher();
+        window.__keyDetectStopWatcher = null;
     }
 
     originalKey = selectedKey;
@@ -321,15 +368,12 @@ applyKeyBtn?.addEventListener("click", () => {
         }
     });
 
-    // Sau 10s tự động nhường lại quyền cho AI — dùng ĐÚNG hàm triggerAiKeyDetect() ở trên,
-    // thay vì tự đổi chữ trực tiếp như code cũ (khiến menu nói "đang AI Detect" trong khi
-    // Auto-Tune thực tế vẫn giữ nguyên key chọn tay, không có gì thật sự chạy phía sau).
-    clearTimeout(autoDetectTimeout);
-    autoDetectTimeout = setTimeout(() => {
-        keySelector.value = "AI Key Detect";
-        console.log("Back To AI Key Detect (tự động sau 10s)");
-        triggerAiKeyDetect();
-    }, 10000);
+    // ĐÃ BỎ: bộ đếm 10 giây tự quay lại AI Key Detect (đây chính là nguyên nhân lỗi AI ghi đè
+    // Key chọn tay). Giờ Manual Key Mode giữ NGUYÊN cho tới khi người dùng tự chọn lại
+    // "AI Key Detect" trong dropdown rồi bấm Apply (xem nhánh if phía trên).
+
+    // AI vẫn tiếp tục dò NỀN để cập nhật AIContext (yêu cầu #2), nhưng không đụng dropdown/AutoTune
+    startBackgroundKeyDetectForCore();
 });
 
 /* ==========================================================
@@ -565,6 +609,9 @@ async function applyModEvent(data) {
     updateModInfo(data.time, originalKey, newKey, data.semitone);
     aiSemitoneOffset = data.semitone;
 
+    // Gửi kết quả sang Core (AIContext) qua IPC — không ảnh hưởng logic gửi lệnh Auto-Tune bên dưới
+    window.electronAPI?.reportAiResult("mod", { from: originalKey, to: newKey, semitone: data.semitone, time: data.time });
+
     if (isManualOverrideActive()) {
         // Đang bị ghi đè tay -> chỉ ghi nhận giá trị AI muốn áp, KHÔNG gửi lệnh thật lúc
         // này để tránh đánh nhau với lệnh tay đang chủ động điều khiển Auto-Tune. Giá trị
@@ -739,6 +786,9 @@ async function startAudioMonitor() {
             if (bpmEl1) bpmEl1.textContent = bpm;
             if (bpmEl2) bpmEl2.textContent = bpm + " BPM";
             setStatus("dot-bpm", "online"); // xanh: đã dò được BPM ổn định, đủ phiếu đồng thuận
+
+            // Gửi kết quả sang Core (AIContext) qua IPC — không ảnh hưởng logic hiển thị phía trên
+            window.electronAPI?.reportAiResult("bpm", { bpm });
         });
 
         BPMEngine.onLevel(({ bassEnergy, localAvg, maxByte }) => {

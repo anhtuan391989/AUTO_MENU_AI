@@ -77,6 +77,9 @@ function createSetupWindow() {
 }
 
 const AIBootstrap = require("../core/ai/AIBootstrap");
+const AIContext = require("../core/ai/AIContext");
+const EventBus = require("../core/events/EventBus");
+const Events = require("../core/events/Events");
 
 app.whenReady().then(async () => {
     // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
@@ -121,6 +124,32 @@ ipcMain.on("close-setup", () => {
 
 ipcMain.on("setup-changed", () => {
     mainWin?.webContents.send("setup-changed");
+});
+
+// ================================
+// NHẬN KẾT QUẢ KEY/BPM/MOD TỪ ui/js/engines/* (renderer) -> cập nhật AIContext -> phát EventBus
+// Không đổi thuật toán, không đổi UI — chỉ chuyển tiếp dữ liệu sang Core.
+// ================================
+ipcMain.on("ai-result", (event, { type, payload } = {}) => {
+
+    if (type === "key") {
+        AIContext.updateKey(payload);
+        EventBus.publish(Events.KEY_UPDATED, payload);
+        return;
+    }
+
+    if (type === "bpm") {
+        AIContext.updateBpm(payload);
+        EventBus.publish(Events.BPM_UPDATED, payload);
+        return;
+    }
+
+    if (type === "mod") {
+        AIContext.updateMod(payload);
+        EventBus.publish(Events.MOD_UPDATED, payload);
+        return;
+    }
+
 });
 
 ipcMain.handle("ping", () => "pong");

@@ -42,10 +42,18 @@ module.exports = {
 
     AUTOMATION_FINISHED: "AUTOMATION_FINISHED",
 
-    ERROR: "ERROR"
-    
+    ERROR: "ERROR",
+
     AI_STARTED: "AI_STARTED",
 
     AI_STOPPED: "AI_STOPPED",
+
+    // -- Do AnalysisState phát ra khi phát hiện THAY ĐỔI thật sự (khác với *_UPDATED ở trên,
+    //    vốn bắn mỗi lần có dữ liệu mới, kể cả khi giá trị không đổi) --
+    KEY_CHANGED: "KEY_CHANGED",
+
+    BPM_CHANGED: "BPM_CHANGED",
+
+    MOD_CHANGED: "MOD_CHANGED",
 
 };
