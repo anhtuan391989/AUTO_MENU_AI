@@ -76,7 +76,9 @@ function createSetupWindow() {
     });
 }
 
-app.whenReady().then(() => {
+const AIBootstrap = require("../core/ai/AIBootstrap");
+
+app.whenReady().then(async () => {
     // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
     // App này cần quyền mic để liệt kê tên soundcard, và quyền midi để gửi MIDI sang DAW.
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -95,8 +97,6 @@ app.whenReady().then(() => {
     createSetupWindow();
     await AIBootstrap.initialize();
 });
-
-const AIBootstrap = require("../core/core/AI/AIBootstrap");
 
 ipcMain.on("open-setup", () => {
 
