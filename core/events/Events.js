@@ -48,4 +48,32 @@ module.exports = {
 
     AI_STOPPED: "AI_STOPPED",
 
+    // -- Do AnalysisState phát ra khi phát hiện THAY ĐỔI thật sự (khác với *_UPDATED ở trên,
+    //    vốn bắn mỗi lần có dữ liệu mới, kể cả khi giá trị không đổi) --
+    KEY_CHANGED: "KEY_CHANGED",
+
+    BPM_CHANGED: "BPM_CHANGED",
+
+    MOD_CHANGED: "MOD_CHANGED",
+
+    // -- Sự kiện tổng hợp: bắn ra bất kỳ khi nào KEY_CHANGED/BPM_CHANGED/MOD_CHANGED xảy ra,
+    //    kèm toàn bộ snapshot -- để module nào chỉ cần "có gì đổi thì báo tôi" không cần
+    //    đăng ký lắng nghe riêng lẻ cả 3 sự kiện trên. --
+    ANALYSIS_UPDATED: "ANALYSIS_UPDATED",
+
+    // -- Do InferenceEngine phát ra: đã PHÂN LOẠI ý nghĩa (NEW_SONG/KEY_CHANGE/MODULATION/
+    //    BPM_CHANGE/NOISE), kèm AnalysisResult đầy đủ. DecisionEngine nên lắng nghe sự kiện
+    //    này thay vì tự lắng nghe KEY_CHANGED/BPM_CHANGED/MOD_CHANGED riêng lẻ. --
+    ANALYSIS_RESULT: "ANALYSIS_RESULT",
+
+    // -- Do ResultQueue (Analysis Aggregator) phát ra: 1 hoặc nhiều AnalysisResult đã được
+    //    gom/lọc/ưu tiên xong sau cửa sổ gom ngắn. DecisionEngine nên lắng nghe sự kiện này
+    //    thay vì tự lắng nghe ANALYSIS_RESULT thô (dễ bị dồn dập/trùng lặp). --
+    ANALYSIS_READY: "ANALYSIS_READY",
+
+    // -- Do WorkflowManager phát ra: các DecisionAction đã được loại trùng liên tiếp,
+    //    giữ nguyên thứ tự, đã đẩy vào TaskQueue -- sẵn sàng để thực thi (chưa thực thi
+    //    ở bước này). --
+    WORKFLOW_READY: "WORKFLOW_READY",
+
 };

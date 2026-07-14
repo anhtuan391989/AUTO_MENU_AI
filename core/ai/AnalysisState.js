@@ -1,25 +1,29 @@
 const EventBus = require("../events/EventBus");
 const Events = require("../events/Events");
 const Logger = require("../shared/Logger");
+const AIContext = require("./AIContext");
 
 /**
  * ==========================================================
  * Auto Menu AI
- * AnalysisState
+ * AnalysisState  (= "Analysis Engine" của Core)
  * ----------------------------------------------------------
- * Lưu trạng thái phân tích hiện tại (Key/BPM/Modulation/Confidence)
- * và CHỊU TRÁCH NHIỆM DUY NHẤT: phát hiện khi nào có THAY ĐỔI thật
- * sự (vd Key đổi từ C sang D), rồi phát sự kiện tương ứng qua
- * EventBus (KEY_CHANGED/BPM_CHANGED/MOD_CHANGED).
+ * Nhiệm vụ DUY NHẤT:
+ *   1. Theo dõi AIContext (đọc trực tiếp this.context.key/bpm/mod
+ *      — KHÔNG có bản sao dữ liệu riêng, KHÔNG tin payload sự kiện).
+ *   2. So sánh dữ liệu cũ (đã lưu ở đây) với dữ liệu mới (đọc từ AIContext).
+ *   3. Phát hiện thay đổi thật sự, phát KEY_CHANGED/BPM_CHANGED/
+ *      MOD_CHANGED/ANALYSIS_UPDATED qua EventBus.
  *
- * KHÔNG quyết định AutoTune, KHÔNG điều khiển Plugin — chỉ theo
- * dõi & báo tin. Việc quyết định làm gì với thay đổi đó thuộc về
- * DecisionEngine (core/ai/decision/), không phải ở đây.
+ * KHÔNG quyết định AutoTune, KHÔNG điều khiển Plugin, KHÔNG đổi UI —
+ * chỉ theo dõi & báo tin. Việc quyết định làm gì với thay đổi đó
+ * thuộc về DecisionEngine (core/ai/decision/), không phải ở đây.
  *
  * Khác với AIContext (chỉ lưu dữ liệu thô, không tự so sánh):
  * AnalysisState tự lắng nghe KEY_UPDATED/BPM_UPDATED/MOD_UPDATED
- * (đã được app/main.js phát sẵn qua IPC) để tự phân tích, không
- * phụ thuộc và không đụng vào tầng IPC.
+ * (đã được app/main.js phát sẵn qua IPC — file này KHÔNG đụng IPC)
+ * làm TÍN HIỆU "có gì đó vừa đổi trong AIContext, đi đọc lại đi",
+ * rồi mới thực sự đọc giá trị hiện tại từ chính AIContext.
  * ==========================================================
  */
 
@@ -73,11 +77,11 @@ class AnalysisState {
 
     }
 
-    _onKeyUpdated(payload = {}) {
+    _onKeyUpdated() {
 
-        this._touchUpdateTime(payload.confidence);
+        this._touchUpdateTime(AIContext.key.confidence);
 
-        const newKey = payload.key;
+        const newKey = AIContext.key.current;
 
         if (!newKey || newKey === this.currentKey) {
 
@@ -103,13 +107,15 @@ class AnalysisState {
 
         });
 
+        this._publishAnalysisUpdated();
+
     }
 
-    _onBpmUpdated(payload = {}) {
+    _onBpmUpdated() {
 
-        this._touchUpdateTime(payload.confidence);
+        this._touchUpdateTime(AIContext.bpm.confidence);
 
-        const newBpm = payload.bpm;
+        const newBpm = AIContext.bpm.current;
 
         if (typeof newBpm !== "number" || newBpm === this.currentBpm) {
 
@@ -135,13 +141,15 @@ class AnalysisState {
 
         });
 
+        this._publishAnalysisUpdated();
+
     }
 
-    _onModUpdated(payload = {}) {
+    _onModUpdated() {
 
-        this._touchUpdateTime(payload.confidence);
+        this._touchUpdateTime(AIContext.mod.confidence);
 
-        const label = payload.to ?? null;
+        const label = AIContext.mod.to ?? null;
 
         if (!label || label === this.currentModulation) {
 
@@ -151,19 +159,25 @@ class AnalysisState {
 
         this.currentModulation = label;
 
-        Logger.info("AnalysisState", `Modulation changed: ${JSON.stringify(payload)}`);
+        Logger.info("AnalysisState", `Modulation changed: ${AIContext.mod.from} -> ${label}`);
 
         EventBus.publish(Events.MOD_CHANGED, {
 
-            from: payload.from ?? null,
+            from: AIContext.mod.from ?? null,
 
             to: label,
-
-            semitone: payload.semitone,
 
             time: this.lastUpdateTime
 
         });
+
+        this._publishAnalysisUpdated();
+
+    }
+
+    _publishAnalysisUpdated() {
+
+        EventBus.publish(Events.ANALYSIS_UPDATED, this.getSnapshot());
 
     }
 

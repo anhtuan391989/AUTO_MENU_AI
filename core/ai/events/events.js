@@ -56,4 +56,14 @@ module.exports = {
 
     MOD_CHANGED: "MOD_CHANGED",
 
+    // -- Sự kiện tổng hợp: bắn ra bất kỳ khi nào KEY_CHANGED/BPM_CHANGED/MOD_CHANGED xảy ra,
+    //    kèm toàn bộ snapshot -- để module nào chỉ cần "có gì đổi thì báo tôi" không cần
+    //    đăng ký lắng nghe riêng lẻ cả 3 sự kiện trên. --
+    ANALYSIS_UPDATED: "ANALYSIS_UPDATED",
+
+    // -- Do InferenceEngine phát ra: đã PHÂN LOẠI ý nghĩa (NEW_SONG/KEY_CHANGE/MODULATION/
+    //    BPM_CHANGE/NOISE), kèm AnalysisResult đầy đủ. DecisionEngine nên lắng nghe sự kiện
+    //    này thay vì tự lắng nghe KEY_CHANGED/BPM_CHANGED/MOD_CHANGED riêng lẻ. --
+    ANALYSIS_RESULT: "ANALYSIS_RESULT",
+
 };
