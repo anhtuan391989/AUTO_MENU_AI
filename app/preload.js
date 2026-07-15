@@ -45,4 +45,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- Gửi kết quả Key/BPM/MOD từ engine (ui/js/engines/*) sang Core (AIContext) ----
     // type: "key" | "bpm" | "mod", payload: dữ liệu tương ứng (xem app/main.js: ipcMain.on("ai-result"))
     reportAiResult: (type, payload) => ipcRenderer.send("ai-result", { type, payload }),
+
+    // ---- Bridge: nhận lệnh Plugin trừu tượng từ Core (PluginController) ----
+    // callback nhận { command, value, confidence, reason, timestamp } — renderer tự quyết
+    // định gọi hàm nào trong vocalCommandRouter.js tương ứng với command.
+    onPluginCommand: (callback) => ipcRenderer.on("plugin-command", (event, message) => callback(message)),
+
+    // ---- Control Source: LEGACY_CONTROL hay AI_CONTROL (xem core/shared/ControlSource.js) ----
+    getControlSource: () => ipcRenderer.invoke("get-control-source"),
 });

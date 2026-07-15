@@ -80,6 +80,7 @@ const AIBootstrap = require("../core/ai/AIBootstrap");
 const AIContext = require("../core/ai/AIContext");
 const EventBus = require("../core/events/EventBus");
 const Events = require("../core/events/Events");
+const ControlSource = require("../core/shared/ControlSource");
 
 app.whenReady().then(async () => {
     // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
@@ -152,7 +153,21 @@ ipcMain.on("ai-result", (event, { type, payload } = {}) => {
 
 });
 
+// ================================
+// BRIDGE: CHỈ chuyển tiếp PLUGIN_COMMAND (từ core/ai/plugin/PluginController.js) sang
+// renderer qua IPC — không xử lý, không diễn giải, không tạo logic MIDI/AHK nào ở đây.
+// Nếu Core chưa bao giờ phát PLUGIN_COMMAND (vd BootLoader chưa gắn), đoạn này đơn giản
+// không bao giờ chạy tới — không ảnh hưởng gì tới hệ thống cũ đang hoạt động.
+// ================================
+EventBus.subscribe(Events.PLUGIN_COMMAND, (message) => {
+    mainWin?.webContents.send("plugin-command", message);
+});
+
 ipcMain.handle("ping", () => "pong");
+
+// Cho renderer biết đang ở LEGACY_CONTROL hay AI_CONTROL — nguồn duy nhất là
+// core/shared/ControlSource.js, renderer KHÔNG tự giữ bản sao riêng.
+ipcMain.handle("get-control-source", () => ControlSource.getControlSource());
 
 // ================================
 // LẤY TỌA ĐỘ: dùng AutoHotkey v2 (di chuột thật tới vị trí + nhấn F8)

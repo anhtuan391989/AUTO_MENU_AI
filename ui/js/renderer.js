@@ -182,6 +182,22 @@ const flatToSharp = {
     "Bb": "A#"
 };
 
+// === Control Source (LEGACY_CONTROL / AI_CONTROL) — lấy 1 lần lúc khởi động từ Core
+// (core/shared/ControlSource.js, qua IPC) để quyết định applyDetectedKey()/applyModEvent()
+// có tự gửi lệnh xuống Plugin hay không. KHÔNG có giao diện nào để đổi lúc chạy — đổi ở
+// core/shared/ControlSource.js. Mặc định LEGACY_CONTROL trong lúc chờ IPC trả lời, để hệ
+// cũ không bao giờ vô tình bị tắt do lỗi/độ trễ IPC.
+let controlSource = "LEGACY_CONTROL";
+
+window.electronAPI?.getControlSource?.().then((mode) => {
+    if (mode) controlSource = mode;
+    console.log("[ControlSource] Đang ở chế độ:", controlSource);
+}).catch((err) => console.warn("[ControlSource] Không lấy được, giữ mặc định LEGACY_CONTROL:", err));
+
+function isAiControlActive() {
+    return controlSource === "AI_CONTROL";
+}
+
 function transposeKey(currentKey, steps) {
     // Bắt cả nốt có dấu thăng (C#) lẫn dấu giáng (Db)
     const match = currentKey.match(/^([A-G](?:#|b)?)/);
@@ -321,15 +337,27 @@ function applyDetectedKey(result) {
     if (keySelector) keySelector.value = originalKey; // có thể không khớp option nào nếu là dấu giáng hiếm, chỉ ảnh hưởng hiển thị dropdown, không ảnh hưởng logic
     if (keyInfoEl) keyInfoEl.textContent = `Auto Detect (${Math.round(result.confidence * 100)}% tin cậy)`;
 
-    sendKeyToAutotune(originalKey).then((sendResult) => {
-        if (sendResult.ok) {
-            setStatus("dot-key", "online"); // xanh: đã dò được + gửi thành công xuống Auto-Tune
-        } else {
-            setStatus("dot-key", "offline");
-            if (keyInfoEl) keyInfoEl.textContent = "⚠️ Lỗi gửi Key (AI)";
-            console.error("sendKeyToAutotune (AI) lỗi:", sendResult.detail);
-        }
-    });
+    if (isAiControlActive()) {
+
+        // AI_CONTROL: renderer KHÔNG tự gửi lệnh AI xuống Plugin nữa — chỉ cập nhật UI +
+        // báo cáo AIContext (đã làm ở trên). Việc gửi thật để dành cho Workflow ->
+        // PluginController -> Bridge (xem ui/js/renderer.js phần cuối file: onPluginCommand).
+        console.log("[ControlSource] AI_CONTROL — bỏ qua gửi Key trực tiếp, chờ Bridge từ Core.");
+        setStatus("dot-key", "online"); // vẫn coi là "đã dò xong", việc gửi là trách nhiệm của Bridge
+
+    } else {
+
+        sendKeyToAutotune(originalKey).then((sendResult) => {
+            if (sendResult.ok) {
+                setStatus("dot-key", "online"); // xanh: đã dò được + gửi thành công xuống Auto-Tune
+            } else {
+                setStatus("dot-key", "offline");
+                if (keyInfoEl) keyInfoEl.textContent = "⚠️ Lỗi gửi Key (AI)";
+                console.error("sendKeyToAutotune (AI) lỗi:", sendResult.detail);
+            }
+        });
+
+    }
 
     // Đã chốt được Key gốc -> bắt đầu theo dõi modulation liên tục suốt phần còn lại của bài hát
     startModulationWatcher();
@@ -618,6 +646,17 @@ async function applyModEvent(data) {
         // này sẽ được áp khi người dùng tắt ghi đè tay (xem turnManualOverrideOff).
         console.log(`[MOD-AI] Muốn dịch ${data.semitone} bán cung (${data.time}) nhưng đang bị ghi đè tay, tạm hoãn.`);
         return;
+    }
+
+    if (isAiControlActive()) {
+
+        // AI_CONTROL: renderer KHÔNG tự gửi lệnh AI xuống Plugin nữa — giá trị đã báo cáo
+        // AIContext ở trên (reportAiResult). Việc gửi thật để dành cho Workflow ->
+        // PluginController -> Bridge (xem onPluginCommand ở cuối file).
+        console.log(`[ControlSource] AI_CONTROL — bỏ qua gửi Mod trực tiếp (${data.semitone} bán cung), chờ Bridge từ Core.`);
+        setStatus("dot-mod", "online");
+        return;
+
     }
 
     setStatus("dot-mod", "pending"); // cam: AI đang gửi lệnh dịch tone theo modulation thật dò được
@@ -1044,3 +1083,73 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 console.log("Renderer Loaded");
+
+// ================================
+// BRIDGE: nhận PLUGIN_COMMAND từ Core (WorkflowManager -> PluginController) qua IPC,
+// gọi ĐÚNG hàm đã có sẵn trong vocalCommandRouter.js — KHÔNG đổi logic file đó, KHÔNG
+// tạo cơ chế MIDI/AHK mới ở đây.
+//
+// AN TOÀN VỚI HỆ THỐNG CŨ: nếu Core chưa bao giờ phát PLUGIN_COMMAND (vd chưa gắn
+// BootLoader vào main.js — hiện đúng là như vậy), callback dưới đây đơn giản không bao
+// giờ được gọi tới. Toàn bộ luồng AI cũ (keyEngine/bpmEngine/modEngine -> applyDetectedKey/
+// applyModEvent -> vocalCommandRouter.js) và luồng chọn tay vẫn chạy y nguyên như trước,
+// không phụ thuộc gì vào đoạn Bridge này.
+// ================================
+window.electronAPI?.onPluginCommand?.(async (message) => {
+    console.log("[Bridge] Nhận PLUGIN_COMMAND từ Core:", message);
+
+    switch (message.command) {
+
+        case "SET_KEY":
+        case "LOAD_NEW_SONG": {
+            if (typeof message.value !== "string") {
+                console.warn("[Bridge] Bỏ qua — value không phải tên Key hợp lệ:", message.value);
+                break;
+            }
+            const result = await sendKeyToAutotune(message.value);
+            console.log("[Bridge] sendKeyToAutotune() ->", result);
+            break;
+        }
+
+        case "SHIFT_KEY": {
+            if (typeof message.value !== "string") {
+                console.warn("[Bridge] Bỏ qua — value không phải tên Key hợp lệ:", message.value);
+                break;
+            }
+            // sendToneStep() cần SỐ bán cung lệch, còn DecisionAction chỉ mang tên Key đích
+            // -> quy đổi bằng đúng cách notes/flatToSharp mà transposeKey() ở trên đã dùng
+            // (tái sử dụng biến có sẵn, không phải logic MIDI/AHK mới).
+            const delta = bridgeSemitoneDelta(originalKey, message.value);
+            const result = await sendToneStep(delta);
+            console.log("[Bridge] sendToneStep() ->", result, "(delta =", delta, ")");
+            break;
+        }
+
+        case "UPDATE_BPM":
+            // vocalCommandRouter.js hiện KHÔNG có hàm nào gửi BPM xuống plugin (đã xác nhận
+            // ở audit Plugin Control Pipeline) -> Bridge KHÔNG tự tạo cơ chế mới, chỉ ghi log.
+            console.log("[Bridge] UPDATE_BPM: chưa có hàm plugin tương ứng trong vocalCommandRouter.js, bỏ qua. value =", message.value);
+            break;
+
+        default:
+            console.warn("[Bridge] Không nhận diện được command:", message.command);
+
+    }
+});
+
+// Quy đổi tên Key ("A Major") sang số bán cung lệch so với 1 tên Key khác — dùng lại ĐÚNG
+// cách tách nốt mà transposeKey() ở trên đã dùng (notes/flatToSharp), chỉ để chọn tham số
+// gọi sendToneStep() có sẵn. Không phải logic MIDI/AHK, không đụng keyEngine.js.
+function bridgeSemitoneDelta(fromKeyName, toKeyName) {
+    const fromMatch = fromKeyName?.match(/^([A-G](?:#|b)?)/);
+    const toMatch = toKeyName?.match(/^([A-G](?:#|b)?)/);
+    if (!fromMatch || !toMatch) return 0;
+
+    const fromIdx = notes.indexOf(flatToSharp[fromMatch[1]] || fromMatch[1]);
+    const toIdx = notes.indexOf(flatToSharp[toMatch[1]] || toMatch[1]);
+    if (fromIdx === -1 || toIdx === -1) return 0;
+
+    let delta = (toIdx - fromIdx + 12) % 12;
+    if (delta > 6) delta -= 12;
+    return delta;
+}
