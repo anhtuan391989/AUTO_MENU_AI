@@ -158,6 +158,12 @@ const KeyEngine = (() => {
         const maxBassVotes = Math.max(...bassRootVotes, 1e-9);
 
         let best = { score: -Infinity, root: 0, mode: "Major" };
+
+        // === Margin Engine (Phase 1) — CHỈ thu thập song song để tính Top1/Top2/Margin,
+        // KHÔNG đụng tới vòng lặp/điều kiện chọn `best` phía dưới (giữ nguyên y hệt bản gốc).
+        // Chưa dùng để quyết định gì — chỉ phục vụ logging/giai đoạn sau (Decision Engine...).
+        const allScores = [];
+
         for (let root = 0; root < 12; root++) {
             // Boost cho root trùng với nốt bass hay lặp lại nhất — phá thế hoà giữa các giọng
             // song song/họ hàng gần (vd E Major vs C# Minor) mà chỉ correlation không phân biệt nổi.
@@ -167,8 +173,26 @@ const KeyEngine = (() => {
             const minorScore = pearsonCorrelation(chromaVector, rotateProfile(KS_MINOR_PROFILE, root)) + bassBoost;
             if (majorScore > best.score) best = { score: majorScore, root, mode: "Major" };
             if (minorScore > best.score) best = { score: minorScore, root, mode: "Minor" };
+
+            allScores.push({ score: majorScore, root, mode: "Major" });
+            allScores.push({ score: minorScore, root, mode: "Minor" });
         }
-        return { key: `${NOTE_NAMES[best.root]} ${best.mode}`, rootIndex: best.root, mode: best.mode, confidence: best.score };
+
+        // Top1/Top2/Margin tính RIÊNG, SAU KHI vòng lặp gốc đã xong — không ảnh hưởng `best`.
+        allScores.sort((a, b) => b.score - a.score);
+        const top1 = allScores[0];
+        const top2 = allScores[1];
+        const margin = top1.score - top2.score;
+
+        return {
+            key: `${NOTE_NAMES[best.root]} ${best.mode}`,
+            rootIndex: best.root,
+            mode: best.mode,
+            confidence: best.score,
+            top1,
+            top2,
+            margin
+        };
     }
 
     // Chênh lệch bán cung NGẮN NHẤT giữa 2 nốt (vd C->A# nên hiểu là -2, không phải +10).
