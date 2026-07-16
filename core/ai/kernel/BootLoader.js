@@ -1,6 +1,10 @@
 const Kernel = require("./Kernel");
 
+<<<<<<< HEAD
+const Logger = require("../shared/Logger");
+=======
 const Logger = require("../../shared/Logger");
+>>>>>>> origin/main
 
 /**
  * ==========================================================
@@ -54,6 +58,17 @@ class BootLoader {
         // ==================================================================
 
         // -- Key Engine (uu tien #1 theo PROJECT_CONTEXT.md, CHUA cai detection) --
+<<<<<<< HEAD
+        // const KeyEngine = require("../ai/engines/KeyEngine");
+        // this.kernel.register("engine", "KeyEngine", new KeyEngine());
+
+        // -- Mod Engine (uu tien #2) --
+        // const ModEngine = require("../ai/engines/ModEngine");
+        // this.kernel.register("engine", "ModEngine", new ModEngine());
+
+        // -- BPM Engine --
+        // const BPMEngine = require("../ai/engines/BPMEngine");
+=======
         // const KeyEngine = require("../engines/KeyEngine");
         // this.kernel.register("engine", "KeyEngine", new KeyEngine());
 
@@ -63,6 +78,7 @@ class BootLoader {
 
         // -- BPM Engine --
         // const BPMEngine = require("../engines/BPMEngine");
+>>>>>>> origin/main
         // this.kernel.register("engine", "BPMEngine", new BPMEngine());
 
         // -- Plugin Controller (dieu phoi AutoTuneDriver/AutoKeyDriver/...) --

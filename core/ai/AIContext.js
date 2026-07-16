@@ -103,6 +103,8 @@ class AIContext {
             version: "2.0.0"
 
         };
+<<<<<<< HEAD
+=======
 
     }
 
@@ -145,6 +147,7 @@ class AIContext {
         this.mod.time = time ?? this.mod.time;
 
         this.mod.confidence = 1;
+>>>>>>> origin/main
 
     }
 
