@@ -1,3 +1,12 @@
+<<<<<<< HEAD
+const BaseModule = require("../shared/BaseModule");
+
+const Logger = require("../shared/Logger");
+
+const EventBus = require("../events/EventBus");
+
+const Events = require("../events/Events");
+=======
 const BaseModule = require("../../shared/BaseModule");
 
 const Logger = require("../../shared/Logger");
@@ -5,6 +14,7 @@ const Logger = require("../../shared/Logger");
 const EventBus = require("../../events/EventBus");
 
 const Events = require("../../events/Events");
+>>>>>>> origin/main
 
 const Registry = require("./Registry");
 

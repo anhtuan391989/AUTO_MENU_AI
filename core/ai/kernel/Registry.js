@@ -1,8 +1,16 @@
+<<<<<<< HEAD
+const BaseManager = require("../shared/BaseManager");
+
+const CoreError = require("../shared/CoreError");
+
+const Logger = require("../shared/Logger");
+=======
 const BaseManager = require("../../shared/BaseManager");
 
 const CoreError = require("../../shared/CoreError");
 
 const Logger = require("../../shared/Logger");
+>>>>>>> origin/main
 
 /**
  * ==========================================================

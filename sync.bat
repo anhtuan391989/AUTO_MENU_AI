@@ -1,19 +1,13 @@
 @echo off
-:: Đường dẫn đến thư mục dự án của bạn trong ổ cứng ngoài
-:: Lưu ý: Hãy sửa lại tên ổ đĩa (ví dụ G:\Data) cho đúng với máy của bạn
 cd /d "G:\AUTO_MENU_AI"
 
-:: Kiểm tra xem đã khởi tạo Git chưa
-if not exist .git (
-    echo Khoi tao git...
-    git init
-    git remote add origin git@github.com:anhtuan391989/AUTO_MENU_AI.git
-)
+:: Lấy code mới nhất về từ nhánh develop trên GitHub
+git pull origin develop
 
-:: Thực hiện đẩy dữ liệu
+:: Đẩy code từ máy lên nhánh develop
 git add .
 git commit -m "Auto-sync %date% %time%"
-git push -u origin main
+git push -u origin develop
 
-echo Da day du lieu len GitHub!
+echo Da day du lieu len nhanh develop!
 timeout /t 5

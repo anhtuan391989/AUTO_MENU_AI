@@ -77,10 +77,13 @@ function createSetupWindow() {
 }
 
 const AIBootstrap = require("../core/ai/AIBootstrap");
+<<<<<<< HEAD
+=======
 const AIContext = require("../core/ai/AIContext");
 const EventBus = require("../core/events/EventBus");
 const Events = require("../core/events/Events");
 const ControlSource = require("../core/shared/ControlSource");
+>>>>>>> origin/main
 
 app.whenReady().then(async () => {
     // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
