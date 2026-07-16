@@ -1,13 +1,13 @@
 @echo off
 cd /d "G:\AUTO_MENU_AI"
 
-:: 1. Cập nhật dữ liệu từ GitHub về trước khi làm gì khác
-git pull origin main
+:: Lấy code mới nhất về từ nhánh develop trên GitHub
+git pull origin develop
 
-:: 2. Thực hiện đẩy dữ liệu
+:: Đẩy code từ máy lên nhánh develop
 git add .
 git commit -m "Auto-sync %date% %time%"
-git push -u origin main
+git push -u origin develop
 
-echo Da xong!
+echo Da day du lieu len nhanh develop!
 timeout /t 5
