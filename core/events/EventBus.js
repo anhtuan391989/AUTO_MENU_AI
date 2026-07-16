@@ -12,25 +12,25 @@ class EventBus extends EventEmitter {
 
     publish(event, payload = {}) {
 
-        this.emit(event.name, payload);
+        this.emit(event, payload);
 
     }
 
     subscribe(event, callback) {
 
-        this.on(event.name, callback);
+        this.on(event, callback);
 
     }
 
     subscribeOnce(event, callback) {
 
-        this.once(event.name, callback);
+        this.once(event, callback);
 
     }
 
     unsubscribe(event, callback) {
 
-        this.removeListener(event.name, callback);
+        this.removeListener(event, callback);
 
     }
 

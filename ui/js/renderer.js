@@ -182,6 +182,22 @@ const flatToSharp = {
     "Bb": "A#"
 };
 
+// === Control Source (LEGACY_CONTROL / AI_CONTROL) — lấy 1 lần lúc khởi động từ Core
+// (core/shared/ControlSource.js, qua IPC) để quyết định applyDetectedKey()/applyModEvent()
+// có tự gửi lệnh xuống Plugin hay không. KHÔNG có giao diện nào để đổi lúc chạy — đổi ở
+// core/shared/ControlSource.js. Mặc định LEGACY_CONTROL trong lúc chờ IPC trả lời, để hệ
+// cũ không bao giờ vô tình bị tắt do lỗi/độ trễ IPC.
+let controlSource = "LEGACY_CONTROL";
+
+window.electronAPI?.getControlSource?.().then((mode) => {
+    if (mode) controlSource = mode;
+    console.log("[ControlSource] Đang ở chế độ:", controlSource);
+}).catch((err) => console.warn("[ControlSource] Không lấy được, giữ mặc định LEGACY_CONTROL:", err));
+
+function isAiControlActive() {
+    return controlSource === "AI_CONTROL";
+}
+
 function transposeKey(currentKey, steps) {
     // Bắt cả nốt có dấu thăng (C#) lẫn dấu giáng (Db)
     const match = currentKey.match(/^([A-G](?:#|b)?)/);
@@ -254,12 +270,21 @@ const applyKeyBtn = document.getElementById("applyKeyBtn");
 const currentKeyEl = document.getElementById("currentKey");
 const keyInfoEl = document.getElementById("keyInfo");
 
-let autoDetectTimeout;
+// === Trạng thái Key Mode — CỜ RIÊNG cho Key, KHÔNG dùng chung với isManualOverrideActive()
+//     (cờ đó đọc modPowerBtn, chỉ dành cho việc chặn gửi lệnh Modulation, không liên quan Key). ===
+let keyMode = "AUTO"; // "AUTO" | "MANUAL"
+
+function isKeyManualModeActive() {
+    return keyMode === "MANUAL";
+}
 
 // Điểm DUY NHẤT chịu trách nhiệm bật chế độ AI Key Detect — trước đây có 2 chỗ tự chép lại
 // logic này (khi bấm Apply chọn "AI Key Detect", và khi tự động hết 10s sau khi chọn tay),
 // nên dễ bị lệch nhau. Giờ gộp về 1 chỗ để sau này nối engine AI thật chỉ cần sửa ở đây.
 function triggerAiKeyDetect() {
+    keyMode = "AUTO";
+    stopBackgroundKeyDetectForCore();
+
     if (keyInfoEl) keyInfoEl.textContent = "AI Detecting...";
     setStatus("dot-key", "pending"); // cam: đang dò tone
     console.log("AI KEY DETECT MODE (KeyEngine.detectOnce — xem ui/js/engines/keyEngine.js)");
@@ -274,24 +299,65 @@ function triggerAiKeyDetect() {
     });
 }
 
+// Vòng dò NỀN dành riêng cho Manual Key Mode: vẫn gọi KeyEngine.detectOnce() (API có sẵn,
+// không sửa keyEngine.js) để tiếp tục cập nhật AIContext qua IPC, nhưng KHÔNG đụng dropdown,
+// KHÔNG đụng keyInfoEl/status dot, và KHÔNG gửi AutoTune — đúng yêu cầu Manual Key Mode.
+//
+// Đây cũng là điểm kiến trúc dự kiến cho bước sau: 1 bộ phát hiện "đổi bài hát" (chưa xây)
+// có thể tự gọi triggerAiKeyDetect() để quay về Auto Mode khi phát hiện bài mới, thay vì
+// phải sửa lại chỗ này.
+function startBackgroundKeyDetectForCore() {
+    stopBackgroundKeyDetectForCore();
+
+    window.__keyBackgroundDetectStopWatcher = KeyEngine.detectOnce((result) => {
+        window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
+
+        if (isKeyManualModeActive()) {
+            startBackgroundKeyDetectForCore(); // vẫn Manual -> dò lại vòng kế tiếp
+        }
+    });
+}
+
+function stopBackgroundKeyDetectForCore() {
+    if (window.__keyBackgroundDetectStopWatcher) {
+        window.__keyBackgroundDetectStopWatcher();
+        window.__keyBackgroundDetectStopWatcher = null;
+    }
+}
+
 // Tách riêng khỏi triggerAiKeyDetect() để có thể tái sử dụng nếu sau này có nguồn phát
 // hiện Key khác (vd nút "bài hát mới" tự reset), không phải chỉ gọi được từ 1 chỗ.
 function applyDetectedKey(result) {
     originalKey = result.key; // vd "D Minor" — khớp đúng định dạng transposeKey/sendKeyToAutotune cần
 
+    // Gửi kết quả sang Core (AIContext) qua IPC — không ảnh hưởng logic hiển thị bên dưới
+    window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
+
     if (currentKeyEl) currentKeyEl.textContent = originalKey;
     if (keySelector) keySelector.value = originalKey; // có thể không khớp option nào nếu là dấu giáng hiếm, chỉ ảnh hưởng hiển thị dropdown, không ảnh hưởng logic
     if (keyInfoEl) keyInfoEl.textContent = `Auto Detect (${Math.round(result.confidence * 100)}% tin cậy)`;
 
-    sendKeyToAutotune(originalKey).then((sendResult) => {
-        if (sendResult.ok) {
-            setStatus("dot-key", "online"); // xanh: đã dò được + gửi thành công xuống Auto-Tune
-        } else {
-            setStatus("dot-key", "offline");
-            if (keyInfoEl) keyInfoEl.textContent = "⚠️ Lỗi gửi Key (AI)";
-            console.error("sendKeyToAutotune (AI) lỗi:", sendResult.detail);
-        }
-    });
+    if (isAiControlActive()) {
+
+        // AI_CONTROL: renderer KHÔNG tự gửi lệnh AI xuống Plugin nữa — chỉ cập nhật UI +
+        // báo cáo AIContext (đã làm ở trên). Việc gửi thật để dành cho Workflow ->
+        // PluginController -> Bridge (xem ui/js/renderer.js phần cuối file: onPluginCommand).
+        console.log("[ControlSource] AI_CONTROL — bỏ qua gửi Key trực tiếp, chờ Bridge từ Core.");
+        setStatus("dot-key", "online"); // vẫn coi là "đã dò xong", việc gửi là trách nhiệm của Bridge
+
+    } else {
+
+        sendKeyToAutotune(originalKey).then((sendResult) => {
+            if (sendResult.ok) {
+                setStatus("dot-key", "online"); // xanh: đã dò được + gửi thành công xuống Auto-Tune
+            } else {
+                setStatus("dot-key", "offline");
+                if (keyInfoEl) keyInfoEl.textContent = "⚠️ Lỗi gửi Key (AI)";
+                console.error("sendKeyToAutotune (AI) lỗi:", sendResult.detail);
+            }
+        });
+
+    }
 
     // Đã chốt được Key gốc -> bắt đầu theo dõi modulation liên tục suốt phần còn lại của bài hát
     startModulationWatcher();
@@ -301,8 +367,17 @@ applyKeyBtn?.addEventListener("click", () => {
     const selectedKey = keySelector.value;
 
     if (selectedKey === "AI Key Detect") {
-        triggerAiKeyDetect();
+        triggerAiKeyDetect(); // tự đưa keyMode về "AUTO" bên trong
         return;
+    }
+
+    // === Chuyển sang Manual Key Mode — cờ RIÊNG cho Key (keyMode), không dùng chung với Mod ===
+    keyMode = "MANUAL";
+
+    // Nếu AI đang dò dở (foreground) từ trước -> huỷ, tránh nó tự áp kết quả đè lên Manual vừa chọn
+    if (window.__keyDetectStopWatcher) {
+        window.__keyDetectStopWatcher();
+        window.__keyDetectStopWatcher = null;
     }
 
     originalKey = selectedKey;
@@ -321,15 +396,12 @@ applyKeyBtn?.addEventListener("click", () => {
         }
     });
 
-    // Sau 10s tự động nhường lại quyền cho AI — dùng ĐÚNG hàm triggerAiKeyDetect() ở trên,
-    // thay vì tự đổi chữ trực tiếp như code cũ (khiến menu nói "đang AI Detect" trong khi
-    // Auto-Tune thực tế vẫn giữ nguyên key chọn tay, không có gì thật sự chạy phía sau).
-    clearTimeout(autoDetectTimeout);
-    autoDetectTimeout = setTimeout(() => {
-        keySelector.value = "AI Key Detect";
-        console.log("Back To AI Key Detect (tự động sau 10s)");
-        triggerAiKeyDetect();
-    }, 10000);
+    // ĐÃ BỎ: bộ đếm 10 giây tự quay lại AI Key Detect (đây chính là nguyên nhân lỗi AI ghi đè
+    // Key chọn tay). Giờ Manual Key Mode giữ NGUYÊN cho tới khi người dùng tự chọn lại
+    // "AI Key Detect" trong dropdown rồi bấm Apply (xem nhánh if phía trên).
+
+    // AI vẫn tiếp tục dò NỀN để cập nhật AIContext (yêu cầu #2), nhưng không đụng dropdown/AutoTune
+    startBackgroundKeyDetectForCore();
 });
 
 /* ==========================================================
@@ -565,12 +637,26 @@ async function applyModEvent(data) {
     updateModInfo(data.time, originalKey, newKey, data.semitone);
     aiSemitoneOffset = data.semitone;
 
+    // Gửi kết quả sang Core (AIContext) qua IPC — không ảnh hưởng logic gửi lệnh Auto-Tune bên dưới
+    window.electronAPI?.reportAiResult("mod", { from: originalKey, to: newKey, semitone: data.semitone, time: data.time });
+
     if (isManualOverrideActive()) {
         // Đang bị ghi đè tay -> chỉ ghi nhận giá trị AI muốn áp, KHÔNG gửi lệnh thật lúc
         // này để tránh đánh nhau với lệnh tay đang chủ động điều khiển Auto-Tune. Giá trị
         // này sẽ được áp khi người dùng tắt ghi đè tay (xem turnManualOverrideOff).
         console.log(`[MOD-AI] Muốn dịch ${data.semitone} bán cung (${data.time}) nhưng đang bị ghi đè tay, tạm hoãn.`);
         return;
+    }
+
+    if (isAiControlActive()) {
+
+        // AI_CONTROL: renderer KHÔNG tự gửi lệnh AI xuống Plugin nữa — giá trị đã báo cáo
+        // AIContext ở trên (reportAiResult). Việc gửi thật để dành cho Workflow ->
+        // PluginController -> Bridge (xem onPluginCommand ở cuối file).
+        console.log(`[ControlSource] AI_CONTROL — bỏ qua gửi Mod trực tiếp (${data.semitone} bán cung), chờ Bridge từ Core.`);
+        setStatus("dot-mod", "online");
+        return;
+
     }
 
     setStatus("dot-mod", "pending"); // cam: AI đang gửi lệnh dịch tone theo modulation thật dò được
@@ -739,6 +825,9 @@ async function startAudioMonitor() {
             if (bpmEl1) bpmEl1.textContent = bpm;
             if (bpmEl2) bpmEl2.textContent = bpm + " BPM";
             setStatus("dot-bpm", "online"); // xanh: đã dò được BPM ổn định, đủ phiếu đồng thuận
+
+            // Gửi kết quả sang Core (AIContext) qua IPC — không ảnh hưởng logic hiển thị phía trên
+            window.electronAPI?.reportAiResult("bpm", { bpm });
         });
 
         BPMEngine.onLevel(({ bassEnergy, localAvg, maxByte }) => {
@@ -994,3 +1083,73 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 console.log("Renderer Loaded");
+
+// ================================
+// BRIDGE: nhận PLUGIN_COMMAND từ Core (WorkflowManager -> PluginController) qua IPC,
+// gọi ĐÚNG hàm đã có sẵn trong vocalCommandRouter.js — KHÔNG đổi logic file đó, KHÔNG
+// tạo cơ chế MIDI/AHK mới ở đây.
+//
+// AN TOÀN VỚI HỆ THỐNG CŨ: nếu Core chưa bao giờ phát PLUGIN_COMMAND (vd chưa gắn
+// BootLoader vào main.js — hiện đúng là như vậy), callback dưới đây đơn giản không bao
+// giờ được gọi tới. Toàn bộ luồng AI cũ (keyEngine/bpmEngine/modEngine -> applyDetectedKey/
+// applyModEvent -> vocalCommandRouter.js) và luồng chọn tay vẫn chạy y nguyên như trước,
+// không phụ thuộc gì vào đoạn Bridge này.
+// ================================
+window.electronAPI?.onPluginCommand?.(async (message) => {
+    console.log("[Bridge] Nhận PLUGIN_COMMAND từ Core:", message);
+
+    switch (message.command) {
+
+        case "SET_KEY":
+        case "LOAD_NEW_SONG": {
+            if (typeof message.value !== "string") {
+                console.warn("[Bridge] Bỏ qua — value không phải tên Key hợp lệ:", message.value);
+                break;
+            }
+            const result = await sendKeyToAutotune(message.value);
+            console.log("[Bridge] sendKeyToAutotune() ->", result);
+            break;
+        }
+
+        case "SHIFT_KEY": {
+            if (typeof message.value !== "string") {
+                console.warn("[Bridge] Bỏ qua — value không phải tên Key hợp lệ:", message.value);
+                break;
+            }
+            // sendToneStep() cần SỐ bán cung lệch, còn DecisionAction chỉ mang tên Key đích
+            // -> quy đổi bằng đúng cách notes/flatToSharp mà transposeKey() ở trên đã dùng
+            // (tái sử dụng biến có sẵn, không phải logic MIDI/AHK mới).
+            const delta = bridgeSemitoneDelta(originalKey, message.value);
+            const result = await sendToneStep(delta);
+            console.log("[Bridge] sendToneStep() ->", result, "(delta =", delta, ")");
+            break;
+        }
+
+        case "UPDATE_BPM":
+            // vocalCommandRouter.js hiện KHÔNG có hàm nào gửi BPM xuống plugin (đã xác nhận
+            // ở audit Plugin Control Pipeline) -> Bridge KHÔNG tự tạo cơ chế mới, chỉ ghi log.
+            console.log("[Bridge] UPDATE_BPM: chưa có hàm plugin tương ứng trong vocalCommandRouter.js, bỏ qua. value =", message.value);
+            break;
+
+        default:
+            console.warn("[Bridge] Không nhận diện được command:", message.command);
+
+    }
+});
+
+// Quy đổi tên Key ("A Major") sang số bán cung lệch so với 1 tên Key khác — dùng lại ĐÚNG
+// cách tách nốt mà transposeKey() ở trên đã dùng (notes/flatToSharp), chỉ để chọn tham số
+// gọi sendToneStep() có sẵn. Không phải logic MIDI/AHK, không đụng keyEngine.js.
+function bridgeSemitoneDelta(fromKeyName, toKeyName) {
+    const fromMatch = fromKeyName?.match(/^([A-G](?:#|b)?)/);
+    const toMatch = toKeyName?.match(/^([A-G](?:#|b)?)/);
+    if (!fromMatch || !toMatch) return 0;
+
+    const fromIdx = notes.indexOf(flatToSharp[fromMatch[1]] || fromMatch[1]);
+    const toIdx = notes.indexOf(flatToSharp[toMatch[1]] || toMatch[1]);
+    if (fromIdx === -1 || toIdx === -1) return 0;
+
+    let delta = (toIdx - fromIdx + 12) % 12;
+    if (delta > 6) delta -= 12;
+    return delta;
+}
