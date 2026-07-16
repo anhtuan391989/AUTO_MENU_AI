@@ -1,7 +1,7 @@
 @echo off
 cd /d "G:\AUTO_MENU_AI"
 
-:: Lấy code mới nhất về từ nhánh develop trên GitHub
+:: Lấy code mới nhất về trước
 git pull origin develop
 
 :: Đẩy code từ máy lên nhánh develop
