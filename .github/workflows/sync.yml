@@ -1,0 +1,24 @@
+﻿name: Sync Main to Develop
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Pull Request
+        uses: repo-sync/pull-request@v2
+        with:
+          source_branch: "main"
+          destination_branch: "develop"
+          pr_title: "Sync: main to develop"
+          pr_body: "Tự động tạo PR để cập nhật nhánh develop từ main."
+          github_token: ${{ secrets.GITHUB_TOKEN }}
