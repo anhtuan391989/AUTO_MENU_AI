@@ -1,9 +1,16 @@
+<<<<<<< HEAD
 ﻿name: Sync Main to Develop
 
 on:
   push:
     branches:
       - main
+=======
+name: Sync Branches
+
+on:
+  workflow_dispatch: # Cái này tạo nút "Run workflow" trên GitHub
+>>>>>>> 5759a9386ae4192efe5a86833a9396fc580f30f2
 
 jobs:
   sync:
@@ -14,11 +21,30 @@ jobs:
         with:
           fetch-depth: 0
 
+<<<<<<< HEAD
       - name: Create Pull Request
+=======
+      # Chiều 1: Tạo PR từ main sang develop
+      - name: PR main to develop
+>>>>>>> 5759a9386ae4192efe5a86833a9396fc580f30f2
         uses: repo-sync/pull-request@v2
         with:
           source_branch: "main"
           destination_branch: "develop"
+<<<<<<< HEAD
           pr_title: "Sync: main to develop"
           pr_body: "Tự động tạo PR để cập nhật nhánh develop từ main."
           github_token: ${{ secrets.GITHUB_TOKEN }}
+=======
+          pr_title: "Sync: main -> develop"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Chiều 2: Tạo PR từ develop sang main
+      - name: PR develop to main
+        uses: repo-sync/pull-request@v2
+        with:
+          source_branch: "develop"
+          destination_branch: "main"
+          pr_title: "Sync: develop -> main"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+>>>>>>> 5759a9386ae4192efe5a86833a9396fc580f30f2
