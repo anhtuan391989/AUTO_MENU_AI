@@ -209,13 +209,46 @@ const KeyEngine = (() => {
     // (trước khi histogram kịp lệch rõ) rất dễ vồ nhầm sang bậc 5.
     const MIN_ELAPSED_BEFORE_LOCK_MS = 15000;
 
+    function formatElapsedSeconds(ms) {
+        return (ms / 1000).toFixed(1);
+    }
+
+    function formatCandidate(candidate) {
+        if (!candidate) return "?";
+        return `${NOTE_NAMES[candidate.root]} ${candidate.mode} (${candidate.score.toFixed(2)})`;
+    }
+
+    // === Margin Logger (Phase 1.5) — CHỈ ghi nhận dữ liệu, KHÔNG quyết định gì. Dùng để thu
+    // thập thực tế margin/confidence của nhạc thật, làm nền tảng chọn ngưỡng cho Adaptive Lock
+    // (Phase 4) sau này thay vì đoán theo cảm tính. `locked` được TRUYỀN VÀO từ đúng biến
+    // `willLock` mà runVoteLoop() dùng để quyết định thật — đảm bảo log không bao giờ lệch so
+    // với những gì engine THỰC SỰ làm.
+    function logMarginSnapshot(result, startedAt, bestCount, locked, note) {
+        const lines = [
+            `[KeyEngine] Time: ${formatElapsedSeconds(Date.now() - startedAt)}s`,
+            `  Top1: ${formatCandidate(result.top1)}`,
+            `  Top2: ${formatCandidate(result.top2)}`,
+            `  Margin: ${typeof result.margin === "number" ? result.margin.toFixed(2) : "?"}`,
+            `  Confidence: ${result.confidence.toFixed(2)}`,
+            `  Key: ${result.key}`,
+            `  Votes: ${bestCount}/${VOTE_MIN_AGREE}`,
+            `  Locked: ${locked ? "Yes" : "No"}${note ? ` (${note})` : ""}`
+        ];
+        console.log(lines.join("\n"));
+    }
+
     function runVoteLoop(onWinner) {
         const voteWindow = []; // các phần tử dạng {key: "rootIndex-mode", result}
         const startedAt = Date.now();
 
         const timer = setInterval(() => {
             const result = estimateKeyFromChroma();
-            if (result.confidence < MIN_CONFIDENCE) return; // không đủ tin cậy, bỏ qua lần đo này, không tính vào cửa sổ
+            if (result.confidence < MIN_CONFIDENCE) {
+                // Margin Logger: vẫn ghi nhận lần đo bị loại (để biết thực tế bao lâu bị dưới
+                // ngưỡng) — KHÔNG đổi hành vi return bên dưới, vẫn y hệt bản gốc.
+                logMarginSnapshot(result, startedAt, 0, false, "dưới MIN_CONFIDENCE, bị loại khỏi vote window");
+                return; // không đủ tin cậy, bỏ qua lần đo này, không tính vào cửa sổ
+            }
 
             voteWindow.push({ key: `${result.rootIndex}-${result.mode}`, result });
             if (voteWindow.length > VOTE_WINDOW) voteWindow.shift();
@@ -228,7 +261,11 @@ const KeyEngine = (() => {
             });
 
             const elapsed = Date.now() - startedAt;
-            if (bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS) {
+            const willLock = bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS;
+
+            logMarginSnapshot(result, startedAt, bestCount, willLock);
+
+            if (willLock) {
                 onWinner(bestResult, bestCount, () => clearInterval(timer));
             }
         }, CHECK_INTERVAL_MS);
