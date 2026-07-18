@@ -51,6 +51,12 @@ const KeyEngine = (() => {
     // hơn (chỉ là mỗi lần không ngân to bằng). Đếm số lần thắng coi mỗi khung là 1 phiếu ngang
     // nhau, không để 1-2 khung quá to quyết định hết.
     let bassRootVotes = new Array(12).fill(0);
+
+    // === Top1 Stability Timer (Phase 3.5) — CHỈ dữ liệu quan sát, không ảnh hưởng bất kỳ
+    // quyết định nào. Theo dõi "Top1 hiện tại đã giữ nguyên liên tục bao lâu", reset ĐÚNG
+    // khi Top1 (root-mode) đổi, KHÔNG reset khi confidence/margin/stability đổi.
+    let lastTop1Key = null;
+    let lastTop1ChangedAt = null;
     const BASS_VOTE_DECAY = 0.999; // "rò rỉ" phiếu cũ dần theo thời gian, ưu tiên xu hướng gần đây
                                     // hơn 1 chút so với đầu bài, nhưng vẫn giữ được suốt ~15-20s
 
@@ -70,6 +76,8 @@ const KeyEngine = (() => {
         chromaDataArray = new Float32Array(chromaAnalyser.frequencyBinCount);
         chromaVector = new Array(12).fill(0);
         bassRootVotes = new Array(12).fill(0);
+        lastTop1Key = null;
+        lastTop1ChangedAt = null;
 
         running = true;
         loop();
@@ -167,15 +175,18 @@ const KeyEngine = (() => {
         for (let root = 0; root < 12; root++) {
             // Boost cho root trùng với nốt bass hay lặp lại nhất — phá thế hoà giữa các giọng
             // song song/họ hàng gần (vd E Major vs C# Minor) mà chỉ correlation không phân biệt nổi.
-            const bassBoost = (bassRootVotes[root] / maxBassVotes) * BASS_ROOT_BOOST_WEIGHT;
+            // Tách riêng bassAgreement (tỉ lệ RAW, tự nhiên trong [0,1]) — bassBoost tính từ đó,
+            // GIÁ TRỊ Y HỆT bản gốc, chỉ đặt tên lại để dùng cho Confidence V2 (Phase 3).
+            const bassAgreement = bassRootVotes[root] / maxBassVotes;
+            const bassBoost = bassAgreement * BASS_ROOT_BOOST_WEIGHT;
 
             const majorScore = pearsonCorrelation(chromaVector, rotateProfile(KS_MAJOR_PROFILE, root)) + bassBoost;
             const minorScore = pearsonCorrelation(chromaVector, rotateProfile(KS_MINOR_PROFILE, root)) + bassBoost;
             if (majorScore > best.score) best = { score: majorScore, root, mode: "Major" };
             if (minorScore > best.score) best = { score: minorScore, root, mode: "Minor" };
 
-            allScores.push({ score: majorScore, root, mode: "Major" });
-            allScores.push({ score: minorScore, root, mode: "Minor" });
+            allScores.push({ score: majorScore, root, mode: "Major", bassAgreement });
+            allScores.push({ score: minorScore, root, mode: "Minor", bassAgreement });
         }
 
         // Top1/Top2/Margin tính RIÊNG, SAU KHI vòng lặp gốc đã xong — không ảnh hưởng `best`.
@@ -191,7 +202,8 @@ const KeyEngine = (() => {
             confidence: best.score,
             top1,
             top2,
-            margin
+            margin,
+            bassAgreement: top1.bassAgreement
         };
     }
 
@@ -223,18 +235,85 @@ const KeyEngine = (() => {
     // (Phase 4) sau này thay vì đoán theo cảm tính. `locked` được TRUYỀN VÀO từ đúng biến
     // `willLock` mà runVoteLoop() dùng để quyết định thật — đảm bảo log không bao giờ lệch so
     // với những gì engine THỰC SỰ làm.
-    function logMarginSnapshot(result, startedAt, bestCount, locked, note) {
+    function logMarginSnapshot(result, startedAt, bestCount, locked, stability, confidenceV2, top1StableMs, note) {
         const lines = [
             `[KeyEngine] Time: ${formatElapsedSeconds(Date.now() - startedAt)}s`,
             `  Top1: ${formatCandidate(result.top1)}`,
             `  Top2: ${formatCandidate(result.top2)}`,
             `  Margin: ${typeof result.margin === "number" ? result.margin.toFixed(2) : "?"}`,
+            `  Stability: ${typeof stability === "number" ? stability.toFixed(2) : "?"}`,
+            `  Top1 Stable: ${formatElapsedSeconds(top1StableMs)}s`,
             `  Confidence: ${result.confidence.toFixed(2)}`,
+            `  DecisionScore: ${confidenceV2.combined.toFixed(2)}`, // alias hiển thị của confidenceV2.combined đã có sẵn — KHÔNG tính toán mới
             `  Key: ${result.key}`,
             `  Votes: ${bestCount}/${VOTE_MIN_AGREE}`,
-            `  Locked: ${locked ? "Yes" : "No"}${note ? ` (${note})` : ""}`
+            `  Locked: ${locked ? "Yes" : "No"}${note ? ` (${note})` : ""}`,
+            `  ConfidenceV2: ${JSON.stringify(confidenceV2)}`
         ];
         console.log(lines.join("\n"));
+    }
+
+    // === Stability Tracker (Phase 2) — CHỈ đọc lại đúng bestCount/độ dài Vote Window đã có
+    // sẵn (KHÔNG thêm cấu trúc dữ liệu song song, KHÔNG đụng cách Vote Window tự đếm phiếu/
+    // quyết định). Công thức: bình phương tỉ lệ đồng thuận trong cửa sổ hiện tại — phạt mạnh
+    // hơn khi kết quả dao động qua lại. Vd 5/5 đồng thuận -> 1.00; 3/5 -> (0.6)^2 = 0.36.
+    function computeStability(bestCount, windowSize) {
+        if (!windowSize) return 0;
+        const agreement = bestCount / windowSize;
+        return agreement * agreement;
+    }
+
+    // === Top1 Stability Timer (Phase 3.5) — không tạo timer/setInterval riêng, chỉ tính
+    // `now - lastTop1ChangedAt` NGAY KHI được gọi (từ trong tick đã có sẵn của runVoteLoop).
+    // Reset ĐÚNG khi Top1 (root-mode) đổi — KHÔNG reset khi confidence/margin/stability đổi,
+    // vì các giá trị đó không được đọc/so sánh ở đây.
+    function updateTop1StabilityTimer(top1) {
+        const currentKey = `${top1.root}-${top1.mode}`;
+        const now = Date.now();
+
+        if (currentKey !== lastTop1Key) {
+            lastTop1Key = currentKey;
+            lastTop1ChangedAt = now;
+        }
+
+        return now - lastTop1ChangedAt;
+    }
+
+    function clamp01(x) {
+        return Math.max(0, Math.min(1, x));
+    }
+
+    // === Confidence V2 (Phase 3) — CHỈ lắp ráp để LOG, KHÔNG gắn vào object trả về cho
+    // onWinner/renderer.js, KHÔNG tham gia bất kỳ điều kiện khoá nào. `confidence` gốc
+    // (top-level) giữ nguyên tuyệt đối để đảm bảo tương thích, đúng yêu cầu.
+    //
+    // PEARSON_NORM_MAX = 1.5 = điểm tối đa LÝ THUYẾT (Pearson tối đa 1.0 + BASS_ROOT_BOOST_WEIGHT
+    // tối đa 0.5) — có căn cứ trực tiếp từ code, không phải số đoán.
+    // MARGIN_NORM_RANGE = 0.5 — hằng số TẠM THỜI (chưa có dữ liệu thực tế để chọn chính xác),
+    // sẽ điều chỉnh lại khi đã thu thập đủ log thật, đúng tinh thần giai đoạn thu thập dữ liệu.
+    const PEARSON_NORM_MAX = 1 + BASS_ROOT_BOOST_WEIGHT;
+    const MARGIN_NORM_RANGE = 0.5;
+
+    function buildConfidenceV2(result, stability) {
+        const pearson = result.confidence; // === confidence hiện tại, chỉ đọc lại, không đổi field gốc
+        const pearsonNorm = clamp01(pearson / PEARSON_NORM_MAX);
+
+        const margin = result.margin;
+        const marginNorm = clamp01(margin / MARGIN_NORM_RANGE);
+
+        const stabilityNorm = clamp01(stability); // đã tự nhiên trong [0,1] (bình phương tỉ lệ)
+
+        const bassAgreement = result.bassAgreement;
+        const bassNorm = clamp01(bassAgreement); // đã tự nhiên trong [0,1] (tỉ lệ so với max)
+
+        // Trung bình cộng đơn giản, trọng số bằng nhau (0.25 mỗi thành phần) — CHƯA có dữ liệu
+        // thực tế để chọn trọng số khác biệt, đây là điểm khởi đầu trung lập nhất có thể.
+        const combined = (pearsonNorm + marginNorm + stabilityNorm + bassNorm) / 4;
+
+        // Margin thấp = 2 ứng viên gần nhau = mập mờ cao.
+        const ambiguity = 1 - marginNorm;
+
+        return { pearson, pearsonNorm, margin, marginNorm, stability, stabilityNorm, bassAgreement, bassNorm, combined, ambiguity };
     }
 
     function runVoteLoop(onWinner) {
@@ -243,10 +322,16 @@ const KeyEngine = (() => {
 
         const timer = setInterval(() => {
             const result = estimateKeyFromChroma();
+
+            // Phase 3.5 — cập nhật/đọc thời gian ổn định của Top1 NGAY tại đây, không tạo
+            // timer/setInterval riêng. Chạy cho MỌI lần đo (kể cả bị lọc dưới đây), vì "Top1"
+            // là kết quả của estimateKeyFromChroma() ở MỌI lần đo, không riêng gì lần được vote.
+            const top1StableMs = updateTop1StabilityTimer(result.top1);
+
             if (result.confidence < MIN_CONFIDENCE) {
                 // Margin Logger: vẫn ghi nhận lần đo bị loại (để biết thực tế bao lâu bị dưới
                 // ngưỡng) — KHÔNG đổi hành vi return bên dưới, vẫn y hệt bản gốc.
-                logMarginSnapshot(result, startedAt, 0, false, "dưới MIN_CONFIDENCE, bị loại khỏi vote window");
+                logMarginSnapshot(result, startedAt, 0, false, 0, buildConfidenceV2(result, 0), top1StableMs, "dưới MIN_CONFIDENCE, bị loại khỏi vote window");
                 return; // không đủ tin cậy, bỏ qua lần đo này, không tính vào cửa sổ
             }
 
@@ -260,10 +345,15 @@ const KeyEngine = (() => {
                 if (counts[v.key] > bestCount) { bestCount = counts[v.key]; bestKey = v.key; bestResult = v.result; }
             });
 
+            const stability = computeStability(bestCount, voteWindow.length); // Phase 2 — chỉ đọc lại, không đổi gì ở trên
+
             const elapsed = Date.now() - startedAt;
             const willLock = bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS;
 
-            logMarginSnapshot(result, startedAt, bestCount, willLock);
+            // Phase 3 — confidenceV2 CHỈ tồn tại cục bộ để log, KHÔNG gắn vào `result`/`bestResult`
+            // -> onWinner() bên dưới vẫn nhận đúng object y hệt bản gốc, không có gì thay đổi.
+            const confidenceV2 = buildConfidenceV2(result, stability);
+            logMarginSnapshot(result, startedAt, bestCount, willLock, stability, confidenceV2, top1StableMs);
 
             if (willLock) {
                 onWinner(bestResult, bestCount, () => clearInterval(timer));
