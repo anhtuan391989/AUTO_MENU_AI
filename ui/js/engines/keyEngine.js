@@ -56,6 +56,7 @@ const KeyEngine = (() => {
     // quyết định nào. Theo dõi "Top1 hiện tại đã giữ nguyên liên tục bao lâu", reset ĐÚNG
     // khi Top1 (root-mode) đổi, KHÔNG reset khi confidence/margin/stability đổi.
     let lastTop1Key = null;
+    let lastTop1Label = null;
     let lastTop1ChangedAt = null;
     const BASS_VOTE_DECAY = 0.999; // "rò rỉ" phiếu cũ dần theo thời gian, ưu tiên xu hướng gần đây
                                     // hơn 1 chút so với đầu bài, nhưng vẫn giữ được suốt ~15-20s
@@ -77,6 +78,7 @@ const KeyEngine = (() => {
         chromaVector = new Array(12).fill(0);
         bassRootVotes = new Array(12).fill(0);
         lastTop1Key = null;
+        lastTop1Label = null;
         lastTop1ChangedAt = null;
 
         running = true;
@@ -230,6 +232,23 @@ const KeyEngine = (() => {
         return `${NOTE_NAMES[candidate.root]} ${candidate.mode} (${candidate.score.toFixed(2)})`;
     }
 
+    // Nhãn NGƯỜI ĐỌC được, KHÔNG kèm điểm số — dùng cho telemetry (Phase 4A), khác
+    // formatCandidate() ở trên (dùng cho log console, có kèm điểm).
+    function candidateLabel(candidate) {
+        if (!candidate) return null;
+        return `${NOTE_NAMES[candidate.root]} ${candidate.mode}`;
+    }
+
+    // === Telemetry (Phase 4A) — CHỈ gửi dữ liệu ĐÃ TÍNH XONG sang main process qua IPC
+    // (nếu có window.electronAPI.sendTelemetry — an toàn no-op nếu không có, vd trong môi
+    // trường sandbox/test). KHÔNG gửi FFT/chroma vector/spectrum/audio buffer thô. KHÔNG
+    // ảnh hưởng bất kỳ quyết định nào — chỉ là quan sát thêm, giống các Phase log trước.
+    function sendTelemetry(record) {
+        if (typeof window !== "undefined" && window.electronAPI && typeof window.electronAPI.sendTelemetry === "function") {
+            window.electronAPI.sendTelemetry(record);
+        }
+    }
+
     // === Margin Logger (Phase 1.5) — CHỈ ghi nhận dữ liệu, KHÔNG quyết định gì. Dùng để thu
     // thập thực tế margin/confidence của nhạc thật, làm nền tảng chọn ngưỡng cho Adaptive Lock
     // (Phase 4) sau này thay vì đoán theo cảm tính. `locked` được TRUYỀN VÀO từ đúng biến
@@ -269,14 +288,21 @@ const KeyEngine = (() => {
     // vì các giá trị đó không được đọc/so sánh ở đây.
     function updateTop1StabilityTimer(top1) {
         const currentKey = `${top1.root}-${top1.mode}`;
+        const currentLabel = candidateLabel(top1);
         const now = Date.now();
 
+        let changed = false;
+        let previousLabel = null;
+
         if (currentKey !== lastTop1Key) {
+            previousLabel = lastTop1Label;
+            changed = lastTop1Key !== null; // lần đầu tiên (chưa có gì để so sánh) không tính là "đổi"
             lastTop1Key = currentKey;
+            lastTop1Label = currentLabel;
             lastTop1ChangedAt = now;
         }
 
-        return now - lastTop1ChangedAt;
+        return { stableMs: now - lastTop1ChangedAt, changed, from: previousLabel, to: currentLabel };
     }
 
     function clamp01(x) {
@@ -326,12 +352,34 @@ const KeyEngine = (() => {
             // Phase 3.5 — cập nhật/đọc thời gian ổn định của Top1 NGAY tại đây, không tạo
             // timer/setInterval riêng. Chạy cho MỌI lần đo (kể cả bị lọc dưới đây), vì "Top1"
             // là kết quả của estimateKeyFromChroma() ở MỌI lần đo, không riêng gì lần được vote.
-            const top1StableMs = updateTop1StabilityTimer(result.top1);
+            const top1Update = updateTop1StabilityTimer(result.top1);
+            const top1StableMs = top1Update.stableMs;
+            const elapsedSec = parseFloat(formatElapsedSeconds(Date.now() - startedAt));
+
+            // Phase 4A — TOP1_CHANGED: chỉ ghi nhận, dùng đúng dữ liệu Phase 3.5 đã tính,
+            // không thêm điều kiện/so sánh mới nào.
+            if (top1Update.changed) {
+                sendTelemetry({ event: "TOP1_CHANGED", from: top1Update.from, to: top1Update.to, time: elapsedSec });
+            }
 
             if (result.confidence < MIN_CONFIDENCE) {
                 // Margin Logger: vẫn ghi nhận lần đo bị loại (để biết thực tế bao lâu bị dưới
                 // ngưỡng) — KHÔNG đổi hành vi return bên dưới, vẫn y hệt bản gốc.
-                logMarginSnapshot(result, startedAt, 0, false, 0, buildConfidenceV2(result, 0), top1StableMs, "dưới MIN_CONFIDENCE, bị loại khỏi vote window");
+                const cv2Rejected = buildConfidenceV2(result, 0);
+                logMarginSnapshot(result, startedAt, 0, false, 0, cv2Rejected, top1StableMs, "dưới MIN_CONFIDENCE, bị loại khỏi vote window");
+                sendTelemetry({
+                    time: elapsedSec,
+                    top1: candidateLabel(result.top1),
+                    top2: candidateLabel(result.top2),
+                    confidence: result.confidence,
+                    margin: result.margin,
+                    stability: 0,
+                    top1Stable: top1StableMs / 1000,
+                    decisionScore: cv2Rejected.combined,
+                    votes: 0,
+                    window: voteWindow.length,
+                    locked: false
+                });
                 return; // không đủ tin cậy, bỏ qua lần đo này, không tính vào cửa sổ
             }
 
@@ -355,7 +403,24 @@ const KeyEngine = (() => {
             const confidenceV2 = buildConfidenceV2(result, stability);
             logMarginSnapshot(result, startedAt, bestCount, willLock, stability, confidenceV2, top1StableMs);
 
+            sendTelemetry({
+                time: elapsedSec,
+                top1: candidateLabel(result.top1),
+                top2: candidateLabel(result.top2),
+                confidence: result.confidence,
+                margin: result.margin,
+                stability,
+                top1Stable: top1StableMs / 1000,
+                decisionScore: confidenceV2.combined,
+                votes: bestCount,
+                window: voteWindow.length,
+                locked: willLock
+            });
+
             if (willLock) {
+                // Phase 4A — LOCK: bản ghi RIÊNG, đúng lúc onWinner() được gọi thật (dùng chung
+                // biến willLock/confidenceV2/bestResult, không tính toán lại/không đoán).
+                sendTelemetry({ event: "LOCK", time: elapsedSec, key: bestResult.key, decisionScore: confidenceV2.combined });
                 onWinner(bestResult, bestCount, () => clearInterval(timer));
             }
         }, CHECK_INTERVAL_MS);

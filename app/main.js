@@ -77,13 +77,11 @@ function createSetupWindow() {
 }
 
 const AIBootstrap = require("../core/ai/AIBootstrap");
-<<<<<<< HEAD
-=======
 const AIContext = require("../core/ai/AIContext");
 const EventBus = require("../core/events/EventBus");
 const Events = require("../core/events/Events");
 const ControlSource = require("../core/shared/ControlSource");
->>>>>>> origin/main
+const TelemetryLogger = require("../core/shared/TelemetryLogger");
 
 app.whenReady().then(async () => {
     // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
@@ -171,6 +169,18 @@ ipcMain.handle("ping", () => "pong");
 // Cho renderer biết đang ở LEGACY_CONTROL hay AI_CONTROL — nguồn duy nhất là
 // core/shared/ControlSource.js, renderer KHÔNG tự giữ bản sao riêng.
 ipcMain.handle("get-control-source", () => ControlSource.getControlSource());
+
+// ================================
+// TELEMETRY (Phase 4A): CHỈ relay bản ghi từ renderer (keyEngine.js) sang TelemetryLogger
+// để ghi vào logs/*.jsonl — không xử lý, không diễn giải nội dung record.
+// ================================
+ipcMain.on("telemetry-record", (event, record) => {
+    try {
+        TelemetryLogger.write(record);
+    } catch (err) {
+        console.error("TelemetryLogger write lỗi:", err);
+    }
+});
 
 // ================================
 // LẤY TỌA ĐỘ: dùng AutoHotkey v2 (di chuột thật tới vị trí + nhấn F8)

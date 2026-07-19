@@ -1,9 +1,8 @@
 const AIBrain = require("./AIBrain");
-<<<<<<< HEAD
+ HEAD
 const WorkflowManager = require("./managers/WorkflowManager");
-=======
 const WorkflowManager = require("./managers/WorkflowManager"); // LƯU Ý: trỏ tới file RỖNG (0 byte), trùng tên với ./workflow/WorkflowManager.js bên dưới — vấn đề trùng tên đã biết từ báo cáo audit trước, CHƯA xử lý trong nhiệm vụ này (ngoài phạm vi được giao)
->>>>>>> origin/main
+ origin/main
 const DecisionEngine = require("./decision/DecisionEngine");
 const EventBus = require("../events/EventBus");
 const Context = require("./AIContext");

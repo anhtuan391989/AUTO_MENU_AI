@@ -53,4 +53,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     // ---- Control Source: LEGACY_CONTROL hay AI_CONTROL (xem core/shared/ControlSource.js) ----
     getControlSource: () => ipcRenderer.invoke("get-control-source"),
+
+    // ---- Telemetry (Phase 4A): gửi 1 bản ghi JSON sang main process để ghi vào logs/*.jsonl ----
+    // Fire-and-forget, không cần phản hồi — giống cơ chế reportAiResult đã có.
+    sendTelemetry: (record) => ipcRenderer.send("telemetry-record", record),
 });
