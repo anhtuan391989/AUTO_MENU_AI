@@ -1,0 +1,25 @@
+const STATES = {
+
+    BOOT: "BOOT",
+
+    READY: "READY",
+
+    IDLE: "IDLE",
+
+    LISTENING: "LISTENING",
+
+    ANALYZING: "ANALYZING",
+
+    DECIDING: "DECIDING",
+
+    EXECUTING: "EXECUTING",
+
+    VERIFYING: "VERIFYING",
+
+    SAVING: "SAVING",
+
+    ERROR: "ERROR"
+
+};
+
+module.exports = STATES;

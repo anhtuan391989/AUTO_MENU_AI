@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Cài đặt</title>
+    <link rel="stylesheet" href="css/setup.css">
+</head>
+
+<body>
+    <div class="setup-window">
+        <div class="setup-title">⚙ Cài đặt</div>
+        <div class="progress-box">
+            <div id="setupProgressText" class="progress-text">Hoàn thành: 0 / 10</div>
+            <div class="progress-bar">
+                <div id="setupProgressFill"></div>
+            </div>
+        </div>
+
+        <div class="setup-grid">
+            <div class="column">
+                <div class="group-title">⚙ THIẾT LẬP AUTOMENU</div>
+                <button id="selectDawBtn" class="setup-btn">🎛 DAW:<span id="currentDaw">Chưa chọn</span></button>
+                <button id="selectAutoKeyBtn" class="setup-btn">🎹 Auto-Key:<span id="currentAutoKey">Chưa
+                        chọn</span></button>
+                <button id="selectAutoTuneBtn" class="setup-btn">🎤 Auto-Tune:<span id="currentAutoTune">Chưa
+                        chọn</span></button>
+                <div class="group-title">⌨ PHÍM TẮT</div>
+                <button id="openShortcutsBtn" class="setup-btn">⌨ Hệ thống phím tắt</button>
+                <div class="group-title">⚒ CÀI ĐẶT CHUNG</div>
+                <button id="openProjectModal" class="setup-btn">📂 Mở kèm Project / Youtube</button>
+                <button id="openSoundcardModal" class="setup-btn">🔊 Soundcard & LinkPro</button>
+                <button id="openBrowserModal" class="setup-btn">🌐 Trình duyệt Youtube</button>
+                <button id="openMidiModal" class="setup-btn">🎹 Cổng MIDI (gửi Key/lệnh sang DAW)</button>
+                <div class="group-title">💾 PRESET</div>
+                <button id="savePresetBtn" class="setup-btn">💾 Lưu Preset</button>
+                <button id="loadPresetBtn" class="setup-btn">📂 Tải Preset</button>
+            </div>
+
+            <div class="column">
+                <div class="group-title">⚒ THIẾT LẬP TỌA ĐỘ</div>
+                <div id="coordDawLabel" style="font-size:12px; text-align:center; margin-bottom:4px; opacity:0.75;">
+                    Chưa chọn DAW
+                </div>
+                <div id="ahkPathDisplay" style="font-size:11px; text-align:center; margin-bottom:4px; opacity:0.7;">
+                    ⏳ Đang dò AutoHotkey...
+                </div>
+                <button id="btnDownloadAhk" class="setup-btn" style="margin-bottom:4px; display:none;">
+                    📥 Tải &amp; Cài AutoHotkey
+                </button>
+                <button id="btnSelectAhkPath" class="setup-btn" style="margin-bottom:8px;">
+                    📂 Chọn đường dẫn AutoHotkey (nếu đã cài sẵn)
+                </button>
+                <button id="btnAutoKey1" class="setup-btn">✢ Lấy tọa độ Auto-Key (2 điểm)</button>
+                <button id="btnAutoKey2" class="setup-btn">✢ Lấy tọa độ Auto-Key 2 (2 điểm)</button>
+                <button id="btnAutoTuneKey" class="setup-btn">✢ Lấy tọa độ Key Auto-Tune (1 điểm)</button>
+                <button id="btnChromatic" class="setup-btn">✢ Lấy tọa độ Chromatic (2 điểm)</button>
+                <p style="font-size:12px; opacity:0.8; margin: 4px 0 8px;">
+                    ℹ️ SoundShifter giờ điều khiển bằng MIDI (không cần lấy tọa độ chuột nữa) —
+                    xem CC number trong vocalCommandRouter.js, cần MIDI Learn khớp trên plugin.
+                </p>
+            </div>
+
+            <div class="column">
+                <div class="group-title">⚒ Thiết lập giọng hát</div>
+                <button id="openBeModal" class="setup-btn">⚙ Cách thức tạo bè</button>
+                <button id="openFixMeoModal" class="setup-btn">⚒ Chọn phương thức fix méo</button>
+                <button id="btnAutoTune11" class="setup-btn">⚙ Bộ Plugin Auto-Tune 11</button>
+                <button id="btnVst2" class="setup-btn">⚙ Cài đặt Plugins VST2</button>
+                <button id="btnJbridge" class="setup-btn">⚙ Cài đặt jBridge cho Studio One</button>
+                <button id="btnInstallBrave" class="setup-btn">🌐 Cài Brave không quảng cáo</button>
+                <button id="btnInstallLoopMidi" class="setup-btn">🎹 Cài loopMIDI (cổng MIDI ảo)</button>
+                <div class="group-title">♖ Thông tin liên hệ:</div>
+                <button id="btnContactKhoi" class="setup-btn">☎ Khói (034.9644.194)</button>
+                <div class="group-title">🚀 KHỞI ĐỘNG</div>
+
+                <div class="setting-row">
+                    <label>📁 Đường dẫn DAW</label>
+                    <div id="currentDawPath" class="status-text">
+                        ❌ Chưa thiết lập
+                    </div>
+                    <button id="browseDawBtn" class="setup-btn">
+                        📂 Chọn đường dẫn DAW
+                    </button>
+                </div>
+
+                <label class="setup-checkbox">
+                    <input type="checkbox" id="launchDawOnStartup">
+                    🚀 Mở DAW cùng Menu
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- DAW MODAL -->
+    <div id="dawModal" class="modal">
+        <div class="modal-box">
+            <div class="modal-title">Chọn DAW</div>
+            <div class="daw-list">
+                <label><input type="radio" name="daw" value="Studio One 7"> Studio One 7</label>
+                <label><input type="radio" name="daw" value="Studio One 6"> Studio One 6</label>
+                <label><input type="radio" name="daw" value="Studio Pro 8"> Studio Pro 8</label>
+                <label><input type="radio" name="daw" value="Cubase 12"> Cubase 12</label>
+                <label><input type="radio" name="daw" value="Cubase 13"> Cubase 13</label>
+                <label><input type="radio" name="daw" value="Cubase 14"> Cubase 14</label>
+                <label><input type="radio" name="daw" value="Cubase 15"> Cubase 15</label>
+            </div>
+            <div class="modal-buttons">
+                <button id="saveDawBtn">Lưu</button>
+                <button id="closeDawBtn">Hủy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AUTO KEY MODAL -->
+    <div id="autoKeyModal" class="modal">
+        <div class="modal-box">
+            <div class="modal-title">Chọn phiên bản Auto-Key</div>
+            <div class="daw-list">
+                <label><input type="radio" name="autokey" value="Auto-Key 1">Auto-Key 1</label>
+                <label><input type="radio" name="autokey" value="Auto-Key 2">Auto-Key 2</label>
+            </div>
+            <div class="modal-buttons">
+                <button id="saveAutoKeyBtn">Lưu</button>
+                <button id="closeAutoKeyBtn">Hủy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AUTO TUNE MODAL -->
+    <div id="autoTuneModal" class="modal">
+        <div class="modal-box">
+            <div class="modal-title">Chọn phiên bản Auto-Tune</div>
+            <div class="daw-list">
+                <label><input type="radio" name="autotune" value="Auto-Tune 9">Auto-Tune 9</label>
+                <label><input type="radio" name="autotune" value="Auto-Tune 10">Auto-Tune 10</label>
+                <label><input type="radio" name="autotune" value="Auto-Tune 11">Auto-Tune 11</label>
+            </div>
+            <div class="modal-buttons">
+                <button id="saveAutoTuneBtn">Lưu</button>
+                <button id="closeAutoTuneBtn">Hủy</button>
+            </div>
+        </div>
+    </div>
+    <!-- BROWSER MODAL * -->
+    <div id="browserModal" class="modal">
+        <div class="modal-box">
+            <div class="modal-title">Chọn trình duyệt</div>
+            <div class="group-title">Chọn trình duyệt Youtube</div>
+            <div class="daw-list">
+                <label><input type="radio" name="browser" value="Chrome"> Chrome</label>
+                <label><input type="radio" name="browser" value="Brave"> Brave</label>
+                <label><input type="radio" name="browser" value="Cốc Cốc"> Cốc Cốc</label>
+            </div>
+            <div class="group-title">Youtube ID (PWA):</div>
+            <input type="text" id="youtubeIdInput" style="width:100%; margin-bottom:15px; padding:5px;">
+            <div class="group-title">Đường dẫn trình duyệt (.exe):</div>
+            <div id="browserPathDisplay" style="margin-bottom:8px; font-size:12px; word-break:break-all;">
+                ❌ Chưa thiết lập
+            </div>
+            <button id="btnSelectBrowserPath" style="width:100%; margin-bottom:15px;">
+                📂 Chọn đường dẫn trình duyệt
+            </button>
+            <div class="modal-buttons">
+                <button id="saveBrowserBtn">Lưu</button>
+                <button id="closeBrowserBtn">Hủy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ShortcutsModal -->
+    <div id="shortcutsModal" class="modal">
+        <div class="modal-box" style="width: 400px;">
+            <div class="modal-title">CÀI ĐẶT PHÍM TẮT</div>
+            <div id="shortcuts-list" style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+                    <span>Chế độ hát thường</span> <input type="text" id="shortcutNormal" placeholder="Nhấn phím..." readonly>
+                    <span>Chế độ Lofi</span> <input type="text" id="shortcutLofi" placeholder="Nhấn phím..." readonly>
+                    <span>Chế độ Remix</span> <input type="text" id="shortcutRemix" placeholder="Nhấn phím..." readonly>
+                    <span>Chế độ Rap</span> <input type="text" id="shortcutRap" placeholder="Nhấn phím..." readonly>
+                    <span>Dò tone</span> <input type="text" id="shortcutKeyDetect" placeholder="Nhấn phím..." readonly>
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button id="clearShortcuts">⟲ Xóa hết</button>
+                <button id="saveShortcuts">💾 Lưu</button>
+                <button id="closeShortcuts">Thoát</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- projectModal -->
+    <div id="projectModal" class="modal">
+        <div class="modal-box" style="width: 450px;">
+            <div class="modal-title">Project Settings</div>
+            <div style="display: flex; gap: 15px; margin-bottom: 15px;">
+                <label><input type="checkbox" id="checkOpenPj"> Mở Project</label>
+                <label><input type="checkbox" id="checkCopyPj"> Tạo bản COPY</label>
+                <label><input type="checkbox" id="checkOpenYt"> Mở Youtube</label>
+            </div>
+            <textarea id="pjPathDisplay" readonly
+                style="width: 100%; height: 80px; margin-bottom: 15px; resize: none; background: #f9f9f9;">Chưa chọn project</textarea>
+            <div class="modal-buttons">
+                <button id="btnSelectPj">Chọn PJ</button>
+                <button id="btnSaveCurrentPj">Lưu PJ đang mở</button>
+                <button id="btnOpenProjectBundle">🚀 Mở kèm ngay</button>
+                <button id="btnClosePj">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SOUNDCARD & LINK PRO MODAL -->
+    <div id="soundcardModal" class="modal">
+        <div class="modal-box" style="width: 400px;">
+            <div class="modal-title">Soundcard & Link Pro</div>
+            <!-- Phần Soundcard -->
+            <div class="group-title">⚄ Báo lỗi khi thiếu Soundcard</div>
+            <div style="margin-bottom:10px;">🎧 <span id="statusSoundcardModal">Chưa chọn soundcard nào</span></div>
+            <select id="soundcardSelect" style="width:100%; margin-bottom:10px; padding:5px;">
+                <option value="">Chọn Soundcard...</option>
+            </select>
+            <div class="modal-buttons" style="justify-content: space-between;">
+                <button id="btnSelectSoundcard">Chọn Soundcard</button>
+                <button id="btnClearAlert">Xóa cảnh báo</button>
+            </div>
+            <!-- Phần Link Pro -->
+            <div class="group-title" style="margin-top:20px;">⚄ Tùy chọn Link Pro</div>
+            <div class="modal-buttons" style="margin-bottom:10px;">
+                <button id="btnBackupLink">Backup LinkPro</button>
+                <button id="btnRestoreLink">Restore LinkPro</button>
+            </div>
+            <div class="modal-buttons" style="margin-top:15px;"><button id="closeSoundcardBtn">OK</button></div>
+            <label><input type="checkbox" id="checkAutoRestore"> Tự động Restore khi mở DAW</label>
+        </div>
+    </div>
+
+
+    <!-- MIDI MODAL -->
+    <div id="midiModal" class="modal">
+        <div class="modal-box" style="width: 420px;">
+            <div class="modal-title">Cổng MIDI</div>
+            <div class="group-title">Chọn cổng MIDI ảo (vd tạo bằng loopMIDI)</div>
+            <select id="midiPortSelect" style="width:100%; margin-bottom:10px; padding:5px;">
+                <option value="">Chọn cổng MIDI...</option>
+            </select>
+            <button id="btnRefreshMidiPorts" style="width:100%; margin-bottom:15px;">🔄 Làm mới danh sách</button>
+
+            <div class="group-title">🧪 Test gửi thử (xem DAW phản ứng ra sao)</div>
+            <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                <label style="width:90px;">Note (0-127)</label>
+                <input type="number" id="midiTestNote" min="0" max="127" value="60" style="flex:1; padding:4px;">
+                <button id="btnTestMidiNote">Gửi Note</button>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; margin-bottom:15px;">
+                <label style="width:90px;">CC / Giá trị</label>
+                <input type="number" id="midiTestCC" min="0" max="127" value="1" style="width:60px; padding:4px;">
+                <input type="number" id="midiTestCCValue" min="0" max="127" value="64" style="flex:1; padding:4px;">
+                <button id="btnTestMidiCC">Gửi CC</button>
+            </div>
+
+            <div class="modal-buttons">
+                <button id="saveMidiBtn">Lưu</button>
+                <button id="closeMidiBtn">Hủy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- BeModal -->
+    <div id="beModal" class="modal">
+        <div class="modal-box">
+            <div class="modal-title">Bè</div>
+            <div class="group-title">Chọn cách thức tạo bè</div>
+            <div class="daw-list">
+                <label><input type="radio" name="beMethod" value="Plugin Auto-Tune 11"> 🎹 Plugin Auto-Tune 11</label>
+                <label><input type="radio" name="beMethod" value="Track 'Bè' riêng"> ⚙ Track "Bè" riêng</label>
+            </div>
+            <div class="modal-buttons">
+                <button id="saveBeBtn">💾 Lưu</button>
+                <button id="closeBeBtn">Hủy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- FIX MEO MODAL -->
+    <div id="fixMeoModal" class="modal">
+        <div class="modal-box">
+            <div class="modal-title">Fix méo</div>
+            <div class="group-title">Chọn phương thức fix méo</div>
+            <div class="daw-list">
+                <label><input type="radio" name="fixMethod" value="Chromatic"> ♫ Chromatic</label>
+                <label><input type="radio" name="fixMethod" value="Chuyển Tone"> ☲ Chuyển Tone</label>
+            </div>
+            <div class="modal-buttons">
+                <button id="saveFixMeoBtn">💾 Lưu</button>
+                <button id="closeFixMeoBtn">Hủy</button>
+            </div>
+        </div>
+    </div>
+    <script src="js/appSettings.js"></script>
+    <script src="js/setup.js"></script>
+</body>
+
+</html>

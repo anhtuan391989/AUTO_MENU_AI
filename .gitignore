@@ -1,0 +1,33 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Build
+dist/
+build/
+release/
+out/
+
+# Cache
+.cache/
+cache/
+temp/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Electron
+*.asar
+
+# Environment
+.env
+.env.local

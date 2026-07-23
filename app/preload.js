@@ -1,0 +1,60 @@
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("electronAPI", {
+    // ---- Setup window ----
+    openSetup: () => ipcRenderer.send("open-setup"),
+    closeSetup: () => ipcRenderer.send("close-setup"),
+    notifySetupChanged: () => ipcRenderer.send("setup-changed"),
+    onSetupChanged: (callback) => ipcRenderer.on("setup-changed", () => callback()),
+
+    // ---- Kiểm tra kết nối main process ----
+    ping: () => ipcRenderer.invoke("ping"),
+
+    // ---- AutoHotkey / lấy toạ độ ----
+    findAhkPath: () => ipcRenderer.invoke("find-ahk-path"),
+    setupCapture: (payload) => ipcRenderer.invoke("setup-capture", payload),
+    downloadAhk: () => ipcRenderer.invoke("download-ahk"),
+    clickAtPoint: (point) => ipcRenderer.invoke("click-at-point", point),
+
+    // ---- Tải & cài phần mềm ----
+    downloadAndInstall: (url, label) => ipcRenderer.invoke("download-and-install", { url, label }),
+    downloadBrave: () => ipcRenderer.invoke("download-brave"),
+    downloadVst2: (url) => ipcRenderer.invoke("download-vst2", url),
+    openExternalUrl: (url) => ipcRenderer.invoke("open-external-url", url),
+
+    // ---- Trình duyệt ----
+    findBrowserPath: (browserName) => ipcRenderer.invoke("find-browser-path", browserName),
+
+    // ---- Cài đặt lưu trên file (thay localStorage) ----
+    loadSettingsSync: () => ipcRenderer.sendSync("load-settings-sync"),
+    saveSettingsSync: (data) => ipcRenderer.sendSync("save-settings-sync", data),
+
+    // ---- File / backup ----
+    selectFile: (options) => ipcRenderer.invoke("select-file", options),
+    exportBackup: (data) => ipcRenderer.invoke("export-backup", data),
+    importBackup: () => ipcRenderer.invoke("import-backup"),
+
+    // ---- Mở DAW / project / youtube cùng lúc ----
+    openProjectBundle: (options) => ipcRenderer.invoke("open-project-bundle", options),
+
+    // ---- Tính năng AI (mới thêm) ----
+    // Lưu ý: main.js hiện CHƯA có ipcMain.handle("ai-command", ...).
+    // Cần nối phần AI layer + Command Engine vào main.js thì hàm này mới chạy được.
+    sendCommand: (text) => ipcRenderer.invoke("ai-command", text),
+
+    // ---- Gửi kết quả Key/BPM/MOD từ engine (ui/js/engines/*) sang Core (AIContext) ----
+    // type: "key" | "bpm" | "mod", payload: dữ liệu tương ứng (xem app/main.js: ipcMain.on("ai-result"))
+    reportAiResult: (type, payload) => ipcRenderer.send("ai-result", { type, payload }),
+
+    // ---- Bridge: nhận lệnh Plugin trừu tượng từ Core (PluginController) ----
+    // callback nhận { command, value, confidence, reason, timestamp } — renderer tự quyết
+    // định gọi hàm nào trong vocalCommandRouter.js tương ứng với command.
+    onPluginCommand: (callback) => ipcRenderer.on("plugin-command", (event, message) => callback(message)),
+
+    // ---- Control Source: LEGACY_CONTROL hay AI_CONTROL (xem core/shared/ControlSource.js) ----
+    getControlSource: () => ipcRenderer.invoke("get-control-source"),
+
+    // ---- Telemetry (Phase 4A): gửi 1 bản ghi JSON sang main process để ghi vào logs/*.jsonl ----
+    // Fire-and-forget, không cần phản hồi — giống cơ chế reportAiResult đã có.
+    sendTelemetry: (record) => ipcRenderer.send("telemetry-record", record),
+});

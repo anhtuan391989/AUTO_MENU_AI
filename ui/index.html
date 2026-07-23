@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AUTO MENU AI</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:,">
+</head>
+
+<body>
+    <div class="app">
+
+        <!-- HEADER -->
+        <header class="header">
+            <div class="logo">AUTO MENU AI</div>
+            <div class="header-center">
+                <div class="clock-line"></div>
+                <div id="clock" class="clock">
+                    00:00:00
+                </div>
+                <div class="clock-line"></div>
+            </div>
+            <div class="window-buttons">
+                <button id="setupBtn">⚙</button>
+                <button id="minBtn">—</button>
+                <button id="closeBtn">✕</button>
+            </div>
+        </header>
+
+        <!-- STATUS -->
+        <div class="audio-monitor-bar">
+            <div id="vu-fill"></div>
+        </div>
+        <div id="songPosition" style="display:none;">00:00</div>
+        <section class="status-grid">
+            <div class="status-card">
+                <div class="status-icon">🌐</div>
+                <div class="status-left">
+                    <div>
+                        <div class="status-title">ONLINE</div>
+                        <div class="status-sub">Connected</div>
+                    </div>
+                </div>
+                <div id="dot-online" class="status-dot"></div>
+            </div>
+            <div class="status-card">
+                <div class="status-icon">🎛</div>
+                <div class="status-left">
+                    <div>
+                        <div class="status-title">AUTO TUNE</div>
+                        <div id="statusATMain" class="status-sub">Chưa Chọn...</div>
+                    </div>
+                </div>
+                <div id="dot-autotune" class="status-dot"></div>
+            </div>
+            <div class="status-card">
+                <div class="status-icon">🎹</div>
+                <div class="status-left">
+                    <div>
+                        <div class="status-title">DAW</div>
+                        <div id="statusDAWMain" class="status-sub">
+                            Chưa Chọn...
+                        </div>
+                    </div>
+                </div>
+                <div id="dot-daw" class="status-dot"></div>
+            </div>
+            <div class="status-card">
+                <div class="status-icon">🔊</div>
+                <div class="status-left">
+                    <div>
+                        <div class="status-title">AUDIO INTERFACE</div>
+                        <div id="soundcardName" class="status-sub"
+                            style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; display:block;"
+                            title="Chưa Chọn...">Chưa Chọn...</div>
+                    </div>
+                </div>
+                <div id="dot-audio" class="status-dot"></div>
+            </div>
+            <div class="status-card">
+                <div class="status-icon">📦</div>
+                <div class="status-left">
+                    <div>
+                        <div class="status-title">CACHE</div>
+                        <div class="status-sub">Ready</div>
+                    </div>
+                </div>
+                <div id="dot-cache" class="status-dot"></div>
+            </div>
+        </section>
+
+        <!-- PRESET -->
+        <section class="preset-grid">
+            <button class="preset-btn active">NORM</button>
+            <button class="preset-btn">LOFI</button>
+            <button class="preset-btn">RAP</button>
+        </section>
+
+        <!-- ANALYZER -->
+        <section class="analyzer-grid">
+            <div class="analyzer-card">
+                <div id="dot-key" class="status-dot offline" style="position:absolute; top:10px; right:12px;"></div>
+                <div class="card-content">
+                    <div class="info-side">
+                        <div class="analyzer-icon">🎼 KEY</div>
+                        <div class="analyzer-title"></div>
+                        <div id="currentKey" class="analyzer-value">G# Minor</div>
+                        <div id="keyInfo" class="analyzer-sub">
+                            Auto Detect
+                        </div>
+                    </div>
+                    <div class="control-side">
+                        <select id="keySelector" class="key-dropdown-inline">
+                            <option value="AI Key Detect">AI Key Detect</option>
+                            <option value="C Major">C Major</option>
+                            <option value="Db Major">Db Major</option>
+                            <option value="D Major">D Major</option>
+                            <option value="Eb Major">Eb Major</option>
+                            <option value="E Major">E Major</option>
+                            <option value="F Major">F Major</option>
+                            <option value="F# Major">F# Major</option>
+                            <option value="G Major">G Major</option>
+                            <option value="Ab Major">Ab Major</option>
+                            <option value="A Major">A Major</option>
+                            <option value="Bb Major">Bb Major</option>
+                            <option value="B Major">B Major</option>
+                            <option value="C Minor">C Minor</option>
+                            <option value="C# Minor">C# Minor</option>
+                            <option value="D Minor">D Minor</option>
+                            <option value="Eb Minor">Eb Minor</option>
+                            <option value="E Minor">E Minor</option>
+                            <option value="F Minor">F Minor</option>
+                            <option value="F# Minor">F# Minor</option>
+                            <option value="G Minor">G Minor</option>
+                            <option value="G# Minor">G# Minor</option>
+                            <option value="A Minor">A Minor</option>
+                            <option value="Bb Minor">Bb Minor</option>
+                            <option value="B Minor">B Minor</option>
+                        </select>
+                        <button id="applyKeyBtn" class="apply-btn-mini">SEND</button>
+                    </div>
+                </div>
+            </div>
+            <div class="analyzer-card">
+                <div id="dot-bpm" class="status-dot offline" style="position:absolute; top:10px; right:12px;"></div>
+                <div class="analyzer-icon">📈 BPM</div>
+                <div class="analyzer-title"></div>
+                <div id="currentBpm" class="analyzer-value">128</div>
+                <div id="bpmValue">-- BPM</div>
+                <div class="analyzer-sub">Confidence 98%</div>
+            </div>
+            <div class="analyzer-card">
+                <div id="dot-mod" class="status-dot offline" style="position:absolute; top:10px; right:12px;"></div>
+                <div class="card-content">
+                    <div class="info-side">
+                        <div class="analyzer-icon">🕒 MOD</div>
+                        <div class="analyzer-title"></div>
+                        <div id="modTime" class="analyzer-value">02:15</div>
+                        <div id="modStatus" class="analyzer-sub">G#m → Am</div>
+                        <div id="modTimeline" class="analyzer-sub">+5 SEMITONES</div>
+                    </div>
+                    <div class="control-side">
+                        <button id="modPowerBtn" class="power-btn">OFF</button>
+                        <select id="toneSelector" class="key-dropdown-inline">
+                            <option value="+10">+10</option>
+                            <option value="+9">+9</option>
+                            <option value="+8">+8</option>
+                            <option value="+7">+7</option>
+                            <option value="+6">+6</option>
+                            <option value="+5">+5</option>
+                            <option value="+4">+4</option>
+                            <option value="+3">+3</option>
+                            <option value="+2">+2</option>
+                            <option value="+1">+1</option>
+                            <option value="0">0</option>
+                            <option value="-1">-1</option>
+                            <option value="-2">-2</option>
+                            <option value="-3">-3</option>
+                            <option value="-4">-4</option>
+                            <option value="-5">-5</option>
+                            <option value="-6">-6</option>
+                            <option value="-7">-7</option>
+                            <option value="-8">-8</option>
+                            <option value="-9">-9</option>
+                            <option value="-10">-10</option>
+                        </select>
+                        <button id="applyToneBtn" class="apply-btn-mini">SET</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- CONTROL -->
+        <section class="control-grid">
+            <button id="autoDetectBtn" class="control-btn">⭕ AUTO DETECT</button>
+            <button id="musicBtn" class="control-btn">🎵 MUSIC</button>
+            <button id="mic1Btn" class="control-btn">🎙 MIC 1</button>
+            <button id="mic2Btn" class="control-btn">🎙 MIC 2</button>
+            <button id="fxBtn" class="control-btn">🎚 FX</button>
+        </section>
+
+        <!-- MIXER -->
+        <section class="mixer-grid">
+
+            <!-- RETUNE 1 -->
+            <div class="knob-card">
+                <div class="knob-label">RETUNE SPEED 1</div>
+                <div id="retune1Value" class="knob-number">20</div>
+                <div class="knob" id="retune1">
+                    <div class="led-ring"></div>
+                    <div class="led-active"></div>
+                    <div class="cap"></div>
+                    <div class="pointer"></div>
+                    <div class="knob-scale">
+                        <span>0</span>
+                        <span>100</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RETUNE 2 -->
+            <div class="knob-card">
+                <div class="knob-label">RETUNE SPEED 2</div>
+                <div id="retune2Value" class="knob-number">20</div>
+                <div class="knob" id="retune2">
+                    <div class="led-ring"></div>
+                    <div class="led-active"></div>
+                    <div class="cap"></div>
+                    <div class="pointer"></div>
+                    <div class="knob-scale">
+                        <span>0</span>
+                        <span>100</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MUSIC -->
+            <div class="knob-card">
+                <div class="knob-label">MUSIC</div>
+                <div id="musicValue" class="knob-number">90</div>
+                <div class="knob" id="musicKnob">
+                    <div class="led-ring"></div>
+                    <div class="led-active"></div>
+                    <div class="cap"></div>
+                    <div class="pointer"></div>
+                    <div class="knob-scale">
+                        <span>0</span>
+                        <span>100</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MASTER -->
+            <div class="knob-card">
+                <div class="knob-label">MASTER</div>
+                <div id="masterValue" class="knob-number">90</div>
+                <div class="knob" id="masterKnob">
+                    <div class="led-ring"></div>
+                    <div class="led-active"></div>
+                    <div class="cap"></div>
+                    <div class="pointer"></div>
+                    <div class="knob-scale">
+                        <span>0</span>
+                        <span>100</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CLAP -->
+            <div class="knob-card">
+                <div class="sample-title">👏CLAP👏</div>
+                <button id="clapPlayBtn" class="play-btn">
+                    <span class="icon">👏</span><span class="text">PLAY</span>
+                </button>
+                <div id="clapValue" class="knob-number">50</div>
+                <div class="knob" id="clapKnob">
+                    <div class="led-ring"></div>
+                    <div class="led-active"></div>
+                    <div class="cap"></div>
+                    <div class="pointer"></div>
+                    <div class="knob-scale">
+                        <span>0</span>
+                        <span>100</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LAUGH -->
+            <div class="knob-card">
+                <div class="sample-title">😂LAUGH😂</div>
+                <button id="laughPlayBtn" class="play-btn">
+                    <span class="icon">😂</span><span class="text">PLAY</span>
+                </button>
+                <div id="laughValue" class="knob-number">50</div>
+                <div class="knob" id="laughKnob">
+                    <div class="led-ring"></div>
+                    <div class="led-active"></div>
+                    <div class="cap"></div>
+                    <div class="pointer"></div>
+                    <div class="knob-scale">
+                        <span>0</span>
+                        <span>100</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <script src="js/appSettings.js"></script>
+    <script src="js/vocalCommandRouter.js"></script>
+    <script src="js/engines/bpmEngine.js"></script>
+    <script src="js/engines/keyEngine.js"></script>
+    <script src="js/engines/modEngine.js"></script>
+    <script src="js/renderer.js"></script>
+</body>
+
+</html>
