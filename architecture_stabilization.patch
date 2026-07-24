@@ -1,0 +1,104 @@
+diff --git a/core/ai/AIBootstrap.js b/core/ai/AIBootstrap.js
+index 0dc3e83..4900b59 100644
+--- a/core/ai/AIBootstrap.js
++++ b/core/ai/AIBootstrap.js
+@@ -1,12 +1,9 @@
+ const AIBrain = require("./AIBrain");
+-<<<<<<< HEAD
+- HEAD
+-const WorkflowManager = require("./managers/WorkflowManager");
+-const WorkflowManager = require("./managers/WorkflowManager"); // LƯU Ý: trỏ tới file RỖNG (0 byte), trùng tên với ./workflow/WorkflowManager.js bên dưới — vấn đề trùng tên đã biết từ báo cáo audit trước, CHƯA xử lý trong nhiệm vụ này (ngoài phạm vi được giao)
+- origin/main
+-=======
+-const WorkflowManager = require("./managers/WorkflowManager"); // LƯU Ý: trỏ tới file RỖNG (0 byte), trùng tên với ./workflow/WorkflowManager.js bên dưới — vấn đề trùng tên đã biết từ báo cáo audit trước, CHƯA xử lý trong nhiệm vụ này (ngoài phạm vi được giao)
+->>>>>>> 98e2c92 (Auto-sync 23/07/2026 12:35:35,71)
++// LƯU Ý: đã bỏ dòng require trỏ tới core/ai/managers/WorkflowManager.js (file RỖNG
++// 0 byte, trùng tên với core/ai/workflow/WorkflowManager.js) vì biến đó chưa từng
++// được dùng ở đâu trong file này — chỉ "WorkflowEngine" (dòng dưới, trỏ tới file
++// workflow/WorkflowManager.js, bản THẬT) mới thực sự được dùng qua getWorkflowEngine().
++// Xoá dòng require thừa này không đổi hành vi hệ thống.
+ const DecisionEngine = require("./decision/DecisionEngine");
+ const EventBus = require("../events/EventBus");
+ const Context = require("./AIContext");
+@@ -14,6 +11,7 @@ const AnalysisState = require("./AnalysisState"); // require để kích hoạt
+ const InferenceEngine = require("./inference/InferenceEngine"); // require để kích hoạt lắng nghe KEY_CHANGED/BPM_CHANGED/MOD_CHANGED (xem InferenceEngine.js)
+ const ResultQueue = require("./aggregation/ResultQueue"); // require để kích hoạt lắng nghe ANALYSIS_RESULT (xem ResultQueue.js)
+ const WorkflowEngine = require("./workflow/WorkflowManager"); // require để kích hoạt lắng nghe DECISION_READY (xem workflow/WorkflowManager.js) — file THẬT của nhiệm vụ Workflow Engine, khác với require("./managers/WorkflowManager") rỗng ở trên
++const PluginController = require("./plugin/PluginController"); // require để kích hoạt lắng nghe WORKFLOW_READY (xem plugin/PluginController.js) — mắt xích cuối, chỉ phát PLUGIN_COMMAND khi ControlSource = AI_CONTROL; mặc định LEGACY_CONTROL nên chỉ quan sát/log, không gửi lệnh, không đổi hành vi hệ thống hiện tại
+ 
+ class AIBootstrap {
+ 
+@@ -75,6 +73,12 @@ class AIBootstrap {
+ 
+     }
+ 
++    getPluginController() {
++
++        return PluginController;
++
++    }
++
+ }
+ 
+ module.exports = new AIBootstrap();
+diff --git a/core/ai/AIContext.js b/core/ai/AIContext.js
+index cc2985f..b15e63b 100644
+--- a/core/ai/AIContext.js
++++ b/core/ai/AIContext.js
+@@ -103,8 +103,6 @@ class AIContext {
+             version: "2.0.0"
+ 
+         };
+-<<<<<<< HEAD
+-=======
+ 
+     }
+ 
+@@ -147,7 +145,6 @@ class AIContext {
+         this.mod.time = time ?? this.mod.time;
+ 
+         this.mod.confidence = 1;
+->>>>>>> origin/main
+ 
+     }
+ 
+diff --git a/core/ai/kernel/Kernel.js b/core/ai/kernel/Kernel.js
+index f7b8652..9910bb4 100644
+--- a/core/ai/kernel/Kernel.js
++++ b/core/ai/kernel/Kernel.js
+@@ -1,12 +1,3 @@
+-<<<<<<< HEAD
+-const BaseModule = require("../shared/BaseModule");
+-
+-const Logger = require("../shared/Logger");
+-
+-const EventBus = require("../events/EventBus");
+-
+-const Events = require("../events/Events");
+-=======
+ const BaseModule = require("../../shared/BaseModule");
+ 
+ const Logger = require("../../shared/Logger");
+@@ -14,7 +5,6 @@ const Logger = require("../../shared/Logger");
+ const EventBus = require("../../events/EventBus");
+ 
+ const Events = require("../../events/Events");
+->>>>>>> origin/main
+ 
+ const Registry = require("./Registry");
+ 
+diff --git a/core/events/Events.js b/core/events/Events.js
+index 349b2b8..8f68027 100644
+--- a/core/events/Events.js
++++ b/core/events/Events.js
+@@ -76,4 +76,9 @@ module.exports = {
+     //    ở bước này). --
+     WORKFLOW_READY: "WORKFLOW_READY",
+ 
++    // -- Do PluginController phát ra (chỉ khi ControlSource = AI_CONTROL): 1 lệnh plugin
++    //    cụ thể (key/bpm/mod) đã sẵn sàng gửi xuống Driver. app/main.js lắng nghe sự kiện
++    //    này để chuyển tiếp qua IPC "plugin-command" sang renderer. --
++    PLUGIN_COMMAND: "PLUGIN_COMMAND",
++
+ };
+\ No newline at end of file
