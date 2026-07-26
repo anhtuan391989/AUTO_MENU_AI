@@ -87,8 +87,28 @@ if ($PSVersionTable.PSEdition -eq "Core") {
 # BƯỚC 0.5 — StreamWriter ghi thẳng vào stdout, AutoFlush=true, UTF-8 KHÔNG
 # BOM. Thay thế hoàn toàn Write-Output cho MỌI dòng thuộc giao thức JSON, để
 # đảm bảo: (a) không bị PowerShell buffer, (b) encoding đúng cho tiếng Việt.
+#
+# PHÒNG THỦ BỔ SUNG (sau khi điều tra lỗi "Chß║»c Chß║»n" — xem báo cáo):
+# đã CHỨNG MINH bằng phép decode ngược rằng đây là UTF-8 bytes của "Chắc"
+# bị đọc nhầm bằng codepage OEM 437/850/858 (codepage console mặc định của
+# Windows, KHÔNG PHẢI cp1252/1258 — đã loại trừ bằng phép tính, xem báo cáo).
+# StreamWriter ghi thẳng vào OpenStandardOutput() lẽ ra đã bỏ qua console
+# codepage hoàn toàn, NHƯNG để phòng ngừa mọi đường ghi phụ nào đó (nếu có)
+# vẫn tham chiếu [Console]::OutputEncoding, đặt luôn giá trị này = UTF-8 và
+# ép luôn codepage console về 65001 (UTF-8) ngay từ đầu tiến trình.
 # ---------------------------------------------------------------
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+try {
+    [Console]::OutputEncoding = $Utf8NoBom
+} catch { }
+
+try {
+    # chcp 65001: ép codepage console về UTF-8. An toàn dù không có console
+    # thật (spawn với windowsHide) — bỏ qua lỗi nếu không áp dụng được.
+    $null = (& chcp.com 65001) 2>$null
+} catch { }
+
 $StdOutWriter = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), $Utf8NoBom)
 $StdOutWriter.AutoFlush = $true
 [Console]::SetOut($StdOutWriter)
@@ -104,6 +124,7 @@ function Write-JsonLine {
     $StdOutWriter.Flush() # tường minh, dù AutoFlush đã bật — không tin tưởng ngầm định
 
 }
+
 
 # ---------------------------------------------------------------
 # BƯỚC 1 — Nạp kiểu WinRT. Thất bại ở đây là FATAL (không thể phục hồi
