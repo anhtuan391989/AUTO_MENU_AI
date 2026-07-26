@@ -15,13 +15,20 @@
 
         <!-- HEADER -->
         <header class="header">
-            <div class="logo">AUTO MENU AI</div>
+            <div class="logo">
+                AUTO MENU AI
+                <span id="dot-online" class="status-dot logo-dot"></span>
+            </div>
             <div class="header-center">
-                <div class="clock-line"></div>
-                <div id="clock" class="clock">
-                    00:00:00
+                <div class="now-playing">
+                    <span class="now-playing-label">NOW PLAYING:</span>
+                    <div id="nowPlayingViewport" class="now-playing-viewport">
+                        <div id="nowPlayingTrack" class="now-playing-track">
+                            <span id="nowPlayingCopyA" class="now-playing-text-copy">Unavailable</span>
+                            <span id="nowPlayingCopyB" class="now-playing-text-copy" style="display:none;"></span>
+                        </div>
+                    </div>
                 </div>
-                <div class="clock-line"></div>
             </div>
             <div class="window-buttons">
                 <button id="setupBtn">⚙</button>
@@ -37,14 +44,13 @@
         <div id="songPosition" style="display:none;">00:00</div>
         <section class="status-grid">
             <div class="status-card">
-                <div class="status-icon">🌐</div>
+                <div class="status-icon">🕒</div>
                 <div class="status-left">
                     <div>
-                        <div class="status-title">ONLINE</div>
-                        <div class="status-sub">Connected</div>
+                        <div class="status-title">TIME</div>
+                        <div id="clock" class="status-sub status-sub-time">00:00:00</div>
                     </div>
                 </div>
-                <div id="dot-online" class="status-dot"></div>
             </div>
             <div class="status-card">
                 <div class="status-icon">🎛</div>

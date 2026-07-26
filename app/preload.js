@@ -54,6 +54,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- Control Source: LEGACY_CONTROL hay AI_CONTROL (xem core/shared/ControlSource.js) ----
     getControlSource: () => ipcRenderer.invoke("get-control-source"),
 
+    // ---- Now Playing (WindowsMediaSession -> Renderer, chỉ đẩy khi có event thật) ----
+    // snapshot: { application, title, artist, album, thumbnail, timestamp } | null
+    onNowPlayingChange: (callback) => ipcRenderer.on("now-playing-change", (event, snapshot) => callback(snapshot)),
+    // info: { reason, message? } — xem core/integration/WindowsMediaSession.js, event "unavailable"
+    onNowPlayingUnavailable: (callback) => ipcRenderer.on("now-playing-unavailable", (event, info) => callback(info)),
+
     // ---- Telemetry (Phase 4A): gửi 1 bản ghi JSON sang main process để ghi vào logs/*.jsonl ----
     // Fire-and-forget, không cần phản hồi — giống cơ chế reportAiResult đã có.
     sendTelemetry: (record) => ipcRenderer.send("telemetry-record", record),

@@ -32,6 +32,141 @@ setInterval(updateClock, 1000);
 updateClock();
 
 /* ==========================================================
+   1B. NOW PLAYING (Header) — marquee, đọc dữ liệu từ WindowsMediaSession
+   ----------------------------------------------------------
+   Phần render/marquee thuần UI, KHÔNG tự đọc IPC (việc nhận IPC nằm ở
+   mục 1C ngay bên dưới, theo đúng yêu cầu "renderer nhận IPC chỉ gọi
+   lại 2 hàm này, không tự xử lý UI khác" — tách biệt 2 việc rõ ràng).
+   Mặc định hiển thị "Unavailable" cho tới khi mục 1C nhận được event
+   đầu tiên từ main process — trung thực, không bịa dữ liệu.
+
+   Hợp đồng dữ liệu (contract) khớp ĐÚNG với snapshot mà
+   core/integration/WindowsMediaSession.js phát ra:
+     - window.AutoMenuAI.updateNowPlaying(snapshot)
+         snapshot = { title, artist, application, album, thumbnail, timestamp }
+         hoặc null (không có gì đang phát) -> hiển thị "No media"
+     - window.AutoMenuAI.setNowPlayingUnavailable()
+         gọi khi WindowsMediaSession phát event "unavailable"
+   ========================================================== */
+(function setupNowPlaying() {
+
+    const viewport = document.getElementById("nowPlayingViewport");
+    const track = document.getElementById("nowPlayingTrack");
+    const copyA = document.getElementById("nowPlayingCopyA");
+    const copyB = document.getElementById("nowPlayingCopyB");
+
+    if (!viewport || !track || !copyA || !copyB) return; // an toàn nếu HTML thiếu phần tử
+
+    const MARQUEE_SPEED_PX_PER_SEC = 45; // tốc độ chạy chữ, vừa mắt, không giật
+    const COPY_GAP_PX = 48; // PHẢI khớp padding-right của .now-playing-text-copy trong CSS
+    const MIN_DURATION_SEC = 4;
+
+    function textForSnapshot(snapshot) {
+
+        if (snapshot === "unavailable") return "Unavailable";
+        if (!snapshot) return "No media";
+
+        const title = String(snapshot.title || "").trim();
+        const artist = String(snapshot.artist || "").trim();
+
+        if (!title) return "No media"; // không có title coi như chưa xác định được gì đáng tin
+
+        return artist ? `${title} - ${artist}` : title;
+
+    }
+
+    function stopMarquee() {
+
+        track.classList.remove("marquee");
+        track.style.animationDuration = "";
+        copyB.style.display = "none";
+        copyB.textContent = "";
+
+    }
+
+    // Chỉ chạy marquee khi tràn (đúng yêu cầu: ngắn hơn vùng hiển thị thì đứng yên).
+    // Không làm thay đổi kích thước menu: viewport có overflow:hidden cố định theo
+    // layout header sẵn có, marquee chỉ dịch chuyển bên trong, không đẩy layout.
+    function startMarqueeIfNeeded() {
+
+        copyB.style.display = "none"; // tạm ẩn bản sao 2 để đo đúng chiều rộng 1 bản
+
+        const overflow = copyA.scrollWidth > viewport.clientWidth;
+
+        if (!overflow) {
+
+            stopMarquee();
+            return;
+
+        }
+
+        // Kỹ thuật marquee liền mạch (seamless loop): 2 bản sao giống hệt nhau nối
+        // tiếp, animation dịch đúng -50% (= đúng 1 bản) rồi lặp lại -> mắt người
+        // không thấy điểm "giật" giữa vòng lặp.
+        copyB.style.display = "inline-block";
+        copyB.textContent = copyA.textContent;
+
+        const singleCopyWidth = copyA.scrollWidth + COPY_GAP_PX;
+        const durationSec = Math.max(MIN_DURATION_SEC, singleCopyWidth / MARQUEE_SPEED_PX_PER_SEC);
+
+        track.style.animationDuration = `${durationSec}s`;
+        track.classList.add("marquee");
+
+    }
+
+    function render(snapshot) {
+
+        copyA.textContent = textForSnapshot(snapshot);
+        stopMarquee();
+
+        // Đợi layout ổn định (2 frame) rồi mới đo chiều rộng thật, tránh đo nhầm
+        // lúc DOM chưa kịp cập nhật xong.
+        requestAnimationFrame(() => requestAnimationFrame(startMarqueeIfNeeded));
+
+    }
+
+    // Trạng thái mặc định khi renderer khởi động — trung thực, không có dữ liệu thật.
+    render("unavailable");
+
+    // Đo lại khi cửa sổ đổi kích thước (viewport rộng/hẹp lại làm thay đổi việc có
+    // tràn hay không).
+    window.addEventListener("resize", () => {
+
+        requestAnimationFrame(startMarqueeIfNeeded);
+
+    });
+
+    // API công khai cho 1 task nối dây sau này (IPC từ WindowsMediaSession).
+    window.AutoMenuAI = window.AutoMenuAI || {};
+    window.AutoMenuAI.updateNowPlaying = render;
+    window.AutoMenuAI.setNowPlayingUnavailable = () => render("unavailable");
+
+})();
+
+/* ==========================================================
+   1C. NOW PLAYING — nhận IPC từ main process (WindowsMediaSession)
+   ----------------------------------------------------------
+   CHỈ gọi lại window.AutoMenuAI.updateNowPlaying()/setNowPlayingUnavailable()
+   đã định nghĩa ở mục 1B — KHÔNG tự xử lý UI gì thêm ở đây. Không poll,
+   không timer — chỉ cập nhật khi main process thực sự bắn event.
+   ========================================================== */
+if (window.electronAPI?.onNowPlayingChange) {
+
+    window.electronAPI.onNowPlayingChange((snapshot) => {
+        window.AutoMenuAI?.updateNowPlaying(snapshot);
+    });
+
+}
+
+if (window.electronAPI?.onNowPlayingUnavailable) {
+
+    window.electronAPI.onNowPlayingUnavailable(() => {
+        window.AutoMenuAI?.setNowPlayingUnavailable();
+    });
+
+}
+
+/* ==========================================================
    2. INITIAL DATA (Dữ liệu mẫu)
    ========================================================== */
 document.getElementById("currentKey").textContent = "G# Minor";

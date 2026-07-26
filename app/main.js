@@ -121,10 +121,20 @@ app.whenReady().then(async () => {
 
     windowsMediaSession.on("change", (snapshot) => {
         console.log("[WindowsMediaSession] SNAPSHOT", snapshot);
+
+        // Đẩy dữ liệu sang renderer qua IPC — CHỈ khi có event thật (không poll,
+        // không timer). Renderer tự gọi window.AutoMenuAI.updateNowPlaying().
+        if (mainWin && !mainWin.isDestroyed()) {
+            mainWin.webContents.send("now-playing-change", snapshot);
+        }
     });
 
     windowsMediaSession.on("unavailable", (info) => {
         console.log("[WindowsMediaSession] UNAVAILABLE", info);
+
+        if (mainWin && !mainWin.isDestroyed()) {
+            mainWin.webContents.send("now-playing-unavailable", info);
+        }
     });
 
     windowsMediaSession.on("error", (err) => {
