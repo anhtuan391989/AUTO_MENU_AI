@@ -43,6 +43,7 @@ class WindowsMediaSession extends EventEmitter {
      * @param {number} [options.restartMaxAttempts]
      * @param {number} [options.restartBackoffMs]
      * @param {number} [options.readyTimeoutMs]
+     * @param {number} [options.winRtCallTimeoutMs] Timeout cho mỗi lệnh gọi WinRT bên trong .ps1 (phòng deadlock)
      * @param {string} [options.scriptPath] Đường dẫn tới smtc-daemon.ps1 (mặc định: cùng thư mục)
      * @param {Function} [options.spawnFn] Cho phép tiêm hàm spawn khác (DÙNG CHO TEST — không dùng trong production)
      * @param {object} [options.logger] Cho phép tiêm logger khác (mặc định: core/shared/Logger)
@@ -58,6 +59,7 @@ class WindowsMediaSession extends EventEmitter {
 
         this._cache = new SnapshotCache();
         this._child = null;
+        this._generation = 0;
         this._stdoutBuffer = "";
         this._stopping = false;
         this._restartAttempts = 0;
@@ -112,6 +114,7 @@ class WindowsMediaSession extends EventEmitter {
     stop() {
 
         this._stopping = true;
+        this._generation++; // vô hiệu hoá NGAY LẬP TỨC mọi listener của tiến trình con hiện tại
 
         if (this._readyTimeoutHandle) { clearTimeout(this._readyTimeoutHandle); this._readyTimeoutHandle = null; }
         if (this._restartTimeoutHandle) { clearTimeout(this._restartTimeoutHandle); this._restartTimeoutHandle = null; }
@@ -175,10 +178,22 @@ class WindowsMediaSession extends EventEmitter {
         const args = [
             "-NoProfile",
             "-NonInteractive",
+            "-MTA", // Xem BƯỚC quan trọng trong báo cáo: powershell.exe mặc định STA,
+                    // WinRT IAsyncOperation await qua Task.Wait() có rủi ro deadlock
+                    // trong console app không có Windows message loop để pump khi ở
+                    // STA (nguyên nhân khả dĩ nhất của "không bao giờ nhận được ready"
+                    // — xem dẫn chứng trong báo cáo). MTA không cần message pump.
             "-ExecutionPolicy", "Bypass",
             "-File", this._scriptPath,
-            "-PollIntervalMs", String(this._config.pollIntervalMs)
+            "-PollIntervalMs", String(this._config.pollIntervalMs),
+            "-WinRtCallTimeoutMs", String(this._config.winRtCallTimeoutMs)
         ];
+
+        // "Thế hệ" của tiến trình con lần này — dùng để CHẶN dữ liệu đến trễ từ
+        // 1 tiến trình con ĐÃ BỊ retire (do stop()/fatal/restart) nhưng vẫn còn
+        // gửi thêm vài byte cuối trước khi thực sự thoát hẳn (race condition đã
+        // rà soát lại theo đúng yêu cầu "kiểm tra lại toàn bộ logic restart").
+        const generation = ++this._generation;
 
         let child;
 
@@ -199,23 +214,42 @@ class WindowsMediaSession extends EventEmitter {
         // dừng lại, không đợi vô thời hạn.
         this._readyTimeoutHandle = setTimeout(() => {
 
-            this._logger.error("WindowsMediaSession", `Không nhận được "ready" sau ${this._config.readyTimeoutMs}ms — dừng tiến trình`);
+            if (generation !== this._generation) return; // đã bị thay thế/stop, không còn liên quan
+
+            this._logger.error("WindowsMediaSession", `[ERROR] Không nhận được "ready" sau ${this._config.readyTimeoutMs}ms — dừng tiến trình (nghi ngờ deadlock WinRT hoặc PowerShell không tương thích, xem báo cáo)`);
             this._available = false;
             this.emit("unavailable", { reason: "ready_timeout" });
             this.stop();
 
         }, this._config.readyTimeoutMs);
 
-        child.stdout.on("data", (chunk) => this._onStdoutData(chunk));
+        child.stdout.setEncoding("utf8"); // QUAN TRỌNG: để Node tự xử lý đúng ký tự
+        // UTF-8 đa-byte (dấu tiếng Việt) bị TCP/pipe cắt ngang giữa 2 lần 'data' —
+        // nếu tự gọi Buffer.toString('utf-8') theo từng chunk riêng lẻ (cách cũ),
+        // 1 byte dở dang ở cuối chunk sẽ bị decode sai thành ký tự lỗi (U+FFFD),
+        // làm hỏng JSON. setEncoding('utf8') dùng StringDecoder nội bộ của Node,
+        // tự giữ lại byte dở dang chờ chunk kế tiếp — đây là cách chính thức được
+        // Node khuyến nghị cho đúng tình huống này.
+        child.stdout.on("data", (chunk) => {
 
+            if (generation !== this._generation) return; // dữ liệu trễ từ tiến trình con đã bị retire -> bỏ qua
+            this._onStdoutData(chunk);
+
+        });
+
+        child.stderr.setEncoding("utf8");
         child.stderr.on("data", (chunk) => {
 
-            const text = chunk.toString("utf-8").trim();
+            if (generation !== this._generation) return;
+
+            const text = chunk.trim();
             if (text) this._logger.warning("WindowsMediaSession", `[powershell stderr] ${text}`);
 
         });
 
         child.on("error", (err) => {
+
+            if (generation !== this._generation) return;
 
             // Lỗi spawn (vd không tìm thấy powershell.exe) hoặc lỗi runtime của
             // tiến trình con — không throw ra ngoài, chỉ log + đánh dấu unavailable.
@@ -225,6 +259,8 @@ class WindowsMediaSession extends EventEmitter {
 
         child.on("exit", (code, signal) => {
 
+            if (generation !== this._generation) return;
+
             this._onChildExit(code, signal);
 
         });
@@ -233,7 +269,7 @@ class WindowsMediaSession extends EventEmitter {
 
     _handleUnrecoverableSpawnFailure(err) {
 
-        this._logger.error("WindowsMediaSession", `Không spawn được powershell.exe: ${err.message}`);
+        this._logger.error("WindowsMediaSession", `[ERROR] Không spawn được powershell.exe: ${err.message}`);
         this._child = null;
         this._available = false;
         this.emit("unavailable", { reason: "spawn_failed", message: err.message });
@@ -248,11 +284,11 @@ class WindowsMediaSession extends EventEmitter {
 
         if (this._stopping) return; // dừng có chủ đích (gọi stop()) -> không restart
 
-        this._logger.warning("WindowsMediaSession", `Tiến trình smtc-daemon.ps1 thoát bất ngờ (code=${code}, signal=${signal})`);
+        this._logger.warning("WindowsMediaSession", `[EXIT] Tiến trình smtc-daemon.ps1 thoát bất ngờ (code=${code}, signal=${signal})`);
 
         if (this._restartAttempts >= this._config.restartMaxAttempts) {
 
-            this._logger.error("WindowsMediaSession", `Đã thử khởi động lại ${this._restartAttempts} lần, dừng hẳn`);
+            this._logger.error("WindowsMediaSession", `[ERROR] Đã thử khởi động lại ${this._restartAttempts} lần, dừng hẳn (restartMaxAttempts=${this._config.restartMaxAttempts})`);
             this._available = false;
             this.emit("unavailable", { reason: "max_restarts_exceeded" });
             return;
@@ -260,6 +296,9 @@ class WindowsMediaSession extends EventEmitter {
         }
 
         this._restartAttempts++;
+
+        this._logger.info("WindowsMediaSession", `[RESTART] Thử khởi động lại lần ${this._restartAttempts}/${this._config.restartMaxAttempts} sau ${this._config.restartBackoffMs}ms`);
+        this.emit("restart", { attempt: this._restartAttempts, maxAttempts: this._config.restartMaxAttempts, backoffMs: this._config.restartBackoffMs, code, signal });
 
         this._restartTimeoutHandle = setTimeout(() => {
 
@@ -271,7 +310,9 @@ class WindowsMediaSession extends EventEmitter {
 
     _onStdoutData(chunk) {
 
-        this._stdoutBuffer += chunk.toString("utf-8");
+        // chunk đã là string (không phải Buffer) vì đã setEncoding("utf8") ở
+        // stream — Node tự đảm bảo không cắt ngang ký tự đa-byte giữa các lần gọi.
+        this._stdoutBuffer += chunk;
 
         let newlineIndex;
 
@@ -338,7 +379,7 @@ class WindowsMediaSession extends EventEmitter {
         this._restartAttempts = 0; // khởi động thành công -> reset bộ đếm backoff
         this._available = true;
 
-        this._logger.info("WindowsMediaSession", `smtc-daemon.ps1 sẵn sàng (startup: ${this._metrics.readyAt - this._metrics.spawnedAt}ms)`);
+        this._logger.info("WindowsMediaSession", `[READY] smtc-daemon.ps1 sẵn sàng (startup: ${this._metrics.readyAt - this._metrics.spawnedAt}ms)`);
         this.emit("ready");
 
     }
@@ -357,19 +398,21 @@ class WindowsMediaSession extends EventEmitter {
 
         if (result.reason === "application_changed") {
 
-            this._logger.info("WindowsMediaSession", `Ứng dụng thay đổi -> ${result.snapshot ? result.snapshot.application : "(không có)"}`);
+            this._logger.info("WindowsMediaSession", `[SESSION CHANGED] Ứng dụng thay đổi -> ${result.snapshot ? result.snapshot.application : "(không có)"}`);
 
         } else if (result.reason === "became_empty" || result.reason === "became_available") {
 
             this._logger.info("WindowsMediaSession", result.snapshot
-                ? `Session mới: "${result.snapshot.title}" - ${result.snapshot.artist || "?"} (${result.snapshot.application})`
-                : "Không còn session nào đang phát");
+                ? `[SESSION CHANGED] Session mới: "${result.snapshot.title}" - ${result.snapshot.artist || "?"} (${result.snapshot.application})`
+                : "[SESSION CHANGED] Không còn session nào đang phát");
 
         } else {
 
-            this._logger.info("WindowsMediaSession", `Session thay đổi -> "${result.snapshot.title}" - ${result.snapshot.artist || "?"}`);
+            this._logger.info("WindowsMediaSession", `[SESSION CHANGED] Đổi bài -> "${result.snapshot.title}" - ${result.snapshot.artist || "?"}`);
 
         }
+
+        this._logger.info("WindowsMediaSession", `[SNAPSHOT] ${result.snapshot ? JSON.stringify({ application: result.snapshot.application, title: result.snapshot.title, artist: result.snapshot.artist }) : "null"}`);
 
         this.emit("change", result.snapshot);
 
@@ -382,14 +425,14 @@ class WindowsMediaSession extends EventEmitter {
         if (errorMessage === this._lastErrorMessage) return;
 
         this._lastErrorMessage = errorMessage;
-        this._logger.warning("WindowsMediaSession", `Không lấy được dữ liệu: ${errorMessage}`);
+        this._logger.warning("WindowsMediaSession", `[ERROR] Không lấy được dữ liệu: ${errorMessage}`);
         this.emit("error", new Error(errorMessage));
 
     }
 
     _handleFatal(errorMessage) {
 
-        this._logger.error("WindowsMediaSession", `Lỗi không thể phục hồi: ${errorMessage}`);
+        this._logger.error("WindowsMediaSession", `[ERROR] Lỗi không thể phục hồi (fatal): ${errorMessage}`);
         this._available = false;
         this._stopping = true; // KHÔNG restart — lỗi fatal sẽ lặp lại y hệt
         this.stop();

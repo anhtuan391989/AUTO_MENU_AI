@@ -82,6 +82,7 @@ const EventBus = require("../core/events/EventBus");
 const Events = require("../core/events/Events");
 const ControlSource = require("../core/shared/ControlSource");
 const TelemetryLogger = require("../core/shared/TelemetryLogger");
+const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
 
 app.whenReady().then(async () => {
     // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
@@ -101,6 +102,41 @@ app.whenReady().then(async () => {
     createMainWindow();
     createSetupWindow();
     await AIBootstrap.initialize();
+
+    // ================================
+    // Windows Media Session Integration (SMTC) — Data Acquisition Layer.
+    // ĐỘC LẬP HOÀN TOÀN với AIBootstrap/AIContext/EventBus/ai-result ở trên:
+    // không publish EventBus, không gọi AIContext, không ảnh hưởng Key/BPM/Mod
+    // Engine hay quyết định Lock. Chỉ khởi tạo + log để theo dõi/debug. Việc nối
+    // dữ liệu này sang NowPlayingResolver/SongMatcher/SongDatabase là task riêng,
+    // CHƯA làm ở đây (đúng phạm vi "chỉ tích hợp lớp Integration").
+    // Tự an toàn trên máy không phải Windows (start() tự phát hiện, không spawn
+    // gì, không throw, không crash app — xem core/integration/WindowsMediaSession.js).
+    // ================================
+    const windowsMediaSession = new WindowsMediaSession();
+
+    windowsMediaSession.on("ready", () => {
+        console.log("[WindowsMediaSession] READY");
+    });
+
+    windowsMediaSession.on("change", (snapshot) => {
+        console.log("[WindowsMediaSession] SNAPSHOT", snapshot);
+    });
+
+    windowsMediaSession.on("unavailable", (info) => {
+        console.log("[WindowsMediaSession] UNAVAILABLE", info);
+    });
+
+    windowsMediaSession.on("error", (err) => {
+        console.log("[WindowsMediaSession] ERROR", err.message);
+    });
+
+    windowsMediaSession.on("restart", (info) => {
+        console.log("[WindowsMediaSession] RESTART", info);
+    });
+
+    console.log("[WindowsMediaSession] START");
+    windowsMediaSession.start();
 });
 
 ipcMain.on("open-setup", () => {

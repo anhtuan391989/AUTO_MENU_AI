@@ -6,7 +6,8 @@ Tiến trình PowerShell SỐNG LÂU DÀI (không bị spawn lại mỗi lần p
 Node (WindowsMediaSession.js) spawn tiến trình này ĐÚNG 1 LẦN, giữ nó
 chạy suốt vòng đời tính năng, đọc từng dòng JSON in ra stdout.
 
-Giao thức (1 dòng JSON / lần, kết thúc bằng \n):
+Giao thức (1 dòng JSON / lần, kết thúc bằng \n) — KHÔNG ĐỔI so với
+bản trước:
   {"type":"ready","pid":<số>}
       -> in ĐÚNG 1 LẦN, ngay sau khi nạp WinRT thành công.
   {"type":"snapshot","data":{application,title,artist,album,thumbnail,timestamp}}
@@ -20,21 +21,77 @@ Giao thức (1 dòng JSON / lần, kết thúc bằng \n):
          in ra rồi THOÁT HẲN (exit 1). Node không nên tự restart khi
          nhận fatal — restart cũng sẽ lỗi y hệt.
 
-⚠️ Kế thừa nguyên trạng thái CHƯA ĐƯỢC TỰ KIỂM THỬ từ báo cáo nghiên
-cứu khả thi trước đó (Claude không có môi trường Windows để chạy thử).
-Logic dựa trên tài liệu chính thức Windows.Media.Control (WinRT) +
-pattern PowerShell "Await" cho WinRT IAsyncOperation, đã dẫn nguồn ở
-prototype trước. Bản này CHỈ khác prototype ở chỗ: in JSON theo dòng
-thay vì bảng, chọn ĐÚNG 1 session "tốt nhất" thay vì liệt kê tất cả
-(theo đúng contract output của WindowsMediaSession.js).
+------------------------------------------------------------
+CÁC SỬA ĐỔI TRONG LẦN NÀY (dựa trên nghiên cứu thật, có dẫn nguồn ở
+báo cáo, KHÔNG suy đoán tuỳ tiện):
+
+1. NGHI VẤN NGUYÊN NHÂN "không bao giờ nhận ready" (mục 3 đề bài):
+   powershell.exe mặc định chạy ở apartment STA. Gọi WinRT async rồi
+   block đồng bộ bằng Task.Wait() trên 1 console app KHÔNG có Windows
+   message loop để "pump" là kiểu deadlock kinh điển đã được ghi nhận
+   cho chính lớp bài toán này (xem project `bleak` — thư viện Python
+   dùng WinRT — tài liệu troubleshooting của họ mô tả ĐÚNG hiện tượng
+   này và khuyến nghị chạy ở MTA). Node giờ spawn kèm cờ `-MTA`.
+2. STDOUT BUFFERING (mục 2 đề bài): thay `Write-Output` (đi qua
+   pipeline formatting của PowerShell) bằng 1 StreamWriter ghi THẲNG
+   vào stdout gốc của tiến trình, AutoFlush=true — đảm bảo mỗi dòng
+   JSON được đẩy ra ngay lập tức, không đợi buffer đầy. StreamWriter
+   này cũng ép encoding UTF-8 KHÔNG BOM tường minh — sửa luôn rủi ro
+   ký tự tiếng Việt (Sơn Tùng, Đêm Trắng...) bị mã hoá sai khi
+   PowerShell dùng codepage hệ thống mặc định thay vì UTF-8.
+3. KIỂM TRA PHIÊN BẢN (mục 1 đề bài): cú pháp
+   `[Type,Assembly,ContentType=WindowsRuntime]` CHỈ hoạt động tin cậy
+   trên Windows PowerShell 5.1 (.NET Framework). PowerShell 7/pwsh
+   (.NET Core/.NET 5+) đã được ghi nhận nhiều lần lỗi
+   "Unable to find type ... ContentType=WindowsRuntime" (xem báo cáo).
+   Script giờ tự kiểm tra $PSVersionTable.PSEdition và báo fatal RÕ
+   RÀNG ngay từ đầu nếu phát hiện đang chạy trên edition "Core", thay
+   vì để lỗi WinRT mơ hồ ở bước sau.
+4. TIMEOUT CHO TỪNG LỆNH GỌI WinRT (phòng ngừa bổ sung, không phải
+   thay thế cho fix #1): `Wait-WinRtOperation` giờ có timeout hữu hạn
+   thay vì đợi vô thời hạn (-1) — nếu do bất kỳ nguyên nhân nào khác
+   ngoài dự đoán vẫn còn treo, sẽ ném lỗi có thể bắt được sau N giây
+   thay vì treo cứng cả tiến trình.
+
+⚠️ VẪN CHƯA ĐƯỢC TỰ KIỂM THỬ TRÊN WINDOWS THẬT — xem báo cáo, mục
+"Kết quả kiểm thử thực tế".
 ============================================================
 #>
 
 param(
-    [int]$PollIntervalMs = 2000
+    [int]$PollIntervalMs = 2000,
+    [int]$WinRtCallTimeoutMs = 5000
 )
 
 $ErrorActionPreference = "Stop"
+
+# ---------------------------------------------------------------
+# BƯỚC 0 — Kiểm tra sớm: đang chạy Windows PowerShell 5.1 hay PowerShell 7 (pwsh)?
+# Cú pháp WinRT type accelerator dùng trong script này CHỈ được xác nhận hoạt
+# động trên PSEdition "Desktop" (Windows PowerShell 5.1, .NET Framework).
+# Báo fatal RÕ RÀNG ngay tại đây thay vì để lỗi khó hiểu ở bước load WinRT.
+# ---------------------------------------------------------------
+if ($PSVersionTable.PSEdition -eq "Core") {
+
+    $msg = "Dang chay tren PowerShell $($PSVersionTable.PSVersion) (PSEdition=Core, tuc la pwsh, khong phai Windows PowerShell 5.1). " +
+           "Cu phap WinRT [Type,Assembly,ContentType=WindowsRuntime] duoc ghi nhan hay loi 'Unable to find type' tren PowerShell 7+. " +
+           "Can dam bao Node goi dung 'powershell.exe' (Windows PowerShell 5.1), khong phai 'pwsh.exe'."
+    # In thẳng bằng Write-Output vì StreamWriter (Write-JsonLine) chưa được
+    # khởi tạo ở bước này — đây là lỗi xảy ra TRƯỚC BƯỚC 0.5.
+    Write-Output ('{"type":"fatal","message":"' + ($msg -replace '"', "'") + '"}')
+    exit 1
+
+}
+
+# ---------------------------------------------------------------
+# BƯỚC 0.5 — StreamWriter ghi thẳng vào stdout, AutoFlush=true, UTF-8 KHÔNG
+# BOM. Thay thế hoàn toàn Write-Output cho MỌI dòng thuộc giao thức JSON, để
+# đảm bảo: (a) không bị PowerShell buffer, (b) encoding đúng cho tiếng Việt.
+# ---------------------------------------------------------------
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$StdOutWriter = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), $Utf8NoBom)
+$StdOutWriter.AutoFlush = $true
+[Console]::SetOut($StdOutWriter)
 
 function Write-JsonLine {
     param($Object)
@@ -43,7 +100,9 @@ function Write-JsonLine {
     # yêu cầu 1 JSON / 1 dòng để Node đọc theo line dễ dàng, không cần
     # gộp nhiều dòng lại mới parse được).
     $json = $Object | ConvertTo-Json -Compress -Depth 5
-    Write-Output $json
+    $StdOutWriter.WriteLine($json)
+    $StdOutWriter.Flush() # tường minh, dù AutoFlush đã bật — không tin tưởng ngầm định
+
 }
 
 # ---------------------------------------------------------------
@@ -57,7 +116,12 @@ try {
 
 } catch {
 
-    Write-JsonLine @{ type = "fatal"; message = "Khong nap duoc WinRT Windows.Media.Control: $($_.Exception.Message)" }
+    $hint = ""
+    if ($_.Exception.Message -match "Unable to find type") {
+        $hint = " (goi y: co the dang chay sai PowerShell edition, hoac Windows SDK projection assemblies khong co san tren may nay)"
+    }
+
+    Write-JsonLine @{ type = "fatal"; message = "Khong nap duoc WinRT Windows.Media.Control: $($_.Exception.Message)$hint" }
     exit 1
 
 }
@@ -73,7 +137,16 @@ function Wait-WinRtOperation {
 
     $asTaskSpecific = $AsTaskGeneric.MakeGenericMethod($ResultType)
     $netTask = $asTaskSpecific.Invoke($null, @($WinRtTask))
-    $netTask.Wait(-1) | Out-Null
+
+    # Timeout HỮU HẠN thay vì Wait(-1) — phòng ngừa bổ sung: nếu vẫn treo vì
+    # lý do nào đó ngoài dự đoán (xem mục 1 ở đầu file), ném lỗi bắt được
+    # được thay vì treo cứng vĩnh viễn cả tiến trình.
+    $completed = $netTask.Wait($WinRtCallTimeoutMs)
+
+    if (-not $completed) {
+        throw "WinRT operation timeout sau ${WinRtCallTimeoutMs}ms (nghi ngo deadlock hoac SMTC khong phan hoi)"
+    }
+
     return $netTask.Result
 }
 

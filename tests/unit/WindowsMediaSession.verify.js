@@ -24,6 +24,7 @@
 
 const assert = require("assert");
 const { EventEmitter } = require("events");
+const { PassThrough } = require("stream");
 
 let failCount = 0;
 function check(condition, message) {
@@ -52,8 +53,12 @@ const WindowsMediaSession = require("../../core/integration/WindowsMediaSession"
 function createFakeChild() {
 
     const child = new EventEmitter();
-    child.stdout = new EventEmitter();
-    child.stderr = new EventEmitter();
+    // PassThrough là stream THẬT của Node — setEncoding("utf8") mà
+    // WindowsMediaSession.js gọi sẽ dùng đúng StringDecoder thật của Node,
+    // cho phép test kiểm chứng ĐÚNG kịch bản byte UTF-8 đa-byte (dấu tiếng
+    // Việt) bị cắt ngang giữa 2 lần .write() (xem Phần I).
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
     child.killed = false;
 
     child.kill = function () {
@@ -70,7 +75,7 @@ function createFakeChild() {
 
 function sendLine(child, obj) {
 
-    child.stdout.emit("data", Buffer.from(JSON.stringify(obj) + "\n", "utf-8"));
+    child.stdout.write(Buffer.from(JSON.stringify(obj) + "\n", "utf-8"));
 
 }
 
@@ -190,6 +195,7 @@ async function runPartC_HappyPath() {
     withPlatform("win32", () => session.start());
 
     check(spawnArgs.cmd === "powershell.exe", "Spawn đúng 'powershell.exe'");
+    check(spawnArgs.args.includes("-MTA"), "Spawn có cờ -MTA (phòng deadlock WinRT async trong console app không có message loop)");
     check(spawnArgs.args.includes("-PollIntervalMs") && spawnArgs.args.includes("1234"), "Truyền đúng pollIntervalMs từ config vào tham số dòng lệnh (không hardcode)");
     check(spawnArgs.args.includes(session._scriptPath), "Truyền đúng đường dẫn script smtc-daemon.ps1");
 
@@ -342,6 +348,9 @@ async function runPartG_UnexpectedExitRestart() {
     let unavailableInfo = null;
     session.on("unavailable", (info) => { unavailableInfo = info; });
 
+    const restartEvents = [];
+    session.on("restart", (info) => { restartEvents.push(info); });
+
     withPlatform("win32", () => session.start());
     check(spawnCount === 1, "Spawn lần đầu (lần 1)");
 
@@ -349,14 +358,17 @@ async function runPartG_UnexpectedExitRestart() {
     children[0].emit("exit", 1, null);
     await sleep(50);
     check(spawnCount === 2, "Chết bất ngờ lần 1 -> tự restart (lần 2)");
+    check(restartEvents.length === 1 && restartEvents[0].attempt === 1, "Phát event 'restart' đúng với attempt=1 (dùng cho log ở lớp tích hợp main.js)");
 
     children[1].emit("exit", 1, null);
     await sleep(50);
     check(spawnCount === 3, "Chết bất ngờ lần 2 -> tự restart (lần 3, đạt restartMaxAttempts=2)");
+    check(restartEvents.length === 2 && restartEvents[1].attempt === 2, "Phát event 'restart' lần 2 đúng attempt=2");
 
     children[2].emit("exit", 1, null);
     await sleep(50);
     check(spawnCount === 3, "Chết bất ngờ lần 3 (vượt quá restartMaxAttempts) -> KHÔNG restart thêm nữa");
+    check(restartEvents.length === 2, "Vượt quá restartMaxAttempts -> KHÔNG phát thêm event 'restart'");
     check(unavailableInfo && unavailableInfo.reason === "max_restarts_exceeded", "Phát 'unavailable' reason='max_restarts_exceeded'");
 }
 
@@ -404,7 +416,7 @@ async function runPartI_MalformedAndChunkedData() {
     withPlatform("win32", () => session.start());
 
     // Dòng JSON hỏng
-    fakeChild.stdout.emit("data", Buffer.from("day khong phai JSON hop le\n", "utf-8"));
+    fakeChild.stdout.write(Buffer.from("day khong phai JSON hop le\n", "utf-8"));
     await sleep(10);
     check(threw === false, "Dòng không phải JSON -> không crash (không uncaughtException)");
 
@@ -412,13 +424,40 @@ async function runPartI_MalformedAndChunkedData() {
     const fullLine = JSON.stringify({ type: "snapshot", data: { application: "VLC", title: "Bài Chia Đôi", artist: "X", album: null, thumbnail: null, timestamp: 1 } }) + "\n";
     const splitPoint = Math.floor(fullLine.length / 2);
 
-    fakeChild.stdout.emit("data", Buffer.from(fullLine.slice(0, splitPoint), "utf-8"));
+    fakeChild.stdout.write(Buffer.from(fullLine.slice(0, splitPoint), "utf-8"));
     await sleep(5);
     check(changeEvents.length === 0, "Chunk đầu (chưa đủ 1 dòng hoàn chỉnh) -> CHƯA parse, chưa emit gì");
 
-    fakeChild.stdout.emit("data", Buffer.from(fullLine.slice(splitPoint), "utf-8"));
+    fakeChild.stdout.write(Buffer.from(fullLine.slice(splitPoint), "utf-8"));
     await sleep(10);
     check(changeEvents.length === 1 && changeEvents[0].title === "Bài Chia Đôi", "Ghép đủ 2 chunk thành 1 dòng -> parse đúng, emit đúng");
+
+    // ---- Kiểm chứng ĐÚNG lỗi vừa sửa: cắt ngang BYTE của 1 ký tự UTF-8 đa-byte ----
+    // "ạ" (U+1EA1) mã hoá UTF-8 là 3 byte. Cắt làm đôi NGAY GIỮA 3 byte đó (không
+    // phải cắt theo chỉ số ký tự JS string như trên) — đây là kịch bản THẬT mà lỗi
+    // cũ (Buffer.toString('utf-8') theo từng chunk riêng lẻ) sẽ làm hỏng dữ liệu.
+    const vietnameseLine = JSON.stringify({ type: "snapshot", data: { application: "Chrome", title: "Câu chuyện tình yêu", artist: "Nghệ sĩ", album: null, thumbnail: null, timestamp: 2 } }) + "\n";
+    const vietnameseBytes = Buffer.from(vietnameseLine, "utf-8");
+
+    // Tìm 1 vị trí byte nằm GIỮA 1 ký tự đa-byte (byte tiếp theo có bit cao dạng 10xxxxxx = byte nối tiếp)
+    let midCharByteIndex = -1;
+    for (let i = 1; i < vietnameseBytes.length; i++) {
+        if ((vietnameseBytes[i] & 0xc0) === 0x80) { midCharByteIndex = i; break; }
+    }
+    check(midCharByteIndex > 0, "(chuẩn bị test) tìm được vị trí byte nằm giữa 1 ký tự UTF-8 đa-byte để cắt");
+
+    changeEvents.length = 0; // reset đếm
+
+    fakeChild.stdout.write(vietnameseBytes.slice(0, midCharByteIndex)); // cắt NGANG XƯƠNG 1 ký tự đa-byte
+    await sleep(5);
+    fakeChild.stdout.write(vietnameseBytes.slice(midCharByteIndex)); // phần còn lại
+    await sleep(10);
+
+    check(changeEvents.length === 1, "Nhận đủ dòng dù bị cắt ngang giữa byte của 1 ký tự đa-byte");
+    check(
+        changeEvents[0] && changeEvents[0].title === "Câu chuyện tình yêu" && changeEvents[0].artist === "Nghệ sĩ",
+        `Dấu tiếng Việt được ghép lại ĐÚNG dù bị cắt ngang byte (fix setEncoding('utf8')) (thực tế: title="${changeEvents[0] && changeEvents[0].title}")`
+    );
 
     session.stop();
 
@@ -447,6 +486,44 @@ async function runPartJ_NoDoubleSpawn() {
     session.stop();
 }
 
+// ================================
+// PHẦN K — "Generation guard": dữ liệu trễ từ tiến trình con CŨ (sau khi đã
+// stop() hoặc đã bị thay bằng tiến trình mới) phải bị bỏ qua hoàn toàn —
+// đây là race condition đã rà soát lại theo đúng yêu cầu "kiểm tra lại toàn
+// bộ logic restart" của đề bài.
+// ================================
+async function runPartK_StaleChildDataIgnored() {
+    console.log("\n=== PHẦN K: Bỏ qua dữ liệu trễ từ tiến trình con đã bị retire ===");
+
+    let fakeChild;
+    const changeEvents = [];
+    let readyCount = 0;
+
+    const session = new WindowsMediaSession({
+        spawnFn: () => { fakeChild = createFakeChild(); return fakeChild; },
+        logger: createFakeLogger()
+    });
+
+    session.on("change", (s) => changeEvents.push(s));
+    session.on("ready", () => { readyCount++; });
+
+    withPlatform("win32", () => session.start());
+    const oldChild = fakeChild;
+
+    session.stop(); // retire tiến trình con NGAY, trước khi nó kịp gửi "ready"
+
+    // Tiến trình CŨ vẫn "kịp" gửi thêm dữ liệu sau khi đã bị stop() (race
+    // condition thật có thể xảy ra: kill() không chấm dứt tức thì tiến trình
+    // trên Windows, dữ liệu đã nằm sẵn trong buffer OS có thể vẫn tới).
+    sendLine(oldChild, { type: "ready" });
+    sendLine(oldChild, { type: "snapshot", data: { application: "Chrome", title: "Bài Của Tiến Trình Cũ", artist: "X", album: null, thumbnail: null, timestamp: 1 } });
+    await sleep(30);
+
+    check(readyCount === 0, "Event 'ready' từ tiến trình CŨ (sau stop()) bị bỏ qua hoàn toàn");
+    check(changeEvents.length === 0, "Event 'change' từ tiến trình CŨ (sau stop()) bị bỏ qua hoàn toàn");
+    check(session.getLastSnapshot() === null, "getLastSnapshot() không bị nhiễm dữ liệu từ tiến trình cũ");
+}
+
 async function main() {
 
     runPartA_SnapshotCache();
@@ -459,6 +536,7 @@ async function main() {
     await runPartH_StopIsClean();
     await runPartI_MalformedAndChunkedData();
     await runPartJ_NoDoubleSpawn();
+    await runPartK_StaleChildDataIgnored();
 
     console.log("\n========== TỔNG KẾT ==========");
     if (failCount === 0) {
