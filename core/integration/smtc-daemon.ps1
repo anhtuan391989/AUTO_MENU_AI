@@ -66,6 +66,40 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ---------------------------------------------------------------
+# Danh sách ưu tiên chọn Session khi có NHIỀU app cùng Playing (mục XI).
+# Khai báo thành hằng số để dễ mở rộng sau này — KHÔNG thêm Settings/UI cấu hình.
+# So khớp theo kiểu "chứa chuỗi" (không phân biệt hoa/thường) trên
+# SourceAppUserModelId, vì định dạng chính xác của giá trị này khác nhau tuỳ
+# máy/phiên bản app (CHƯA thể xác nhận chính xác 100% vì không có Windows để
+# tự kiểm thử — xem báo cáo). Thứ tự trong mảng = thứ tự ưu tiên (index nhỏ
+# hơn = ưu tiên cao hơn).
+# ---------------------------------------------------------------
+$PREFERRED_PLAYERS = @(
+    "wmplayer",     # Windows Media Player (Legacy, wmplayer.exe)
+    "spotify",      # Spotify
+    "vlc",          # VLC
+    "foobar2000",   # Foobar2000
+    "brave",        # Browser: Brave
+    "chrome",       # Browser: Chrome
+    "msedge"        # Browser: Edge
+)
+
+function Get-PreferredPlayerRank {
+    param([string]$AppId)
+
+    if ([string]::IsNullOrEmpty($AppId)) { return [int]::MaxValue }
+
+    for ($i = 0; $i -lt $PREFERRED_PLAYERS.Count; $i++) {
+
+        if ($AppId.ToLowerInvariant().Contains($PREFERRED_PLAYERS[$i])) { return $i }
+
+    }
+
+    return [int]::MaxValue # không nằm trong danh sách ưu tiên -> hạng thấp nhất ("Các ứng dụng khác")
+
+}
+
+# ---------------------------------------------------------------
 # BƯỚC 0 — Kiểm tra sớm: đang chạy Windows PowerShell 5.1 hay PowerShell 7 (pwsh)?
 # Cú pháp WinRT type accelerator dùng trong script này CHỈ được xác nhận hoạt
 # động trên PSEdition "Desktop" (Windows PowerShell 5.1, .NET Framework).
@@ -188,7 +222,6 @@ function Get-UnixTimeMs {
 function Select-BestSession {
     param($AllSessions, $CurrentSession)
 
-    $currentAppId = if ($CurrentSession) { $CurrentSession.SourceAppUserModelId } else { $null }
     $playingSessions = @()
 
     foreach ($s in $AllSessions) {
@@ -207,18 +240,26 @@ function Select-BestSession {
 
     }
 
-    if ($currentAppId) {
+    if ($playingSessions.Count -eq 0) {
 
-        $match = $playingSessions | Where-Object { $_.SourceAppUserModelId -eq $currentAppId } | Select-Object -First 1
-        if ($match) { return $match }
+        # Không có app nào đang Playing thật -> fallback GetCurrentSession() (có thể đang Paused).
+        if ($CurrentSession) { return $CurrentSession }
+        return $null
 
     }
 
-    if ($playingSessions.Count -gt 0) { return $playingSessions[0] }
+    if ($playingSessions.Count -eq 1) { return $playingSessions[0] }
 
-    if ($CurrentSession) { return $CurrentSession }
+    # Mục XI: NHIỀU app cùng Playing -> KHÔNG chỉ dựa vào GetCurrentSession(), chọn
+    # theo danh sách ưu tiên PREFERRED_PLAYERS (hạng thấp hơn = ưu tiên cao hơn).
+    $ranked = $playingSessions | Sort-Object { Get-PreferredPlayerRank $_.SourceAppUserModelId }
+    $best = $ranked[0]
 
-    return $null
+    # Ghi log ra stderr (KHÔNG đổi giao thức JSON stdout) — WindowsMediaSession.js đã
+    # sẵn có cơ chế forward stderr thành log "[powershell stderr] ...".
+    [Console]::Error.WriteLine("[NowPlaying] Preferred Player Selected: $($best.SourceAppUserModelId)")
+
+    return $best
 
 }
 

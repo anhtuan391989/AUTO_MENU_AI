@@ -83,6 +83,8 @@ const Events = require("../core/events/Events");
 const ControlSource = require("../core/shared/ControlSource");
 const TelemetryLogger = require("../core/shared/TelemetryLogger");
 const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
+const NowPlayingResolver = require("../core/reference/NowPlayingResolver");
+const SongMatcher = require("../core/reference/SongMatcher");
 
 app.whenReady().then(async () => {
     // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
@@ -107,9 +109,9 @@ app.whenReady().then(async () => {
     // Windows Media Session Integration (SMTC) — Data Acquisition Layer.
     // ĐỘC LẬP HOÀN TOÀN với AIBootstrap/AIContext/EventBus/ai-result ở trên:
     // không publish EventBus, không gọi AIContext, không ảnh hưởng Key/BPM/Mod
-    // Engine hay quyết định Lock. Chỉ khởi tạo + log để theo dõi/debug. Việc nối
-    // dữ liệu này sang NowPlayingResolver/SongMatcher/SongDatabase là task riêng,
-    // CHƯA làm ở đây (đúng phạm vi "chỉ tích hợp lớp Integration").
+    // Engine hay quyết định Lock trực tiếp — module này chỉ LÀM GIÀU dữ liệu
+    // (tra Song Database) rồi gửi qua IPC; renderer (Key Source Manager, mục
+    // 7B ui/js/renderer.js) mới là nơi quyết định áp dụng Key nào.
     // Tự an toàn trên máy không phải Windows (start() tự phát hiện, không spawn
     // gì, không throw, không crash app — xem core/integration/WindowsMediaSession.js).
     // ================================
@@ -122,10 +124,40 @@ app.whenReady().then(async () => {
     windowsMediaSession.on("change", (snapshot) => {
         console.log("[WindowsMediaSession] SNAPSHOT", snapshot);
 
+        // Tra Song Database — KHÔNG gọi AI/EventBus, chỉ đọc dữ liệu tĩnh có sẵn
+        // (SongDatabase/SongMatcher đã xây từ trước, không sửa API của chúng).
+        let databaseMatch = null;
+
+        if (snapshot && snapshot.title) {
+
+            const resolved = NowPlayingResolver.resolve({ source: "smtc", title: snapshot.title, artist: snapshot.artist });
+
+            if (resolved.title) {
+
+                const song = SongMatcher.findReference(resolved.title, resolved.artist);
+
+                if (song && song.key) {
+
+                    databaseMatch = { key: song.key, bpm: song.bpm || null };
+                    console.log("[NowPlaying] Database Match");
+
+                } else {
+
+                    console.log("[NowPlaying] Database Miss");
+
+                }
+
+            }
+
+        }
+
+        const payload = snapshot ? { ...snapshot, databaseMatch } : null;
+
         // Đẩy dữ liệu sang renderer qua IPC — CHỈ khi có event thật (không poll,
-        // không timer). Renderer tự gọi window.AutoMenuAI.updateNowPlaying().
+        // không timer). Renderer tự gọi window.AutoMenuAI.updateNowPlaying() +
+        // Key Source Manager (dispatchNowPlayingPayload, mục 7B).
         if (mainWin && !mainWin.isDestroyed()) {
-            mainWin.webContents.send("now-playing-change", snapshot);
+            mainWin.webContents.send("now-playing-change", payload);
         }
     });
 

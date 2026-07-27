@@ -68,7 +68,34 @@ class NowPlayingResolver {
 
         }
 
+        if (input.source === "smtc" && input.title) {
+
+            return this._resolveSmtc(input);
+
+        }
+
         return unknownResult();
+
+    }
+
+    // Snapshot từ Windows SMTC (qua core/integration/WindowsMediaSession.js) đã có sẵn
+    // Title/Artist TÁCH RIÊNG (không phải 1 chuỗi thô cần regex như windowTitle) — chỉ cần
+    // làm sạch nhiễu (vd "(Official Video)" nếu app nguồn để lẫn vào Title), không cần tách.
+    // Confidence cao vì đây là metadata native do chính app phát nhạc khai báo với OS.
+    _resolveSmtc(input) {
+
+        const title = TitleNormalizer.clean(input.title);
+
+        if (!title) return unknownResult();
+
+        const artist = input.artist ? TitleNormalizer.clean(input.artist) : null;
+
+        return {
+            title,
+            artist,
+            source: "smtc",
+            confidence: artist ? 0.9 : 0.7
+        };
 
     }
 

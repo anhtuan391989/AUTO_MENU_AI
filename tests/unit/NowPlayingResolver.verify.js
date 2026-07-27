@@ -218,6 +218,20 @@ function runPartE_NowPlayingResolver_WindowTitle() {
     check(r5.source === "unknown", "Input null -> unknown, không throw");
 }
 
+function runPartE2_NowPlayingResolver_Smtc() {
+    console.log("\n=== PHẦN E2: NowPlayingResolver — nguồn 'smtc' (WindowsMediaSession) ===");
+
+    const r1 = NowPlayingResolver.resolve({ source: "smtc", title: "Chắc Chắn Một Người (Official Video)", artist: "Various Artist" });
+    check(r1.source === "smtc" && r1.title === "Chắc Chắn Một Người" && r1.artist === "Various Artist", "Làm sạch nhiễu trong Title, giữ nguyên Artist đã tách sẵn");
+    check(r1.confidence === 0.9, `Confidence cao (0.9) khi có cả Title+Artist từ SMTC (thực tế: ${r1.confidence})`);
+
+    const r2 = NowPlayingResolver.resolve({ source: "smtc", title: "Độc Đạo" });
+    check(r2.artist === null && r2.confidence === 0.7, "Chỉ có Title (không có Artist) -> confidence thấp hơn (0.7), artist null");
+
+    const r3 = NowPlayingResolver.resolve({ source: "smtc", title: "" });
+    check(r3.source === "unknown", "Title rỗng -> unknown, không bịa");
+}
+
 function runPartF_NoInterference() {
     console.log("\n=== PHẦN F: Độc lập — không đụng AI Core/EventFlow/IPC/HTML, không internet, không package mới ===");
 
@@ -273,6 +287,7 @@ function main() {
     runPartC_ResolverUtils_Id3Real();
     runPartD_NowPlayingResolver_File();
     runPartE_NowPlayingResolver_WindowTitle();
+    runPartE2_NowPlayingResolver_Smtc();
     runPartF_NoInterference();
     runPartG_MemoryBehavior();
 
