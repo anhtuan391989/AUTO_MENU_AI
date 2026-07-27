@@ -120,7 +120,13 @@ function runSandbox(fakeSpectrumFn) {
         Array,
         console,
         requestAnimationFrame: (cb) => { capturedRaf = cb; return 1; }, // KHÔNG tự chạy vòng lặp — test tự gọi updateChromaVector qua loop 1 lần
-        cancelAnimationFrame: () => {}
+        cancelAnimationFrame: () => {},
+        // Provisional Estimate (mục A, thêm sau khi cải thiện tốc độ dò Key) gọi setInterval()
+        // ngay trong init() — mock theo ĐÚNG triết lý requestAnimationFrame ở trên: bắt lại
+        // callback, KHÔNG tự chạy lặp lại, để test vẫn hoàn toàn xác định (deterministic),
+        // không có timer nền thật nào chạy trong lúc test.
+        setInterval: () => 1,
+        clearInterval: () => {}
     };
     vm.createContext(sandbox);
     vm.runInContext(keyEngineSource, sandbox, { filename: "keyEngine.js" });

@@ -423,7 +423,7 @@ const manualOverrideStatusEl = document.getElementById("manualOverrideStatus");
 const keySource = {
     manual: { active: false, value: null, deadlineAt: null, tickHandle: null },
     songDb: { active: false, value: null, bpm: null, title: null, artist: null },
-    ai: { value: appState.originalKey }
+    ai: { value: appState.originalKey, provisional: null }
 };
 
 let lastPluginKey = appState.originalKey; // giá trị THẬT đã gửi xuống Plugin lần gần nhất (chống gửi trùng)
@@ -456,7 +456,17 @@ function formatCountdownMMSS(ms) {
 // set textContent lệch nhau. KHÔNG đụng #keyInfo (giữ nguyên hành vi/text hiện có).
 function refreshKeySourceDisplay() {
 
-    if (aiKeyDetectLineEl) aiKeyDetectLineEl.textContent = `AI Key Detect: ${keySource.ai.value}`;
+    if (aiKeyDetectLineEl) {
+
+        // Mục A ("Key tạm"): nếu có ước lượng tạm mới hơn giá trị ĐÃ KHOÁ -> hiện kèm nhãn
+        // "đang dò" cho cảm giác tức thì. Giá trị thật dùng để gửi Plugin (keySource.ai.value)
+        // KHÔNG đổi ở đây — chỉ đổi hiển thị.
+        const showProvisional = keySource.ai.provisional && keySource.ai.provisional !== keySource.ai.value;
+        aiKeyDetectLineEl.textContent = showProvisional
+            ? `AI Key Detect: ${keySource.ai.provisional} (đang dò...)`
+            : `AI Key Detect: ${keySource.ai.value}`;
+
+    }
 
     if (!manualOverrideStatusEl) return;
 
@@ -1188,6 +1198,14 @@ async function startAudioMonitor() {
 
         KeyEngine.onLevel(() => {
             __debugLogKeyConfidence(); // <-- DEBUG TẠM THỜI (tự throttle 1 lần/giây bên trong)
+        });
+
+        // Mục A ("Key tạm" — cải thiện tốc độ cảm nhận): CHỈ cập nhật hiển thị, KHÔNG đụng
+        // keySource.ai.value/lock/gửi Plugin — những việc đó vẫn 100% qua startAiRealtimeLoop()
+        // (mục 7B) như cũ.
+        KeyEngine.onProvisionalEstimate((estimate) => {
+            keySource.ai.provisional = estimate.key;
+            refreshKeySourceDisplay();
         });
 
         console.log("Audio Engine đã sẵn sàng! (BPMEngine + KeyEngine tự chạy độc lập)");
