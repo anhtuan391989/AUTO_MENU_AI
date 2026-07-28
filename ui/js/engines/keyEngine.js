@@ -68,6 +68,16 @@ const KeyEngine = (() => {
 
     const levelListeners = []; // callback(chromaVectorSnapshot) mỗi khung — dùng cho debug
 
+    // === Provisional Estimate (mục A — "Key tạm") ===
+    // Cập nhật NHANH HƠN NHIỀU so với vote loop (CHECK_INTERVAL_MS=1500ms), CHỈ để hiển
+    // thị "đang dò..." cho cảm giác tức thì — KHÔNG dùng để khoá/gửi Plugin (việc đó vẫn
+    // 100% qua runVoteLoop()/detectOnce() như cũ, không đổi gì). Vì estimateKeyFromChroma()
+    // chỉ là ~24 phép correlation trên vector đã có sẵn (rẻ), tăng tần suất đọc không đáng kể
+    // về CPU so với việc render mỗi rAF frame vốn đã chạy liên tục.
+    const PROVISIONAL_INTERVAL_MS = 400;
+    const provisionalListeners = [];
+    let provisionalTimerId = null;
+
     function init(audioContext, sourceNode) {
         audioCtxRef = audioContext;
         chromaAnalyser = audioContext.createAnalyser();
@@ -83,6 +93,7 @@ const KeyEngine = (() => {
 
         running = true;
         loop();
+        startProvisionalTicker();
     }
 
     function frequencyToPitchClass(freq) {
@@ -223,6 +234,18 @@ const KeyEngine = (() => {
     // (trước khi histogram kịp lệch rõ) rất dễ vồ nhầm sang bậc 5.
     const MIN_ELAPSED_BEFORE_LOCK_MS = 15000;
 
+    // === Adaptive Lock (Phase 4) — được dự trù sẵn từ comment cũ ở buildConfidenceV2(),
+    // giờ triển khai thật. Ý tưởng: sàn 15000ms ở trên là "chuẩn/an toàn" cho MỌI bài kể cả
+    // mơ hồ nhất, nhưng nếu confidenceV2.combined CAO và ỔN ĐỊNH liên tục qua nhiều lần đo,
+    // không có lý do bắt bài đó chờ đủ 15s như bài khó. Đây là con đường khoá THỨ HAI, chạy
+    // SONG SONG với con đường vote-window+15s cũ (giữ NGUYÊN 100%, không xoá/sửa) — willLock
+    // cuối cùng là HOẶC của cả 2 đường, không đường nào thay thế đường nào.
+    const FAST_LOCK_MIN_ELAPSED_MS = 3000;   // sàn tuyệt đối, kể cả confidence tối đa cũng không khoá sớm hơn
+                                              // (thời gian vật lý tối thiểu để FFT 8192 + làm mượt chroma ổn định)
+    const ADAPTIVE_LOCK_CONFIDENCE = 0.80;   // confidenceV2.combined (thang 0-1, đã chuẩn hoá) phải đạt mức này
+    const ADAPTIVE_LOCK_STREAK_REQUIRED = 3; // phải đạt ngưỡng LIÊN TỤC 3 lần đo mới cho khoá sớm —
+                                              // chống 1 lần đo nhiễu ngẫu nhiên đạt cao rồi tụt ngay
+
     function formatElapsedSeconds(ms) {
         return (ms / 1000).toFixed(1);
     }
@@ -345,6 +368,7 @@ const KeyEngine = (() => {
     function runVoteLoop(onWinner) {
         const voteWindow = []; // các phần tử dạng {key: "rootIndex-mode", result}
         const startedAt = Date.now();
+        let highConfidenceStreak = 0; // Adaptive Lock — đếm số lần đo LIÊN TỤC đạt ngưỡng cao
 
         const timer = setInterval(() => {
             const result = estimateKeyFromChroma();
@@ -380,6 +404,7 @@ const KeyEngine = (() => {
                     window: voteWindow.length,
                     locked: false
                 });
+                highConfidenceStreak = 0; // dưới ngưỡng tin cậy tối thiểu -> chuỗi Adaptive Lock mất, phải tích luỹ lại từ đầu
                 return; // không đủ tin cậy, bỏ qua lần đo này, không tính vào cửa sổ
             }
 
@@ -394,14 +419,28 @@ const KeyEngine = (() => {
             });
 
             const stability = computeStability(bestCount, voteWindow.length); // Phase 2 — chỉ đọc lại, không đổi gì ở trên
-
             const elapsed = Date.now() - startedAt;
-            const willLock = bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS;
 
-            // Phase 3 — confidenceV2 CHỈ tồn tại cục bộ để log, KHÔNG gắn vào `result`/`bestResult`
-            // -> onWinner() bên dưới vẫn nhận đúng object y hệt bản gốc, không có gì thay đổi.
+            // Phase 3 — confidenceV2 giờ KHÔNG CÒN "chỉ để log": combined được dùng thật cho
+            // Adaptive Lock bên dưới (nhưng vẫn KHÔNG gắn vào `result`/`bestResult` trả ra ngoài
+            // — onWinner() vẫn nhận đúng object y hệt bản gốc, contract không đổi).
             const confidenceV2 = buildConfidenceV2(result, stability);
-            logMarginSnapshot(result, startedAt, bestCount, willLock, stability, confidenceV2, top1StableMs);
+
+            // === Đường 1 (GIỮ NGUYÊN 100%, không sửa) — vote-window + sàn 15s, luôn là fallback an toàn. ===
+            const willLockByVote = bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS;
+
+            // === Đường 2 (MỚI) — Adaptive Lock: confidence cao LIÊN TỤC nhiều lần -> khoá sớm hơn. ===
+            if (bestCount >= VOTE_MIN_AGREE && confidenceV2.combined >= ADAPTIVE_LOCK_CONFIDENCE) {
+                highConfidenceStreak++;
+            } else {
+                highConfidenceStreak = 0;
+            }
+            const willLockByAdaptive = elapsed >= FAST_LOCK_MIN_ELAPSED_MS && highConfidenceStreak >= ADAPTIVE_LOCK_STREAK_REQUIRED;
+
+            const willLock = willLockByVote || willLockByAdaptive;
+            const lockReason = willLockByAdaptive && !willLockByVote ? "adaptive" : "vote-window";
+
+            logMarginSnapshot(result, startedAt, bestCount, willLock, stability, confidenceV2, top1StableMs, willLock ? `khoá qua đường: ${lockReason}` : undefined);
 
             sendTelemetry({
                 time: elapsedSec,
@@ -414,13 +453,14 @@ const KeyEngine = (() => {
                 decisionScore: confidenceV2.combined,
                 votes: bestCount,
                 window: voteWindow.length,
-                locked: willLock
+                locked: willLock,
+                highConfidenceStreak
             });
 
             if (willLock) {
                 // Phase 4A — LOCK: bản ghi RIÊNG, đúng lúc onWinner() được gọi thật (dùng chung
                 // biến willLock/confidenceV2/bestResult, không tính toán lại/không đoán).
-                sendTelemetry({ event: "LOCK", time: elapsedSec, key: bestResult.key, decisionScore: confidenceV2.combined });
+                sendTelemetry({ event: "LOCK", time: elapsedSec, key: bestResult.key, decisionScore: confidenceV2.combined, reason: lockReason });
                 onWinner(bestResult, bestCount, () => clearInterval(timer));
             }
         }, CHECK_INTERVAL_MS);
@@ -461,10 +501,34 @@ const KeyEngine = (() => {
         rafId = requestAnimationFrame(loop);
     }
 
+    function startProvisionalTicker() {
+        stopProvisionalTicker();
+
+        provisionalTimerId = setInterval(() => {
+            const result = estimateKeyFromChroma();
+
+            // Vẫn tôn trọng ngưỡng tin cậy tối thiểu — không hiện "Key tạm" là rác khi
+            // audio chưa đủ tín hiệu (vd vài trăm ms đầu, hoặc intro chỉ có trống).
+            if (result.confidence < MIN_CONFIDENCE) return;
+
+            provisionalListeners.forEach((cb) => cb({ key: result.key, confidence: result.confidence }));
+        }, PROVISIONAL_INTERVAL_MS);
+    }
+
+    function stopProvisionalTicker() {
+        if (provisionalTimerId) {
+            clearInterval(provisionalTimerId);
+            provisionalTimerId = null;
+        }
+    }
+
+    function onProvisionalEstimate(cb) { provisionalListeners.push(cb); }
+
     function stop() {
         running = false;
         if (rafId) cancelAnimationFrame(rafId);
         rafId = null;
+        stopProvisionalTicker();
     }
 
     function onLevel(cb) { levelListeners.push(cb); } // dùng cho debug log
@@ -475,7 +539,7 @@ const KeyEngine = (() => {
 
     return {
         init, stop, detectOnce, watchContinuous, estimateKeyFromChroma,
-        shortestSemitoneDelta, onLevel, NOTE_NAMES, MIN_CONFIDENCE, getDebugSnapshot,
+        shortestSemitoneDelta, onLevel, onProvisionalEstimate, NOTE_NAMES, MIN_CONFIDENCE, getDebugSnapshot,
     };
 })();
 
