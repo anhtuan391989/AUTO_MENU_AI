@@ -155,22 +155,46 @@ const KeyEngine = (() => {
             whitened[idx] = magnitudes[idx] / (floor + 1e-6);
         }
 
-        // === v2.0 BƯỚC 3 — Peak-picking: CHỈ tính vào chroma những bin là ĐỈNH CỤC BỘ (biên độ ĐÃ
-        // WHITEN lớn hơn hoặc bằng 2 hàng xóm ngay sát). Loại bớt phần "chân"/rò rỉ phổ (spectral
-        // leakage) quanh 1 đỉnh thật, giữ lại đúng phần là hài âm rõ rệt — kỹ thuật chuẩn khi trích
-        // xuất HPCP/chroma trong MIR, KHÔNG lấy từ phần mềm cụ thể nào (xem báo cáo, mục nghiên cứu).
+        // === v3.0 BƯỚC 3 — Peak-picking (giữ nguyên từ v2.0) + Harmonic Suppression (MỚI):
+        // trước tiên xác định TOÀN BỘ tập đỉnh cục bộ, sau đó với MỖI đỉnh, kiểm tra có đỉnh
+        // NÀO KHÁC nằm gần đúng ở f/2 hoặc f/3 hay không — nếu có, đỉnh này nhiều khả năng là
+        // HÀI ÂM (harmonic overtone) của đỉnh thấp hơn đó, giảm nhẹ trọng số đóng góp (KHÔNG
+        // loại bỏ hoàn toàn — hài âm vẫn mang thông tin thật, octave doubling có ý nghĩa âm
+        // nhạc). Đây là kỹ thuật "Harmonic Suppression" chuẩn trong tách pitch/chroma (họ hàng
+        // với Harmonic Product Spectrum), giảm lỗi octave/nhầm bậc do năng lượng hài âm bị đếm
+        // 2 lần vào chroma. FFT tuyến tính -> bin của f/2 CHÍNH XÁC bằng bin(f)/2, không cần quy
+        // đổi qua tần số Hz (rẻ, không tăng độ phức tạp thuật toán).
+        const peakIndices = [];
         for (let idx = 0; idx < rangeLen; idx++) {
             if (magnitudes[idx] <= 0) continue;
-
             const isPeak = (idx === 0 || whitened[idx] >= whitened[idx - 1]) &&
                            (idx === rangeLen - 1 || whitened[idx] >= whitened[idx + 1]);
-            if (!isPeak) continue;
+            if (isPeak) peakIndices.push(idx);
+        }
+        const peakSet = new Set(peakIndices);
 
-            const i = minBin + idx;
-            const magnitude = magnitudes[idx]; // dùng biên độ GỐC (đã nén căn bậc 2) để cộng dồn — whitened chỉ dùng để CHỌN đỉnh, không dùng để cộng
-            const pc = frequencyToPitchClass(i * binHz);
+        const HARMONIC_TOLERANCE_BINS = 2;   // sai số cho phép khi so khớp vị trí hài âm (do rời rạc hoá bin)
+        const HARMONIC_SUPPRESS_FACTOR = 0.7; // giảm 30% trọng số mỗi lần khớp hài âm bậc 2 HOẶC bậc 3
+
+        function hasPeakNear(targetIdxInRange) {
+            if (targetIdxInRange < 0) return false;
+            for (let d = -HARMONIC_TOLERANCE_BINS; d <= HARMONIC_TOLERANCE_BINS; d++) {
+                if (peakSet.has(targetIdxInRange + d)) return true;
+            }
+            return false;
+        }
+
+        for (const idx of peakIndices) {
+            const absoluteBin = minBin + idx;
+
+            let harmonicWeight = 1.0;
+            if (hasPeakNear(Math.round(absoluteBin / 2) - minBin)) harmonicWeight *= HARMONIC_SUPPRESS_FACTOR;
+            if (hasPeakNear(Math.round(absoluteBin / 3) - minBin)) harmonicWeight *= HARMONIC_SUPPRESS_FACTOR;
+
+            const magnitude = magnitudes[idx] * harmonicWeight; // biên độ GỐC (đã nén căn bậc 2) x hệ số hài âm
+            const pc = frequencyToPitchClass(absoluteBin * binHz);
             if (pc < 0) continue;
-            const isBass = (i * binHz) <= BASS_MAX_HZ;
+            const isBass = (absoluteBin * binHz) <= BASS_MAX_HZ;
             const weight = isBass ? BASS_WEIGHT : 1;
             frame[pc] += magnitude * weight;
             if (isBass) bassFrame[pc] += magnitude;
@@ -263,6 +287,10 @@ const KeyEngine = (() => {
             rootIndex: best.root,
             mode: best.mode,
             confidence: best.score,
+            // v3.0 — Confidence Engine: field MỚI, chỉ để HIỂN THỊ (vd "97%"), không thay thế
+            // `confidence` ở trên (giữ nguyên thang đo cũ — mọi so sánh với MIN_CONFIDENCE trong
+            // toàn bộ file vẫn đúng y hệt, không silent-break). Kẹp về [0,1] rồi quy ra 0-100.
+            confidencePercent: Math.round(Math.max(0, Math.min(1, best.score)) * 100),
             top1,
             top2,
             margin,
