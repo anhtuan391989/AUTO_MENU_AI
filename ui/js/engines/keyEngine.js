@@ -31,6 +31,15 @@ const KeyEngine = (() => {
     const KS_MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 
     const CHROMA_SMOOTHING = 0.96; // càng gần 1 càng mượt/chậm đổi, cần thiết vì tín hiệu qua loopback ảo khá nhiễu
+
+    // === v2.0 — Dual-rate smoothing (kỹ thuật "fast/slow envelope follower" chuẩn trong DSP,
+    // không riêng phần mềm nào). chromaVector (0.96, chậm) vẫn là nguồn DUY NHẤT cho vote/khoá
+    // thật — KHÔNG đổi gì ở đường đó. chromaVectorFast (nhanh hơn nhiều) chỉ phục vụ Provisional
+    // Estimate — hội tụ ~95% sau ~225ms thay vì ~1.2s, giúp "Key tạm" bắt kịp âm thanh thật nhanh
+    // hơn nhiều mà KHÔNG cần FFT/analyser thứ hai (tốn thêm CPU) — dùng lại nguyên `frame` đã
+    // tính 1 lần trong updateChromaVector(), chỉ thêm 1 vòng lặp EMA 12 phần tử (rẻ không đáng kể).
+    const CHROMA_SMOOTHING_FAST = 0.80;
+
     const MIN_CONFIDENCE = 0.35;   // dưới ngưỡng này coi là chưa đủ tin cậy
     const STABLE_CHECKS = 4;        // (giữ lại để tương thích, không còn dùng trực tiếp)
     const CHECK_INTERVAL_MS = 1500; // kiểm tra thường xuyên hơn (trước: 3000ms)
@@ -44,6 +53,7 @@ const KeyEngine = (() => {
     let chromaDataArray = null;
     let audioCtxRef = null;
     let chromaVector = new Array(12).fill(0);
+    let chromaVectorFast = new Array(12).fill(0); // v2.0 — xem giải thích CHROMA_SMOOTHING_FAST
 
     // Theo dõi RIÊNG nốt bass hay "THẮNG" (mạnh nhất trong TỪNG khung) nhiều lần nhất — ĐẾM SỐ
     // LẦN THẮNG, không cộng dồn độ to. Lý do đổi cách này: cộng dồn biên độ thô rất dễ bị 1 hợp
@@ -86,6 +96,7 @@ const KeyEngine = (() => {
         sourceNode.connect(chromaAnalyser);
         chromaDataArray = new Float32Array(chromaAnalyser.frequencyBinCount);
         chromaVector = new Array(12).fill(0);
+        chromaVectorFast = new Array(12).fill(0);
         bassRootVotes = new Array(12).fill(0);
         lastTop1Key = null;
         lastTop1Label = null;
@@ -115,16 +126,48 @@ const KeyEngine = (() => {
         // loại bớt nhiễu tần số quá thấp (rumble) hoặc quá cao (harmonics rối).
         const minBin = Math.max(1, Math.floor(65 / binHz));
         const maxBin = Math.min(chromaDataArray.length - 1, Math.ceil(2100 / binHz));
+        const rangeLen = maxBin - minBin + 1;
 
-        for (let i = minBin; i <= maxBin; i++) {
-            const db = chromaDataArray[i];
-            if (db < -90) continue;
-            const rawMagnitude = Math.pow(10, db / 20);
-            // NÉN biên độ (căn bậc 2) — giảm bớt ảnh hưởng của các bin bị kịch trần/vỡ tiếng
-            // (thường xuất hiện dạng vài đỉnh cực lớn bất thường) so với phần còn lại của phổ,
-            // giúp hình dạng chroma phản ánh đúng tỉ lệ hài hoà thật hơn thay vì bị vài đỉnh vỡ
-            // tiếng lấn át. Đây chỉ là giảm nhẹ tác động — gain vỡ tiếng ở nguồn vẫn cần hạ thật.
-            const magnitude = Math.sqrt(rawMagnitude);
+        // === v2.0 BƯỚC 1 — dB -> biên độ (NÉN căn bậc 2, giữ nguyên lý do như bản cũ: giảm ảnh
+        // hưởng của bin vỡ tiếng), tính 1 LẦN, dùng lại cho cả whitening lẫn peak-picking bên dưới
+        // (tránh tính lại 2 lần, giữ chi phí CPU tương đương bản cũ).
+        const magnitudes = new Float32Array(rangeLen);
+        for (let idx = 0; idx < rangeLen; idx++) {
+            const db = chromaDataArray[minBin + idx];
+            magnitudes[idx] = db < -90 ? 0 : Math.sqrt(Math.pow(10, db / 20));
+        }
+
+        // === v2.0 BƯỚC 2 — Spectral Whitening: chia mỗi bin cho "sàn phổ cục bộ" (trung bình
+        // trượt ±WHITEN_RADIUS bin quanh nó). Nhạc thật luôn có bass to hơn treble một cách tự
+        // nhiên (độ nghiêng phổ) — whitening làm phẳng độ nghiêng này, giúp bước peak-picking bên
+        // dưới CHỈ so sánh 1 bin với hàng xóm GẦN nó (cùng "vùng" âm lượng), không bị âm trầm luôn
+        // thắng chỉ vì to hơn tự nhiên. Kỹ thuật chuẩn MIR (không riêng phần mềm nào) — xem báo cáo.
+        const WHITEN_RADIUS = 8;
+        const whitened = new Float32Array(rangeLen);
+        let runningSum = 0;
+        for (let idx = 0; idx < Math.min(WHITEN_RADIUS, rangeLen); idx++) runningSum += magnitudes[idx];
+        for (let idx = 0; idx < rangeLen; idx++) {
+            const lo = Math.max(0, idx - WHITEN_RADIUS);
+            const hi = Math.min(rangeLen - 1, idx + WHITEN_RADIUS);
+            let sum = 0;
+            for (let j = lo; j <= hi; j++) sum += magnitudes[j]; // rangeLen nhỏ (~350 bin ở dải 65-2100Hz) -> vẫn rẻ
+            const floor = sum / (hi - lo + 1);
+            whitened[idx] = magnitudes[idx] / (floor + 1e-6);
+        }
+
+        // === v2.0 BƯỚC 3 — Peak-picking: CHỈ tính vào chroma những bin là ĐỈNH CỤC BỘ (biên độ ĐÃ
+        // WHITEN lớn hơn hoặc bằng 2 hàng xóm ngay sát). Loại bớt phần "chân"/rò rỉ phổ (spectral
+        // leakage) quanh 1 đỉnh thật, giữ lại đúng phần là hài âm rõ rệt — kỹ thuật chuẩn khi trích
+        // xuất HPCP/chroma trong MIR, KHÔNG lấy từ phần mềm cụ thể nào (xem báo cáo, mục nghiên cứu).
+        for (let idx = 0; idx < rangeLen; idx++) {
+            if (magnitudes[idx] <= 0) continue;
+
+            const isPeak = (idx === 0 || whitened[idx] >= whitened[idx - 1]) &&
+                           (idx === rangeLen - 1 || whitened[idx] >= whitened[idx + 1]);
+            if (!isPeak) continue;
+
+            const i = minBin + idx;
+            const magnitude = magnitudes[idx]; // dùng biên độ GỐC (đã nén căn bậc 2) để cộng dồn — whitened chỉ dùng để CHỌN đỉnh, không dùng để cộng
             const pc = frequencyToPitchClass(i * binHz);
             if (pc < 0) continue;
             const isBass = (i * binHz) <= BASS_MAX_HZ;
@@ -135,6 +178,7 @@ const KeyEngine = (() => {
 
         for (let i = 0; i < 12; i++) {
             chromaVector[i] = chromaVector[i] * CHROMA_SMOOTHING + frame[i] * (1 - CHROMA_SMOOTHING);
+            chromaVectorFast[i] = chromaVectorFast[i] * CHROMA_SMOOTHING_FAST + frame[i] * (1 - CHROMA_SMOOTHING_FAST);
         }
 
         // ĐẾM PHIẾU: tìm nốt bass mạnh nhất CHỈ TRONG KHUNG NÀY rồi cộng đúng 1 phiếu cho nó —
@@ -174,8 +218,14 @@ const KeyEngine = (() => {
         return profile.slice(12 - s).concat(profile.slice(0, 12 - s));
     }
 
-    /** @returns {{ key: string, rootIndex: number, mode: string, confidence: number }} */
-    function estimateKeyFromChroma() {
+    /**
+     * @param {number[]} [sourceVector] Mặc định dùng chromaVector (chậm, dùng cho vote/khoá thật).
+     *   Tham số tuỳ chọn này CHỈ để tái sử dụng cho Provisional Estimate (chromaVectorFast) — gọi
+     *   estimateKeyFromChroma() KHÔNG tham số vẫn giữ NGUYÊN 100% hành vi/API công khai cũ.
+     * @returns {{ key: string, rootIndex: number, mode: string, confidence: number }}
+     */
+    function estimateKeyFromChroma(sourceVector) {
+        const vector = sourceVector || chromaVector;
         const maxBassVotes = Math.max(...bassRootVotes, 1e-9);
 
         let best = { score: -Infinity, root: 0, mode: "Major" };
@@ -193,8 +243,8 @@ const KeyEngine = (() => {
             const bassAgreement = bassRootVotes[root] / maxBassVotes;
             const bassBoost = bassAgreement * BASS_ROOT_BOOST_WEIGHT;
 
-            const majorScore = pearsonCorrelation(chromaVector, rotateProfile(KS_MAJOR_PROFILE, root)) + bassBoost;
-            const minorScore = pearsonCorrelation(chromaVector, rotateProfile(KS_MINOR_PROFILE, root)) + bassBoost;
+            const majorScore = pearsonCorrelation(vector, rotateProfile(KS_MAJOR_PROFILE, root)) + bassBoost;
+            const minorScore = pearsonCorrelation(vector, rotateProfile(KS_MINOR_PROFILE, root)) + bassBoost;
             if (majorScore > best.score) best = { score: majorScore, root, mode: "Major" };
             if (minorScore > best.score) best = { score: minorScore, root, mode: "Minor" };
 
@@ -505,7 +555,9 @@ const KeyEngine = (() => {
         stopProvisionalTicker();
 
         provisionalTimerId = setInterval(() => {
-            const result = estimateKeyFromChroma();
+            // v2.0: dùng chromaVectorFast (hội tụ ~225ms) thay vì chromaVector chậm (~1.2s) —
+            // đây là thay đổi CHÍNH giúp "Key tạm" bắt kịp âm thanh thật nhanh hơn nhiều.
+            const result = estimateKeyFromChroma(chromaVectorFast);
 
             // Vẫn tôn trọng ngưỡng tin cậy tối thiểu — không hiện "Key tạm" là rác khi
             // audio chưa đủ tín hiệu (vd vài trăm ms đầu, hoặc intro chỉ có trống).
@@ -534,7 +586,7 @@ const KeyEngine = (() => {
     function onLevel(cb) { levelListeners.push(cb); } // dùng cho debug log
 
     function getDebugSnapshot() {
-        return { chromaVector: chromaVector.slice(), bassRootVotes: bassRootVotes.slice() };
+        return { chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice() };
     }
 
     return {
