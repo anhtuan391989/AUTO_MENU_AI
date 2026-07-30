@@ -306,6 +306,8 @@ document.getElementById("musicBtn")?.addEventListener("click", (e) => {
 
     function expandPanel() {
         panel.classList.add("expanded");
+        // Thêm class "show" ở frame kế tiếp để CSS transition (opacity/translateY) chạy mượt — chỉ là animation.
+        requestAnimationFrame(() => panel.classList.add("show"));
         expandBtn.classList.add("active");
         expandBtn.setAttribute("aria-expanded", "true");
         setLabel(true);
@@ -313,11 +315,13 @@ document.getElementById("musicBtn")?.addEventListener("click", (e) => {
     }
 
     function collapsePanel() {
-        panel.classList.remove("expanded");
+        panel.classList.remove("show");
         expandBtn.classList.remove("active");
         expandBtn.setAttribute("aria-expanded", "false");
         setLabel(false);
         clearCollapseTimer();
+        // Đợi hiệu ứng mờ dần (180ms, khớp CSS transition) xong mới display:none để không bị giật khung hình.
+        setTimeout(() => panel.classList.remove("expanded"), 180);
     }
 
     expandBtn.addEventListener("click", () => {
