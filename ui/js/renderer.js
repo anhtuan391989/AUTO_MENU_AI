@@ -264,12 +264,77 @@ document.getElementById("musicBtn")?.addEventListener("click", (e) => {
    ========================================================== */
 ["clapPlayBtn", "laughPlayBtn"].forEach(id => {
     const btn = document.getElementById(id);
+    // UI Final v1.0: nút đã chuyển lên hàng Preset với nhãn cố định (CLAP/LAUGH),
+    // nên bỏ phần đổi chữ PLAY/PLAYING — chỉ còn toggle class "active" để báo trạng thái.
+    // Logic phát âm thanh (sự kiện click) giữ nguyên 100%.
     btn?.addEventListener("click", () => {
         btn.classList.toggle("active");
-        const textSpan = btn.querySelector(".text");
-        if (textSpan) textSpan.textContent = btn.classList.contains("active") ? "PLAYING" : "PLAY";
     });
 });
+
+/* ==========================================================
+   5b. EXPAND / COLLAPSE CONTROL PANEL (UI Final v1.0)
+   Chỉ thao tác DOM/CSS — không gọi IPC, không đổi EventBus,
+   không đụng AI/Key/BPM/Mod Engine.
+   ========================================================== */
+(function () {
+    const expandBtn = document.getElementById("expandBtn");
+    const panel = document.getElementById("controlPanel");
+    if (!expandBtn || !panel) return;
+
+    const AUTO_COLLAPSE_MS = 12000; // 12s — trong khoảng 10–15s theo yêu cầu Mục IX
+    let collapseTimer = null;
+
+    function setLabel(expanded) {
+        const textSpan = expandBtn.querySelector(".text");
+        const iconSpan = expandBtn.querySelector(".icon");
+        if (textSpan) textSpan.textContent = expanded ? "COLLAPSE" : "EXPAND";
+        if (iconSpan) iconSpan.textContent = expanded ? "▴" : "▾";
+    }
+
+    function clearCollapseTimer() {
+        if (collapseTimer) {
+            clearTimeout(collapseTimer);
+            collapseTimer = null;
+        }
+    }
+
+    function scheduleAutoCollapse() {
+        clearCollapseTimer();
+        collapseTimer = setTimeout(collapsePanel, AUTO_COLLAPSE_MS);
+    }
+
+    function expandPanel() {
+        panel.classList.add("expanded");
+        expandBtn.classList.add("active");
+        expandBtn.setAttribute("aria-expanded", "true");
+        setLabel(true);
+        scheduleAutoCollapse();
+    }
+
+    function collapsePanel() {
+        panel.classList.remove("expanded");
+        expandBtn.classList.remove("active");
+        expandBtn.setAttribute("aria-expanded", "false");
+        setLabel(false);
+        clearCollapseTimer();
+    }
+
+    expandBtn.addEventListener("click", () => {
+        if (panel.classList.contains("expanded")) {
+            collapsePanel();
+        } else {
+            expandPanel();
+        }
+    });
+
+    // Bất kỳ thao tác nào trong Control (bấm, kéo knob, đổi select...) reset lại giờ tự Collapse
+    ["mousedown", "click", "input", "change"].forEach(evt => {
+        panel.addEventListener(evt, () => {
+            if (panel.classList.contains("expanded")) scheduleAutoCollapse();
+        });
+    });
+})();
 
 /* ==========================================================
    6. KNOB LOGIC (Xử lý vòng xoay & LED)

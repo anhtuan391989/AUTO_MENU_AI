@@ -103,6 +103,15 @@
             <button class="preset-btn active">NORM</button>
             <button class="preset-btn">LOFI</button>
             <button class="preset-btn">RAP</button>
+            <button id="clapPlayBtn" class="preset-sound-btn">
+                <span class="icon">👏</span><span class="text">CLAP</span>
+            </button>
+            <button id="laughPlayBtn" class="preset-sound-btn">
+                <span class="icon">😂</span><span class="text">LAUGH</span>
+            </button>
+            <button id="expandBtn" class="preset-expand-btn" aria-expanded="false">
+                <span class="icon">▾</span><span class="text">EXPAND</span>
+            </button>
         </section>
 
         <!-- ANALYZER -->
@@ -210,8 +219,8 @@
             <button id="fxBtn" class="control-btn">🎚 FX</button>
         </section>
 
-        <!-- MIXER -->
-        <section class="mixer-grid">
+        <!-- CONTROL (ẩn mặc định, hiện khi bấm EXPAND ở hàng Preset) -->
+        <section class="mixer-grid" id="controlPanel">
 
             <!-- RETUNE 1 -->
             <div class="knob-card">
@@ -280,9 +289,6 @@
             <!-- CLAP -->
             <div class="knob-card">
                 <div class="sample-title">👏CLAP👏</div>
-                <button id="clapPlayBtn" class="play-btn">
-                    <span class="icon">👏</span><span class="text">PLAY</span>
-                </button>
                 <div id="clapValue" class="knob-number">50</div>
                 <div class="knob" id="clapKnob">
                     <div class="led-ring"></div>
@@ -299,9 +305,6 @@
             <!-- LAUGH -->
             <div class="knob-card">
                 <div class="sample-title">😂LAUGH😂</div>
-                <button id="laughPlayBtn" class="play-btn">
-                    <span class="icon">😂</span><span class="text">PLAY</span>
-                </button>
                 <div id="laughValue" class="knob-number">50</div>
                 <div class="knob" id="laughKnob">
                     <div class="led-ring"></div>
