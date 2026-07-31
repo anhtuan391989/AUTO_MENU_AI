@@ -261,83 +261,83 @@ document.getElementById("musicBtn")?.addEventListener("click", (e) => {
 
 /* ==========================================================
    5. PLAY BUTTONS (Logic chuyển đổi PLAY/PLAYING)
+   ----------------------------------------------------------
+   UI FINAL v1.0: 2 nút này đã CHUYỂN VỊ TRÍ từ Control (mixer-grid)
+   lên Preset row, đổi nhãn "PLAY" -> "CLAP"/"LAUGH" cho khớp vị trí
+   mới (đứng cạnh NORM/LOFI/RAP). ĐÂY LÀ THAY ĐỔI LOGIC NHỎ BẮT BUỘC
+   (đổi chữ hiển thị lúc nghỉ) để hoàn thành yêu cầu UI — id, sự kiện
+   click, class "active" dùng để trigger phát âm thanh ở nơi khác
+   GIỮ NGUYÊN 100%, không đổi gì khác.
    ========================================================== */
+const PLAY_BUTTON_RESTING_LABEL = { clapPlayBtn: "CLAP", laughPlayBtn: "LAUGH" };
+
 ["clapPlayBtn", "laughPlayBtn"].forEach(id => {
     const btn = document.getElementById(id);
-    // UI Final v1.0: nút đã chuyển lên hàng Preset với nhãn cố định (CLAP/LAUGH),
-    // nên bỏ phần đổi chữ PLAY/PLAYING — chỉ còn toggle class "active" để báo trạng thái.
-    // Logic phát âm thanh (sự kiện click) giữ nguyên 100%.
     btn?.addEventListener("click", () => {
         btn.classList.toggle("active");
+        const textSpan = btn.querySelector(".text");
+        if (textSpan) textSpan.textContent = btn.classList.contains("active") ? "PLAYING" : PLAY_BUTTON_RESTING_LABEL[id];
     });
 });
 
 /* ==========================================================
-   5b. EXPAND / COLLAPSE CONTROL PANEL (UI Final v1.0)
-   Chỉ thao tác DOM/CSS — không gọi IPC, không đổi EventBus,
-   không đụng AI/Key/BPM/Mod Engine.
-   ========================================================== */
-(function () {
-    const expandBtn = document.getElementById("expandBtn");
-    const panel = document.getElementById("controlPanel");
-    if (!expandBtn || !panel) return;
+   5B. EXPAND / COLLAPSE Control (mixer-grid) — UI FINAL v1.0
+   ----------------------------------------------------------
+   Mặc định Control (RETUNE1/RETUNE2/MASTER/MUSIC/CLAP knob/LAUGH knob)
+   ẨN. Bấm "EXPAND" để hiện/ẩn. Nếu không có thao tác BÊN TRONG Control
+   trong 10-15 giây thì tự Collapse. KHÔNG gọi bất kỳ IPC/EventBus/API
+   nào — chỉ toggle 1 class CSS (".expanded") trên #mixerGrid, không
+   ảnh hưởng workflow/logic hệ thống.
 
-    const AUTO_COLLAPSE_MS = 12000; // 12s — trong khoảng 10–15s theo yêu cầu Mục IX
+   ⚠️ GIỚI HẠN QUAN TRỌNG (đã nêu trong báo cáo): cửa sổ Electron có
+   kích thước CỐ ĐỊNH 1200x800 (app/main.js, không được sửa) — EXPAND
+   KHÔNG thể phóng to cửa sổ thật, chỉ hiện/ẩn nội dung Control trong
+   đúng vùng không gian cố định sẵn có bên dưới Function Row.
+   ========================================================== */
+const AUTO_COLLAPSE_MS = 12000; // giữa khoảng 10-15 giây theo yêu cầu
+
+(function setupExpandCollapse() {
+
+    const expandBtn = document.getElementById("expandBtn");
+    const mixerGrid = document.getElementById("mixerGrid");
+
+    if (!expandBtn || !mixerGrid) return;
+
     let collapseTimer = null;
 
-    function setLabel(expanded) {
-        const textSpan = expandBtn.querySelector(".text");
-        const iconSpan = expandBtn.querySelector(".icon");
-        if (textSpan) textSpan.textContent = expanded ? "COLLAPSE" : "EXPAND";
-        if (iconSpan) iconSpan.textContent = expanded ? "▴" : "▾";
-    }
-
-    function clearCollapseTimer() {
-        if (collapseTimer) {
-            clearTimeout(collapseTimer);
-            collapseTimer = null;
-        }
+    function collapse() {
+        mixerGrid.classList.remove("expanded");
+        expandBtn.classList.remove("active");
+        if (collapseTimer) { clearTimeout(collapseTimer); collapseTimer = null; }
     }
 
     function scheduleAutoCollapse() {
-        clearCollapseTimer();
-        collapseTimer = setTimeout(collapsePanel, AUTO_COLLAPSE_MS);
-    }
-
-    function expandPanel() {
-        panel.classList.add("expanded");
-        // Thêm class "show" ở frame kế tiếp để CSS transition (opacity/translateY) chạy mượt — chỉ là animation.
-        requestAnimationFrame(() => panel.classList.add("show"));
-        expandBtn.classList.add("active");
-        expandBtn.setAttribute("aria-expanded", "true");
-        setLabel(true);
-        scheduleAutoCollapse();
-    }
-
-    function collapsePanel() {
-        panel.classList.remove("show");
-        expandBtn.classList.remove("active");
-        expandBtn.setAttribute("aria-expanded", "false");
-        setLabel(false);
-        clearCollapseTimer();
-        // Đợi hiệu ứng mờ dần (180ms, khớp CSS transition) xong mới display:none để không bị giật khung hình.
-        setTimeout(() => panel.classList.remove("expanded"), 180);
+        if (collapseTimer) clearTimeout(collapseTimer);
+        collapseTimer = setTimeout(collapse, AUTO_COLLAPSE_MS);
     }
 
     expandBtn.addEventListener("click", () => {
-        if (panel.classList.contains("expanded")) {
-            collapsePanel();
+
+        const isExpanded = mixerGrid.classList.contains("expanded");
+
+        if (isExpanded) {
+            collapse();
         } else {
-            expandPanel();
+            mixerGrid.classList.add("expanded");
+            expandBtn.classList.add("active");
+            scheduleAutoCollapse();
         }
+
     });
 
-    // Bất kỳ thao tác nào trong Control (bấm, kéo knob, đổi select...) reset lại giờ tự Collapse
-    ["mousedown", "click", "input", "change"].forEach(evt => {
-        panel.addEventListener(evt, () => {
-            if (panel.classList.contains("expanded")) scheduleAutoCollapse();
+    // Bất kỳ thao tác nào BÊN TRONG Control (kéo knob, click, cuộn chuột) -> tính là "đang dùng",
+    // reset lại đồng hồ 10-15s. Dùng event bubbling ở container, không cần gắn riêng từng knob.
+    ["mousedown", "wheel", "dblclick"].forEach((evt) => {
+        mixerGrid.addEventListener(evt, () => {
+            if (mixerGrid.classList.contains("expanded")) scheduleAutoCollapse();
         });
     });
+
 })();
 
 /* ==========================================================
