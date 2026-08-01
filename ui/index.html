@@ -103,13 +103,15 @@
             <button class="preset-btn active">NORM</button>
             <button class="preset-btn">LOFI</button>
             <button class="preset-btn">RAP</button>
-            <button id="clapPlayBtn" class="preset-btn preset-action-btn">
+            <button id="clapPlayBtn" class="preset-sound-btn">
                 <span class="icon">👏</span><span class="text">CLAP</span>
             </button>
-            <button id="laughPlayBtn" class="preset-btn preset-action-btn">
+            <button id="laughPlayBtn" class="preset-sound-btn">
                 <span class="icon">😂</span><span class="text">LAUGH</span>
             </button>
-            <button id="expandBtn" class="preset-btn preset-action-btn">EXPAND</button>
+            <button id="expandBtn" class="preset-expand-btn" aria-expanded="false">
+                <span class="icon">▾</span><span class="text">EXPAND</span>
+            </button>
         </section>
 
         <!-- ANALYZER -->
@@ -121,9 +123,12 @@
                         <div class="analyzer-icon">🎼 KEY</div>
                         <div class="analyzer-title"></div>
                         <div id="currentKey" class="analyzer-value">G# Minor</div>
-                        <div id="keySourceLabel" class="analyzer-sub key-source-label">Source: AI DETECT</div>
+                        <div id="activeSourceLabel" class="analyzer-sub active-source-label">ACTIVE: AI DETECT</div>
+                        <div id="keyInfo" class="analyzer-sub">
+                            Auto Detect
+                        </div>
                         <div id="aiKeyDetectLine" class="analyzer-sub">AI Key Detect: G# Minor</div>
-                        <div id="keyInfo" class="analyzer-sub"></div>
+                        <div id="manualOverrideStatus" class="analyzer-sub">AI Key Detect</div>
                     </div>
                     <div class="control-side">
                         <select id="keySelector" class="key-dropdown-inline">
@@ -162,7 +167,7 @@
                 <div class="analyzer-icon">📈 BPM</div>
                 <div class="analyzer-title"></div>
                 <div id="currentBpm" class="analyzer-value">128</div>
-                <div id="bpmValue">-- BPM</div>
+                <div id="bpmValue" class="bpm-value-line">-- BPM</div>
                 <div class="analyzer-sub">Confidence 98%</div>
             </div>
             <div class="analyzer-card">
@@ -215,12 +220,12 @@
             <button id="fxBtn" class="control-btn">🎚 FX</button>
         </section>
 
-        <!-- MIXER -->
-        <section class="mixer-grid" id="mixerGrid">
+        <!-- CONTROL (ẩn mặc định, hiện khi bấm EXPAND ở hàng Preset) -->
+        <section class="mixer-grid" id="controlPanel">
 
             <!-- RETUNE 1 -->
             <div class="knob-card">
-                <div class="knob-label">RETUNE SPEED 1</div>
+                <div class="knob-label">RETUNE 1</div>
                 <div id="retune1Value" class="knob-number">20</div>
                 <div class="knob" id="retune1">
                     <div class="led-ring"></div>
@@ -236,7 +241,7 @@
 
             <!-- RETUNE 2 -->
             <div class="knob-card">
-                <div class="knob-label">RETUNE SPEED 2</div>
+                <div class="knob-label">RETUNE 2</div>
                 <div id="retune2Value" class="knob-number">20</div>
                 <div class="knob" id="retune2">
                     <div class="led-ring"></div>

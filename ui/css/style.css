@@ -4,34 +4,32 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root { --bg: #020813; --panel: #071421; --panel2: #0b1b2c; --border: #0ea5ff; --cyan: #13dfff; --cyan2: #00cfff; --text: #ffffff;}
 body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-family: "Segoe UI", sans-serif; color: #fff; overflow: hidden;}
-.app { width: 1200px; margin: 0 auto; padding: 7px; display: flex; flex-direction: column; gap: 5px; background: linear-gradient(180deg, #03111f, #010813);}
+.app { width: 1200px; height: 800px; margin: 0 auto; padding: 6px; display: flex; flex-direction: column; justify-content: center; gap: 6px; background: linear-gradient(180deg, #03111f, #010813);}
 ::-webkit-scrollbar { display: none; }
 
 /* =====================================
 2. HEADER & STATUS
 ===================================== */
-.header { height: 50px; display: grid; grid-template-columns: 190px 1fr 130px; align-items: center; padding: 0 12px; border: 1px solid rgba(0,180,255,.35); border-radius: 12px; background: linear-gradient(180deg,rgba(0,25,45,.55),rgba(0,0,0,.55));}
-.logo { font-size: 19px; font-weight: 900; color: var(--cyan); letter-spacing: 1px; display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.header { height: 52px; display: grid; grid-template-columns: 240px 1fr 180px; align-items: center; padding: 0 12px; border: 1px solid rgba(0,180,255,.35); border-radius: 12px; background: linear-gradient(180deg,rgba(0,25,45,.55),rgba(0,0,0,.55));}
+.logo { font-size: 20px; font-weight: 900; color: var(--cyan); letter-spacing: 1px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .logo-dot { flex-shrink: 0; }
-.header-center { display: flex; align-items: center; justify-content: flex-start; gap: 16px; min-width: 0; /* bắt buộc để flex item con co lại đúng, không đẩy tràn header */ }
-.window-buttons { display: flex; justify-content: flex-end; gap: 5px; }
-.window-buttons button { width: 28px; height: 28px; border: none; border-radius: 7px; background: #10253b; color: #fff; cursor: pointer; }
-.status-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: 5px; margin-bottom: 0; }
-.status-card { height: 36px; padding: 4px 8px; border-radius: 9px; border: 1px solid rgba(0,180,255,.25); background: linear-gradient(180deg,#081523,#05101a); display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
-.status-dot { width: 9px; height: 9px; border-radius: 50%; margin-left: auto;}
-.status-icon {font-size: 15px; display: flex; align-items: center; color: var(--cyan);}
-.status-left {display: flex; align-items: center; gap: 5px;}
-.status-title { font-size: 8px; color: #8fa5b8; font-weight: 700; letter-spacing: .3px; }
-.status-sub { font-size: 11px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.header-center { display: flex; align-items: center; justify-content: flex-start; gap: 20px; min-width: 0; /* bắt buộc để flex item con co lại đúng, không đẩy tràn header */ }
+.window-buttons { display: flex; justify-content: flex-end; gap: 6px; }
+.window-buttons button { width: 29px; height: 29px; border: none; border-radius: 8px; background: #10253b; color: #fff; cursor: pointer; }
+.status-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: 6px; margin-bottom: 2px; }
+.status-card { height: 38px; padding: 5px 8px; border-radius: 10px; border: 1px solid rgba(0,180,255,.25); background: linear-gradient(180deg,#081523,#05101a); display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
+.status-dot { width: 12px; height: 12px; border-radius: 50%; margin-left: auto;}
+.status-icon {font-size: 16px; display: flex; align-items: center; color: var(--cyan);}
+.status-left {display: flex; align-items: center; gap: 8px;}
 .status-sub-time { font-variant-numeric: tabular-nums; } /* số không bị nhảy chiều rộng mỗi giây */
 
 /* NOW PLAYING (thay cho đồng hồ lớn cũ ở giữa header) */
 .now-playing { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; overflow: hidden; }
-.now-playing-label { font-size: 12px; font-weight: 700; color: var(--cyan); letter-spacing: .5px; white-space: nowrap; flex-shrink: 0; }
+.now-playing-label { font-size: 15px; font-weight: 700; color: var(--cyan); letter-spacing: .5px; white-space: nowrap; flex-shrink: 0; }
 .now-playing-viewport { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
 .now-playing-track { display: inline-flex; white-space: nowrap; will-change: transform; }
 .now-playing-track.marquee { animation-name: now-playing-marquee; animation-timing-function: linear; animation-iteration-count: infinite; }
-.now-playing-text-copy { display: inline-block; font-size: 13px; color: #eafcff; padding-right: 40px; }
+.now-playing-text-copy { display: inline-block; font-size: 16px; color: #eafcff; padding-right: 48px; }
 @keyframes now-playing-marquee {
     from { transform: translateX(0); }
     to   { transform: translateX(-50%); }
@@ -49,11 +47,18 @@ body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-fa
 /* =====================================
 3. PRESET, ANALYZER & CONTROL
 ===================================== */
-.preset-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 5px; margin-bottom: 0; }
-.preset-btn { height: 32px; border: 1px solid rgba(0,180,255,.25); border-radius: 8px; background: linear-gradient(180deg,#0a1826,#07111c); color: #fff; font-weight: 800; font-size: 11px; cursor: pointer; transition: all 0.3s ease; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.preset-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 6px; margin-bottom: 2px; }
+.preset-btn { height: 31px; border: 1px solid rgba(0,180,255,.25); border-radius: 8px; background: linear-gradient(180deg,#0a1826,#07111c); color: #fff; font-weight: 800; font-size: 12px; cursor: pointer; transition: all 0.3s ease; position: relative; overflow: hidden; }
 .preset-btn.active { background: linear-gradient(90deg,#00bfff,#39e3ff); color: #00131c; box-shadow: 0 0 15px rgba(0, 191, 255, 0.4); }
-.preset-action-btn { border-color: rgba(0,180,255,.35); }
-.preset-action-btn.active { background: linear-gradient(180deg, #00e5ff, #0099ff); color: #000; border: 1px solid #fff; box-shadow: 0 0 10px rgba(0, 229, 255, 0.6); }
+
+/* CLAP / LAUGH / EXPAND — nằm cùng hàng Preset nhưng KHÔNG dùng class .preset-btn
+   để không bị cuốn vào logic chọn preset độc quyền (NORM/LOFI/RAP) trong renderer.js */
+.preset-sound-btn, .preset-expand-btn { height: 31px; border: 1px solid rgba(0,180,255,.25); border-radius: 8px; background: linear-gradient(180deg,#0a1826,#07111c); color: #fff; font-weight: 800; font-size: 12px; cursor: pointer; transition: all 0.3s ease; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.preset-sound-btn:hover, .preset-expand-btn:hover { border-color: var(--cyan); background: linear-gradient(180deg, #0d2238, #0a1826); box-shadow: 0 0 10px rgba(0, 180, 255, 0.3); transform: translateY(-2px); }
+.preset-sound-btn.active { background: linear-gradient(180deg, #00e5ff, #0099ff); color: #000; box-shadow: 0 0 15px rgba(0, 229, 255, 0.5); border-color: #fff; }
+.preset-expand-btn.active { background: linear-gradient(90deg,#00bfff,#39e3ff); color: #00131c; box-shadow: 0 0 15px rgba(0, 191, 255, 0.4); }
+.preset-sound-btn .icon, .preset-expand-btn .icon { font-size: 14px; transition: transform .2s ease; }
+.preset-expand-btn.active .icon { transform: rotate(180deg); }
 
 /* --- NÚT SETUP (XOAY & SÁNG) --- */
 #setupBtn { transition: all 0.5s ease; cursor: pointer; border: 1px solid rgba(0, 180, 255, 0.3); background: #10253b; color: #fff;}
@@ -66,35 +71,52 @@ body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-fa
 #closeBtn:hover { background: #ff4d4d; border-color: #ff4d4d; }
 #minBtn:hover { background: #555; }
 .preset-btn:hover:not(.active) {border-color: var(--cyan); background: linear-gradient(180deg, #0d2238, #0a1826); box-shadow: 0 0 10px rgba(0, 180, 255, 0.3); transform: translateY(-2px);}
-.analyzer-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; margin-bottom: 0; }
-.analyzer-card { height: 95px; border-radius: 11px; border: 1px solid rgba(0,180,255,.25); background: linear-gradient(180deg,#081523,#05101a); display: flex; flex-direction: column; justify-content: center; align-items: center; }
-.analyzer-value { font-size: 33px; font-weight: 900; color: #13dfff; } /* Đúng target đề bài UI Final v2.0: 40px gốc -> 32-34px, chọn 33px */
-.control-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: 5px; margin-bottom: 0; }
-.control-btn { height: 41px; border: 1px solid rgba(0,180,255,.25); border-radius: 9px; background: linear-gradient(180deg,#0a1826,#07111c); color: #13dfff; font-weight: 800; font-size: 12px; cursor: pointer; }
-#modTime{ font-size:33px; line-height:1.3;} /* trước đây 40px (ID override đè cả .analyzer-value) khiến MOD to hơn cả Key/BPM — sửa về đúng chung 33px */
-#modStatus{ font-size:11px; opacity:.9;}
-#modTimeline{ font-size:10px; opacity:.7; letter-spacing:1px;}
+.analyzer-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; margin-bottom: 2px; }
+.analyzer-card { height: 104px; border-radius: 12px; border: 1px solid rgba(0,180,255,.25); background: linear-gradient(180deg,#081523,#05101a); display: flex; flex-direction: column; justify-content: center; align-items: center; }
+.analyzer-value { font-size: clamp(26px, 3.2vw, 38px); font-weight: 900; color: #13dfff; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* clamp() thay vì hardcode — Mục X: không giảm khả năng đọc, chỉ chống tràn khi text dài */
+.control-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: 6px; margin-bottom: 2px; }
+.control-btn { height: 47px; border: 1px solid rgba(0,180,255,.25); border-radius: 10px; background: linear-gradient(180deg,#0a1826,#07111c); color: #13dfff; font-weight: 800; cursor: pointer; }
+#modTime{ font-size: clamp(26px, 3.2vw, 40px); line-height:1.3; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+#modStatus{ font-size:13px; opacity:.9; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+#modTimeline{ font-size:11px; opacity:.7; letter-spacing:1px;}
+.bpm-value-line{ font-size:15px; font-weight:700; color:#9fe9ff; margin-top:2px;} /* trước đây #bpmValue không có class -> không có style; giờ thêm để hoàn thiện phân cấp 113 / 113 BPM / Confidence (to->vừa->nhỏ) */
+
+/* Mục XII — ACTIVE SOURCE: 1 dòng badge duy nhất, ẩn các dòng trạng thái cũ dễ gây rối
+   (vẫn giữ nguyên trong DOM để không đổi id/logic JS đang ghi vào chúng) */
+.active-source-label { color: var(--cyan); font-weight: 700; letter-spacing: .3px; }
+#keyInfo, #manualOverrideStatus { display: none; }
+#aiKeyDetectLine { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* =====================================
 4. MIXER (KNOB CARD)
 ===================================== */
-.mixer-grid { display: none; grid-template-columns: repeat(3,1fr); grid-template-rows: repeat(2, 100px); gap: 6px; }
-.mixer-grid.expanded { display: grid; }
-.knob-card { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid rgba(0,180,255,0.3); background: linear-gradient(180deg, #081523, #04101a); display: flex; box-shadow: inset 0 0 12px rgba(0,180,255,0.5); }
-.knob-label, .sample-title { position: absolute; left: 10px; top: 5px; font-size: 12px; font-weight: 900; color: #fff; }
-.knob-number { position: absolute; left: 16px; top: 34px; font-size: 28px; font-weight: 900; color: #13dfff; text-shadow: 0 0 12px rgba(0,220,255,.45); }
-.play-btn { position: absolute; left: 120px; top: 90px; width: 78px; height: 30px; border: none; border-radius: 8px; background: #10314f; color: #fff; font-weight: 800; cursor: pointer;display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.3s ease; } /* KHÔNG còn dùng ở CLAP/LAUGH (đã chuyển lên preset row) — giữ rule lại phòng tương thích ngược, không xoá */
+/* Mặc định ẨN — chỉ hiện khi có class .expanded (bấm EXPAND ở hàng Preset)
+   Có hiệu ứng mờ dần/trượt nhẹ khi mở — chỉ là animation, không đổi workflow. */
+#controlPanel { display: none; opacity: 0; transform: translateY(-6px); transition: opacity .2s ease-in-out, transform .2s ease-in-out; }
+#controlPanel.expanded { display: grid; }
+#controlPanel.expanded.show { opacity: 1; transform: translateY(0); }
+
+.mixer-grid { display: grid; grid-template-columns: repeat(3,1fr); grid-template-rows: repeat(2, 122px); gap: 6px; flex-shrink: 0; }
+.knob-card { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid rgba(0,180,255,0.3); background: linear-gradient(180deg, #081523, #04101a); display: flex; box-shadow: inset 0 0 16px rgba(0,180,255,0.5); }
+.knob-label, .sample-title { position: absolute; left: 12px; top: 4px; font-size: 15px; font-weight: 900; color: #fff; letter-spacing: .2px; } /* 20px -> 15px, -25% */
+.knob-number { position: absolute; left: 12px; top: 26px; font-size: 40px; font-weight: 900; color: #13dfff; text-shadow: 0 0 12px rgba(0,220,255,.45); line-height: 1; } /* 50px -> 40px, -20% (giảm ít nhất — vẫn là con số quan trọng nhất) */
+.play-btn { position: absolute; left: 120px; top: 90px; width: 78px; height: 30px; border: none; border-radius: 8px; background: #10314f; color: #fff; font-weight: 800; cursor: pointer;display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.3s ease; }
 .play-btn.active { background: linear-gradient(180deg, #00e5ff, #0099ff); color: #000; ox-shadow: 0 0 10px rgba(0, 229, 255, 0.6); border: 1px solid #fff;}
 
 /* =====================================
 5. KNOB COMPONENTS (VÒNG LED, KIM, CAP)
+Đường kính knob: 130px -> 76px (-41.5%, giảm mạnh nhất vì ưu tiên #1 là "nhỏ gọn").
+Toàn bộ số đo bên dưới được TÍNH LẠI theo đúng tỷ lệ hình học của knob gốc
+(hệ số f = 76/130 ≈ 0.585), không phải đoán — để vòng LED/kim vẫn khớp tâm
+và tỷ lệ như bản gốc. Logic kéo/xoay trong renderer.js chỉ dựa vào clientY,
+không đọc kích thước phần tử, nên đổi số đo ở đây không ảnh hưởng độ chính xác.
 ===================================== */
-.knob { position: absolute; width: 80px; height: 80px; right: 10px; top: 12px; border-radius: 50%; }
-.led-ring { position: absolute; inset: -6px; border-radius: 50%; transform: rotate(-135deg); background: conic-gradient(#7f8993 0deg 270deg, transparent 270deg); mask: radial-gradient(circle, transparent 38px, #000 39px, #000 43px, transparent 44px); -webkit-mask: radial-gradient(circle, transparent 38px, #000 39px, #000 43px, transparent 44px);}
-.led-active { position: absolute; inset: -6px;  border-radius: 50%; transform: rotate(-135deg); mask: radial-gradient(circle, transparent 38px, #000 39px, #000 43px, transparent 44px); -webkit-mask: radial-gradient(circle, transparent 38px, #000 39px, #000 43px, transparent 44px);}
-.cap { position: absolute; inset: 9px; border-radius: 50%; border: 1.5px solid #355c82; background: radial-gradient(circle at 35% 35%, #5d7592, #263f57 60%, #0b1520); box-shadow: inset 0 2px 6px rgba(255,255,255,.12), inset 0 -6px 12px rgba(0,0,0,.6);}
-.pointer { position: absolute; left: 50%; top: 6px; width: 3px; height: 25px; border-radius: 3px; background: #13dfff; transform: translateX(-50%) rotate(-135deg); transform-origin: center 37px; box-shadow: 0 0 8px #13dfff, 0 0 14px rgba(0,220,255,.6);}
-.knob-scale { position: absolute; left: 0; bottom: -10px; width: 100%; display: flex; justify-content: space-between; padding: 0 5px; font-size: 8px; font-weight: 700; color: #d5dce4; }
+.knob { position: absolute; width: 76px; height: 76px; right: 12px; top: 10px; border-radius: 50%; }
+.led-ring { position: absolute; inset: -6px; border-radius: 50%; transform: rotate(-135deg); background: conic-gradient(#7f8993 0deg 270deg, transparent 270deg); mask: radial-gradient(circle, transparent 36px, #000 37px, #000 41px, transparent 42px); -webkit-mask: radial-gradient(circle, transparent 36px, #000 37px, #000 41px, transparent 42px);}
+.led-active { position: absolute; inset: -6px;  border-radius: 50%; transform: rotate(-135deg); mask: radial-gradient(circle, transparent 36px, #000 37px, #000 41px, transparent 42px); -webkit-mask: radial-gradient(circle, transparent 36px, #000 37px, #000 41px, transparent 42px);}
+.cap { position: absolute; inset: 8px; border-radius: 50%; border: 2px solid #355c82; background: radial-gradient(circle at 35% 35%, #5d7592, #263f57 60%, #0b1520); box-shadow: inset 0 2px 8px rgba(255,255,255,.12), inset 0 -8px 15px rgba(0,0,0,.6);}
+.pointer { position: absolute; left: 50%; top: 6px; width: 3px; height: 23px; border-radius: 4px; background: #13dfff; transform: translateX(-50%) rotate(-135deg); transform-origin: center 35px; box-shadow: 0 0 8px #13dfff, 0 0 14px rgba(0,220,255,.6);}
+.knob-scale { position: absolute; left: 0; bottom: -9px; width: 100%; display: flex; justify-content: space-between; padding: 0 4px; font-size: 8px; font-weight: 700; color: #d5dce4; }
 
 /* =====================================
 6. BUTTON ANIMATION & STATES
@@ -152,9 +174,8 @@ body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-fa
 
 /* Tinh chỉnh để Icon và Sub nằm gọn trong info-side */
 .info-side { text-align: left; display: flex; flex-direction: column; gap: 2px;}
-.analyzer-icon { font-size: 18px; color: var(--cyan); }
+.analyzer-icon { font-size: 15px; color: var(--cyan); }
 .analyzer-sub { font-size: 10px; color: #888; }
-.key-source-label { color: #6fe0ff; font-weight: 700; letter-spacing: .3px; } /* nổi bật hơn .analyzer-sub thường — Phần IV yêu cầu rõ ràng, không mập mờ */
 
 /* Tinh chỉnh lại card content */
 .card-content { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 0 10px;}
@@ -173,8 +194,9 @@ body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-fa
 
 /* Tinh chỉnh cho dropdown và nút trong khối card */
 .control-side { display: flex; flex-direction: column; gap: 4px; width: 95px;}
-.key-dropdown-inline { width: 100%; background: #0a141c; color: #00d4ff; border: 1px solid #1c3a50; font-size: 10px; padding: 3px; cursor: pointer;}
+.key-dropdown-inline { width: 100%; height: 22px; background: #0a141c; color: #00d4ff; border: 1px solid #1c3a50; font-size: 10px; padding: 0 3px; cursor: pointer;}
 .control-btn { z-index: 100 !important; cursor: pointer;}
+.apply-btn-mini, .power-btn { height: 22px; } /* Mục II: SEND/SET cao bằng dropdown */
 
 /* Đảm bảo vùng xoay nhận chuột tốt */
 .knob-card { position: relative; user-select: none; /* Ngăn bôi đen khi kéo */ cursor: grab;}
