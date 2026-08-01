@@ -4,7 +4,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root { --bg: #020813; --panel: #071421; --panel2: #0b1b2c; --border: #0ea5ff; --cyan: #13dfff; --cyan2: #00cfff; --text: #ffffff;}
 body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-family: "Segoe UI", sans-serif; color: #fff; overflow: hidden;}
-.app { width: 1200px; height: 800px; margin: 0 auto; padding: 6px; display: flex; flex-direction: column; justify-content: center; gap: 6px; background: linear-gradient(180deg, #03111f, #010813);}
+.app { width: 1200px; height: 800px; margin: 0 auto; padding: 6px; display: flex; flex-direction: column; justify-content: flex-start; gap: 6px; background: linear-gradient(180deg, #03111f, #010813);}
 ::-webkit-scrollbar { display: none; }
 
 /* =====================================
