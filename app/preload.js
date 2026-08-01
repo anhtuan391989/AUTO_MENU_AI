@@ -63,4 +63,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- Telemetry (Phase 4A): gửi 1 bản ghi JSON sang main process để ghi vào logs/*.jsonl ----
     // Fire-and-forget, không cần phản hồi — giống cơ chế reportAiResult đã có.
     sendTelemetry: (record) => ipcRenderer.send("telemetry-record", record),
+
+    // ---- UI FINAL v2.0: "Menu ôm sát nội dung" — CHỈ đổi chiều cao cửa sổ chính ----
+    resizeWindow: (height) => ipcRenderer.send("resize-window", { height }),
 });

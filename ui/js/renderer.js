@@ -58,7 +58,7 @@ updateClock();
     if (!viewport || !track || !copyA || !copyB) return; // an toàn nếu HTML thiếu phần tử
 
     const MARQUEE_SPEED_PX_PER_SEC = 45; // tốc độ chạy chữ, vừa mắt, không giật
-    const COPY_GAP_PX = 48; // PHẢI khớp padding-right của .now-playing-text-copy trong CSS
+    const COPY_GAP_PX = 40; // PHẢI khớp padding-right của .now-playing-text-copy trong CSS (UI Final v2.0: 48->40)
     const MIN_DURATION_SEC = 4;
 
     function textForSnapshot(snapshot) {
@@ -281,20 +281,35 @@ const PLAY_BUTTON_RESTING_LABEL = { clapPlayBtn: "CLAP", laughPlayBtn: "LAUGH" }
 });
 
 /* ==========================================================
-   5B. EXPAND / COLLAPSE Control (mixer-grid) — UI FINAL v1.0
+   5B. EXPAND / COLLAPSE Control (mixer-grid) — UI FINAL v2.0
    ----------------------------------------------------------
    Mặc định Control (RETUNE1/RETUNE2/MASTER/MUSIC/CLAP knob/LAUGH knob)
-   ẨN. Bấm "EXPAND" để hiện/ẩn. Nếu không có thao tác BÊN TRONG Control
-   trong 10-15 giây thì tự Collapse. KHÔNG gọi bất kỳ IPC/EventBus/API
-   nào — chỉ toggle 1 class CSS (".expanded") trên #mixerGrid, không
-   ảnh hưởng workflow/logic hệ thống.
+   ẨN — "Menu ôm sát nội dung" (Phần II): cửa sổ THẬT co lại đúng bằng
+   nội dung đang hiển thị (Header+Status+Preset+Analyzer+Function),
+   không còn nền trống phía dưới. Bấm "EXPAND" -> cửa sổ THẬT giãn ra
+   đúng đủ chỗ cho Control. Không thao tác trong Control 10-15s -> tự
+   Collapse, cửa sổ tự co lại.
 
-   ⚠️ GIỚI HẠN QUAN TRỌNG (đã nêu trong báo cáo): cửa sổ Electron có
-   kích thước CỐ ĐỊNH 1200x800 (app/main.js, không được sửa) — EXPAND
-   KHÔNG thể phóng to cửa sổ thật, chỉ hiện/ẩn nội dung Control trong
-   đúng vùng không gian cố định sẵn có bên dưới Function Row.
+   KHÁC v1.0: v1.0 bị giới hạn bởi cửa sổ cố định 1200x800 (không được
+   sửa main.js lúc đó). Task UI Final v2.0 (Phần II) CHO PHÉP tường
+   minh: "Nếu cần sửa Electron để resize theo content thì được phép" —
+   đã thêm 1 kênh IPC MỚI, tách biệt hoàn toàn ("resize-window", xem
+   app/main.js + app/preload.js), CHỈ làm đúng 1 việc: đổi chiều CAO
+   cửa sổ theo số đo THẬT từ DOM (không đoán số ở main.js). Không đụng
+   bất kỳ kênh IPC nghiệp vụ nào khác (Key/BPM/NowPlaying/AI...).
    ========================================================== */
 const AUTO_COLLAPSE_MS = 12000; // giữa khoảng 10-15 giây theo yêu cầu
+const RESIZE_HEIGHT_PADDING_PX = 4; // đệm nhỏ chống lệch số đo do bo tròn/scroll-bar ảo
+
+function resizeWindowToContent() {
+
+    const appEl = document.querySelector(".app");
+    if (!appEl || !window.electronAPI?.resizeWindow) return;
+
+    const targetHeight = Math.round(appEl.scrollHeight) + RESIZE_HEIGHT_PADDING_PX;
+    window.electronAPI.resizeWindow(targetHeight);
+
+}
 
 (function setupExpandCollapse() {
 
@@ -309,6 +324,9 @@ const AUTO_COLLAPSE_MS = 12000; // giữa khoảng 10-15 giây theo yêu cầu
         mixerGrid.classList.remove("expanded");
         expandBtn.classList.remove("active");
         if (collapseTimer) { clearTimeout(collapseTimer); collapseTimer = null; }
+        // Đợi 1 frame để trình duyệt áp dụng display:none xong rồi mới đo lại — đo ngay lập tức
+        // có thể vẫn đọc được chiều cao CŨ (chưa kịp reflow).
+        requestAnimationFrame(() => requestAnimationFrame(resizeWindowToContent));
     }
 
     function scheduleAutoCollapse() {
@@ -325,6 +343,7 @@ const AUTO_COLLAPSE_MS = 12000; // giữa khoảng 10-15 giây theo yêu cầu
         } else {
             mixerGrid.classList.add("expanded");
             expandBtn.classList.add("active");
+            requestAnimationFrame(() => requestAnimationFrame(resizeWindowToContent));
             scheduleAutoCollapse();
         }
 
@@ -337,6 +356,10 @@ const AUTO_COLLAPSE_MS = 12000; // giữa khoảng 10-15 giây theo yêu cầu
             if (mixerGrid.classList.contains("expanded")) scheduleAutoCollapse();
         });
     });
+
+    // "Menu ôm sát nội dung" ngay từ lúc mở app — đo và co cửa sổ về đúng trạng thái Collapsed
+    // (mixer-grid vốn đã display:none mặc định theo CSS, không cần đợi gì thêm).
+    requestAnimationFrame(() => requestAnimationFrame(resizeWindowToContent));
 
 })();
 
@@ -487,7 +510,7 @@ document.getElementById("applyToneBtn")?.addEventListener("click", () => {
 const MANUAL_OVERRIDE_DURATION_MS = 4 * 60 * 1000;
 
 const aiKeyDetectLineEl = document.getElementById("aiKeyDetectLine");
-const manualOverrideStatusEl = document.getElementById("manualOverrideStatus");
+const keySourceLabelEl = document.getElementById("keySourceLabel"); // UI Final v2.0 — Phần IV: nhãn nguồn Key rõ ràng, không mập mờ
 
 const keySource = {
     manual: { active: false, value: null, deadlineAt: null, tickHandle: null },
@@ -521,15 +544,13 @@ function formatCountdownMMSS(ms) {
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-// 1 hàm DUY NHẤT vẽ lại 2 dòng hiển thị mới trong card Key — tránh nhiều nơi tự
-// set textContent lệch nhau. KHÔNG đụng #keyInfo (giữ nguyên hành vi/text hiện có).
+// 1 hàm DUY NHẤT vẽ lại card Key — tránh nhiều nơi tự set textContent lệch nhau.
 function refreshKeySourceDisplay() {
 
     if (aiKeyDetectLineEl) {
 
-        // Mục A ("Key tạm"): nếu có ước lượng tạm mới hơn giá trị ĐÃ KHOÁ -> hiện kèm nhãn
-        // "đang dò" cho cảm giác tức thì. Giá trị thật dùng để gửi Plugin (keySource.ai.value)
-        // KHÔNG đổi ở đây — chỉ đổi hiển thị.
+        // Phần III: "Manual ON -> AI vẫn Detect -> UI vẫn hiện AI Detect" — dòng này LUÔN hiện AI
+        // đang nghĩ gì, BẤT KỂ nguồn nào đang thật sự điều khiển Plugin.
         const showProvisional = keySource.ai.provisional && keySource.ai.provisional !== keySource.ai.value;
         aiKeyDetectLineEl.textContent = showProvisional
             ? `AI Key Detect: ${keySource.ai.provisional} (đang dò...)`
@@ -537,16 +558,20 @@ function refreshKeySourceDisplay() {
 
     }
 
-    if (!manualOverrideStatusEl) return;
+    if (!keySourceLabelEl) return;
 
-    if (keySource.manual.active) {
+    // Phần IV: hiển thị RÕ RÀNG, KHÔNG mập mờ — đúng 1 trong 3 giá trị, không dùng chung text.
+    const sourceName = getActiveSourceName();
+    const sourceLabel = sourceName === "manual" ? "MANUAL" : sourceName === "songDb" ? "SONG DATABASE" : "AI DETECT";
+
+    if (sourceName === "manual") {
 
         const remainMs = keySource.manual.deadlineAt - Date.now();
-        manualOverrideStatusEl.textContent = `Auto Detect · ${formatCountdownMMSS(remainMs)}`;
+        keySourceLabelEl.textContent = `Source: ${sourceLabel} · ${formatCountdownMMSS(remainMs)}`;
 
     } else {
 
-        manualOverrideStatusEl.textContent = "AI Key Detect"; // đúng yêu cầu: KHÔNG hiện timer ở chế độ AI/Song Database
+        keySourceLabelEl.textContent = `Source: ${sourceLabel}`;
 
     }
 
@@ -730,7 +755,9 @@ function startAiRealtimeLoop() {
 
         if (getActiveSourceName() === "ai") {
 
-            if (keyInfoEl) keyInfoEl.textContent = `Auto Detect (${Math.round(result.confidence * 100)}% tin cậy)`;
+            // UI Final v2.0: KHÔNG còn ghi "Auto Detect (xx%)" vào #keyInfo nữa — #keySourceLabel
+            // đã hiển thị rõ "Source: AI DETECT" (Phần IV), tránh trùng lặp/nhiều dòng gây rối.
+            if (keyInfoEl) keyInfoEl.textContent = "";
             applyActiveKeyToPlugin("AI Detect");
             startModulationWatcher();
 
@@ -749,15 +776,17 @@ function triggerAiKeyDetect() {
 
     cancelManualOverride();
 
+    // UI FINAL v2.0 — Phần III: "Manual OFF -> Plugin lập tức dùng AI. Không mất dữ liệu.
+    // Không Detect lại từ đầu." AI luôn chạy NỀN liên tục suốt lúc Manual bật (startAiRealtimeLoop
+    // không bao giờ dừng — xem vòng lặp bên dưới), nên keySource.ai.value LUÔN đã có sẵn giá trị
+    // mới nhất ngay tại thời điểm này -> áp dụng NGAY LẬP TỨC, không cần chờ vòng dò tiếp theo.
     if (keySource.songDb.active) {
 
         applyActiveKeyToPlugin("Song Database");
 
     } else {
 
-        setStatus("dot-key", "pending");
-        if (keyInfoEl) keyInfoEl.textContent = "AI Detecting...";
-        console.log("[Key Source] AI Detect");
+        applyActiveKeyToPlugin("AI Detect");
 
     }
 
@@ -796,13 +825,12 @@ applyKeyBtn?.addEventListener("click", () => {
 
     originalKey = selectedKey;
     if (currentKeyEl) currentKeyEl.textContent = selectedKey;
-    if (keyInfoEl) keyInfoEl.textContent = "Manual Key";
+    if (keyInfoEl) keyInfoEl.textContent = ""; // #keySourceLabel đã hiển thị "Source: MANUAL" rõ ràng (Phần IV)
     setStatus("dot-key", "pending"); // cam: đang gửi, chờ kết quả thực thi
 
     sendKeyToAutotune(selectedKey).then((result) => {
         if (result.ok) {
             setStatus("dot-key", "online"); // xanh: đã gửi thành công (qua MIDI hoặc click)
-            if (keyInfoEl) keyInfoEl.textContent = `Manual Key (${result.driverUsed})`;
             logKeySource("Manual Override");
 
             // SEND thành công -> Plugin chính thức đổi, bắt đầu đếm ngược 4 phút.
@@ -810,7 +838,7 @@ applyKeyBtn?.addEventListener("click", () => {
             startManualOverrideCountdown();
         } else {
             setStatus("dot-key", "offline"); // đỏ: gửi thất bại
-            if (keyInfoEl) keyInfoEl.textContent = "Lỗi gửi Key";
+            if (keyInfoEl) keyInfoEl.textContent = "⚠️ Lỗi gửi Key"; // LỖI thật -> vẫn cần báo rõ, giữ nguyên
             console.error("sendKeyToAutotune lỗi:", result.detail);
         }
         refreshKeySourceDisplay();

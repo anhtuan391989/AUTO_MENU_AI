@@ -261,6 +261,28 @@ ipcMain.on("telemetry-record", (event, record) => {
 });
 
 // ================================
+// UI FINAL v2.0 — "Menu ôm sát nội dung" (Phần II). CHỈ 1 việc duy nhất: đổi chiều CAO cửa sổ
+// chính theo đúng số đo renderer tự đo được từ DOM thật (KHÔNG đoán số ở main.js) — dùng khi
+// Collapse (menu ôm sát, không còn nền trống) / Expand (mở đúng đủ chỗ cho Control). Chiều RỘNG
+// LUÔN giữ nguyên 1200 (không đổi, đúng yêu cầu). Đây là kênh IPC MỚI, tách biệt hoàn toàn khỏi
+// mọi kênh IPC nghiệp vụ hiện có (Key/BPM/NowPlaying/AI...) — không đụng, không đổi bất kỳ kênh
+// nào khác.
+// ================================
+ipcMain.on("resize-window", (event, { height } = {}) => {
+    try {
+        if (!mainWin || mainWin.isDestroyed()) return;
+        if (typeof height !== "number" || !Number.isFinite(height)) return;
+
+        const [currentWidth] = mainWin.getContentSize();
+        const clampedHeight = Math.max(200, Math.min(1000, Math.round(height))); // chặn giá trị bất thường, không tin tưởng dữ liệu renderer 100%
+
+        mainWin.setContentSize(currentWidth, clampedHeight);
+    } catch (err) {
+        console.error("resize-window lỗi:", err);
+    }
+});
+
+// ================================
 // LẤY TỌA ĐỘ: dùng AutoHotkey v2 (di chuột thật tới vị trí + nhấn F8)
 // Không che màn hình, hoạt động đúng trên cả nhiều màn hình vì MouseGetPos
 // của AHK tự tính theo toàn bộ desktop ảo (ghép tất cả các màn hình).
