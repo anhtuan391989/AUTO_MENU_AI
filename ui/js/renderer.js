@@ -1600,3 +1600,31 @@ function bridgeSemitoneDelta(fromKeyName, toKeyName) {
     if (delta > 6) delta -= 12;
     return delta;
 }
+/* ==========================================================
+   UI FINAL v3.2 — Mục IV: Giá trị KEY tự co font theo độ dài,
+   không bao giờ tràn card. Có ~8 chỗ khác nhau set textContent
+   cho #currentKey (chọn tay, AI detect, song database, load lại
+   settings...) — thay vì sửa từng chỗ (rủi ro sót/đụng logic),
+   dùng MutationObserver quan sát nội dung #currentKey và tự đo/co
+   font mỗi khi giá trị đổi, không đụng bất kỳ dòng gán textContent
+   nào ở trên. Thuần DOM, không thêm thư viện/canvas/WebGL.
+   ========================================================== */
+(function () {
+    const keyValueEl = document.getElementById("currentKey");
+    if (!keyValueEl) return;
+
+    const MAX_FONT = 38; // px — kích thước gốc, khớp trần của clamp() trong CSS
+    const MIN_FONT = 20; // px — không co nhỏ hơn mức này để vẫn dễ đọc
+
+    function fitKeyFont() {
+        let size = MAX_FONT;
+        keyValueEl.style.fontSize = size + "px";
+        while (keyValueEl.scrollWidth > keyValueEl.clientWidth && size > MIN_FONT) {
+            size -= 1;
+            keyValueEl.style.fontSize = size + "px";
+        }
+    }
+
+    new MutationObserver(fitKeyFont).observe(keyValueEl, { characterData: true, childList: true, subtree: true });
+    fitKeyFont(); // áp dụng luôn cho giá trị mặc định lúc mở app
+})();
