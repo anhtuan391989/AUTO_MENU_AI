@@ -4,33 +4,35 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root { --bg: #020813; --panel: #071421; --panel2: #0b1b2c; --border: #0ea5ff; --cyan: #13dfff; --cyan2: #00cfff; --text: #ffffff;}
 body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-family: "Segoe UI", sans-serif; color: #fff; overflow: hidden;}
-.app { width: 1200px; height: 800px; margin: 0 auto; padding: 6px; display: flex; flex-direction: column; justify-content: flex-start; gap: 6px; background: linear-gradient(180deg, #03111f, #010813);}
+.app { width: 1200px; margin: 0 auto; padding: 6px; display: flex; flex-direction: column; justify-content: flex-start; gap: 6px; background: linear-gradient(180deg, #03111f, #010813);} /* v3.0: bỏ height cố định 800px — "ôm sát nội dung" (Mục IX), không dùng IPC resize (bị cấm ở task này) */
 ::-webkit-scrollbar { display: none; }
 
 /* =====================================
 2. HEADER & STATUS
 ===================================== */
-.header { height: 52px; display: grid; grid-template-columns: 240px 1fr 180px; align-items: center; padding: 0 12px; border: 1px solid rgba(0,180,255,.35); border-radius: 12px; background: linear-gradient(180deg,rgba(0,25,45,.55),rgba(0,0,0,.55));}
-.logo { font-size: 20px; font-weight: 900; color: var(--cyan); letter-spacing: 1px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.header { height: 47px; display: grid; grid-template-columns: 220px 1fr 170px; align-items: center; padding: 0 11px; border: 1px solid rgba(0,180,255,.35); border-radius: 11px; background: linear-gradient(180deg,rgba(0,25,45,.55),rgba(0,0,0,.55));} /* v3.0 Mục V: thu nhỏ thêm ~10% từ 52px */
+.logo { font-size: 18px; font-weight: 900; color: var(--cyan); letter-spacing: 1px; display: flex; align-items: center; gap: 7px; white-space: nowrap; }
 .logo-dot { flex-shrink: 0; }
 .header-center { display: flex; align-items: center; justify-content: flex-start; gap: 20px; min-width: 0; /* bắt buộc để flex item con co lại đúng, không đẩy tràn header */ }
 .window-buttons { display: flex; justify-content: flex-end; gap: 6px; }
 .window-buttons button { width: 29px; height: 29px; border: none; border-radius: 8px; background: #10253b; color: #fff; cursor: pointer; }
 .status-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: 6px; margin-bottom: 2px; }
-.status-card { height: 60px; padding: 9px 11px; border-radius: 11px; border: 1px solid rgba(0,180,255,.25); background: linear-gradient(180deg,#081523,#05101a); display: flex; align-items: center; justify-content: flex-start; gap: 8px; } /* v3.2: khôi phục chiều cao/bo góc gần bản gốc (60px, radius 12->11), chỉ giảm padding ~5% (10/12 -> 9/11) */
-.status-dot { width: 12px; height: 12px; border-radius: 50%; margin-left: auto;}
+.status-card { height: 54px; padding: 7px 9px; border-radius: 10px; border: 1px solid rgba(0,180,255,.25); background: linear-gradient(180deg,#081523,#05101a); display: flex; align-items: center; justify-content: flex-start; gap: 7px; } /* v3.0 Mục VI: giảm thêm ~10% từ 60px (v3.2), padding/icon đồng đều */
+.status-dot { width: 11px; height: 11px; border-radius: 50%; margin-left: auto;}
 .logo-dot { margin-left: 0; } /* v3.2: huỷ margin-left:auto kế thừa từ .status-dot — Dot AI phải dính sát cụm logo (cách 6-8px qua gap của .logo), không bị đẩy dạt sang cụm Now Playing */
-.status-icon {font-size: 24px; display: flex; align-items: center; color: var(--cyan);} /* v3.2: khôi phục 24px (bản gốc) */
-.status-left {display: flex; align-items: center; gap: 8px;}
+.status-icon {font-size: 20px; display: flex; align-items: center; color: var(--cyan);} /* v3.0: giảm từ 24px (v3.2) theo yêu cầu giảm icon đồng đều */
+.status-left {display: flex; align-items: center; gap: 7px;}
+.status-title { font-size: 8px; color: #8fa5b8; font-weight: 700; letter-spacing: .3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* v3.0: BỔ SUNG — thiếu hoàn toàn font-size (dùng mặc định trình duyệt 16px), rủi ro tràn card thật sự, đã sửa */
+.status-sub { font-size: 12px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* v3.0: BỔ SUNG — cùng lý do trên */
 .status-sub-time { font-variant-numeric: tabular-nums; } /* số không bị nhảy chiều rộng mỗi giây */
 
 /* NOW PLAYING (thay cho đồng hồ lớn cũ ở giữa header) */
 .now-playing { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; overflow: hidden; }
-.now-playing-label { font-size: 15px; font-weight: 700; color: var(--cyan); letter-spacing: .5px; white-space: nowrap; flex-shrink: 0; }
+.now-playing-label { font-size: 13px; font-weight: 700; color: var(--cyan); letter-spacing: .5px; white-space: nowrap; flex-shrink: 0; }
 .now-playing-viewport { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
 .now-playing-track { display: inline-flex; white-space: nowrap; will-change: transform; }
 .now-playing-track.marquee { animation-name: now-playing-marquee; animation-timing-function: linear; animation-iteration-count: infinite; }
-.now-playing-text-copy { display: inline-block; font-size: 16px; color: #eafcff; padding-right: 48px; }
+.now-playing-text-copy { display: inline-block; font-size: 14px; color: #eafcff; padding-right: 44px; }
 @keyframes now-playing-marquee {
     from { transform: translateX(0); }
     to   { transform: translateX(-50%); }
@@ -76,7 +78,7 @@ body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-fa
 .analyzer-card { height: 104px; border-radius: 12px; border: 1px solid rgba(0,180,255,.25); background: linear-gradient(180deg,#081523,#05101a); display: flex; flex-direction: column; justify-content: center; align-items: center; }
 .analyzer-value { font-size: clamp(26px, 3.2vw, 38px); font-weight: 900; color: #13dfff; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* clamp() thay vì hardcode — Mục X: không giảm khả năng đọc, chỉ chống tràn khi text dài */
 .control-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: 6px; margin-bottom: 2px; }
-.control-btn { height: 47px; border: 1px solid rgba(0,180,255,.25); border-radius: 10px; background: linear-gradient(180deg,#0a1826,#07111c); color: #13dfff; font-weight: 800; cursor: pointer; }
+.control-btn { height: 42px; border: 1px solid rgba(0,180,255,.25); border-radius: 9px; background: linear-gradient(180deg,#0a1826,#07111c); color: #13dfff; font-weight: 800; cursor: pointer; } /* v3.0 Mục VIII: giảm ~10% từ 47px */
 #modTime{ font-size: clamp(26px, 3.2vw, 40px); line-height:1.3; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
 #modStatus{ font-size:11px; opacity:.85; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px;} /* v3.2: nhỏ lại (13->11px), modTime vẫn là trọng tâm */
 #modTimeline{ font-size:9px; opacity:.65; letter-spacing:1px;} /* v3.2: nhỏ lại (11->9px) */

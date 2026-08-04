@@ -58,7 +58,7 @@ updateClock();
     if (!viewport || !track || !copyA || !copyB) return; // an toàn nếu HTML thiếu phần tử
 
     const MARQUEE_SPEED_PX_PER_SEC = 45; // tốc độ chạy chữ, vừa mắt, không giật
-    const COPY_GAP_PX = 48; // PHẢI khớp padding-right của .now-playing-text-copy trong CSS
+    const COPY_GAP_PX = 44; // PHẢI khớp padding-right của .now-playing-text-copy trong CSS (v3.0: 48->44)
     const MIN_DURATION_SEC = 4;
 
     function textForSnapshot(snapshot) {
@@ -542,8 +542,8 @@ function refreshKeySourceDisplay() {
         // KHÔNG đổi ở đây — chỉ đổi hiển thị.
         const showProvisional = keySource.ai.provisional && keySource.ai.provisional !== keySource.ai.value;
         aiKeyDetectLineEl.textContent = showProvisional
-            ? `AI Key Detect: ${keySource.ai.provisional} (đang dò...)`
-            : `AI Key Detect: ${keySource.ai.value}`;
+            ? `AI Detect: ${keySource.ai.provisional} (đang dò...)`
+            : `AI Detect: ${keySource.ai.value}`;
 
     }
 
@@ -759,15 +759,18 @@ function triggerAiKeyDetect() {
 
     cancelManualOverride();
 
+    // "Manual OFF -> Plugin lập tức dùng AI. Không mất dữ liệu. Không Detect lại từ đầu."
+    // AI luôn chạy NỀN liên tục suốt lúc Manual bật (startAiRealtimeLoop không bao giờ dừng),
+    // nên keySource.ai.value LUÔN đã có sẵn giá trị mới nhất ngay tại thời điểm này -> áp dụng
+    // NGAY LẬP TỨC, không cần chờ vòng dò tiếp theo. (Khôi phục fix đã bị mất do revert ngoài
+    // ý muốn — xem báo cáo.)
     if (keySource.songDb.active) {
 
         applyActiveKeyToPlugin("Song Database");
 
     } else {
 
-        setStatus("dot-key", "pending");
-        if (keyInfoEl) keyInfoEl.textContent = "AI Detecting...";
-        console.log("[Key Source] AI Detect");
+        applyActiveKeyToPlugin("AI Detect");
 
     }
 
