@@ -1,119 +1,225 @@
-/* RESET */
-*{margin:0;padding:0;box-sizing:border-box;}
-body{background:#dcdcdc;font-family:"Segoe UI",sans-serif;}
-/* WINDOW */
-.setup-window{width:1000px;height:650px;margin:0 auto;background:#e5e5e5;border:1px solid #b7b7b7;background:#efefef;}
-/* TITLE */
-.setup-title{height:34px;display:flex;align-items:center;padding-left:10px;font-size:18px;background:#f6f6f6;border-bottom:1px solid #c8c8c8;}
-/* GRID */
-.setup-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;padding:10px;}
-/* COLUMN */
-.column{display:flex;flex-direction:column;gap:4px;}
-/* GROUP TITLE */
-.group-title{margin-top:4px;margin-bottom:2px;font-size:15px;color:#222;}
-.group-title{ font-size:16px; font-weight:700; text-align:center; padding:10px; border-bottom:1px solid #444; margin-bottom:12px; width:100%; box-sizing:border-box;}
-/* BUTTON */
-.setup-btn{height:26px;border:1px solid #a8a8a8;background:#ececec;font-size:14px;cursor:pointer;transition:.15s;}
-.setup-btn:hover{background:#dfeeff;border-color:#4c8bf5;}
-.setup-btn:active{background:#cde2ff;}
-.modal-box{ width:340px; background:#efefef; border:1px solid #a8a8a8; padding:15px;}
-.modal-title{ font-size:18px; margin-bottom:12px; font-weight:600;}
-.daw-list{ display:flex; flex-direction:column; gap:10px; margin-bottom:15px;}
-.modal-buttons{ display:flex; justify-content:flex-end; gap:8px;}
-.modal-buttons button{width:90px; height:28px;}
-.modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
-.modal.show { display: flex; justify-content: center; align-items: center; }
-.modal-box { background: white; padding: 20px; border-radius: 5px; width: 400px; }
-.modal { display: none; }
-.modal.show { display: flex; } /* Hoặc block */
-.footer-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 10px 10px 10px; margin-top: 10px;}
-
-/* Thêm vào cuối file setup.css */
-.setup-status{ border:1px solid #b7b7b7; background:#f6f6f6; padding:8px; display:flex; flex-direction:column; gap:4px; font-size:11px;}
-.progress-box{ margin-bottom:10px;}
-.progress-bar{
-    width:100%;
-    height:10px;
-    background:#333;
-    border-radius:10px;
-    overflow:hidden;
+/* =====================================
+   RESET & TOKENS — đồng bộ với ui/css/style.css (Menu chính)
+   ===================================== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+    --bg: #020813;
+    --panel: #071421;
+    --panel2: #0b1b2c;
+    --border: #0ea5ff;
+    --cyan: #13dfff;
+    --cyan2: #00cfff;
+    --text: #ffffff;
+    --text-dim: #8fa5b8;
+    --danger: #ff4d4d;
+}
+body {
+    background: radial-gradient(circle at top, #0b2036, #020813 65%);
+    font-family: "Segoe UI", sans-serif;
+    color: var(--text);
+    min-height: 100vh;
 }
 
-#setupProgressFill{
-    width:0%;
-    height:100%;
-    background:#00c853;
-    transition:0.3s;
+/* =====================================
+   SHELL: sidebar trái cố định + nội dung phải cuộn được
+   ===================================== */
+.setup-shell {
+    width: 100%;
+    max-width: 1160px;
+    min-width: 760px;
+    height: 100vh;
+    max-height: 760px;
+    margin: 0 auto;
+    display: flex;
+    background: linear-gradient(180deg, #03111f, #010813);
+    border: 1px solid rgba(0, 180, 255, .25);
+    border-radius: 14px;
+    overflow: hidden;
 }
 
-/* thanh trạng thái*/
-.ready{ color:#00c853; font-weight:bold;}
-.missing{ color:#ff3d00; font-weight:bold;}
-.column{
-    flex:1;
-    min-width:0;
+/* ---------- SIDEBAR ---------- */
+.setup-sidebar {
+    width: 210px;
+    min-width: 180px;
+    flex-shrink: 0;
+    background: linear-gradient(180deg, rgba(0, 25, 45, .55), rgba(0, 0, 0, .55));
+    border-right: 1px solid rgba(0, 180, 255, .25);
+    display: flex;
+    flex-direction: column;
+    padding: 14px 10px;
+    gap: 12px;
+    overflow-y: auto;
 }
-.setup-container{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:15px; align-items:stretch;}
-
-.status-row{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-
-    margin-bottom:8px;
+.sidebar-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--cyan);
+    letter-spacing: .5px;
+    padding: 2px 4px 8px;
+    border-bottom: 1px solid rgba(0, 180, 255, .25);
 }
-
-.status-badge{
-    padding:4px 10px;
-    border-radius:6px;
-    font-size:12px;
+.sidebar-nav { display: flex; flex-direction: column; gap: 4px; }
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .3px;
+    cursor: pointer;
+    text-align: left;
+    transition: .15s;
 }
-
-.missing{
-    background:#ff5252;
-    color:white;
-}
-
-.ready{
-    background:#00c853;
-    color:white;
-}
-
-.setup-divider{
-    border:none;
-    border-top:1px solid #444;
-    margin:10px 0;
-}
-
-.setup-status-list{
-    display:flex;
-    flex-direction:column;
-    gap:4px;
-}
-
-.status-item{
-    font-size:13px;
-    padding:2px 4px;
+.nav-item:hover { background: rgba(0, 180, 255, .08); color: var(--text); }
+.nav-item.active {
+    background: linear-gradient(90deg, rgba(0,191,255,.18), rgba(57,227,255,.08));
+    border-color: rgba(0, 180, 255, .4);
+    color: var(--cyan);
+    box-shadow: 0 0 10px rgba(0, 180, 255, .15);
 }
 
-.status-ready{
-    color:#4CAF50;
-    font-weight:700;
+/* ---------- PROGRESS ---------- */
+.progress-box { padding: 2px 4px; }
+.progress-text { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+.progress-bar { width: 100%; height: 8px; background: #0a1826; border-radius: 8px; overflow: hidden; border: 1px solid rgba(0,180,255,.2); }
+#setupProgressFill { width: 0%; height: 100%; background: linear-gradient(90deg, #00bfff, #39e3ff); transition: .3s; }
+
+/* ---------- CONTENT ---------- */
+.setup-content { flex: 1; min-width: 0; overflow-y: auto; padding: 18px 22px 30px; }
+.setup-panel { display: none; flex-direction: column; gap: 14px; }
+.setup-panel.active { display: flex; }
+
+.panel-card {
+    background: linear-gradient(180deg, #081523, #05101a);
+    border: 1px solid rgba(0, 180, 255, .22);
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.panel-card-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 2px;
 }
 
-.status-missing{
-    color:#ff5252;
-    font-weight:700;
+/* ---------- BUTTONS / FORM CONTROLS ---------- */
+.setup-btn {
+    height: 32px;
+    border: 1px solid rgba(0, 180, 255, .25);
+    border-radius: 8px;
+    background: linear-gradient(180deg, #0a1826, #07111c);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0 12px;
+    transition: .15s;
+    text-align: left;
 }
-
-.status-missing{
-    color:#ff5252;
-    font-weight:700;
+.setup-btn:hover:not(:disabled) {
+    border-color: var(--cyan);
+    background: linear-gradient(180deg, #0d2238, #0a1826);
+    box-shadow: 0 0 10px rgba(0, 180, 255, .3);
 }
+.setup-btn:active:not(:disabled) { transform: translateY(1px); }
+.setup-btn:disabled { opacity: .4; cursor: not-allowed; }
 
-.status-two-col{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    column-gap:14px;
-    row-gap:4px;
+.row-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.setup-checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); cursor: pointer; }
+.setup-checkbox input { accent-color: var(--cyan); }
+
+.setting-row { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; }
+.setting-row label { font-size: 12px; color: var(--text-dim); }
+.status-text { font-size: 12px; color: var(--text); background: #0a1826; border: 1px solid rgba(0,180,255,.2); border-radius: 6px; padding: 6px 8px; word-break: break-all; }
+
+.hint-text { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+.hint-text code { color: var(--cyan2); background: rgba(0,180,255,.08); padding: 1px 5px; border-radius: 4px; }
+
+.group-title { font-size: 12px; font-weight: 700; color: var(--text-dim); margin-top: 4px; }
+
+select, input[type="text"], input[type="number"] {
+    height: 30px;
+    background: #0a1826;
+    border: 1px solid rgba(0, 180, 255, .25);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 0 8px;
+    font-size: 13px;
+}
+.ph-select { width: 100%; margin-bottom: 8px; }
+
+/* ---------- BADGES ---------- */
+.badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; letter-spacing: .2px; }
+.badge-unwired { background: rgba(255, 77, 77, .12); color: #ff8080; border: 1px solid rgba(255, 77, 77, .3); }
+.badge-live { background: rgba(0, 255, 68, .1); color: #4CAF50; border: 1px solid rgba(0, 255, 68, .3); }
+
+/* ---------- PLACEHOLDER GRID (mục chưa có Engine) ---------- */
+.placeholder-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.ph-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-dim); }
+.ph-field select, .ph-field input[type="range"] { width: 100%; }
+
+/* ---------- MIDI TEST ROW ---------- */
+.midi-test-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.midi-test-row label { width: 90px; font-size: 12px; color: var(--text-dim); }
+.midi-test-row input { flex: 1; }
+
+/* ---------- MIDI MAPPING TABLES ---------- */
+.mapping-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.mapping-block { background: #0a1826; border: 1px solid rgba(0,180,255,.18); border-radius: 8px; padding: 10px; }
+.mapping-block-title { font-size: 12px; font-weight: 700; color: var(--cyan2); margin-bottom: 6px; }
+.mapping-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 4px 0; border-top: 1px solid rgba(255,255,255,.05); color: var(--text-dim); }
+.mapping-row:first-of-type { border-top: none; }
+.tag-unassigned { font-size: 10px; color: #ff8080; background: rgba(255,77,77,.1); border: 1px solid rgba(255,77,77,.25); padding: 1px 8px; border-radius: 20px; }
+
+/* =====================================
+   MODAL (giữ cơ chế .modal/.show cũ, chỉ đổi màu)
+   ===================================== */
+.modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,5,12,.72); z-index: 1000; align-items: center; justify-content: center; }
+.modal.show { display: flex; }
+.modal-box {
+    width: 360px;
+    background: linear-gradient(180deg, #0b1b2c, #071421);
+    border: 1px solid rgba(0, 180, 255, .35);
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: 0 0 30px rgba(0, 180, 255, .15);
+    color: var(--text);
+}
+.modal-title { font-size: 16px; font-weight: 700; color: var(--cyan); margin-bottom: 14px; }
+.daw-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; font-size: 13px; }
+.daw-list input { accent-color: var(--cyan); margin-right: 6px; }
+.modal-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.modal-buttons button {
+    width: 90px; height: 30px;
+    border: 1px solid rgba(0, 180, 255, .25);
+    border-radius: 6px;
+    background: linear-gradient(180deg, #0a1826, #07111c);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12px;
+}
+.modal-buttons button:hover { border-color: var(--cyan); box-shadow: 0 0 8px rgba(0,180,255,.3); }
+
+/* =====================================
+   RESPONSIVE — chống vỡ layout ở 125%/150% zoom (Mục XVIII)
+   ===================================== */
+@media (max-width: 900px) {
+    .setup-shell { flex-direction: column; height: auto; max-height: none; min-width: 0; }
+    .setup-sidebar { width: 100%; flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+    .sidebar-nav { flex-direction: row; }
+    .nav-item span { display: none; }
+    .setup-content { max-height: 70vh; }
 }
