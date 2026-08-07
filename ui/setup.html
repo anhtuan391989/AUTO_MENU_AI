@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Cài đặt — AUTO MENU AI</title>
+    <title>System Center — AUTO MENU AI</title>
     <link rel="stylesheet" href="css/setup.css">
 </head>
 
@@ -12,7 +12,7 @@
 
         <!-- ============== SIDEBAR ============== -->
         <aside class="setup-sidebar">
-            <div class="sidebar-title">⚙ Cài đặt</div>
+            <div class="sidebar-title">⚙ System Center</div>
 
             <div class="progress-box">
                 <div id="setupProgressText" class="progress-text">Hoàn thành: 0 / 10</div>
@@ -22,27 +22,42 @@
             </div>
 
             <nav class="sidebar-nav" id="sidebarNav">
-                <button class="nav-item active" data-panel="panel-general">🖥 <span>GENERAL</span></button>
-                <button class="nav-item" data-panel="panel-audio">🔊 <span>AUDIO</span></button>
+                <button class="nav-item active" data-panel="panel-dashboard">🏠 <span>Dashboard</span></button>
+                <button class="nav-item" data-panel="panel-audio">🔊 <span>Audio</span></button>
                 <button class="nav-item" data-panel="panel-ai">🤖 <span>AI</span></button>
                 <button class="nav-item" data-panel="panel-midi">🎹 <span>MIDI</span></button>
-                <button class="nav-item" data-panel="panel-plugin">🧩 <span>PLUGIN</span></button>
                 <button class="nav-item" data-panel="panel-daw">🎛 <span>DAW</span></button>
-                <button class="nav-item" data-panel="panel-database">🗄 <span>DATABASE</span></button>
-                <button class="nav-item" data-panel="panel-backup">💾 <span>BACKUP</span></button>
-                <button class="nav-item" data-panel="panel-advanced">🛠 <span>ADVANCED</span></button>
-                <button class="nav-item" data-panel="panel-about">ℹ <span>ABOUT</span></button>
+                <button class="nav-item" data-panel="panel-plugins">🧩 <span>Plugin</span></button>
+                <button class="nav-item" data-panel="panel-database">🗄 <span>Database</span></button>
+                <button class="nav-item" data-panel="panel-calibration">🎯 <span>Calibration</span></button>
+                <button class="nav-item" data-panel="panel-backup">💾 <span>Backup</span></button>
+                <button class="nav-item" data-panel="panel-system">🖥 <span>System</span></button>
             </nav>
         </aside>
 
         <!-- ============== CONTENT ============== -->
         <main class="setup-content">
 
-            <!-- ===================== GENERAL ===================== -->
-            <section class="setup-panel active" id="panel-general" data-title="General">
+            <!-- ===================== DASHBOARD ===================== -->
+            <section class="setup-panel active" id="panel-dashboard" data-title="Dashboard">
 
                 <div class="panel-card">
-                    <div class="panel-card-title">💾 Preset cấu hình</div>
+                    <div class="panel-card-title">📊 System Status</div>
+                    <div class="status-grid" id="dashboardStatusGrid">
+                        <div class="status-card"><span class="status-label">Audio</span><span class="status-pill status-pill--dim" id="dashAudioPill">—</span></div>
+                        <div class="status-card"><span class="status-label">AI</span><span class="status-pill status-pill--soon">Coming Soon</span></div>
+                        <div class="status-card"><span class="status-label">MIDI</span><span class="status-pill status-pill--dim" id="dashMidiPill">—</span></div>
+                        <div class="status-card"><span class="status-label">DAW</span><span class="status-pill status-pill--dim" id="dashDawPill">—</span></div>
+                        <div class="status-card"><span class="status-label">Plugin</span><span class="status-pill status-pill--dim" id="dashPluginPill">—</span></div>
+                        <div class="status-card"><span class="status-label">Database</span><span class="status-pill status-pill--soon">Coming Soon</span></div>
+                        <div class="status-card"><span class="status-label">Calibration</span><span class="status-pill status-pill--dim" id="dashCalibPill">—</span></div>
+                    </div>
+                    <p class="hint-text">Đọc trực tiếp từ cấu hình đã lưu (dữ liệu thật) — "Coming Soon" nghĩa là chưa
+                        có Engine để tự kiểm tra, không phải lỗi.</p>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">⚡ Quick Actions</div>
                     <div class="row-buttons">
                         <button id="savePresetBtn" class="setup-btn">💾 Lưu Preset</button>
                         <button id="loadPresetBtn" class="setup-btn">📂 Tải Preset</button>
@@ -50,64 +65,72 @@
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">⌨ Phím tắt</div>
-                    <button id="openShortcutsBtn" class="setup-btn">⌨ Mở hệ thống phím tắt</button>
-                </div>
-
-                <div class="panel-card">
-                    <div class="panel-card-title">🚀 Khởi động</div>
-                    <button id="openProjectModal" class="setup-btn">📂 Mở kèm Project / Youtube</button>
-
-                    <div class="setting-row">
-                        <label>📁 Đường dẫn DAW</label>
-                        <div id="currentDawPath" class="status-text">❌ Chưa thiết lập</div>
-                        <button id="browseDawBtn" class="setup-btn">📂 Chọn đường dẫn DAW</button>
+                    <div class="panel-card-title">🚀 Mở kèm Project / Youtube</div>
+                    <div class="row-buttons" style="margin-bottom:10px;">
+                        <label class="setup-checkbox"><input type="checkbox" id="checkOpenPj"> Mở Project</label>
+                        <label class="setup-checkbox"><input type="checkbox" id="checkCopyPj"> Tạo bản COPY</label>
+                        <label class="setup-checkbox"><input type="checkbox" id="checkOpenYt"> Mở Youtube</label>
                     </div>
-
-                    <label class="setup-checkbox">
-                        <input type="checkbox" id="launchDawOnStartup">
-                        🚀 Mở DAW cùng Menu
-                    </label>
-                </div>
-
-                <div class="panel-card">
-                    <div class="panel-card-title">🌐 Trình duyệt</div>
-                    <button id="openBrowserModal" class="setup-btn">🌐 Trình duyệt Youtube</button>
-                    <button id="btnInstallBrave" class="setup-btn">🌐 Cài Brave không quảng cáo</button>
-                </div>
-
-                <div class="panel-card">
-                    <div class="panel-card-title">🎯 Calibration (tọa độ)</div>
-                    <div id="coordDawLabel" class="hint-text">Chưa chọn DAW</div>
-                    <div id="ahkPathDisplay" class="hint-text">⏳ Đang dò AutoHotkey...</div>
-                    <button id="btnDownloadAhk" class="setup-btn" style="display:none;">📥 Tải &amp; Cài AutoHotkey</button>
-                    <button id="btnSelectAhkPath" class="setup-btn">📂 Chọn đường dẫn AutoHotkey (nếu đã cài sẵn)</button>
-                    <button id="btnAutoKey1" class="setup-btn">✢ Lấy tọa độ Auto-Key (2 điểm)</button>
-                    <button id="btnAutoKey2" class="setup-btn">✢ Lấy tọa độ Auto-Key 2 (2 điểm)</button>
-                    <button id="btnAutoTuneKey" class="setup-btn">✢ Lấy tọa độ Key Auto-Tune (1 điểm)</button>
-                    <button id="btnChromatic" class="setup-btn">✢ Lấy tọa độ Chromatic (2 điểm)</button>
-                    <p class="hint-text">ℹ️ SoundShifter giờ điều khiển bằng MIDI (không cần lấy tọa độ chuột nữa).</p>
-                </div>
-
-                <div class="panel-card">
-                    <div class="panel-card-title">Ngôn ngữ / Giao diện / Cửa sổ / Cập nhật
-                        <span class="badge badge-unwired">Chưa có Engine</span>
+                    <textarea id="pjPathDisplay" readonly class="ph-textarea">Chưa chọn project</textarea>
+                    <div class="row-buttons" style="margin-top:8px;">
+                        <button id="btnSelectPj" class="setup-btn">Chọn PJ</button>
+                        <button id="btnSaveCurrentPj" class="setup-btn">Lưu PJ đang mở</button>
+                        <button id="btnOpenProjectBundle" class="setup-btn">🚀 Mở kèm ngay</button>
                     </div>
-                    <p class="hint-text">Chưa có logic phía Core cho Language, Theme, Window behaviour, Auto-update.
-                        Khung giao diện đặt sẵn dưới đây, vô hiệu hoá cho tới khi có Engine tương ứng.</p>
+                    <!-- nút ẩn giữ để không phá initModal(..., "btnClosePj") của setup.js -->
+                    <button id="btnClosePj" style="display:none;"></button>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">⌨ Phím tắt điều khiển</div>
+                    <div class="shortcuts-grid">
+                        <span>Chế độ hát thường</span> <input type="text" id="shortcutNormal" placeholder="Nhấn phím..." readonly>
+                        <span>Chế độ Lofi</span> <input type="text" id="shortcutLofi" placeholder="Nhấn phím..." readonly>
+                        <span>Chế độ Remix</span> <input type="text" id="shortcutRemix" placeholder="Nhấn phím..." readonly>
+                        <span>Chế độ Rap</span> <input type="text" id="shortcutRap" placeholder="Nhấn phím..." readonly>
+                        <span>Dò tone</span> <input type="text" id="shortcutKeyDetect" placeholder="Nhấn phím..." readonly>
+                    </div>
+                    <div class="row-buttons" style="margin-top:8px;">
+                        <button id="clearShortcuts" class="setup-btn">⟲ Xóa hết</button>
+                        <button id="saveShortcuts" class="setup-btn">💾 Lưu</button>
+                    </div>
+                    <!-- id cũ setup.js vẫn tham chiếu khi khởi tạo modal, giữ ẩn để không lỗi -->
+                    <button id="openShortcutsBtn" style="display:none;"></button>
+                    <button id="closeShortcuts" style="display:none;"></button>
+                </div>
+            </section>
+
+            <!-- ===================== AI ===================== -->
+            <section class="setup-panel" id="panel-ai" data-title="AI">
+                <div class="panel-card">
+                    <div class="panel-card-title">🤖 AI Core
+                        <span class="badge badge-unwired">Chưa có kênh IPC — không xoá, chỉ disable</span>
+                    </div>
+                    <p class="hint-text">core/ai (ConfidenceEngine, DecisionEngine, RuleEngine...) chưa expose IPC nào cho
+                        Setup đọc/ghi. Toàn bộ khối dưới đây là khung giao diện đúng khái niệm thật trong Core, để sẵn vị
+                        trí — chỉ cần nối IPC sau này, không phải sửa UI.</p>
                     <div class="placeholder-grid">
-                        <label class="ph-field">Ngôn ngữ<select disabled><option>Tiếng Việt</option></select></label>
-                        <label class="ph-field">Giao diện<select disabled><option>Tối (mặc định)</option></select></label>
-                        <label class="ph-field">Cửa sổ<select disabled><option>Ghi nhớ vị trí</option></select></label>
-                        <label class="ph-field">Cập nhật<button class="setup-btn" disabled>🔄 Kiểm tra cập nhật</button></label>
+                        <label class="ph-field">Realtime mode<label class="setup-checkbox"><input type="checkbox" disabled checked> Bật</label></label>
+                        <label class="ph-field">Instant Detect<label class="setup-checkbox"><input type="checkbox" disabled> Bật</label></label>
+                        <label class="ph-field">Locked Detect<label class="setup-checkbox"><input type="checkbox" disabled> Bật</label></label>
+                        <label class="ph-field">Confidence<input type="range" min="0" max="100" value="50" disabled></label>
+                        <label class="ph-field">Threshold<input type="range" min="0" max="100" value="50" disabled></label>
+                        <label class="ph-field">Reaction Speed<select disabled><option>Trung bình</option></select></label>
+                        <label class="ph-field">Prediction<label class="setup-checkbox"><input type="checkbox" disabled> Bật</label></label>
+                        <label class="ph-field">Learning<label class="setup-checkbox"><input type="checkbox" disabled> Bật</label></label>
+                        <label class="ph-field">Memory<select disabled><option>Mặc định</option></select></label>
+                        <label class="ph-field">Auto Apply<label class="setup-checkbox"><input type="checkbox" disabled> Bật</label></label>
+                        <label class="ph-field">Calibration<button class="setup-btn" disabled>Chạy Calibration AI</button></label>
+                        <label class="ph-field">Debug<label class="setup-checkbox"><input type="checkbox" disabled> Bật log debug</label></label>
                     </div>
                 </div>
             </section>
 
             <!-- ===================== AUDIO ===================== -->
             <section class="setup-panel" id="panel-audio" data-title="Audio">
+
                 <div class="panel-card">
-                    <div class="panel-card-title">🎧 Audio Interface</div>
+                    <div class="panel-card-title">🎙 Microphone (Input Device) <span class="badge badge-live">Đang hoạt động</span></div>
                     <div style="margin-bottom:10px;">🎧 <span id="statusSoundcardModal">Chưa chọn soundcard nào</span></div>
                     <select id="soundcardSelect" class="ph-select">
                         <option value="">Chọn Soundcard...</option>
@@ -116,43 +139,44 @@
                         <button id="btnSelectSoundcard" class="setup-btn">Chọn Soundcard</button>
                         <button id="btnClearAlert" class="setup-btn">Xóa cảnh báo</button>
                     </div>
-                    <!-- nút mở dạng cũ vẫn cần tồn tại vì appSettings/setup.js gắn listener refresh danh sách vào đây -->
-                    <button id="openSoundcardModal" class="setup-btn" style="display:none;">refresh</button>
+                    <!-- giữ id cũ để không phá initModal(...) trong setup.js, không hiển thị popup -->
+                    <button id="openSoundcardModal" style="display:none;"></button>
+                    <button id="closeSoundcardBtn" style="display:none;"></button>
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">Input / Output / Sample Rate / Buffer / Latency / Test / Monitor
+                    <div class="panel-card-title">📶 Microphone VU <span class="badge badge-live">Thật — đo trực tiếp mic đang chọn</span></div>
+                    <p class="hint-text">Đo mức tín hiệu micro bằng Web Audio API ngay trong Setup (không qua Engine của
+                        app) — dùng để kiểm tra nhanh mic có bắt tiếng hay không trước khi biểu diễn.</p>
+                    <div class="vu-meter"><div id="vuMeterFill" class="vu-fill"></div></div>
+                    <div class="row-buttons">
+                        <button id="btnVuStart" class="setup-btn">▶ Bắt đầu đo</button>
+                        <button id="btnVuStop" class="setup-btn">■ Dừng đo</button>
+                    </div>
+                    <p class="hint-text" id="vuMeterStatus">Chưa đo.</p>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🔈 Desktop Audio (Output Device) <span class="badge badge-unwired">Chưa có Engine — tách riêng khỏi Microphone</span></div>
+                    <p class="hint-text">App hiện chưa có khái niệm "Desktop Audio" (thu âm thanh phát ra loa/DAW) tách
+                        biệt khỏi Microphone — chỉ có 1 lựa chọn thiết bị input dùng chung cho mic. Theo đúng yêu cầu
+                        "không dùng chung", phần này để riêng, vô hiệu hoá, không dùng lại thiết bị input của Microphone.</p>
+                    <div class="placeholder-grid">
+                        <label class="ph-field">Output Device<select disabled><option>Chưa có Engine</option></select></label>
+                        <label class="ph-field">Desktop VU<button class="setup-btn" disabled>▶ Đo (chưa khả dụng)</button></label>
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">Sample Rate / Buffer Size / Latency / Audio Test / Calibration
                         <span class="badge badge-unwired">Chưa có Engine</span>
                     </div>
-                    <p class="hint-text">Chưa có Audio Engine riêng cho các mục này trong Core hiện tại — chỉ đang có lựa chọn
-                        thiết bị input ở trên (qua Web Audio). Khung giao diện dưới đây chờ nối Engine, không đại diện cho
-                        trạng thái thật.</p>
                     <div class="placeholder-grid">
                         <label class="ph-field">Sample Rate<select disabled><option>48000 Hz</option></select></label>
                         <label class="ph-field">Buffer size<select disabled><option>256 samples</option></select></label>
                         <label class="ph-field">Latency<span class="hint-text">— chưa đo được</span></label>
                         <label class="ph-field">Audio Test<button class="setup-btn" disabled>▶ Test</button></label>
-                    </div>
-                </div>
-            </section>
-
-            <!-- ===================== AI ===================== -->
-            <section class="setup-panel" id="panel-ai" data-title="AI">
-                <div class="panel-card">
-                    <div class="panel-card-title">Thông số AI Core
-                        <span class="badge badge-unwired">Chưa có kênh IPC</span>
-                    </div>
-                    <p class="hint-text">Core/AI (ConfidenceEngine, DecisionEngine, RuleEngine...) hiện chưa có kênh IPC nào
-                        để Setup đọc/ghi (preload.js chưa expose). Đây là khung giao diện hiển thị đúng các khái niệm đang
-                        tồn tại thật trong core/ai (confidence, threshold, reaction speed), nhưng chưa kết nối được vì việc
-                        thêm hàm IPC mới nằm ngoài phạm vi "chỉ sửa UI Setup" của nhiệm vụ này.</p>
-                    <div class="placeholder-grid">
-                        <label class="ph-field">Confidence tối thiểu<input type="range" min="0" max="100" value="50" disabled></label>
-                        <label class="ph-field">Threshold nhận diện<input type="range" min="0" max="100" value="50" disabled></label>
-                        <label class="ph-field">Reaction speed<select disabled><option>Trung bình</option></select></label>
-                        <label class="ph-field">Auto Apply<label class="setup-checkbox"><input type="checkbox" disabled> Bật</label></label>
-                        <label class="ph-field">Auto Detect<label class="setup-checkbox"><input type="checkbox" disabled> Bật</label></label>
-                        <label class="ph-field">Realtime mode<label class="setup-checkbox"><input type="checkbox" disabled checked> Bật</label></label>
+                        <label class="ph-field">Calibration<button class="setup-btn" disabled>Chạy Calibration Audio</button></label>
                     </div>
                 </div>
             </section>
@@ -160,16 +184,36 @@
             <!-- ===================== MIDI (ưu tiên cao nhất) ===================== -->
             <section class="setup-panel" id="panel-midi" data-title="MIDI">
 
+                <div class="panel-banner">
+                    🎹 <b>MIDI là phương thức điều khiển DAW/Plugin CHÍNH của AUTO MENU AI.</b>
+                    Chuột (mục Calibration) chỉ là phương án dự phòng khi một DAW/plugin cụ thể chưa hỗ trợ MIDI, phím
+                    tắt hoặc API.
+                </div>
+
                 <div class="panel-card">
-                    <div class="panel-card-title">🎹 MIDI Devices (Output) <span class="badge badge-live">Đang hoạt động</span></div>
+                    <div class="panel-card-title">🎹 Device / Output / Channel / Clock <span class="badge badge-live">Đang hoạt động</span></div>
                     <div class="group-title">Chọn cổng MIDI ảo (vd tạo bằng loopMIDI)</div>
                     <select id="midiPortSelect" class="ph-select">
                         <option value="">Chọn cổng MIDI...</option>
                     </select>
-                    <button id="btnRefreshMidiPorts" class="setup-btn">🔄 Làm mới danh sách</button>
-                    <button id="btnInstallLoopMidi" class="setup-btn">🎹 Cài loopMIDI (cổng MIDI ảo)</button>
+                    <div class="row-buttons">
+                        <button id="btnRefreshMidiPorts" class="setup-btn">🔄 Refresh / Reconnect</button>
+                        <button id="btnInstallLoopMidi" class="setup-btn">🎹 Cài loopMIDI (Virtual Port)</button>
+                    </div>
+                    <button id="saveMidiBtn" class="setup-btn" style="margin-top:8px;">💾 Lưu cổng MIDI</button>
+                    <div class="hint-text" id="midiOutputStatus" style="margin-top:6px;">Status: chưa chọn cổng.</div>
+                    <!-- id cũ, không dùng nữa vì không còn modal, giữ để initModal không lỗi -->
+                    <button id="closeMidiBtn" style="display:none;"></button>
 
-                    <div class="group-title" style="margin-top:10px;">🧪 Test gửi thử (xem DAW phản ứng ra sao)</div>
+                    <div class="placeholder-grid" style="margin-top:10px;">
+                        <label class="ph-field">Input<span class="badge badge-soon">Coming Soon</span></label>
+                        <label class="ph-field">Channel<select disabled><option>Tất cả (Omni)</option></select></label>
+                        <label class="ph-field">MIDI Clock<span class="badge badge-soon">Coming Soon</span></label>
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🧪 Test &amp; Monitor <span class="badge badge-live">Realtime — echo lệnh vừa gửi</span></div>
                     <div class="midi-test-row">
                         <label>Note (0-127)</label>
                         <input type="number" id="midiTestNote" min="0" max="127" value="60">
@@ -181,123 +225,263 @@
                         <input type="number" id="midiTestCCValue" min="0" max="127" value="64">
                         <button id="btnTestMidiCC" class="setup-btn">Gửi CC</button>
                     </div>
-                    <button id="saveMidiBtn" class="setup-btn" style="margin-top:8px;">💾 Lưu cổng MIDI</button>
+                    <div class="midi-monitor" id="midiMonitorFeed">
+                        <div class="midi-monitor-empty">Chưa có tín hiệu nào được gửi.</div>
+                    </div>
+                    <div class="row-buttons" style="margin-top:6px;">
+                        <span class="badge badge-live">NOTE ON</span>
+                        <span class="badge badge-live">CC</span>
+                        <span class="badge badge-soon">Pitch Bend</span>
+                        <span class="badge badge-soon">Program Change</span>
+                    </div>
+                    <p class="hint-text">Chỉ NOTE ON và CC có nút gửi thật ở trên (echo thật khi bấm). Pitch Bend /
+                        Program Change chưa có hàm gửi trong <code>appSettings.js</code> — đặt vị trí, chưa hoạt động.</p>
                 </div>
 
                 <div class="panel-card">
                     <div class="panel-card-title">MIDI Learn <span class="badge badge-unwired">Chưa có Engine Input</span></div>
-                    <p class="hint-text">Hiện tại app chỉ GỬI MIDI ra (Web MIDI Output) — chưa có Driver lắng nghe MIDI Input
-                        từ hardware, nên chưa thể "xoay Knob → Menu tự nhận CC". Khung UI dưới đây mô phỏng đúng luồng thao
-                        tác mục tiêu, chờ bổ sung MIDI Input Driver ở Core trước khi hoạt động thật.</p>
+                    <p class="hint-text">Setup chỉ GỬI MIDI ra (Web MIDI Output). Chưa có Driver lắng nghe MIDI Input từ
+                        hardware nên chưa thể "xoay Knob → tự nhận CC". Vị trí UI đặt sẵn, chờ nối Driver.</p>
                     <button class="setup-btn" disabled>🎯 Bắt đầu Learn (chưa khả dụng)</button>
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">Mapping: Menu / Button / DAW Control / Plugin
+                    <div class="panel-card-title">MIDI Mapping — Menu / DAW / Plugin
                         <span class="badge badge-unwired">Chưa có Engine Mapping</span>
                     </div>
-                    <p class="hint-text">Chưa có bảng Mapping thật trong Core (không tìm thấy MappingManager / MappingStore).
-                        Bảng dưới đây là khung UI tĩnh cho 4 nhóm Mapping theo đúng yêu cầu, mỗi dòng hiện "Chưa gán".</p>
                     <div class="mapping-tabs">
                         <div class="mapping-block">
                             <div class="mapping-block-title">Menu</div>
-                            <div class="mapping-row"><span>MASTER</span><span class="tag-unassigned">Chưa gán</span></div>
-                            <div class="mapping-row"><span>MUSIC</span><span class="tag-unassigned">Chưa gán</span></div>
-                            <div class="mapping-row"><span>MIC</span><span class="tag-unassigned">Chưa gán</span></div>
-                            <div class="mapping-row"><span>RETUNE / HUMANIZE / KEY / MOD</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row"><span>Button A / Button B</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row"><span>Encoder 1 / Encoder 2</span><span class="tag-unassigned">Chưa gán</span></div>
                         </div>
                         <div class="mapping-block">
-                            <div class="mapping-block-title">Button</div>
-                            <div class="mapping-row"><span>AUTO / MIC1 / MIC2 / FX</span><span class="tag-unassigned">Chưa gán</span></div>
-                            <div class="mapping-row"><span>CLAP / LAUGH / EXPAND</span><span class="tag-unassigned">Chưa gán</span></div>
-                        </div>
-                        <div class="mapping-block">
-                            <div class="mapping-block-title">DAW Control</div>
+                            <div class="mapping-block-title">DAW</div>
                             <div class="mapping-row"><span>Play / Stop / Record</span><span class="tag-unassigned">Chưa gán</span></div>
-                            <div class="mapping-row"><span>Undo / Redo / Save / Loop</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row"><span>Undo / Redo / Marker</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row"><span>Loop / Metronome</span><span class="tag-unassigned">Chưa gán</span></div>
                         </div>
                         <div class="mapping-block">
                             <div class="mapping-block-title">Plugin</div>
-                            <div class="mapping-row"><span>Auto-Tune: Retune / Humanize / Key</span><span class="tag-unassigned">Chưa gán</span></div>
-                            <div class="mapping-row"><span>Melodyne: Pitch / Formant</span><span class="tag-unassigned">Chưa gán</span></div>
-                            <div class="mapping-row"><span>SoundShifter: Semitone / Mix</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row"><span>Retune / Humanize / Flex Tune</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row"><span>Formant / Mix / Output</span><span class="tag-unassigned">Chưa gán</span></div>
                         </div>
                     </div>
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">Workflow (1 MIDI → nhiều Action) <span class="badge badge-unwired">Chưa có Engine</span></div>
-                    <p class="hint-text">Chưa có WorkflowManager nối tới MIDI trong project hiện tại. Chờ thiết kế Engine
-                        trước khi xây UI chuỗi hành động thật.</p>
-                </div>
-            </section>
-
-            <!-- ===================== PLUGIN ===================== -->
-            <section class="setup-panel" id="panel-plugin" data-title="Plugin">
-                <div class="panel-card">
-                    <div class="panel-card-title">🎤 Auto-Tune</div>
-                    <button id="selectAutoTuneBtn" class="setup-btn">🎤 Auto-Tune: <span id="currentAutoTune">Chưa chọn</span></button>
-                    <button id="btnAutoTune11" class="setup-btn">⚙ Cài bộ Plugin Auto-Tune 11</button>
+                    <div class="panel-card-title">🔀 MIDI Workflow</div>
+                    <div class="workflow-diagram">
+                        <span class="workflow-step">Controller</span>
+                        <span class="workflow-arrow">↓</span>
+                        <span class="workflow-step workflow-step--main">AUTO MENU AI</span>
+                        <span class="workflow-arrow">↓</span>
+                        <span class="workflow-step">DAW</span>
+                        <span class="workflow-arrow">↓</span>
+                        <span class="workflow-step">Plugin</span>
+                    </div>
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">🎙 Giọng hát</div>
-                    <button id="openBeModal" class="setup-btn">⚙ Cách thức tạo bè</button>
-                    <button id="openFixMeoModal" class="setup-btn">⚒ Chọn phương thức fix méo</button>
-                </div>
-
-                <div class="panel-card">
-                    <div class="panel-card-title">🧩 VST2</div>
-                    <button id="btnVst2" class="setup-btn">⚙ Cài đặt Plugins VST2</button>
-                    <p class="hint-text">Chỉ hiển thị plugin thực tế project đang hỗ trợ (AutoTuneDriver, MelodyneDriver,
-                        SoundShifterDriver trong core/drivers) — không thêm plugin giả.</p>
+                    <div class="panel-card-title">⚡ MIDI Priority</div>
+                    <div class="row-buttons">
+                        <span class="badge badge-live">Realtime</span>
+                        <span class="badge badge-live">Ultra Low Latency</span>
+                        <span class="badge badge-live">No Buffer</span>
+                        <span class="badge badge-live">No Queue</span>
+                    </div>
+                    <p class="hint-text">Triết lý hệ thống: mọi lệnh MIDI gửi thẳng ra Output ngay khi bấm, không xếp
+                        hàng, không đệm — đúng cách <code>sendMidiNotePulse</code>/<code>sendMidiCC</code> đang hoạt
+                        động (thông tin mô tả, không phải công tắc bật/tắt).</p>
                 </div>
             </section>
 
             <!-- ===================== DAW ===================== -->
             <section class="setup-panel" id="panel-daw" data-title="DAW">
+
+                <div class="panel-banner">
+                    🎹 Điều khiển DAW theo thời gian thực (Transport/Mixer/Automation...) nên cấu hình ở mục
+                    <b>MIDI → Mapping</b>. Các mục dưới đây chỉ là lựa chọn DAW đang dùng + đường dẫn khởi động.
+                </div>
+
                 <div class="panel-card">
-                    <div class="panel-card-title">🎛 DAW</div>
-                    <button id="selectDawBtn" class="setup-btn">🎛 DAW: <span id="currentDaw">Chưa chọn</span></button>
-                    <p class="hint-text">⚠ core/drivers hiện chỉ có <code>StudioOneDriver.js</code>. Các lựa chọn Cubase
-                        trong danh sách hiện chỉ dùng để chọn hồ sơ toạ độ/phím tắt, chưa có driver điều khiển riêng —
-                        cần xác nhận trước khi công bố là "đã hỗ trợ".</p>
+                    <div class="panel-card-title">🎛 DAW đang dùng <span class="badge badge-live">READY (Studio One)</span></div>
+                    <div class="group-title">Studio One / Cubase (chọn phiên bản)</div>
+                    <div class="daw-list-inline">
+                        <label><input type="radio" name="daw" value="Studio One 7"> Studio One 7</label>
+                        <label><input type="radio" name="daw" value="Studio One 6"> Studio One 6</label>
+                        <label><input type="radio" name="daw" value="Studio Pro 8"> Studio Pro 8</label>
+                        <label><input type="radio" name="daw" value="Cubase 12"> Cubase 12</label>
+                        <label><input type="radio" name="daw" value="Cubase 13"> Cubase 13</label>
+                        <label><input type="radio" name="daw" value="Cubase 14"> Cubase 14</label>
+                        <label><input type="radio" name="daw" value="Cubase 15"> Cubase 15</label>
+                    </div>
+                    <button id="saveDawBtn" class="setup-btn" style="margin-top:8px;">💾 Lưu DAW: <span id="currentDaw">Chưa chọn</span></button>
+                    <p class="hint-text">⚠ <code>core/drivers</code> hiện chỉ có <code>StudioOneDriver.js</code>. Cubase
+                        trong danh sách chỉ dùng để chọn hồ sơ toạ độ/phím tắt, chưa có driver điều khiển riêng.</p>
+                    <!-- giữ id cũ để initModal không lỗi -->
+                    <button id="selectDawBtn" style="display:none;"></button>
+                    <button id="closeDawBtn" style="display:none;"></button>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">📁 Đường dẫn &amp; khởi động</div>
+                    <div class="setting-row">
+                        <label>📁 Đường dẫn DAW</label>
+                        <div id="currentDawPath" class="status-text">❌ Chưa thiết lập</div>
+                        <button id="browseDawBtn" class="setup-btn">📂 Chọn đường dẫn DAW</button>
+                    </div>
+                    <label class="setup-checkbox">
+                        <input type="checkbox" id="launchDawOnStartup">
+                        🚀 Mở DAW cùng Menu
+                    </label>
                 </div>
 
                 <div class="panel-card">
                     <div class="panel-card-title">⌨ Auto-Key</div>
-                    <button id="selectAutoKeyBtn" class="setup-btn">🎹 Auto-Key: <span id="currentAutoKey">Chưa chọn</span></button>
+                    <div class="daw-list-inline">
+                        <label><input type="radio" name="autokey" value="Auto-Key 1">Auto-Key 1</label>
+                        <label><input type="radio" name="autokey" value="Auto-Key 2">Auto-Key 2</label>
+                    </div>
+                    <button id="saveAutoKeyBtn" class="setup-btn" style="margin-top:8px;">💾 Lưu Auto-Key: <span id="currentAutoKey">Chưa chọn</span></button>
+                    <button id="selectAutoKeyBtn" style="display:none;"></button>
+                    <button id="closeAutoKeyBtn" style="display:none;"></button>
                 </div>
 
                 <div class="panel-card">
                     <div class="panel-card-title">🔗 Bridging</div>
                     <button id="btnJbridge" class="setup-btn">⚙ Cài đặt jBridge cho Studio One</button>
                 </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🕑 DAW khác <span class="badge badge-soon">Coming Soon</span></div>
+                    <p class="hint-text">Vị trí đã đặt sẵn — chỉ cần bổ sung Driver, không cần sửa UI này.</p>
+                    <div class="soon-list">
+                        <div class="soon-row"><b>Cubase</b><span>Hồ sơ toạ độ có sẵn ở trên — chưa có Driver điều khiển</span></div>
+                        <div class="soon-row"><b>Nuendo</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
+                        <div class="soon-row"><b>Reaper</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
+                        <div class="soon-row"><b>Ableton</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
+                        <div class="soon-row"><b>FL Studio</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===================== PLUGIN ===================== -->
+            <section class="setup-panel" id="panel-plugins" data-title="Plugin">
+                <div class="panel-card">
+                    <div class="panel-card-title">🎤 Auto-Tune <span class="badge badge-live">READY</span></div>
+                    <div class="daw-list-inline">
+                        <label><input type="radio" name="autotune" value="Auto-Tune 9">Auto-Tune 9</label>
+                        <label><input type="radio" name="autotune" value="Auto-Tune 10">Auto-Tune 10</label>
+                        <label><input type="radio" name="autotune" value="Auto-Tune 11">Auto-Tune 11</label>
+                    </div>
+                    <button id="saveAutoTuneBtn" class="setup-btn" style="margin-top:8px;">💾 Lưu Auto-Tune: <span id="currentAutoTune">Chưa chọn</span></button>
+                    <button id="btnAutoTune11" class="setup-btn" style="margin-top:4px;">⚙ Cài bộ Plugin Auto-Tune 11</button>
+                    <button id="selectAutoTuneBtn" style="display:none;"></button>
+                    <button id="closeAutoTuneBtn" style="display:none;"></button>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🎙 Giọng hát <span class="badge badge-live">Đã hỗ trợ</span></div>
+                    <div class="group-title">Cách thức tạo bè</div>
+                    <div class="daw-list-inline">
+                        <label><input type="radio" name="beMethod" value="Plugin Auto-Tune 11"> 🎹 Plugin Auto-Tune 11</label>
+                        <label><input type="radio" name="beMethod" value="Track 'Bè' riêng"> ⚙ Track "Bè" riêng</label>
+                    </div>
+                    <button id="saveBeBtn" class="setup-btn" style="margin:8px 0;">💾 Lưu cách tạo bè</button>
+
+                    <div class="group-title">Phương thức fix méo</div>
+                    <div class="daw-list-inline">
+                        <label><input type="radio" name="fixMethod" value="Chromatic"> ♫ Chromatic</label>
+                        <label><input type="radio" name="fixMethod" value="Chuyển Tone"> ☲ Chuyển Tone</label>
+                    </div>
+                    <button id="saveFixMeoBtn" class="setup-btn" style="margin-top:8px;">💾 Lưu cách fix méo</button>
+
+                    <button id="openBeModal" style="display:none;"></button>
+                    <button id="closeBeBtn" style="display:none;"></button>
+                    <button id="openFixMeoModal" style="display:none;"></button>
+                    <button id="closeFixMeoBtn" style="display:none;"></button>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🧩 VST2 <span class="badge badge-soon">Cài đặt khả dụng — chưa nối Mapping</span></div>
+                    <button id="btnVst2" class="setup-btn">⚙ Cài đặt Plugins VST2</button>
+                    <p class="hint-text">Installer thật (tải &amp; cài bundle), nhưng plugin cài xong chưa được điều
+                        khiển qua MIDI Mapping như Auto-Tune.</p>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">Melodyne / SoundShifter / VST3 / Plugin Scan
+                        <span class="badge badge-soon">Coming Soon</span>
+                    </div>
+                    <div class="soon-list">
+                        <div class="soon-row"><b>Melodyne</b><span>—</span></div>
+                        <div class="soon-row"><b>SoundShifter</b><span>— (điều khiển thô qua MIDI CC, xem mục MIDI)</span></div>
+                        <div class="soon-row"><b>VST3</b><span>—</span></div>
+                        <div class="soon-row"><b>Plugin Scan / Folder / Status</b><span>—</span></div>
+                    </div>
+                </div>
             </section>
 
             <!-- ===================== DATABASE ===================== -->
             <section class="setup-panel" id="panel-database" data-title="Database">
                 <div class="panel-card">
-                    <div class="panel-card-title">🗄 Song Library <span class="badge badge-unwired">Chưa có UI/IPC</span></div>
-                    <p class="hint-text">Dữ liệu bài hát tồn tại thật ở <code>database/songLibrary.json</code> và
-                        <code>data/songs.json</code>, nhưng Setup hiện chưa có kênh nào để Import / Export / Rebuild /
-                        xem Statistics / quản lý Cache. Khung UI đặt sẵn dưới đây, vô hiệu hoá tới khi có IPC tương ứng.</p>
-                    <div class="row-buttons">
+                    <div class="panel-card-title">🗄 Database <span class="badge badge-unwired">Chưa có IPC</span></div>
+                    <p class="hint-text">Dữ liệu tồn tại thật ở <code>database/songLibrary.json</code> / <code>data/songs.json</code>,
+                        nhưng Setup chưa có kênh đọc/ghi. Không bịa số — mọi ô hiện "—" cho tới khi có IPC thật.</p>
+                    <div class="status-grid">
+                        <div class="status-card"><span class="status-label">Songs</span><span class="status-value status-value--dim">—</span></div>
+                        <div class="status-card"><span class="status-label">Artists</span><span class="status-value status-value--dim">—</span></div>
+                        <div class="status-card"><span class="status-label">Key</span><span class="status-value status-value--dim">—</span></div>
+                        <div class="status-card"><span class="status-label">BPM</span><span class="status-value status-value--dim">—</span></div>
+                        <div class="status-card"><span class="status-label">Cache</span><span class="status-value status-value--dim">—</span></div>
+                        <div class="status-card"><span class="status-label">Statistics</span><span class="status-value status-value--dim">—</span></div>
+                    </div>
+                    <div class="row-buttons" style="margin-top:8px;">
                         <button class="setup-btn" disabled>📥 Import</button>
                         <button class="setup-btn" disabled>📤 Export</button>
                         <button class="setup-btn" disabled>🔁 Rebuild</button>
-                        <button class="setup-btn" disabled>📊 Statistics</button>
-                        <button class="setup-btn" disabled>🧹 Clear Cache</button>
+                        <button class="setup-btn" disabled>🧹 Cache</button>
                     </div>
                 </div>
             </section>
 
-            <!-- ===================== BACKUP (đổi tên từ LinkPro) ===================== -->
-            <section class="setup-panel" id="panel-backup" data-title="Backup & Restore">
+            <!-- ===================== CALIBRATION ===================== -->
+            <section class="setup-panel" id="panel-calibration" data-title="Calibration">
+
+                <div class="panel-banner panel-banner--fallback">
+                    🖱 <b>Calibration (chuột) là phương án DỰ PHÒNG</b> — chỉ dùng khi DAW/plugin cụ thể chưa hỗ trợ
+                    MIDI, phím tắt hoặc API. Ưu tiên cấu hình ở mục <b>MIDI</b> trước. Không popup.
+                </div>
+
                 <div class="panel-card">
-                    <div class="panel-card-title">💾 Backup &amp; Restore</div>
-                    <p class="hint-text">Sao lưu / phục hồi toàn bộ cài đặt hiện tại (đổi tên từ "LinkPro" cho đúng bản chất —
-                        logic export/import giữ nguyên, không thay đổi).</p>
+                    <div class="panel-card-title">🎯 DAW / Plugin Auto-Tune Coordinate <span class="badge badge-live">Đang hoạt động</span></div>
+                    <div id="coordDawLabel" class="hint-text">Chưa chọn DAW</div>
+                    <div id="ahkPathDisplay" class="hint-text">⏳ Đang dò AutoHotkey...</div>
+                    <button id="btnDownloadAhk" class="setup-btn" style="display:none;">📥 Tải &amp; Cài AutoHotkey</button>
+                    <button id="btnSelectAhkPath" class="setup-btn">📂 Chọn đường dẫn AutoHotkey (nếu đã cài sẵn)</button>
+                    <button id="btnAutoKey1" class="setup-btn">✢ Lấy tọa độ Auto-Key (2 điểm)</button>
+                    <button id="btnAutoKey2" class="setup-btn">✢ Lấy tọa độ Auto-Key 2 (2 điểm)</button>
+                    <button id="btnAutoTuneKey" class="setup-btn">✢ Lấy tọa độ Key Auto-Tune (1 điểm)</button>
+                    <button id="btnChromatic" class="setup-btn">✢ Lấy tọa độ Chromatic (2 điểm)</button>
+                    <p class="hint-text">ℹ️ SoundShifter điều khiển bằng MIDI (không cần lấy tọa độ chuột).</p>
+                </div>
+                <div class="panel-card">
+                    <div class="panel-card-title">Resolution / Scaling / Verify / Plugin Verify / Test
+                        <span class="badge badge-soon">Coming Soon</span>
+                    </div>
+                    <p class="hint-text">Chưa có Engine kiểm tra lại toạ độ đã capture, phát hiện đổi độ phân giải/tỉ lệ
+                        màn hình, hay xác minh plugin đúng vị trí. Vị trí đặt sẵn, chỉ cần bổ sung Engine.</p>
+                </div>
+            </section>
+
+            <!-- ===================== BACKUP (đổi hoàn toàn từ LinkPro) ===================== -->
+            <section class="setup-panel" id="panel-backup" data-title="Backup">
+                <div class="panel-card">
+                    <div class="panel-card-title">💾 Backup / Restore / Export / Import</div>
+                    <p class="hint-text">Sao lưu / phục hồi toàn bộ cài đặt hiện tại — đổi tên hoàn toàn khỏi "LinkPro"
+                        theo đúng yêu cầu. Logic export/import giữ nguyên 100%, không đổi. Backup = Export, Restore =
+                        Import (cùng một cơ chế, không có 2 cặp nút riêng vì Engine chỉ có 1 cặp thật).</p>
                     <div class="row-buttons">
                         <button id="btnBackupLink" class="setup-btn">📤 Backup</button>
                         <button id="btnRestoreLink" class="setup-btn">📥 Restore</button>
@@ -308,31 +492,50 @@
                 </div>
             </section>
 
-            <!-- ===================== ADVANCED ===================== -->
-            <section class="setup-panel" id="panel-advanced" data-title="Advanced">
-                <div class="panel-card">
-                    <div class="panel-card-title">📈 Telemetry</div>
-                    <p class="hint-text">Log thật đang được ghi tại thư mục <code>/logs</code> (qua
-                        <code>electronAPI.sendTelemetry</code>). Setup hiện chưa có công tắc bật/tắt hay trình xem log —
-                        đây là thông tin tĩnh, không phải điều khiển thật.</p>
-                </div>
-                <div class="panel-card">
-                    <div class="panel-card-title">Developer / Debug / Performance
-                        <span class="badge badge-unwired">Chưa có UI trước đây</span>
-                    </div>
-                    <p class="hint-text">Không tìm thấy cấu hình Developer/Debug/Performance nào trong project — để trống
-                        theo đúng yêu cầu "chỉ hiện nếu project có".</p>
-                </div>
-            </section>
+            <!-- ===================== SYSTEM (gộp Theme/Language/Update/Log/Version/License/Browser) ===================== -->
+            <section class="setup-panel" id="panel-system" data-title="System">
 
-            <!-- ===================== ABOUT ===================== -->
-            <section class="setup-panel" id="panel-about" data-title="About">
                 <div class="panel-card">
-                    <div class="panel-card-title">ℹ AUTO MENU AI</div>
-                    <p class="hint-text">Version / Electron / Node / License / Github: chưa có kênh IPC để đọc động các
-                        thông tin này ra renderer (đọc <code>package.json</code>/version Electron cần thêm handler ở
-                        main.js — ngoài phạm vi UI Setup). Để trống thay vì bịa số liệu.</p>
+                    <div class="panel-card-title">🌐 Browser <span class="badge badge-live">Đã hỗ trợ</span></div>
+                    <div class="daw-list-inline">
+                        <label><input type="radio" name="browser" value="Chrome"> Chrome</label>
+                        <label><input type="radio" name="browser" value="Brave"> Brave</label>
+                        <label><input type="radio" name="browser" value="Cốc Cốc"> Cốc Cốc</label>
+                        <label><input type="radio" name="browser" value="Edge"> Edge <span class="tag-unassigned">auto-dò: chưa hỗ trợ</span></label>
+                        <label><input type="radio" name="browser" value="Firefox"> Firefox <span class="tag-unassigned">auto-dò: chưa hỗ trợ</span></label>
+                    </div>
+                    <div class="group-title" style="margin-top:10px;">Youtube ID (PWA):</div>
+                    <input type="text" id="youtubeIdInput" style="width:100%; margin-bottom:10px;">
+                    <div class="group-title">Đường dẫn trình duyệt (.exe):</div>
+                    <div id="browserPathDisplay" class="status-text" style="margin-bottom:8px;">❌ Chưa thiết lập</div>
+                    <button id="btnSelectBrowserPath" class="setup-btn" style="width:100%; margin-bottom:10px;">📂 Chọn đường dẫn trình duyệt</button>
+                    <button id="saveBrowserBtn" class="setup-btn">💾 Lưu trình duyệt</button>
+                    <button id="btnInstallBrave" class="setup-btn">🌐 Cài Brave không quảng cáo</button>
+                    <button id="openBrowserModal" style="display:none;"></button>
+                    <button id="closeBrowserBtn" style="display:none;"></button>
                 </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🎨 Theme / Language <span class="badge badge-unwired">Chưa có Engine</span></div>
+                    <div class="placeholder-grid">
+                        <label class="ph-field">Theme<select disabled><option>Tối (mặc định)</option></select></label>
+                        <label class="ph-field">Language<select disabled><option>Tiếng Việt</option></select></label>
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">📈 Log <span class="badge badge-live">Thật</span></div>
+                    <p class="hint-text">Log thật đang được ghi tại thư mục <code>/logs</code> (qua
+                        <code>electronAPI.sendTelemetry</code>). Chưa có trình xem log ngay trong Setup.</p>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">Version / Update / License <span class="badge badge-soon">Coming Soon</span></div>
+                    <p class="hint-text">Chưa có kênh IPC đọc version/build động, chưa có Engine kiểm tra cập nhật,
+                        chưa có hệ thống license/activation trong project. Để trống thay vì bịa số liệu — chỉ cần bổ
+                        sung Engine sau này, không cần sửa layout.</p>
+                </div>
+
                 <div class="panel-card">
                     <div class="panel-card-title">☎ Liên hệ</div>
                     <button id="btnContactKhoi" class="setup-btn">☎ 𝓚𝓱𝓸́𝓲 (bấm để copy số điện thoại)</button>
@@ -342,175 +545,11 @@
         </main>
     </div>
 
-    <!-- ================= MODALS (giữ nguyên hành vi initModal cũ của setup.js) ================= -->
-
-    <!-- DAW MODAL -->
-    <div id="dawModal" class="modal">
-        <div class="modal-box">
-            <div class="modal-title">Chọn DAW</div>
-            <div class="daw-list">
-                <label><input type="radio" name="daw" value="Studio One 7"> Studio One 7</label>
-                <label><input type="radio" name="daw" value="Studio One 6"> Studio One 6</label>
-                <label><input type="radio" name="daw" value="Studio Pro 8"> Studio Pro 8</label>
-                <label><input type="radio" name="daw" value="Cubase 12"> Cubase 12</label>
-                <label><input type="radio" name="daw" value="Cubase 13"> Cubase 13</label>
-                <label><input type="radio" name="daw" value="Cubase 14"> Cubase 14</label>
-                <label><input type="radio" name="daw" value="Cubase 15"> Cubase 15</label>
-            </div>
-            <div class="modal-buttons">
-                <button id="saveDawBtn">Lưu</button>
-                <button id="closeDawBtn">Hủy</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- AUTO KEY MODAL -->
-    <div id="autoKeyModal" class="modal">
-        <div class="modal-box">
-            <div class="modal-title">Chọn phiên bản Auto-Key</div>
-            <div class="daw-list">
-                <label><input type="radio" name="autokey" value="Auto-Key 1">Auto-Key 1</label>
-                <label><input type="radio" name="autokey" value="Auto-Key 2">Auto-Key 2</label>
-            </div>
-            <div class="modal-buttons">
-                <button id="saveAutoKeyBtn">Lưu</button>
-                <button id="closeAutoKeyBtn">Hủy</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- AUTO TUNE MODAL -->
-    <div id="autoTuneModal" class="modal">
-        <div class="modal-box">
-            <div class="modal-title">Chọn phiên bản Auto-Tune</div>
-            <div class="daw-list">
-                <label><input type="radio" name="autotune" value="Auto-Tune 9">Auto-Tune 9</label>
-                <label><input type="radio" name="autotune" value="Auto-Tune 10">Auto-Tune 10</label>
-                <label><input type="radio" name="autotune" value="Auto-Tune 11">Auto-Tune 11</label>
-            </div>
-            <div class="modal-buttons">
-                <button id="saveAutoTuneBtn">Lưu</button>
-                <button id="closeAutoTuneBtn">Hủy</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- BROWSER MODAL -->
-    <div id="browserModal" class="modal">
-        <div class="modal-box">
-            <div class="modal-title">Chọn trình duyệt</div>
-            <div class="group-title">Chọn trình duyệt Youtube</div>
-            <div class="daw-list">
-                <label><input type="radio" name="browser" value="Chrome"> Chrome</label>
-                <label><input type="radio" name="browser" value="Brave"> Brave</label>
-                <label><input type="radio" name="browser" value="Cốc Cốc"> Cốc Cốc</label>
-            </div>
-            <div class="group-title">Youtube ID (PWA):</div>
-            <input type="text" id="youtubeIdInput" style="width:100%; margin-bottom:15px; padding:5px;">
-            <div class="group-title">Đường dẫn trình duyệt (.exe):</div>
-            <div id="browserPathDisplay" style="margin-bottom:8px; font-size:12px; word-break:break-all;">❌ Chưa thiết lập</div>
-            <button id="btnSelectBrowserPath" style="width:100%; margin-bottom:15px;">📂 Chọn đường dẫn trình duyệt</button>
-            <div class="modal-buttons">
-                <button id="saveBrowserBtn">Lưu</button>
-                <button id="closeBrowserBtn">Hủy</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- ShortcutsModal -->
-    <div id="shortcutsModal" class="modal">
-        <div class="modal-box" style="width: 400px;">
-            <div class="modal-title">CÀI ĐẶT PHÍM TẮT</div>
-            <div id="shortcuts-list" style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 5px;">
-                    <span>Chế độ hát thường</span> <input type="text" id="shortcutNormal" placeholder="Nhấn phím..." readonly>
-                    <span>Chế độ Lofi</span> <input type="text" id="shortcutLofi" placeholder="Nhấn phím..." readonly>
-                    <span>Chế độ Remix</span> <input type="text" id="shortcutRemix" placeholder="Nhấn phím..." readonly>
-                    <span>Chế độ Rap</span> <input type="text" id="shortcutRap" placeholder="Nhấn phím..." readonly>
-                    <span>Dò tone</span> <input type="text" id="shortcutKeyDetect" placeholder="Nhấn phím..." readonly>
-                </div>
-            </div>
-            <div class="modal-buttons">
-                <button id="clearShortcuts">⟲ Xóa hết</button>
-                <button id="saveShortcuts">💾 Lưu</button>
-                <button id="closeShortcuts">Thoát</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- projectModal -->
-    <div id="projectModal" class="modal">
-        <div class="modal-box" style="width: 450px;">
-            <div class="modal-title">Project Settings</div>
-            <div style="display: flex; gap: 15px; margin-bottom: 15px;">
-                <label><input type="checkbox" id="checkOpenPj"> Mở Project</label>
-                <label><input type="checkbox" id="checkCopyPj"> Tạo bản COPY</label>
-                <label><input type="checkbox" id="checkOpenYt"> Mở Youtube</label>
-            </div>
-            <textarea id="pjPathDisplay" readonly
-                style="width: 100%; height: 80px; margin-bottom: 15px; resize: none;">Chưa chọn project</textarea>
-            <div class="modal-buttons">
-                <button id="btnSelectPj">Chọn PJ</button>
-                <button id="btnSaveCurrentPj">Lưu PJ đang mở</button>
-                <button id="btnOpenProjectBundle">🚀 Mở kèm ngay</button>
-                <button id="btnClosePj">OK</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- SOUNDCARD MODAL (rỗng — mở/đóng vẫn hoạt động nhưng nội dung thật đã chuyển vào panel AUDIO) -->
-    <div id="soundcardModal" class="modal">
-        <div class="modal-box" style="width: 360px;">
-            <div class="modal-title">Soundcard</div>
-            <p class="hint-text">Đã chuyển sang nhóm AUDIO ở sidebar.</p>
-            <div class="modal-buttons"><button id="closeSoundcardBtn">OK</button></div>
-        </div>
-    </div>
-
-    <!-- MIDI MODAL (rỗng — nội dung thật đã chuyển vào panel MIDI, giữ để không phá initModal) -->
-    <div id="midiModal" class="modal">
-        <div class="modal-box" style="width: 360px;">
-            <div class="modal-title">MIDI</div>
-            <p class="hint-text">Đã chuyển sang nhóm MIDI ở sidebar.</p>
-            <div class="modal-buttons"><button id="closeMidiBtn">OK</button></div>
-        </div>
-    </div>
-
-    <!-- BeModal -->
-    <div id="beModal" class="modal">
-        <div class="modal-box">
-            <div class="modal-title">Bè</div>
-            <div class="group-title">Chọn cách thức tạo bè</div>
-            <div class="daw-list">
-                <label><input type="radio" name="beMethod" value="Plugin Auto-Tune 11"> 🎹 Plugin Auto-Tune 11</label>
-                <label><input type="radio" name="beMethod" value="Track 'Bè' riêng"> ⚙ Track "Bè" riêng</label>
-            </div>
-            <div class="modal-buttons">
-                <button id="saveBeBtn">💾 Lưu</button>
-                <button id="closeBeBtn">Hủy</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- FIX MEO MODAL -->
-    <div id="fixMeoModal" class="modal">
-        <div class="modal-box">
-            <div class="modal-title">Fix méo</div>
-            <div class="group-title">Chọn phương thức fix méo</div>
-            <div class="daw-list">
-                <label><input type="radio" name="fixMethod" value="Chromatic"> ♫ Chromatic</label>
-                <label><input type="radio" name="fixMethod" value="Chuyển Tone"> ☲ Chuyển Tone</label>
-            </div>
-            <div class="modal-buttons">
-                <button id="saveFixMeoBtn">💾 Lưu</button>
-                <button id="closeFixMeoBtn">Hủy</button>
-            </div>
-        </div>
-    </div>
-
     <script src="js/appSettings.js"></script>
     <script src="js/setup.js"></script>
     <script src="js/setupNav.js"></script>
+    <script src="js/setupVuMeter.js"></script>
+    <script src="js/setupMidiMonitor.js"></script>
 </body>
 
 </html>

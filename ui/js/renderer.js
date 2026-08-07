@@ -375,6 +375,18 @@ if (toneSelector) {
     toneSelector.value = "0";
 }
 
+// ==========================================================
+// MENU FINAL v4.0 — Mục VIII/IX: MOD OFF -> Dropdown + SET vô hiệu hoá hẳn (không chỉ
+// no-op khi bấm), bật lại khi MOD ON. Thuần thuộc tính "disabled" chuẩn của trình duyệt,
+// KHÔNG thêm CSS/HTML mới — không đổi giao diện, chỉ đổi khả năng tương tác.
+// ==========================================================
+const applyToneBtnEl = document.getElementById("applyToneBtn");
+function setModControlsEnabled(enabled) {
+    if (toneSelector) toneSelector.disabled = !enabled;
+    if (applyToneBtnEl) applyToneBtnEl.disabled = !enabled;
+}
+setModControlsEnabled(false); // trạng thái ban đầu: MOD đang OFF
+
 /* ==========================================================
    7. KEY TRANSPOSE (hỗ trợ cả dấu thăng # và dấu giáng b)
    ========================================================== */
@@ -423,6 +435,22 @@ function transposeKey(currentKey, steps) {
 
     return notes[newIndex] + type;
 }
+
+// MENU FINAL v4.0 — Mục VIII: chọn trong Dropdown MOD CHỈ xem trước KEY hiển thị, Auto Tune
+// CHƯA đổi (chưa gửi lệnh gì) cho tới khi bấm SET. Chỉ có tác dụng khi MOD đang ON (Dropdown
+// đã bị disabled khi OFF nên về lý thuyết không bắn được, thêm guard cho chắc).
+toneSelector?.addEventListener("change", () => {
+    const powerBtn = document.getElementById("modPowerBtn");
+    if (!powerBtn || !powerBtn.classList.contains("active")) return;
+
+    const toneVal = parseInt(toneSelector.value ?? "0", 10);
+    const previewKey = transposeKey(originalKey, toneVal);
+
+    if (currentKeyEl) currentKeyEl.textContent = previewKey;
+
+    const modTimelineEl = document.getElementById("modTimeline");
+    if (modTimelineEl) modTimelineEl.textContent = (toneVal > 0 ? "+" : "") + toneVal + " SEMITONES";
+});
 
 document.getElementById("applyToneBtn")?.addEventListener("click", () => {
     const powerBtn = document.getElementById("modPowerBtn");
@@ -497,6 +525,29 @@ const keySource = {
 
 let lastPluginKey = appState.originalKey; // giá trị THẬT đã gửi xuống Plugin lần gần nhất (chống gửi trùng)
 let lastNowPlayingKey = null;             // "<title>|<artist>" gần nhất, để tự phát hiện đổi bài (mục IX)
+
+// ==========================================================
+// MENU FINAL v4.0 — Mục XI/XII: 3 giá trị BẮT BUỘC độc lập (AI KEY / MANUAL KEY / ACTIVE KEY)
+// + trạng thái MOD. Object CHỈ ĐỌC (getter), KHÔNG tạo thêm biến lưu trữ trùng lặp — dựa
+// hoàn toàn trên state đã tách sẵn ở trên (keySource) và control MOD (modPowerBtn/toneSelector),
+// đúng đúng cảnh báo của task: "Không được dùng 1 biến cho cả 3".
+//   - aiKey      : Key AI đang dò được (luôn chạy nền, không bao giờ dừng — mục III)
+//   - manualKey  : Key người dùng chọn tay gần nhất (mục IV)
+//   - activeKey  : Key GỐC đang có hiệu lực (CHƯA cộng offset MOD) — cơ sở để SEND/SET gửi
+//                  xuống Auto Tune, ưu tiên Manual > Song Database > AI (mục VII/X)
+//   - modOffset  : số bán cung đang chọn ở Dropdown MOD (chỉ áp dụng thật khi modMode=true)
+//   - manualMode : đang ở chế độ Manual (đã SEND, chưa hết 4 phút) hay không (mục IV)
+//   - modMode    : MOD đang ON hay OFF (mục VIII)
+// ==========================================================
+const keyState = {
+    get aiKey() { return keySource.ai.value; },
+    get manualKey() { return keySource.manual.value; },
+    get activeKey() { return originalKey; },
+    get modOffset() { return parseInt(document.getElementById("toneSelector")?.value ?? "0", 10); },
+    get manualMode() { return keySource.manual.active; },
+    get modMode() { return !!document.getElementById("modPowerBtn")?.classList.contains("active"); }
+};
+window.keyState = keyState; // chỉ để debug qua DevTools Console (F12) — không có nơi nào khác đọc biến này
 
 function logKeySource(sourceLabel) {
     console.log(`[Key Source] ${sourceLabel}`);
@@ -985,6 +1036,7 @@ function turnManualOverrideOff() {
     modPowerBtn.classList.remove("active");
     modPowerBtn.textContent = "OFF";
     if (toneSelector) toneSelector.value = "0";
+    setModControlsEnabled(false); // Mục IX: MOD OFF -> Dropdown/SET vô hiệu hoá lại
     setStatus("dot-mod", "pending"); // cam: đang trả quyền lại cho AI, chưa xong
 
     const modStatusEl = document.getElementById("modStatus");
@@ -1020,6 +1072,7 @@ modPowerBtn?.addEventListener("click", () => {
 
     if (isActive) {
         modPowerBtn.textContent = "ON";
+        setModControlsEnabled(true); // Mục VIII: MOD ON -> Dropdown/SET dùng được
         setStatus("dot-mod", "pending"); // cam: đang bật SoundShifter, chờ xác nhận
 
         clearTimeout(modAutoOffTimer);
@@ -1187,6 +1240,77 @@ function __debugLogKeyConfidence() {
     console.log(`[DEBUG bassVotes] ${fmt(snap.bassRootVotes)}`);
 }
 
+// ==========================================================
+// MENU FINAL v4.0 — Mục II: VuMeter CHỈ nhận Audio Desktop/System, không bao giờ nhận
+// Mic 1/Mic 2/Microphone. HOÀN TOÀN ĐỘC LẬP với startAudioMonitor() bên dưới (nguồn nạp
+// cho Key Engine/BPM Engine — KHÔNG đụng, giữ nguyên như cũ).
+//
+// Dùng API "loopback audio" chuẩn của Electron (session.setDisplayMediaRequestHandler +
+// audio:'loopback', đăng ký sẵn ở app/main.js) — đây là API capture âm thanh hệ thống,
+// vật lý không đi qua danh sách "audioinput" (microphone) của Windows nên không thể vô
+// tình bắt trúng Mic, khác hẳn getUserMedia({audio:true}) mà Setup > Soundcard đang dùng.
+//
+// Không cần thêm IPC mới: navigator.mediaDevices.getDisplayMedia() là API Web chuẩn,
+// gọi thẳng được từ renderer.
+// ==========================================================
+let vuMeterLoopbackStarted = false;
+
+async function startDesktopLoopbackVuMeter() {
+    if (vuMeterLoopbackStarted) return; // tránh mở nhiều stream loopback cùng lúc
+    vuMeterLoopbackStarted = true;
+
+    const meterEl = document.getElementById("vu-fill");
+    if (!meterEl) { vuMeterLoopbackStarted = false; return; } // UI chưa có phần tử này -> bỏ qua an toàn
+
+    let stream;
+    try {
+        // video:true là điều kiện bắt buộc của getDisplayMedia, KHÔNG dùng tới hình ảnh
+        // gì cả -> dừng track video ngay bên dưới, chỉ giữ lại audio.
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    } catch (err) {
+        console.error(
+            "[VuMeter/Loopback] Không lấy được audio Desktop/System (loopback). VuMeter sẽ đứng yên. Lỗi:",
+            err
+        );
+        vuMeterLoopbackStarted = false;
+        return;
+    }
+
+    stream.getVideoTracks().forEach((t) => { t.stop(); stream.removeTrack(t); });
+
+    if (stream.getAudioTracks().length === 0) {
+        console.error("[VuMeter/Loopback] Stream trả về không có track audio nào (loopback không khả dụng trên máy này).");
+        vuMeterLoopbackStarted = false;
+        return;
+    }
+
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state !== "running") await audioContext.resume();
+
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    function tick() {
+        analyser.getByteFrequencyData(data);
+        // Lấy trung bình dải tần thấp (bass) tương tự cách vu-fill cũ hiển thị, để không
+        // đổi cảm giác/độ nhạy của thanh VuMeter trên giao diện (không đổi giao diện).
+        const bassBinCount = Math.max(1, Math.floor(data.length * 0.25));
+        let sum = 0;
+        for (let i = 0; i < bassBinCount; i++) sum += data[i];
+        const bassEnergy = (sum / bassBinCount / 255) * 100; // quy về thang 0-100 giống bassEnergy cũ
+
+        meterEl.style.width = Math.min(bassEnergy * 2, 100) + "%";
+        requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+
+    console.log("[VuMeter/Loopback] Đã khởi động — nguồn: Audio Desktop/System (loopback), không phải Mic.");
+}
+
 async function startAudioMonitor() {
     if (audioMonitorStarted) return; // tránh khởi tạo lặp / mở nhiều stream mic
     audioMonitorStarted = true;
@@ -1273,8 +1397,11 @@ async function startAudioMonitor() {
         });
 
         BPMEngine.onLevel(({ bassEnergy, localAvg, maxByte }) => {
-            const meter = document.getElementById("vu-fill");
-            if (meter) meter.style.width = Math.min(bassEnergy * 2, 100) + "%";
+            // MENU FINAL v4.0 — Mục II: KHÔNG còn dùng nguồn này để vẽ VuMeter nữa (nguồn
+            // này đi qua getUserMedia(selectedSoundcardId) ở Setup, có thể vô tình là Mic
+            // nếu chọn nhầm). VuMeter giờ lấy từ startDesktopLoopbackVuMeter() bên dưới —
+            // audio Desktop/System thật, tách biệt vật lý khỏi Mic. Giữ callback lại để
+            // KHÔNG đụng API của BPMEngine (rule: không sửa BPM Engine), chỉ dùng để debug.
             __debugLogAudioLevel(bassEnergy, localAvg, maxByte); // <-- DEBUG TẠM THỜI
         });
 
@@ -1514,6 +1641,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.body.addEventListener('click', () => {
         console.log("Kích hoạt Audio...");
         startAudioMonitor();
+        startDesktopLoopbackVuMeter(); // Mục II MENU FINAL v4.0 — độc lập, chỉ audio Desktop/System
     }, { once: true });
 
     console.log("Renderer đã sẵn sàng!");
