@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session, shell, desktopCapturer } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, session, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { execFile } = require("child_process");
@@ -85,6 +85,10 @@ const TelemetryLogger = require("../core/shared/TelemetryLogger");
 const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
 const NowPlayingResolver = require("../core/reference/NowPlayingResolver");
 const SongMatcher = require("../core/reference/SongMatcher");
+// MIDI CONTROL CORE v1.0 — wiring MỚI, độc lập hoàn toàn với AIBootstrap/EventBus ở trên.
+// KHÔNG viết lại CommandEngine/capabilityRegistry (core/command-engine-js/), chỉ nối chúng
+// vào runtime thật. Toàn bộ lỗi bên trong CommandRuntime tự bắt, không throw ra ngoài.
+const CommandRuntime = require("../core/command-engine-js/runtime");
 
 app.whenReady().then(async () => {
     // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
@@ -101,42 +105,18 @@ app.whenReady().then(async () => {
         return permission === "media" || permission === "midi" || permission === "midiSysex";
     });
 
-    // ================================
-    // MENU FINAL v4.0 — Mục II (VuMeter): đăng ký handler "loopback audio" chuẩn của
-    // Electron để renderer lấy được ĐÚNG audio hệ thống (Audio Desktop/System), tách
-    // biệt hoàn toàn khỏi Microphone — không phải filter/đoán tên thiết bị, mà là API
-    // capture khác hẳn với getUserMedia (không đi qua danh sách "audioinput" của
-    // Setup > Soundcard, nên vật lý không thể vô tình bắt trúng Mic 1/Mic 2).
-    // Không ảnh hưởng getUserMedia(selectedSoundcardId) hiện có — pipeline nạp cho
-    // Key Engine/BPM Engine (app/../ui/js/renderer.js -> startAudioMonitor) GIỮ NGUYÊN
-    // 100%, không đụng tới. Handler này chỉ phục vụ luồng thứ hai, độc lập, riêng cho
-    // VuMeter (xem ui/js/renderer.js -> startDesktopLoopbackVuMeter).
-    // Đăng ký 1 lần duy nhất lúc khởi động, không cần thêm kênh IPC mới: renderer gọi
-    // thẳng navigator.mediaDevices.getDisplayMedia() — API Web chuẩn, không cần preload.
-    // Tham khảo: https://www.electronjs.org/docs/latest/api/desktop-capturer
-    // ================================
-    session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
-        desktopCapturer.getSources({ types: ["screen"] })
-            .then((sources) => {
-                if (!sources || !sources[0]) {
-                    console.error("[VuMeter/Loopback] Không tìm thấy nguồn màn hình nào để lấy audio loopback.");
-                    callback({});
-                    return;
-                }
-                // audio: "loopback" = âm thanh hệ thống đang phát ra loa (Desktop/System),
-                // KHÔNG liên quan gì tới Microphone. video chỉ là điều kiện bắt buộc của API,
-                // renderer sẽ dừng track video ngay lập tức, chỉ giữ lại track audio.
-                callback({ video: sources[0], audio: "loopback" });
-            })
-            .catch((err) => {
-                console.error("[VuMeter/Loopback] Lỗi khi lấy desktop source:", err);
-                callback({});
-            });
-    }, { useSystemPicker: false });
-
     createMainWindow();
     createSetupWindow();
     await AIBootstrap.initialize();
+
+    // MIDI CONTROL CORE v1.0 — bọc try/catch riêng: nếu MIDI/Command Engine lỗi (thiếu
+    // easymidi lúc runtime, không có cổng MIDI nào, v.v.) thì app vẫn mở bình thường,
+    // không ảnh hưởng AIBootstrap/Key/BPM/MOD/EventBus ở trên hay bất kỳ chức năng cũ nào.
+    try {
+        CommandRuntime.start({ readSettingsFile });
+    } catch (err) {
+        console.error("CommandRuntime.start() lỗi (không ảnh hưởng phần còn lại của app):", err);
+    }
 
     // ================================
     // Windows Media Session Integration (SMTC) — Data Acquisition Layer.
@@ -237,6 +217,21 @@ ipcMain.on("close-setup", () => {
 
 ipcMain.on("setup-changed", () => {
     mainWin?.webContents.send("setup-changed");
+    // Nạp lại mapping MIDI + mở lại Input đúng cổng mới nhất — không ảnh hưởng dòng relay ở trên.
+    try { CommandRuntime.reloadMappings(); } catch (err) { console.error("reloadMappings lỗi:", err); }
+});
+
+// ================================
+// MIDI CONTROL CORE v1.0 — bridge cho preload.js:sendCommand(targetId, action, value),
+// đã khai báo sẵn từ trước nhưng CHƯA có handler (đúng như báo cáo v5.0 phát hiện).
+// Chỉ chuyển tiếp vào CommandRuntime.dispatch() — không tự xử lý/diễn giải gì thêm ở đây.
+// ================================
+ipcMain.handle("ai-command", async (event, payload) => {
+    try {
+        return await CommandRuntime.dispatch(payload);
+    } catch (err) {
+        return { ok: false, detail: err.message };
+    }
 });
 
 // ================================

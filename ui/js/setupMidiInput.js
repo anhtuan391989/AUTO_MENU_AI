@@ -143,6 +143,8 @@
         delete learnResult.dataset.channel;
     }
 
+    const DISPATCHABLE_ACTIONS = new Set(["daw:play", "daw:stop", "daw:record"]);
+
     function renderMappingList() {
         const { mappingList } = els();
         if (!mappingList) return;
@@ -155,8 +157,12 @@
         list.forEach((m, idx) => {
             const row = document.createElement("div");
             row.className = "mapping-saved-row";
+            const live = DISPATCHABLE_ACTIONS.has(m.action);
+            const statusBadge = live
+                ? '<span class="badge badge-live">Đã nối Command Engine (Studio One Transport)</span>'
+                : '<span class="badge badge-soon">Đã lưu — chưa nối capability nào</span>';
             row.innerHTML = `<span>${m.trigger}</span><span>→ ${m.action}</span>
-                <span class="badge badge-soon">Đã lưu — chưa thực thi</span>
+                ${statusBadge}
                 <button class="setup-btn mapping-del-btn" data-idx="${idx}">🗑</button>`;
             mappingList.appendChild(row);
         });
@@ -166,6 +172,7 @@
                 list2.splice(Number(btn.dataset.idx), 1);
                 saveMappings(list2);
                 renderMappingList();
+                window.electronAPI?.notifySetupChanged?.();
             });
         });
     }
@@ -182,10 +189,22 @@
         }
         const trigger = learnResult.textContent.replace("✅ Đã nhận: ", "");
         const list = getMappings();
-        list.push({ trigger, action: actionSelect.value, savedAt: new Date().toISOString() });
+        // Lưu CẤU TRÚC thật (type/channel/number), không chỉ chuỗi hiển thị — đây là field
+        // mà core/command-engine-js/runtime.js dùng để tra O(1) lúc dispatch thật. Thiếu field
+        // này thì mapping chỉ để XEM, không bao giờ được Command Engine khớp/thực thi.
+        list.push({
+            trigger,
+            kind: learnResult.dataset.kind,
+            type: learnResult.dataset.kind === "note" ? "note" : (learnResult.dataset.kind === "cc" ? "cc" : learnResult.dataset.kind),
+            channel: Number(learnResult.dataset.channel),
+            number: Number(learnResult.dataset.number),
+            action: actionSelect.value,
+            savedAt: new Date().toISOString(),
+        });
         saveMappings(list);
         renderMappingList();
         clearLearnResult();
+        window.electronAPI?.notifySetupChanged?.(); // báo main.js nạp lại mapping/Input thật ngay, không cần khởi động lại app
         if (saveBtn) saveBtn.textContent = "💾 Đã lưu";
         setTimeout(() => { if (saveBtn) saveBtn.textContent = "💾 Lưu Mapping"; }, 1200);
     }

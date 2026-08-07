@@ -303,9 +303,14 @@
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">Sơ đồ nhóm Mapping (khái niệm) <span class="badge badge-unwired">Thực thi chưa có Engine</span></div>
-                    <p class="hint-text">Mapping thật (Learn + Lưu) đã có ở trên. Bảng dưới đây chỉ minh hoạ các nhóm
-                        action theo đúng yêu cầu — chưa có Command Engine để THỰC THI khi trigger khớp (xem mục DAW).</p>
+                    <div class="panel-card-title">Sơ đồ nhóm Mapping (khái niệm)
+                        <span class="badge badge-soon">Chỉ nhóm "DAW Control: Play/Stop/Record" đã nối thật</span>
+                    </div>
+                    <p class="hint-text">Mapping thật (Learn + Lưu + <b>dispatch thật tới Studio One</b> qua Command
+                        Engine) đã có ở Mapping đã lưu bên trên, nhưng chỉ 3 action
+                        <code>daw:play/daw:stop/daw:record</code> có capability thật trong
+                        <code>capabilityRegistry.js</code>. Các nhóm còn lại (Menu/Preset/Key-Mod/Plugin) vẫn Learn+Save
+                        được nhưng KHÔNG dispatch — bảng dưới chỉ minh hoạ khái niệm.</p>
                     <div class="mapping-tabs">
                         <div class="mapping-block">
                             <div class="mapping-block-title">Menu</div>
@@ -327,11 +332,11 @@
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">🔗 MIDI Macro <span class="badge badge-unwired">Chưa có Engine thực thi</span></div>
-                    <p class="hint-text">1 MIDI → nhiều Action nối tiếp (Action 1 → Action 2 → Action 3). Cần Command
-                        Engine để chạy, đồng thời phải giới hạn rõ số bước tối đa (đề xuất ≤5 action/macro) để tránh
-                        loop — chưa implement vì chưa có Engine thực thi action nào (kể cả 1 action đơn cũng chưa chạy
-                        được, xem Mapping ở trên).</p>
+                    <div class="panel-card-title">🔗 MIDI Macro <span class="badge badge-unwired">Chưa có Engine thực thi chuỗi action</span></div>
+                    <p class="hint-text">1 MIDI → nhiều Action nối tiếp (Action 1 → Action 2 → Action 3). Command
+                        Engine hiện chỉ dispatch 1 action/lần (không có khái niệm chuỗi) — cần thêm logic riêng, giới
+                        hạn rõ số bước tối đa (đề xuất ≤5 action/macro) để tránh loop. Chưa làm ở task này vì Transport
+                        đơn lẻ (Mục 8) phải ổn định trước.</p>
                 </div>
 
                 <div class="panel-card">
@@ -370,20 +375,23 @@
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">🔧 Command Engine — phát hiện quan trọng
-                        <span class="badge badge-unwired">Có sẵn nhưng chưa nối (dead code)</span>
+                    <div class="panel-card-title">🔧 Command Engine
+                        <span class="badge badge-soon">Đã nối Transport — chưa test phần cứng/DAW thật</span>
                     </div>
                     <p class="hint-text">
-                        <code>core/command-engine-js/</code> đã có sẵn <b>CommandEngine + capabilityRegistry</b> hoàn
-                        chỉnh, kể cả mục <code>studio_one</code> với action <code>transportPlay/transportStop/
-                        transportRecord/saveSong</code> qua driver MCU (MIDI) + hotkey fallback — đúng kiến trúc
-                        "MIDI → Command Engine → DAW Capability → DAW Driver" đang cần. Nhưng thư mục này
-                        <b>không được require ở bất kỳ đâu trong app đang chạy</b> (đã grep toàn repo xác nhận), và
-                        <code>preload.js</code> tự ghi chú "main.js hiện CHƯA có ipcMain.handle('ai-command', ...)".<br>
-                        → Vì vậy: <b>DAW Status</b> dưới đây chỉ là "đã cấu hình" (đã chọn + lưu), <b>không phải</b>
-                        "Control: MIDI đang chạy thật". Nối Command Engine vào <code>main.js</code> để nó thực thi
-                        thật nằm ngoài phạm vi "chỉ sửa Setup UI" — cần bạn xác nhận trước khi làm ở task khác.
-                    </p>
+                        <code>core/command-engine-js/</code> (CommandEngine + capabilityRegistry — <b>không viết lại</b>,
+                        chỉ wire) nay đã được khởi tạo thật trong <code>main.js</code> lúc app khởi động, đăng ký
+                        <code>HotkeyDriver</code> + <code>MidiDriver</code> (alias <code>'mcu'</code> — đúng tên driver
+                        <code>studio_one</code> khai báo trong registry, đã vá 1 dòng vì registry dùng <code>'mcu'</code>
+                        còn driver gốc chỉ đăng ký tên <code>'midi'</code>). MIDI Input thật (Node, <code>easymidi</code>)
+                        đọc đúng cổng đã chọn ở mục MIDI, tra Mapping đã Learn+Save theo O(1), gọi thẳng
+                        <code>transportPlay/transportStop/transportRecord</code> khi khớp CC/Note — <b>chỉ nhóm
+                        Transport</b>, đúng thứ tự ưu tiên "Studio One trước, Transport trước".</p>
+                    <p class="hint-text">✅ Đã test được (static, trong sandbox không có ALSA/MIDI subsystem): khởi động
+                        không crash, tự fallback đúng thứ tự <code>mcu → hotkey</code>, không báo "thành công" giả khi
+                        driver thật sự thất bại, mapping cũ dạng chuỗi (không có type/channel/number) bị bỏ qua an toàn.<br>
+                        ❌ <b>Chưa test được</b>: cắm controller MIDI thật, mở Studio One thật, xác nhận
+                        transportPlay/Stop/Record thật sự chạy — không được gọi READY cho tới khi có kết quả này.</p>
                 </div>
 
                 <div class="panel-card">
@@ -401,10 +409,12 @@
                     <button id="saveDawBtn" class="setup-btn" style="margin-top:8px;">💾 Lưu DAW: <span id="currentDaw">Chưa chọn</span></button>
                     <div class="status-text" style="margin-top:8px;">
                         DAW: <b id="dawStatusName">Chưa chọn</b> · Status: <b>Đã cấu hình</b> (không phải health-check) ·
-                        Control: <b>Chưa nối Command Engine</b>
+                        Driver: <b>MIDI/MCU → Hotkey fallback</b> (Transport only, chưa test phần cứng)
                     </div>
-                    <p class="hint-text">⚠ <code>core/drivers</code> hiện chỉ có <code>StudioOneDriver.js</code>. Cubase
-                        trong danh sách chỉ dùng để chọn hồ sơ toạ độ/phím tắt, chưa có driver điều khiển riêng.</p>
+                    <p class="hint-text">⚠ <code>core/drivers</code> (thư mục khác, cũ) chỉ có
+                        <code>StudioOneDriver.js</code> — KHÔNG liên quan tới <code>core/command-engine-js/</code> ở
+                        trên. Cubase trong danh sách chỉ dùng để chọn hồ sơ toạ độ/phím tắt, chưa có driver điều khiển
+                        riêng trong cả 2 thư mục.</p>
                     <!-- giữ id cũ để initModal không lỗi -->
                     <button id="selectDawBtn" style="display:none;"></button>
                     <button id="closeDawBtn" style="display:none;"></button>
