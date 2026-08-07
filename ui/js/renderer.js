@@ -444,7 +444,7 @@ toneSelector?.addEventListener("change", () => {
     if (!powerBtn || !powerBtn.classList.contains("active")) return;
 
     const toneVal = parseInt(toneSelector.value ?? "0", 10);
-    const previewKey = transposeKey(originalKey, toneVal);
+    const previewKey = transposeKey(keyState.active.value, toneVal);
 
     if (currentKeyEl) currentKeyEl.textContent = previewKey;
 
@@ -459,7 +459,7 @@ document.getElementById("applyToneBtn")?.addEventListener("click", () => {
     }
 
     const toneVal = parseInt(document.getElementById("toneSelector")?.value ?? "0", 10);
-    const newKey = transposeKey(originalKey, toneVal);
+    const newKey = transposeKey(keyState.active.value, toneVal); // Mục XIV/Test 11-12: luôn lấy Active Key MỚI NHẤT làm base
 
     const currentKeyEl = document.getElementById("currentKey");
     if (currentKeyEl) currentKeyEl.textContent = newKey;
@@ -498,14 +498,21 @@ document.getElementById("applyToneBtn")?.addEventListener("click", () => {
 });
 
 /* ==========================================================
-   7B. KEY SOURCE MANAGER — Manual Override > Song Database > AI Realtime
+   7B. KEY SOURCE MANAGER — MANUAL KEY / MOD WORKFLOW FINAL v5.1
    ----------------------------------------------------------
-   Lớp quản lý MỚI theo đúng thứ tự ưu tiên bắt buộc:
-       Manual Override
-              ↑
-         Song Database
-              ↑
-       AI Realtime Detect
+   State machine tường minh theo đúng Mục XVI/XVII/XVIII của task:
+   3 nguồn Key độc lập (MANUAL/DATABASE/AI) không bao giờ dùng chung 1 biến,
+   1 điểm DUY NHẤT quyết định Active Key (resolveActiveKey), 1 điểm DUY NHẤT
+   thực sự gửi xuống Auto Tune (commitKeyToAutoTune).
+
+       AI STATE ───────────────┐
+                                │
+       DATABASE STATE ─────────┼──→ ACTIVE KEY ──→ MOD PREVIEW
+                                │                     │
+       MANUAL STATE ───────────┘                     ↓
+                                             MOD SET / MANUAL SEND
+                                                    ↓
+                                               AUTO TUNE
 
    KHÔNG đụng KeyEngine.js/ModEngine.js (logic dò AI thật), KHÔNG đụng
    cơ chế sendKeyToAutotune() (vẫn là hàm DUY NHẤT thật sự gửi xuống
@@ -517,52 +524,60 @@ const MANUAL_OVERRIDE_DURATION_MS = 4 * 60 * 1000;
 const aiKeyDetectLineEl = document.getElementById("aiKeyDetectLine");
 const manualOverrideStatusEl = document.getElementById("manualOverrideStatus");
 
-const keySource = {
-    manual: { active: false, value: null, deadlineAt: null, tickHandle: null },
-    songDb: { active: false, value: null, bpm: null, title: null, artist: null },
-    ai: { value: appState.originalKey, provisional: null }
-};
-
-let lastPluginKey = appState.originalKey; // giá trị THẬT đã gửi xuống Plugin lần gần nhất (chống gửi trùng)
-let lastNowPlayingKey = null;             // "<title>|<artist>" gần nhất, để tự phát hiện đổi bài (mục IX)
-
 // ==========================================================
-// MENU FINAL v4.0 — Mục XI/XII: 3 giá trị BẮT BUỘC độc lập (AI KEY / MANUAL KEY / ACTIVE KEY)
-// + trạng thái MOD. Object CHỈ ĐỌC (getter), KHÔNG tạo thêm biến lưu trữ trùng lặp — dựa
-// hoàn toàn trên state đã tách sẵn ở trên (keySource) và control MOD (modPowerBtn/toneSelector),
-// đúng đúng cảnh báo của task: "Không được dùng 1 biến cho cả 3".
-//   - aiKey      : Key AI đang dò được (luôn chạy nền, không bao giờ dừng — mục III)
-//   - manualKey  : Key người dùng chọn tay gần nhất (mục IV)
-//   - activeKey  : Key GỐC đang có hiệu lực (CHƯA cộng offset MOD) — cơ sở để SEND/SET gửi
-//                  xuống Auto Tune, ưu tiên Manual > Song Database > AI (mục VII/X)
-//   - modOffset  : số bán cung đang chọn ở Dropdown MOD (chỉ áp dụng thật khi modMode=true)
-//   - manualMode : đang ở chế độ Manual (đã SEND, chưa hết 4 phút) hay không (mục IV)
-//   - modMode    : MOD đang ON hay OFF (mục VIII)
+// Mục XVI — State object DUY NHẤT, tách biệt hoàn toàn MANUAL / DATABASE / AI /
+// ACTIVE (Key đang hiển thị + gửi Plugin) / MOD / AUTO TUNE. Không dùng 1 biến
+// "currentKey" cho nhiều nghĩa như code cũ.
+//   - manual.preview   : giá trị đang chọn ở Dropdown, CHƯA SEND (Mục IV, VI)
+//   - manual.committed : giá trị đã SEND thành công lần gần nhất (Mục V)
+//   - manual.active    : đã SEND và CHƯA hết 4 phút (Mục V, VII) — gate chặn AI/Database
+//   - database.*       : Song Database (SMTC/NowPlayingResolver), độc lập AI (Mục VIII)
+//   - ai.*             : AI Realtime — luôn chạy nền, không bao giờ dừng (Mục II)
+//   - active.*         : Key ĐANG HIỂN THỊ, do resolveActiveKey() quyết định (Mục XVII)
+//   - mod.*            : chỉ mirror lại control DOM sẵn có (modPowerBtn/toneSelector),
+//                         KHÔNG tạo 2 nguồn sự thật cho cùng 1 giá trị (Mục XVI cho phép
+//                         "cấu trúc khác nếu tốt hơn, miễn giữ được sự tách biệt")
+//   - autoTune.committedKey : giá trị THẬT sự đã gửi xuống Plugin lần gần nhất
 // ==========================================================
 const keyState = {
-    get aiKey() { return keySource.ai.value; },
-    get manualKey() { return keySource.manual.value; },
-    get activeKey() { return originalKey; },
-    get modOffset() { return parseInt(document.getElementById("toneSelector")?.value ?? "0", 10); },
-    get manualMode() { return keySource.manual.active; },
-    get modMode() { return !!document.getElementById("modPowerBtn")?.classList.contains("active"); }
+    manual: { active: false, preview: null, committed: null, deadlineAt: null, tickHandle: null },
+    database: { active: false, value: null, bpm: null, title: null, artist: null },
+    ai: { value: appState.originalKey, confidence: 0, provisional: null },
+    active: { source: "ai", value: appState.originalKey },
+    mod: {
+        get enabled() { return !!document.getElementById("modPowerBtn")?.classList.contains("active"); },
+        get offset() { return parseInt(document.getElementById("toneSelector")?.value ?? "0", 10); }
+    },
+    autoTune: { committedKey: appState.originalKey }
 };
 window.keyState = keyState; // chỉ để debug qua DevTools Console (F12) — không có nơi nào khác đọc biến này
+
+let lastPluginKey = appState.originalKey; // giữ để tương thích ngược với code cũ đọc biến này (mirror keyState.autoTune.committedKey)
+let lastNowPlayingKey = null;             // "<title>|<artist>" gần nhất, để tự phát hiện đổi bài (mục IX)
 
 function logKeySource(sourceLabel) {
     console.log(`[Key Source] ${sourceLabel}`);
 }
 
-function getActiveSourceName() {
-    if (keySource.manual.active) return "manual";
-    if (keySource.songDb.active) return "songDb";
-    return "ai";
+// Mục XVI: user đã "chạm" vào Manual (đang preview HOẶC đã commit) — trong cả 2 trường hợp
+// này, theo đúng Mục IV ("ACTIVE = MANUAL" ngay khi mới chọn dropdown, chưa cần SEND) và
+// Mục II (AI không được đổi hiển thị/gửi Auto Tune khi Manual đang active), Manual coi như
+// đang NẮM QUYỀN hiển thị + chặn AI/Database, dù đã SEND hay chưa.
+function manualHasControl() {
+    return keyState.manual.active || keyState.manual.preview !== null;
 }
 
-function getActiveKeyValue() {
-    if (keySource.manual.active) return keySource.manual.value;
-    if (keySource.songDb.active) return keySource.songDb.value;
-    return keySource.ai.value;
+// Mục XVII — SINGLE AUTHORITY quyết định Active Key. KHÔNG để bất kỳ nơi nào khác tự suy
+// luận nguồn đang active (đúng cảnh báo Mục IX: "Source display phải lấy từ state machine
+// duy nhất, không tự suy luận ở nhiều nơi").
+function resolveActiveKey() {
+    if (manualHasControl()) {
+        return { source: "manual", value: keyState.manual.preview ?? keyState.manual.committed };
+    }
+    if (keyState.database.active) {
+        return { source: "database", value: keyState.database.value };
+    }
+    return { source: "ai", value: keyState.ai.value };
 }
 
 function formatCountdownMMSS(ms) {
@@ -572,103 +587,125 @@ function formatCountdownMMSS(ms) {
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+// Mục XIV/Test 11-12: MOD luôn lấy Active Key HIỆN TẠI (mới nhất) làm base cho preview,
+// không được giữ base cũ. Chỉ ĐỔI HIỂN THỊ (currentKeyEl) — không gửi gì xuống Auto Tune,
+// đúng Mục XII ("đây vẫn là preview, chưa gửi Auto Tune").
+function refreshModPreviewIfOn() {
+    if (!keyState.mod.enabled) return;
+    const previewKey = transposeKey(keyState.active.value, keyState.mod.offset);
+    if (currentKeyEl) currentKeyEl.textContent = previewKey;
+}
+
 // 1 hàm DUY NHẤT vẽ lại 2 dòng hiển thị mới trong card Key — tránh nhiều nơi tự
 // set textContent lệch nhau. KHÔNG đụng #keyInfo (giữ nguyên hành vi/text hiện có).
 function refreshKeySourceDisplay() {
 
-    // UI Final v3.0 — Mục XII (ACTIVE SOURCE): 1 dòng badge duy nhất, đọc lại
-    // getActiveSourceName() đã có sẵn (KHÔNG đổi hàm đó/logic chọn nguồn).
-    // #keyInfo và #manualOverrideStatus vẫn được JS cập nhật như cũ bên dưới,
-    // chỉ ẩn đi bằng CSS để tránh hiện nhiều dòng trạng thái cùng lúc.
+    // Mục IX (SOURCE DISPLAY): badge phải phản ánh ĐÚNG state machine (keyState.active.source),
+    // không tự suy luận nơi khác.
     const activeSourceLabelEl = document.getElementById("activeSourceLabel");
     if (activeSourceLabelEl) {
-        const labelMap = { manual: "MANUAL", songDb: "DATABASE", ai: "AI DETECT" };
-        activeSourceLabelEl.textContent = "ACTIVE: " + (labelMap[getActiveSourceName()] || "AI DETECT");
+        const labelMap = { manual: "MANUAL", database: "DATABASE", ai: "AI DETECT" };
+        activeSourceLabelEl.textContent = "ACTIVE: " + (labelMap[keyState.active.source] || "AI DETECT");
     }
 
     if (aiKeyDetectLineEl) {
 
-        // Mục A ("Key tạm"): nếu có ước lượng tạm mới hơn giá trị ĐÃ KHOÁ -> hiện kèm nhãn
-        // "đang dò" cho cảm giác tức thì. Giá trị thật dùng để gửi Plugin (keySource.ai.value)
-        // KHÔNG đổi ở đây — chỉ đổi hiển thị.
-        const showProvisional = keySource.ai.provisional && keySource.ai.provisional !== keySource.ai.value;
+        // Mục A ("Key tạm" — cải thiện tốc độ cảm nhận): CHỈ hiển thị, KHÔNG đụng
+        // keyState.ai.value/gửi Plugin — những việc đó vẫn qua startAiRealtimeLoop() (mục 7B).
+        const showProvisional = keyState.ai.provisional && keyState.ai.provisional !== keyState.ai.value;
         aiKeyDetectLineEl.textContent = showProvisional
-            ? `AI Detect: ${keySource.ai.provisional} (đang dò...)`
-            : `AI Detect: ${keySource.ai.value}`;
+            ? `AI Detect: ${keyState.ai.provisional} (đang dò...)`
+            : `AI Detect: ${keyState.ai.value}`;
 
     }
 
     if (!manualOverrideStatusEl) return;
 
-    if (keySource.manual.active) {
+    if (keyState.manual.active) {
 
-        const remainMs = keySource.manual.deadlineAt - Date.now();
+        const remainMs = keyState.manual.deadlineAt - Date.now();
         manualOverrideStatusEl.textContent = `Auto Detect · ${formatCountdownMMSS(remainMs)}`;
 
     } else {
 
-        manualOverrideStatusEl.textContent = "AI Key Detect"; // đúng yêu cầu: KHÔNG hiện timer ở chế độ AI/Song Database
+        manualOverrideStatusEl.textContent = "AI Key Detect"; // đúng yêu cầu: KHÔNG hiện timer ở chế độ AI/Database
 
     }
 
 }
 
-// Áp dụng key của nguồn ĐANG có hiệu lực (theo đúng thứ tự ưu tiên) xuống Plugin + UI.
-// KHÔNG gọi hàm này cho bước "xem trước" khi mới chọn Manual (chưa bấm SEND) — đó là
-// hành vi riêng trong keySelector "change" bên dưới, đúng yêu cầu giữ nguyên Logic Send.
-function applyActiveKeyToPlugin(sourceLabel) {
+// Mục XVIII — SINGLE AUTHORITY CHO AUTO TUNE. Đây là nơi DUY NHẤT thực sự gọi
+// sendKeyToAutotune(). Chỉ được gọi từ: AI cập nhật khi AI đang là nguồn active,
+// Manual SEND, Manual timeout (quay về Database/AI), Database match/miss khi Manual
+// không active. KHÔNG được gọi từ bất kỳ dropdown onchange nào (đó là preview, Mục VI).
+async function commitKeyToAutoTune(key, reason) {
 
-    const value = getActiveKeyValue();
-    const source = getActiveSourceName();
+    if (key === keyState.autoTune.committedKey) return; // giá trị không đổi thật -> khỏi gửi lại, tránh spam Plugin
 
-    originalKey = value;
-    if (currentKeyEl) currentKeyEl.textContent = value;
-    if (keySelector && source !== "manual") keySelector.value = value; // đồng bộ dropdown khi KHÔNG phải Manual (mục I)
-
-    logKeySource(sourceLabel);
-    refreshKeySourceDisplay();
-
-    if (value === lastPluginKey) return; // giá trị không đổi thật -> khỏi gửi lại, tránh spam Plugin
-
-    if (source === "ai" && isAiControlActive()) {
+    if (isAiControlActive()) {
 
         // AI_CONTROL: renderer KHÔNG tự gửi lệnh AI xuống Plugin nữa (giữ NGUYÊN hành vi cũ) —
         // Workflow -> PluginController -> Bridge lo phần gửi thật (xem onPluginCommand cuối file).
-        console.log("[ControlSource] AI_CONTROL — bỏ qua gửi Key trực tiếp, chờ Bridge từ Core.");
+        console.log(`[ControlSource] AI_CONTROL — bỏ qua gửi Key trực tiếp (${reason}), chờ Bridge từ Core.`);
         setStatus("dot-key", "online");
-        lastPluginKey = value;
+        keyState.autoTune.committedKey = key;
+        lastPluginKey = key;
         return;
 
     }
 
     setStatus("dot-key", "pending");
 
-    sendKeyToAutotune(value).then((result) => {
+    const result = await sendKeyToAutotune(key);
 
-        if (result.ok) {
-            setStatus("dot-key", "online");
-            lastPluginKey = value;
-        } else {
-            setStatus("dot-key", "offline");
-            console.error("sendKeyToAutotune lỗi:", result.detail);
-        }
+    if (result.ok) {
+        setStatus("dot-key", "online");
+        keyState.autoTune.committedKey = key;
+        lastPluginKey = key;
+        if (keyInfoEl && reason === "Manual Override") keyInfoEl.textContent = `Manual Key (${result.driverUsed})`;
+    } else {
+        setStatus("dot-key", "offline");
+        console.error(`commitKeyToAutoTune(${reason}) lỗi:`, result.detail);
+        if (keyInfoEl && reason === "Manual Override") keyInfoEl.textContent = "Lỗi gửi Key";
+    }
 
-        refreshKeySourceDisplay();
+    refreshKeySourceDisplay();
 
-    });
+}
+
+// Cập nhật Active Key (hiển thị + mirror originalKey cho code cũ: SoundShifter, ModEngine
+// rootIndex...) theo đúng resolveActiveKey() hiện tại, rồi commit xuống Auto Tune nếu được
+// phép (commit=false dùng cho các bước chỉ cần đồng bộ hiển thị, ví dụ Manual preview).
+function syncActiveKey(reason, { commit = true } = {}) {
+
+    const resolved = resolveActiveKey();
+    keyState.active.source = resolved.source;
+    keyState.active.value = resolved.value;
+
+    originalKey = resolved.value; // mirror — nhiều chỗ code cũ (SoundShifter, ModEngine, transposeKey) vẫn đọc biến này
+    if (currentKeyEl) currentKeyEl.textContent = resolved.value;
+    if (keySelector && resolved.source !== "manual") keySelector.value = resolved.value; // đồng bộ dropdown khi KHÔNG phải Manual
+
+    refreshModPreviewIfOn(); // Mục XIV/Test 11-12: MOD phải nhìn thấy Active Key MỚI NHẤT
+    logKeySource(reason);
+    refreshKeySourceDisplay();
+
+    if (commit) commitKeyToAutoTune(resolved.value, reason);
 
 }
 
 function cancelManualOverride() {
 
-    if (keySource.manual.tickHandle) {
-        clearInterval(keySource.manual.tickHandle);
-        keySource.manual.tickHandle = null;
+    if (keyState.manual.tickHandle) {
+        clearInterval(keyState.manual.tickHandle);
+        keyState.manual.tickHandle = null;
     }
 
-    const wasActive = keySource.manual.active;
-    keySource.manual.active = false;
-    keySource.manual.deadlineAt = null;
+    const wasActive = keyState.manual.active;
+    keyState.manual.active = false;
+    keyState.manual.preview = null;
+    keyState.manual.committed = null;
+    keyState.manual.deadlineAt = null;
 
     if (wasActive) console.log("[Manual Override] OFF");
 
@@ -677,24 +714,25 @@ function cancelManualOverride() {
 // Gọi ngay sau khi SEND gửi Manual Key thành công xuống Plugin.
 function startManualOverrideCountdown() {
 
-    if (keySource.manual.tickHandle) clearInterval(keySource.manual.tickHandle);
+    if (keyState.manual.tickHandle) clearInterval(keyState.manual.tickHandle);
 
-    keySource.manual.deadlineAt = Date.now() + MANUAL_OVERRIDE_DURATION_MS;
+    keyState.manual.deadlineAt = Date.now() + MANUAL_OVERRIDE_DURATION_MS;
 
     console.log("[Manual Override] ON");
     console.log(`[Manual Timer] ${formatCountdownMMSS(MANUAL_OVERRIDE_DURATION_MS)}`);
 
-    keySource.manual.tickHandle = setInterval(() => {
+    keyState.manual.tickHandle = setInterval(() => {
 
-        const remainMs = keySource.manual.deadlineAt - Date.now();
+        const remainMs = keyState.manual.deadlineAt - Date.now();
 
         if (remainMs <= 0) {
 
             console.log("[Manual Timer] Expired");
+            // Mục VII: source quay về Database nếu có, không thì AI — dùng NGAY giá trị đang
+            // có sẵn (keyState.ai.value luôn được AI cập nhật nền liên tục), KHÔNG detect lại
+            // từ đầu (Mục VII, Mục XX).
             cancelManualOverride();
-            // Mục VII: Plugin tự nhận Key AI hiện tại, HOẶC quay về Song Database nếu đó đang
-            // là nguồn hiện tại (không quay về Manual — Manual đã tắt hẳn).
-            applyActiveKeyToPlugin(keySource.songDb.active ? "Song Database" : "AI Detect");
+            syncActiveKey("Manual Timeout");
             return;
 
         }
@@ -713,17 +751,18 @@ function onSongDatabaseMatch(song) {
 
     console.log("[NowPlaying] Database Match");
 
-    keySource.songDb.active = true;
-    keySource.songDb.value = song.key;
-    keySource.songDb.bpm = song.bpm;
-    keySource.songDb.title = song.title;
-    keySource.songDb.artist = song.artist;
+    keyState.database.active = true;
+    keyState.database.value = song.key;
+    keyState.database.bpm = song.bpm;
+    keyState.database.title = song.title;
+    keyState.database.artist = song.artist;
 
-    if (!keySource.manual.active) {
-        applyActiveKeyToPlugin("Song Database"); // Manual vẫn ưu tiên cao nhất -> không đè nếu đang Manual
-    } else {
-        refreshKeySourceDisplay();
+    if (manualHasControl()) {
+        // Mục II/VIII: Manual (kể cả đang preview, chưa SEND) vẫn ưu tiên cao nhất -> không đè.
+        return;
     }
+
+    syncActiveKey("Song Database");
 
 }
 
@@ -731,17 +770,17 @@ function onSongDatabaseMiss() {
 
     console.log("[NowPlaying] Database Miss");
 
-    const wasActive = keySource.songDb.active;
-    keySource.songDb.active = false;
-    keySource.songDb.value = null;
+    const wasActive = keyState.database.active;
+    keyState.database.active = false;
+    keyState.database.value = null;
 
-    if (wasActive && !keySource.manual.active) {
-        applyActiveKeyToPlugin("AI Detect"); // Mục IV: không nhận diện được bài -> tự quay về Realtime FFT
+    if (wasActive && !manualHasControl()) {
+        syncActiveKey("AI Detect"); // Mục VIII: không nhận diện được bài -> tự quay về AI Realtime
     }
 
 }
 
-// Mục X: mất Now Playing (No Media/Unavailable) -> Song Database OFF, Realtime FFT ON.
+// Mục X: mất Now Playing (No Media/Unavailable) -> Database OFF, AI Realtime ON.
 // KHÔNG chủ động huỷ Manual — Manual vẫn giữ quyền ưu tiên cao nhất theo đúng mục I nếu
 // người dùng đang chủ động điều khiển tay.
 function onNowPlayingLost() {
@@ -785,15 +824,24 @@ function startAiRealtimeLoop() {
 
         window.__keyDetectStopWatcher = null;
 
-        keySource.ai.value = result.key;
+        // Mục II/XIX: AI luôn cập nhật giá trị NỘI BỘ của nó bất kể Manual đang active hay
+        // không (chống race condition — AI update chỉ ghi vào ai.value, KHÔNG được tự ý
+        // đổi hiển thị/Auto Tune khi Manual/Database đang nắm quyền).
+        keyState.ai.value = result.key;
+        keyState.ai.confidence = result.confidence;
         window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
-        refreshKeySourceDisplay();
 
-        if (getActiveSourceName() === "ai") {
+        if (!manualHasControl() && !keyState.database.active) {
 
             if (keyInfoEl) keyInfoEl.textContent = `Auto Detect (${Math.round(result.confidence * 100)}% tin cậy)`;
-            applyActiveKeyToPlugin("AI Detect");
+            syncActiveKey("AI Detect");
             startModulationWatcher();
+
+        } else {
+
+            // Không phải nguồn active -> KHÔNG đổi hiển thị/Auto Tune, chỉ cần vẽ lại dòng
+            // "AI Detect: ..." phụ (đã cập nhật keyState.ai.value ở trên).
+            refreshKeySourceDisplay();
 
         }
 
@@ -805,25 +853,17 @@ function startAiRealtimeLoop() {
 
 // Điểm DUY NHẤT xử lý "quay lại Auto" — dùng cho: nút autoDetectBtn có sẵn, dropdown chọn lại
 // "AI Key Detect" + SEND, và khởi động lần đầu. Huỷ Manual (nếu có), áp NGAY nguồn hiện có
-// hiệu lực (Song Database nếu có, không thì đợi AI), đảm bảo vòng dò AI đang chạy.
+// hiệu lực (Database nếu có, không thì AI), đảm bảo vòng dò AI đang chạy. Mục XX: KHÔNG gọi
+// lại startAiRealtimeLoop() nếu vòng AI đã chạy — chỉ đảm bảo nó CÓ chạy (idempotent).
 function triggerAiKeyDetect() {
 
     cancelManualOverride();
 
-    // "Manual OFF -> Plugin lập tức dùng AI. Không mất dữ liệu. Không Detect lại từ đầu."
-    // AI luôn chạy NỀN liên tục suốt lúc Manual bật (startAiRealtimeLoop không bao giờ dừng),
-    // nên keySource.ai.value LUÔN đã có sẵn giá trị mới nhất ngay tại thời điểm này -> áp dụng
-    // NGAY LẬP TỨC, không cần chờ vòng dò tiếp theo. (Khôi phục fix đã bị mất do revert ngoài
-    // ý muốn — xem báo cáo.)
-    if (keySource.songDb.active) {
-
-        applyActiveKeyToPlugin("Song Database");
-
-    } else {
-
-        applyActiveKeyToPlugin("AI Detect");
-
-    }
+    // "Manual OFF -> Plugin lập tức dùng Database/AI hiện có. Không mất dữ liệu. Không Detect
+    // lại từ đầu." AI luôn chạy NỀN liên tục suốt lúc Manual bật (startAiRealtimeLoop không
+    // bao giờ dừng), nên keyState.ai.value LUÔN đã có sẵn giá trị mới nhất ngay tại thời điểm
+    // này -> áp dụng NGAY LẬP TỨC, không cần chờ vòng dò tiếp theo.
+    syncActiveKey(keyState.database.active ? "Song Database" : "AI Detect");
 
     if (window.__keyDetectStopWatcher) { window.__keyDetectStopWatcher(); window.__keyDetectStopWatcher = null; }
     startAiRealtimeLoop();
@@ -855,45 +895,39 @@ applyKeyBtn?.addEventListener("click", () => {
         window.__keyDetectStopWatcher = null;
     }
 
-    keySource.manual.active = true;
-    keySource.manual.value = selectedKey;
+    // Mục V — SEND: commit Manual Key. Đây là điểm DUY NHẤT (cùng AI active/Manual timeout/
+    // MOD SET) được phép gọi qua commitKeyToAutoTune (Mục XVIII).
+    keyState.manual.preview = null;
+    keyState.manual.committed = selectedKey;
+    keyState.manual.active = true;
 
-    originalKey = selectedKey;
-    if (currentKeyEl) currentKeyEl.textContent = selectedKey;
     if (keyInfoEl) keyInfoEl.textContent = "Manual Key";
-    setStatus("dot-key", "pending"); // cam: đang gửi, chờ kết quả thực thi
 
-    sendKeyToAutotune(selectedKey).then((result) => {
-        if (result.ok) {
-            setStatus("dot-key", "online"); // xanh: đã gửi thành công (qua MIDI hoặc click)
-            if (keyInfoEl) keyInfoEl.textContent = `Manual Key (${result.driverUsed})`;
-            logKeySource("Manual Override");
-
-            // SEND thành công -> Plugin chính thức đổi, bắt đầu đếm ngược 4 phút.
-            lastPluginKey = selectedKey;
-            startManualOverrideCountdown();
-        } else {
-            setStatus("dot-key", "offline"); // đỏ: gửi thất bại
-            if (keyInfoEl) keyInfoEl.textContent = "Lỗi gửi Key";
-            console.error("sendKeyToAutotune lỗi:", result.detail);
-        }
-        refreshKeySourceDisplay();
-    });
+    syncActiveKey("Manual Override");
+    startManualOverrideCountdown(); // SEND -> chính thức đổi, bắt đầu đếm ngược 4 phút (Mục V, VII)
 
     // AI Realtime vẫn chạy nền liên tục (startAiRealtimeLoop tự lặp lại vô điều kiện từ lúc khởi
     // động, mục 7B) — không cần khởi động lại riêng ở đây.
 });
 
-// Người dùng CHỈ chọn trong dropdown (chưa bấm SEND) -> "Key" cập nhật NGAY để xem trước, nhưng
-// Plugin CHƯA đổi (không gọi sendKeyToAutotune ở đây — đúng yêu cầu giữ nguyên Logic Send: Send
-// vẫn là hành động DUY NHẤT thật sự gửi xuống Plugin).
+// Mục IV/VI — Người dùng CHỈ chọn trong dropdown (chưa bấm SEND) -> "Key" + badge ACTIVE
+// cập nhật NGAY để xem trước (manual.preview), nhưng Auto Tune CHƯA đổi (KHÔNG gọi
+// sendKeyToAutotune/commitKeyToAutoTune ở đây — Send vẫn là hành động DUY NHẤT thật sự
+// gửi xuống Plugin). Đây là chỗ Mục VI cảnh báo rõ: KHÔNG được gộp preview + commit.
 keySelector?.addEventListener("change", () => {
 
     const selectedKey = keySelector.value;
 
-    if (selectedKey === "AI Key Detect") return; // chưa áp dụng gì, chờ bấm SEND
+    if (selectedKey === "AI Key Detect") {
+        // Người dùng đổi ý, quay lại "AI Key Detect" trong dropdown nhưng CHƯA bấm SEND ->
+        // chỉ nhả preview ra, xem trước lại nguồn Database/AI hiện có (chưa commit gì).
+        keyState.manual.preview = null;
+        if (!keyState.manual.active) syncActiveKey("Preview: AI Key Detect", { commit: false });
+        return;
+    }
 
-    if (currentKeyEl) currentKeyEl.textContent = selectedKey;
+    keyState.manual.preview = selectedKey;
+    syncActiveKey("Manual Preview", { commit: false }); // Mục IV: ACTIVE = MANUAL ngay, Auto Tune chưa đổi
 
 });
 
@@ -1410,10 +1444,10 @@ async function startAudioMonitor() {
         });
 
         // Mục A ("Key tạm" — cải thiện tốc độ cảm nhận): CHỈ cập nhật hiển thị, KHÔNG đụng
-        // keySource.ai.value/lock/gửi Plugin — những việc đó vẫn 100% qua startAiRealtimeLoop()
+        // keyState.ai.value/lock/gửi Plugin — những việc đó vẫn 100% qua startAiRealtimeLoop()
         // (mục 7B) như cũ.
         KeyEngine.onProvisionalEstimate((estimate) => {
-            keySource.ai.provisional = estimate.key;
+            keyState.ai.provisional = estimate.key;
             refreshKeySourceDisplay();
         });
 

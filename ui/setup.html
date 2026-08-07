@@ -157,13 +157,13 @@
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">🔈 Desktop Audio (Output Device) <span class="badge badge-unwired">Chưa có Engine — tách riêng khỏi Microphone</span></div>
-                    <p class="hint-text">App hiện chưa có khái niệm "Desktop Audio" (thu âm thanh phát ra loa/DAW) tách
-                        biệt khỏi Microphone — chỉ có 1 lựa chọn thiết bị input dùng chung cho mic. Theo đúng yêu cầu
-                        "không dùng chung", phần này để riêng, vô hiệu hoá, không dùng lại thiết bị input của Microphone.</p>
+                    <div class="panel-card-title">🔈 Desktop Audio <span class="badge badge-soon">COMING SOON</span></div>
+                    <p class="hint-text"><b>COMING SOON — Desktop audio capture engine unavailable.</b> App chưa có
+                        khái niệm "Desktop Audio" (thu âm thanh phát ra loa/DAW) tách biệt khỏi Microphone. Không dùng
+                        tạm Microphone thay thế — để trống đúng như yêu cầu, không giả vờ.</p>
                     <div class="placeholder-grid">
-                        <label class="ph-field">Output Device<select disabled><option>Chưa có Engine</option></select></label>
-                        <label class="ph-field">Desktop VU<button class="setup-btn" disabled>▶ Đo (chưa khả dụng)</button></label>
+                        <label class="ph-field">Output Device<select disabled><option>—</option></select></label>
+                        <label class="ph-field">Desktop VU<button class="setup-btn" disabled>▶ —</button></label>
                     </div>
                 </div>
 
@@ -206,9 +206,66 @@
                     <button id="closeMidiBtn" style="display:none;"></button>
 
                     <div class="placeholder-grid" style="margin-top:10px;">
-                        <label class="ph-field">Input<span class="badge badge-soon">Coming Soon</span></label>
-                        <label class="ph-field">Channel<select disabled><option>Tất cả (Omni)</option></select></label>
+                        <label class="ph-field">Channel (Input)<select disabled><option>Tất cả (Omni)</option></select></label>
                         <label class="ph-field">MIDI Clock<span class="badge badge-soon">Coming Soon</span></label>
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🎹 MIDI Input <span class="badge badge-live">Thật — Web MIDI API</span></div>
+                    <p class="hint-text">Phát hiện thiết bị Input thật đang cắm, trạng thái Connected/Disconnected đọc
+                        trực tiếp từ hệ thống (<code>input.state</code>), tự cập nhật khi cắm/rút dây
+                        (<code>onstatechange</code>).</p>
+                    <select id="midiInputSelect" class="ph-select">
+                        <option value="">Chọn cổng MIDI Input...</option>
+                    </select>
+                    <div class="hint-text" id="midiInputStatus">Đang dò MIDI Input...</div>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🎯 MIDI Learn <span class="badge badge-live">Thật — đọc tín hiệu Input thật</span></div>
+                    <p class="hint-text">Bấm Learn rồi xoay Knob / bấm phím trên controller — hệ thống đọc đúng
+                        Note/CC/Channel/Value thật gửi về. <b>Lưu Mapping chỉ LƯU trigger → tên action</b>, chưa THỰC
+                        THI hành động thật (xem ghi chú Command Engine ở mục DAW).</p>
+                    <div class="row-buttons">
+                        <button id="btnMidiLearn" class="setup-btn">🎯 Learn</button>
+                        <button id="btnMidiLearnCancel" class="setup-btn">✖ Cancel</button>
+                        <button id="btnMidiLearnClear" class="setup-btn">⟲ Clear</button>
+                    </div>
+                    <div class="status-text" id="midiLearnResult" style="margin-top:8px;">Chưa Learn.</div>
+                    <div class="group-title" style="margin-top:8px;">Gán vào Action</div>
+                    <select id="midiLearnAction" class="ph-select">
+                        <option value="">Chọn nhóm action...</option>
+                        <optgroup label="Menu Button">
+                            <option value="menu:buttonA">Button A</option>
+                            <option value="menu:buttonB">Button B</option>
+                        </optgroup>
+                        <optgroup label="Function">
+                            <option value="fn:autoDetect">Auto Detect</option>
+                        </optgroup>
+                        <optgroup label="Preset">
+                            <option value="preset:load">Load Preset</option>
+                        </optgroup>
+                        <optgroup label="Key/Mod action">
+                            <option value="keymod:doTone">Dò Tone</option>
+                        </optgroup>
+                        <optgroup label="DAW Control">
+                            <option value="daw:play">Play</option>
+                            <option value="daw:stop">Stop</option>
+                            <option value="daw:record">Record</option>
+                        </optgroup>
+                        <optgroup label="Plugin Control">
+                            <option value="plugin:retune">Retune</option>
+                            <option value="plugin:humanize">Humanize</option>
+                        </optgroup>
+                    </select>
+                    <button id="btnMidiLearnSave" class="setup-btn" style="margin-top:8px;">💾 Lưu Mapping</button>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">📋 Mapping đã lưu <span class="badge badge-live">Thật — đọc/ghi settings thật</span></div>
+                    <div class="midi-monitor" id="midiMappingList">
+                        <div class="midi-monitor-empty">Chưa có Mapping nào được lưu.</div>
                     </div>
                 </div>
 
@@ -246,9 +303,9 @@
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">MIDI Mapping — Menu / DAW / Plugin
-                        <span class="badge badge-unwired">Chưa có Engine Mapping</span>
-                    </div>
+                    <div class="panel-card-title">Sơ đồ nhóm Mapping (khái niệm) <span class="badge badge-unwired">Thực thi chưa có Engine</span></div>
+                    <p class="hint-text">Mapping thật (Learn + Lưu) đã có ở trên. Bảng dưới đây chỉ minh hoạ các nhóm
+                        action theo đúng yêu cầu — chưa có Command Engine để THỰC THI khi trigger khớp (xem mục DAW).</p>
                     <div class="mapping-tabs">
                         <div class="mapping-block">
                             <div class="mapping-block-title">Menu</div>
@@ -267,6 +324,14 @@
                             <div class="mapping-row"><span>Formant / Mix / Output</span><span class="tag-unassigned">Chưa gán</span></div>
                         </div>
                     </div>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🔗 MIDI Macro <span class="badge badge-unwired">Chưa có Engine thực thi</span></div>
+                    <p class="hint-text">1 MIDI → nhiều Action nối tiếp (Action 1 → Action 2 → Action 3). Cần Command
+                        Engine để chạy, đồng thời phải giới hạn rõ số bước tối đa (đề xuất ≤5 action/macro) để tránh
+                        loop — chưa implement vì chưa có Engine thực thi action nào (kể cả 1 action đơn cũng chưa chạy
+                        được, xem Mapping ở trên).</p>
                 </div>
 
                 <div class="panel-card">
@@ -305,7 +370,24 @@
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">🎛 DAW đang dùng <span class="badge badge-live">READY (Studio One)</span></div>
+                    <div class="panel-card-title">🔧 Command Engine — phát hiện quan trọng
+                        <span class="badge badge-unwired">Có sẵn nhưng chưa nối (dead code)</span>
+                    </div>
+                    <p class="hint-text">
+                        <code>core/command-engine-js/</code> đã có sẵn <b>CommandEngine + capabilityRegistry</b> hoàn
+                        chỉnh, kể cả mục <code>studio_one</code> với action <code>transportPlay/transportStop/
+                        transportRecord/saveSong</code> qua driver MCU (MIDI) + hotkey fallback — đúng kiến trúc
+                        "MIDI → Command Engine → DAW Capability → DAW Driver" đang cần. Nhưng thư mục này
+                        <b>không được require ở bất kỳ đâu trong app đang chạy</b> (đã grep toàn repo xác nhận), và
+                        <code>preload.js</code> tự ghi chú "main.js hiện CHƯA có ipcMain.handle('ai-command', ...)".<br>
+                        → Vì vậy: <b>DAW Status</b> dưới đây chỉ là "đã cấu hình" (đã chọn + lưu), <b>không phải</b>
+                        "Control: MIDI đang chạy thật". Nối Command Engine vào <code>main.js</code> để nó thực thi
+                        thật nằm ngoài phạm vi "chỉ sửa Setup UI" — cần bạn xác nhận trước khi làm ở task khác.
+                    </p>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🎛 DAW đang dùng <span class="badge badge-live" id="dawConfigBadge">Đã cấu hình</span></div>
                     <div class="group-title">Studio One / Cubase (chọn phiên bản)</div>
                     <div class="daw-list-inline">
                         <label><input type="radio" name="daw" value="Studio One 7"> Studio One 7</label>
@@ -317,6 +399,10 @@
                         <label><input type="radio" name="daw" value="Cubase 15"> Cubase 15</label>
                     </div>
                     <button id="saveDawBtn" class="setup-btn" style="margin-top:8px;">💾 Lưu DAW: <span id="currentDaw">Chưa chọn</span></button>
+                    <div class="status-text" style="margin-top:8px;">
+                        DAW: <b id="dawStatusName">Chưa chọn</b> · Status: <b>Đã cấu hình</b> (không phải health-check) ·
+                        Control: <b>Chưa nối Command Engine</b>
+                    </div>
                     <p class="hint-text">⚠ <code>core/drivers</code> hiện chỉ có <code>StudioOneDriver.js</code>. Cubase
                         trong danh sách chỉ dùng để chọn hồ sơ toạ độ/phím tắt, chưa có driver điều khiển riêng.</p>
                     <!-- giữ id cũ để initModal không lỗi -->
@@ -369,7 +455,7 @@
             <!-- ===================== PLUGIN ===================== -->
             <section class="setup-panel" id="panel-plugins" data-title="Plugin">
                 <div class="panel-card">
-                    <div class="panel-card-title">🎤 Auto-Tune <span class="badge badge-live">READY</span></div>
+                    <div class="panel-card-title">🎤 Auto-Tune <span class="badge badge-soon" id="autoTuneStatusBadge">Not selected</span></div>
                     <div class="daw-list-inline">
                         <label><input type="radio" name="autotune" value="Auto-Tune 9">Auto-Tune 9</label>
                         <label><input type="radio" name="autotune" value="Auto-Tune 10">Auto-Tune 10</label>
@@ -382,7 +468,7 @@
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">🎙 Giọng hát <span class="badge badge-live">Đã hỗ trợ</span></div>
+                    <div class="panel-card-title">🎙 Giọng hát <span class="badge badge-live">Cấu hình khả dụng</span></div>
                     <div class="group-title">Cách thức tạo bè</div>
                     <div class="daw-list-inline">
                         <label><input type="radio" name="beMethod" value="Plugin Auto-Tune 11"> 🎹 Plugin Auto-Tune 11</label>
@@ -455,7 +541,9 @@
                 </div>
 
                 <div class="panel-card">
-                    <div class="panel-card-title">🎯 DAW / Plugin Auto-Tune Coordinate <span class="badge badge-live">Đang hoạt động</span></div>
+                    <div class="panel-card-title">🎯 DAW / Plugin Auto-Tune Coordinate
+                        <span class="badge" id="calibStatusBadge">—</span>
+                    </div>
                     <div id="coordDawLabel" class="hint-text">Chưa chọn DAW</div>
                     <div id="ahkPathDisplay" class="hint-text">⏳ Đang dò AutoHotkey...</div>
                     <button id="btnDownloadAhk" class="setup-btn" style="display:none;">📥 Tải &amp; Cài AutoHotkey</button>
@@ -464,7 +552,10 @@
                     <button id="btnAutoKey2" class="setup-btn">✢ Lấy tọa độ Auto-Key 2 (2 điểm)</button>
                     <button id="btnAutoTuneKey" class="setup-btn">✢ Lấy tọa độ Key Auto-Tune (1 điểm)</button>
                     <button id="btnChromatic" class="setup-btn">✢ Lấy tọa độ Chromatic (2 điểm)</button>
-                    <p class="hint-text">ℹ️ SoundShifter điều khiển bằng MIDI (không cần lấy tọa độ chuột).</p>
+                    <p class="hint-text">ℹ️ SoundShifter điều khiển bằng MIDI (không cần lấy tọa độ chuột). Trạng thái:
+                        <b>Not calibrated</b> (chưa có toạ độ nào) → <b>Partial</b> (thiếu một số toạ độ) →
+                        <b>Calibrated</b> (đủ 4 toạ độ đã lưu). "Verified" cần Engine xác minh lại — chưa có, không tự
+                        gắn nhãn Verified.</p>
                 </div>
                 <div class="panel-card">
                     <div class="panel-card-title">Resolution / Scaling / Verify / Plugin Verify / Test
@@ -482,6 +573,14 @@
                     <p class="hint-text">Sao lưu / phục hồi toàn bộ cài đặt hiện tại — đổi tên hoàn toàn khỏi "LinkPro"
                         theo đúng yêu cầu. Logic export/import giữ nguyên 100%, không đổi. Backup = Export, Restore =
                         Import (cùng một cơ chế, không có 2 cặp nút riêng vì Engine chỉ có 1 cặp thật).</p>
+                    <p class="hint-text"><b>Phân biệt với Preset (mục Dashboard):</b> Preset chỉ lưu 10 field chọn lọc
+                        (DAW/Auto-Key/Auto-Tune/Browser/Soundcard/toạ độ/launchDAW). <b>Backup lưu toàn bộ
+                        <code>appSettings</code></b> (gọi <code>exportBackup(appSettings)</code> nguyên object) — đã
+                        xác nhận đúng trong code, không phải chỉ vài field như Preset.</p>
+                    <p class="hint-text">⚠ <b>Validation trước Restore:</b> hiện Restore chỉ có <code>confirm()</code>
+                        cảnh báo ghi đè, chưa kiểm tra cấu trúc file trước khi merge. Thêm validation cần sửa handler
+                        <code>btnRestoreLink</code> trong <code>setup.js</code> — không tự làm ở đây để tránh phá luồng
+                        Restore đang chạy ổn định (rủi ro tương thích), báo cáo để bạn quyết định.</p>
                     <div class="row-buttons">
                         <button id="btnBackupLink" class="setup-btn">📤 Backup</button>
                         <button id="btnRestoreLink" class="setup-btn">📥 Restore</button>
@@ -550,6 +649,7 @@
     <script src="js/setupNav.js"></script>
     <script src="js/setupVuMeter.js"></script>
     <script src="js/setupMidiMonitor.js"></script>
+    <script src="js/setupMidiInput.js"></script>
 </body>
 
 </html>
