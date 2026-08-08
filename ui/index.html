@@ -117,10 +117,9 @@
         <!-- ANALYZER -->
         <section class="analyzer-grid">
             <div class="analyzer-card">
-                <div id="dot-key" class="status-dot offline" style="position:absolute; top:10px; right:12px;"></div>
                 <div class="card-content">
                     <div class="info-side">
-                        <div class="analyzer-icon">🎼 KEY</div>
+                        <div class="analyzer-icon">🎼 KEY<span id="dot-key" class="status-dot offline inline-dot"></span></div>
                         <div class="analyzer-title"></div>
                         <div id="currentKey" class="analyzer-value">G# Minor</div>
                         <div id="activeSourceLabel" class="analyzer-sub active-source-label">ACTIVE: AI DETECT</div>
@@ -163,18 +162,16 @@
                 </div>
             </div>
             <div class="analyzer-card">
-                <div id="dot-bpm" class="status-dot offline" style="position:absolute; top:10px; right:12px;"></div>
-                <div class="analyzer-icon">📈 BPM</div>
+                <div class="analyzer-icon">📈 BPM<span id="dot-bpm" class="status-dot offline inline-dot"></span></div>
                 <div class="analyzer-title"></div>
                 <div id="currentBpm" class="analyzer-value">128</div>
                 <div id="bpmValue" class="bpm-value-line">-- BPM</div>
                 <div class="analyzer-sub">Confidence 98%</div>
             </div>
             <div class="analyzer-card">
-                <div id="dot-mod" class="status-dot offline" style="position:absolute; top:10px; right:12px;"></div>
                 <div class="card-content">
                     <div class="info-side">
-                        <div class="analyzer-icon">🕒 MOD</div>
+                        <div class="analyzer-icon">🕒 MOD<span id="dot-mod" class="status-dot offline inline-dot"></span></div>
                         <div class="analyzer-title"></div>
                         <div id="modTime" class="analyzer-value">02:15</div>
                         <div id="modStatus" class="analyzer-sub">G#m → Am</div>
