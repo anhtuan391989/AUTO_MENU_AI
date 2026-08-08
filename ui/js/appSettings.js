@@ -29,7 +29,18 @@ const DEFAULT_APP_SETTINGS = {
     projectOpenEnabled: false,
     projectCopyEnabled: false,
     projectOpenYoutube: false,
-    autoRestoreOnDawStart: false
+    autoRestoreOnDawStart: false,
+
+    // ===== TASK B — Control/MIDI/DAW Mapping V1 =====
+    // Mục 15: Mouse Control ON/OFF toàn cục — CHỈ áp dụng cho DAW Mouse Mapping mới
+    // (actionRegistry.js), TUYỆT ĐỐI không đụng tới clickAtPoint() sẵn có trong
+    // vocalCommandRouter.js (Key/Tone Plugin fallback) — xem actionRegistry.js.
+    // Mặc định true để không đổi hành vi hiện tại của bất kỳ ai chưa từng bật/tắt nó.
+    mouseControlEnabled: true,
+    // Mục 8/9/22: mapping MIDI OUTPUT cho Logical Action, theo từng DAW — CHƯA có giá trị
+    // mặc định nào (không tự bịa CC/note, đúng Mục 8). Cấu trúc:
+    // { [dawName]: { DAW_PLAY: {kind:"cc"|"note", number, channel} | null, ... } }
+    dawMidiOutMappings: {}
 };
 
 const LEGACY_STORAGE_KEYS = [

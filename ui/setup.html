@@ -303,14 +303,44 @@
                 </div>
 
                 <div class="panel-card">
+                    <div class="panel-card-title">🖱 Mouse Control <span class="badge badge-live" id="mouseControlBadge">ON</span></div>
+                    <p class="hint-text">Công tắc này CHỈ áp dụng cho "DAW Action Mapping" ngay bên dưới (Play/Stop/Record
+                        bằng cách tự click chuột). <b>Không ảnh hưởng</b> tới đường click chuột dự phòng sẵn có của
+                        Auto-Tune/Key/Manual (đường đó độc lập hoàn toàn, luôn hoạt động bất kể công tắc này ON hay OFF).</p>
+                    <button id="btnMouseControlToggle" class="setup-btn">Tắt Mouse Control</button>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🎬 DAW Action Mapping — Play / Stop / Record <span class="badge badge-live">Task B</span></div>
+                    <p class="hint-text">Chọn DAW ở mục "Thiết lập AutoMenu" trước. Bấm "Capture toạ độ" rồi click đúng vị
+                        trí nút tương ứng trên DAW — AUTO_MENU_AI sẽ tự click lại đúng chỗ đó khi có nơi gọi
+                        <code>ActionRegistry.executeAction()</code> trực tiếp (vd nút bấm ở menu chính, nếu có ở phase
+                        sau). Đây là lối dự phòng bằng CHUỘT, <b>độc lập</b> với đường MIDI Input → Studio One Transport
+                        đã có sẵn ở mục "MIDI Input"/"Sơ đồ nhóm Mapping" phía trên (đường đó không đi qua Capture toạ
+                        độ này). Nếu đã cấu hình MIDI Output riêng cho action này (chưa có UI ở bản này), MIDI sẽ được
+                        ưu tiên dùng trước, chuột chỉ là dự phòng.</p>
+                    <div class="placeholder-grid">
+                        <label class="ph-field">DAW_PLAY<button id="btnCaptureDawPlay" class="setup-btn">🎯 Capture toạ độ</button></label>
+                        <label class="ph-field">DAW_STOP<button id="btnCaptureDawStop" class="setup-btn">🎯 Capture toạ độ</button></label>
+                        <label class="ph-field">DAW_RECORD<button id="btnCaptureDawRecord" class="setup-btn">🎯 Capture toạ độ</button></label>
+                    </div>
+                    <div class="hint-text" id="dawActionMappingStatus">Chưa capture toạ độ nào.</div>
+                </div>
+
+                <div class="panel-card">
                     <div class="panel-card-title">Sơ đồ nhóm Mapping (khái niệm)
                         <span class="badge badge-soon">Chỉ nhóm "DAW Control: Play/Stop/Record" đã nối thật</span>
                     </div>
                     <p class="hint-text">Mapping thật (Learn + Lưu + <b>dispatch thật tới Studio One</b> qua Command
                         Engine) đã có ở Mapping đã lưu bên trên, nhưng chỉ 3 action
                         <code>daw:play/daw:stop/daw:record</code> có capability thật trong
-                        <code>capabilityRegistry.js</code>. Các nhóm còn lại (Menu/Preset/Key-Mod/Plugin) vẫn Learn+Save
-                        được nhưng KHÔNG dispatch — bảng dưới chỉ minh hoạ khái niệm.</p>
+                        <code>capabilityRegistry.js</code> (nối thật qua <code>core/command-engine-js/runtime.js</code>
+                        ở main process — xem panel "Chọn DAW" bên dưới để biết trạng thái test). Các nhóm còn lại
+                        (Menu/Preset/Key-Mod/Plugin) vẫn Learn+Save được nhưng KHÔNG dispatch — bảng dưới chỉ minh hoạ
+                        khái niệm. <b>Task B bổ sung thêm</b> (không thay thế đường trên): mục "DAW Action Mapping" phía
+                        trên dùng <code>ui/js/actionRegistry.js</code> làm lối gọi TRỰC TIẾP (vd nút UI trong menu
+                        chính) với chuột làm dự phòng khi chưa cấu hình MIDI Output cho action đó — độc lập hoàn toàn
+                        với đường MIDI Input ở trên, không tranh chấp.</p>
                     <div class="mapping-tabs">
                         <div class="mapping-block">
                             <div class="mapping-block-title">Menu</div>

@@ -404,6 +404,14 @@ function initSetupPage() {
     setupCaptureButton("btnAutoKey2", "autokey2");
     setupCaptureButton("btnAutoTuneKey", "autotunekey");
     setupCaptureButton("btnChromatic", "chromatic");
+    // Task B — DAW Action Mapping (Mục 8/22): tái dùng ĐÚNG cơ chế setupCaptureButton +
+    // coordinateProfiles[selectedDAW] đã có sẵn, chỉ thêm 3 key mới (daw_play/daw_stop/
+    // daw_record), không đụng autokey1/autokey2/autotunekey/chromatic (Key/Tone Plugin).
+    setupCaptureButton("btnCaptureDawPlay", "daw_play");
+    setupCaptureButton("btnCaptureDawStop", "daw_stop");
+    setupCaptureButton("btnCaptureDawRecord", "daw_record");
+    initMouseControlToggle();
+    initDawActionMappingStatus();
     initAhkPathSection();
 
     updateSetupStatus();
@@ -534,6 +542,64 @@ function setupCaptureButton(buttonId, captureName) {
             alert("Không lấy được tọa độ");
         }
     });
+}
+
+/* ================= TASK B — MOUSE CONTROL ON/OFF + DAW ACTION MAPPING STATUS ================= */
+// Mục 15: Mouse Control ON/OFF. Đọc/ghi đúng key "mouseControlEnabled" đã thêm trong
+// appSettings.js (mặc định true). CHỈ ảnh hưởng ActionRegistry.executeAction() (Task B) —
+// không đụng gì tới clickAtPoint() gốc trong vocalCommandRouter.js (Key/Tone Plugin).
+function initMouseControlToggle() {
+    const btn = document.getElementById("btnMouseControlToggle");
+    const badge = document.getElementById("mouseControlBadge");
+    if (!btn || !badge) return;
+
+    function render() {
+        const enabled = getSetting("mouseControlEnabled");
+        const isOn = enabled === undefined || enabled === null || enabled === "" ? true : !!enabled;
+        badge.textContent = isOn ? "ON" : "OFF";
+        badge.className = isOn ? "badge badge-live" : "badge badge-unwired";
+        btn.textContent = isOn ? "Tắt Mouse Control" : "Bật Mouse Control";
+    }
+
+    btn.addEventListener("click", () => {
+        const current = getSetting("mouseControlEnabled");
+        const isOn = current === undefined || current === null || current === "" ? true : !!current;
+        saveSetting("mouseControlEnabled", !isOn);
+        render();
+        notifySetupChanged();
+    });
+
+    render();
+}
+
+// Mục 8: hiển thị trạng thái THẬT (không đoán) của 3 action DAW_PLAY/STOP/RECORD cho DAW
+// đang chọn — đọc trực tiếp coordinateProfiles + dawMidiOutMappings qua getSetting/getCoordinate
+// đã có sẵn, không cần nạp actionRegistry.js vào cửa sổ Setup (tránh 2 dispatcher MIDI).
+function initDawActionMappingStatus() {
+    const el = document.getElementById("dawActionMappingStatus");
+    if (!el) return;
+
+    function render() {
+        const daw = getSetting("selectedDAW");
+        if (!daw) {
+            el.textContent = "Chưa chọn DAW ở mục \"Thiết lập AutoMenu\" — chưa thể capture toạ độ.";
+            return;
+        }
+        const keys = [
+            ["DAW_PLAY", "daw_play"],
+            ["DAW_STOP", "daw_stop"],
+            ["DAW_RECORD", "daw_record"]
+        ];
+        const parts = keys.map(([label, key]) => `${label}: ${getCoordinate(key) ? "✅ đã capture" : "— chưa capture"}`);
+        el.textContent = `DAW "${daw}" — ${parts.join(" · ")}`;
+    }
+
+    render();
+    // Cập nhật lại mỗi khi bấm xong 1 capture (setupCaptureButton tự alert rồi mới xong async,
+    // nên poll nhẹ khi panel này active là đủ, không cần event riêng)
+    document.getElementById("btnCaptureDawPlay")?.addEventListener("click", () => setTimeout(render, 500));
+    document.getElementById("btnCaptureDawStop")?.addEventListener("click", () => setTimeout(render, 500));
+    document.getElementById("btnCaptureDawRecord")?.addEventListener("click", () => setTimeout(render, 500));
 }
 
 /* ================= PHÍM TẮT ================= */
