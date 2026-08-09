@@ -335,12 +335,13 @@
                         Engine) đã có ở Mapping đã lưu bên trên, nhưng chỉ 3 action
                         <code>daw:play/daw:stop/daw:record</code> có capability thật trong
                         <code>capabilityRegistry.js</code> (nối thật qua <code>core/command-engine-js/runtime.js</code>
-                        ở main process — xem panel "Chọn DAW" bên dưới để biết trạng thái test). Các nhóm còn lại
-                        (Menu/Preset/Key-Mod/Plugin) vẫn Learn+Save được nhưng KHÔNG dispatch — bảng dưới chỉ minh hoạ
-                        khái niệm. <b>Task B bổ sung thêm</b> (không thay thế đường trên): mục "DAW Action Mapping" phía
-                        trên dùng <code>ui/js/actionRegistry.js</code> làm lối gọi TRỰC TIẾP (vd nút UI trong menu
-                        chính) với chuột làm dự phòng khi chưa cấu hình MIDI Output cho action đó — độc lập hoàn toàn
-                        với đường MIDI Input ở trên, không tranh chấp.</p>
+                        ở main process — xem panel "Command Engine" ở tab Chọn DAW để biết trạng thái test). Các nhóm
+                        còn lại (Menu/Preset/Key-Mod/Plugin) vẫn Learn+Save được nhưng KHÔNG dispatch — bảng dưới chỉ
+                        minh hoạ khái niệm. <b>Task B bổ sung thêm</b> (không thay thế đường trên): mục "DAW Action
+                        Mapping" phía trên dùng <code>ui/js/actionRegistry.js</code> làm lối gọi TRỰC TIẾP (vd nút UI
+                        trong menu chính) với chuột làm dự phòng khi chưa cấu hình MIDI Output cho action đó — độc lập
+                        hoàn toàn với đường MIDI Input ở trên, không tranh chấp (không có 2 dispatcher cùng nghe 1
+                        mapping — đã audit kỹ, xem báo cáo Task B2).</p>
                     <div class="mapping-tabs">
                         <div class="mapping-block">
                             <div class="mapping-block-title">Menu</div>

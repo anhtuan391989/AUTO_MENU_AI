@@ -110,18 +110,32 @@ function getMouseCoordinate(action) {
     return getCoordinate(key);
 }
 
-// Mục 8 — trạng thái THẬT của 1 action cho DAW đang chọn, không đoán.
+// Mục 8 (v1) / VIII (B2) — trạng thái THẬT của 1 action cho DAW đang chọn, không đoán.
+// Dùng CHUNG enum với executeAction() bên dưới (SUCCESS/NOT_CONFIGURED/NO_DEVICE/
+// MOUSE_DISABLED/ERROR) để cả 2 nơi luôn nhất quán, không lệch nhau.
+const ACTION_STATUS = Object.freeze({
+    SUCCESS: "SUCCESS",
+    NOT_CONFIGURED: "NOT_CONFIGURED",
+    NO_DEVICE: "NO_DEVICE",
+    MOUSE_DISABLED: "MOUSE_DISABLED",
+    ERROR: "ERROR"
+});
+
 function getActionStatus(action) {
-    if (!getSelectedDaw()) return { status: "NOT_CONFIGURED", via: null, reason: "NO_DAW_SELECTED" };
-    if (getMidiOutMapping(action)) return { status: "READY", via: "midi" };
-    if (getMouseCoordinate(action)) return { status: "READY", via: "mouse" };
-    return { status: "NOT_CONFIGURED", via: null };
+    if (!getSelectedDaw()) return { status: ACTION_STATUS.NOT_CONFIGURED, via: null, reason: "NO_DAW_SELECTED" };
+    if (getMidiOutMapping(action)) return { status: ACTION_STATUS.SUCCESS, via: "midi" };
+    if (getMouseCoordinate(action)) {
+        return isMouseControlEnabled()
+            ? { status: ACTION_STATUS.SUCCESS, via: "mouse" }
+            : { status: ACTION_STATUS.MOUSE_DISABLED, via: "mouse" };
+    }
+    return { status: ACTION_STATUS.NOT_CONFIGURED, via: null };
 }
 
 // ---------------------------------------------------------
-// Mục 15 — Mouse Control ON/OFF, CHỈ gate nhánh mouse-fallback CỦA RIÊNG file này
-// (executeAction bên dưới). KHÔNG liên quan gì tới clickAtPoint() trong
-// vocalCommandRouter.js (Key/Tone Plugin) — xem trace ở đầu file.
+// Mục 15 (v1) / VI (B2) — Mouse Control ON/OFF, CHỈ gate nhánh mouse-fallback CỦA RIÊNG
+// file này (executeAction bên dưới). KHÔNG liên quan gì tới clickAtPoint() trong
+// vocalCommandRouter.js (Key/Tone Plugin) — xem trace ở đầu file. Mặc định ON (Mục VI B2).
 // ---------------------------------------------------------
 function isMouseControlEnabled() {
     if (typeof getSetting !== "function") return true; // an toàn: mặc định cho phép, giữ hành vi cũ
@@ -130,27 +144,39 @@ function isMouseControlEnabled() {
 }
 
 // ---------------------------------------------------------
-// Mục 21 — ACTION EXECUTOR: nơi DUY NHẤT quyết định MIDI hay Mouse cho 1 Logical Action.
-// UI button/MIDI dispatcher KHÔNG được tự biết CC hay toạ độ — chỉ gọi executeAction().
+// Mục 21 (v1) / VIII (B2) — ACTION EXECUTOR: nơi DUY NHẤT quyết định MIDI hay Mouse cho 1
+// Logical Action. UI button/MIDI dispatcher KHÔNG được tự biết CC hay toạ độ — chỉ gọi
+// executeAction(). Luôn trả { ok, status, via, ... } với status thuộc đúng 5 giá trị
+// ACTION_STATUS ở trên (Mục VIII B2: "Action phải có trạng thái SUCCESS/NOT_CONFIGURED/
+// NO_DEVICE/MOUSE_DISABLED/ERROR").
 // ---------------------------------------------------------
 async function executeAction(action, context = {}) {
     const reason = context.reason || action;
+    const log = (status, extra) => console.log(`[ActionExecutor] ${action} (${reason}) -> ${status}`, extra ?? "");
 
     const midiMap = getMidiOutMapping(action);
     if (midiMap && midiMap.kind && Number.isFinite(midiMap.number)) {
         try {
+            let sent = false;
             if (midiMap.kind === "cc" && typeof sendMidiCC === "function") {
-                await sendMidiCC(midiMap.number, midiMap.value ?? 127, (midiMap.channel || 1) - 1);
+                sent = await sendMidiCC(midiMap.number, midiMap.value ?? 127, (midiMap.channel || 1) - 1);
             } else if (midiMap.kind === "note" && typeof sendMidiNotePulse === "function") {
-                await sendMidiNotePulse(midiMap.number, midiMap.velocity ?? 100, (midiMap.channel || 1) - 1);
+                sent = await sendMidiNotePulse(midiMap.number, midiMap.velocity ?? 100, (midiMap.channel || 1) - 1);
             } else {
                 throw new Error("Mapping MIDI không hợp lệ (thiếu hàm gửi tương ứng)");
             }
-            console.log(`[ActionExecutor] ${action} (${reason}) -> MIDI OK`);
-            return { ok: true, via: "midi" };
+            // sendMidiCC/sendMidiNotePulse (appSettings.js) trả về false (KHÔNG throw) khi
+            // chưa chọn/không mở được cổng MIDI output — đây chính là ca NO_DEVICE thật,
+            // phải tự kiểm tra return value, không thể chỉ dựa vào try/catch.
+            if (!sent) {
+                log(ACTION_STATUS.NO_DEVICE, "getSelectedMidiOutput() không tìm thấy cổng đã cấu hình");
+                return { ok: false, status: ACTION_STATUS.NO_DEVICE, via: "midi" };
+            }
+            log(ACTION_STATUS.SUCCESS);
+            return { ok: true, status: ACTION_STATUS.SUCCESS, via: "midi" };
         } catch (err) {
-            console.error(`[ActionExecutor] ${action} (${reason}) -> MIDI lỗi:`, err);
-            return { ok: false, via: "midi", error: String(err) };
+            console.error(`[ActionExecutor] ${action} (${reason}) -> ${ACTION_STATUS.ERROR}:`, err);
+            return { ok: false, status: ACTION_STATUS.ERROR, via: "midi", error: String(err) };
         }
     }
 
@@ -158,24 +184,24 @@ async function executeAction(action, context = {}) {
     const point = coordKey ? getMouseCoordinate(action) : "";
     if (point) {
         if (!isMouseControlEnabled()) {
-            console.warn(`[ActionExecutor] ${action} (${reason}) -> có toạ độ nhưng Mouse Control đang OFF, bỏ qua.`);
-            return { ok: false, via: "mouse", reason: "MOUSE_CONTROL_OFF" };
+            log(ACTION_STATUS.MOUSE_DISABLED);
+            return { ok: false, status: ACTION_STATUS.MOUSE_DISABLED, via: "mouse" };
         }
         if (!window.electronAPI?.clickAtPoint) {
-            console.warn(`[ActionExecutor] ${action} -> clickAtPoint không khả dụng (không phải môi trường Electron?)`);
-            return { ok: false, via: "mouse", reason: "NO_ELECTRON_API" };
+            log(ACTION_STATUS.NO_DEVICE, "clickAtPoint không khả dụng (không phải môi trường Electron?)");
+            return { ok: false, status: ACTION_STATUS.NO_DEVICE, via: "mouse" };
         }
         try {
             const result = await window.electronAPI.clickAtPoint(point);
-            console.log(`[ActionExecutor] ${action} (${reason}) -> Mouse OK`, result);
-            return { ok: true, via: "mouse", result };
+            log(ACTION_STATUS.SUCCESS, result);
+            return { ok: true, status: ACTION_STATUS.SUCCESS, via: "mouse", result };
         } catch (err) {
-            console.error(`[ActionExecutor] ${action} (${reason}) -> Mouse lỗi:`, err);
-            return { ok: false, via: "mouse", error: String(err) };
+            console.error(`[ActionExecutor] ${action} (${reason}) -> ${ACTION_STATUS.ERROR}:`, err);
+            return { ok: false, status: ACTION_STATUS.ERROR, via: "mouse", error: String(err) };
         }
     }
 
-    console.warn(`[ActionExecutor] ${action} (${reason}) -> NOT_CONFIGURED (chưa có MIDI mapping lẫn toạ độ cho DAW "${getSelectedDaw() || "(chưa chọn)"}")`);
+    log(ACTION_STATUS.NOT_CONFIGURED, `(chưa có MIDI mapping lẫn toạ độ cho DAW "${getSelectedDaw() || "(chưa chọn)"}")`);
     return { ok: false, reason: "NOT_CONFIGURED" };
 }
 
@@ -198,6 +224,7 @@ async function executeAction(action, context = {}) {
 // không export gì liên quan Manual/AI/MOD/Key/BPM (đúng phạm vi khoá của task).
 window.ActionRegistry = {
     ACTIONS,
+    ACTION_STATUS,
     SUPPORTED_DAWS,
     executeAction,
     getActionStatus,

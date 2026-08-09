@@ -1259,32 +1259,40 @@ async function startAudioMonitor() {
     // từ NHẠC NỀN (qua soundcard/loopback), không phải giọng hát qua mic.
     const soundcardId = getSetting?.("selectedSoundcardId", "");
 
+    // HARD AUDIO ROUTING RULE: Key/BPM/MOD chỉ được init trên ĐÚNG thiết bị input mà người
+    // dùng đã chọn ở Setup (selectedSoundcardId) — deviceId khớp chính xác, không rơi về mặc định.
+    //
+    // GIỚI HẠN THẬT (không được nói quá): getUserMedia({deviceId: exact}) CHỈ chứng minh "đúng
+    // thiết bị đã chọn", KHÔNG chứng minh thiết bị đó là desktop loopback thật. Nếu người dùng
+    // chọn nhầm mic vật lý làm "soundcard" ở Setup, code này KHÔNG có cách nào phát hiện ra —
+    // nó vẫn coi đó là nguồn hợp lệ vì đúng deviceId đã chọn. "System Audio" ở đây phụ thuộc
+    // 100% vào việc Setup đã cấu hình đúng kênh loopback/virtual-cable, không phải điều renderer.js
+    // tự xác minh được. Không tuyên bố "đã cách ly khỏi mic" — chỉ đúng là "đã cách ly khỏi việc
+    // rơi về input KHÔNG DO NGƯỜI DÙNG CHỌN".
     if (!soundcardId) {
-        console.warn(
-            "[Audio] Chưa chọn Soundcard ở Setup -> đang tạm dùng thiết bị mặc định của hệ điều hành. " +
-            "Vào Setup > Soundcard để chọn đúng kênh loopback/audio interface đang phát nhạc, " +
-            "nếu không BPM/Key sẽ dò từ mic thay vì từ nhạc."
+        console.error(
+            "[Audio] Chưa chọn Soundcard ở Setup -> KHÔNG khởi tạo Key/BPM/MOD (để tránh phân tích nhầm mic). " +
+            "Vào Setup > Soundcard để chọn đúng kênh loopback/audio interface đang phát nhạc."
         );
+        audioMonitorStarted = false;
+        setStatus("dot-bpm", "offline");
+        const bpmEl2 = document.getElementById("bpmValue");
+        if (bpmEl2) bpmEl2.textContent = "Chưa chọn Soundcard (Setup)";
+        return;
     }
 
-    const audioConstraints = soundcardId
-        ? {
-              deviceId: { exact: soundcardId },
-              // Tắt hết các bộ lọc dành cho giọng nói: chúng được thiết kế để "làm sạch" tiếng người,
-              // nên sẽ bóp méo/triệt tiêu nhạc cụ và làm sai lệch kết quả phân tích BPM/Key.
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-          }
-        : {
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-          };
+    const audioConstraints = {
+        deviceId: { exact: soundcardId },
+        // Tắt hết các bộ lọc dành cho giọng nói: chúng được thiết kế để "làm sạch" tiếng người,
+        // nên sẽ bóp méo/triệt tiêu nhạc cụ và làm sai lệch kết quả phân tích BPM/Key.
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+    };
 
     let stream;
     try {
-        console.log("Đang khởi tạo Audio từ thiết bị:", soundcardId || "(mặc định — chưa cấu hình Setup)");
+        console.log("Đang khởi tạo Audio từ thiết bị (soundcard đã chọn):", soundcardId);
         stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     } catch (err) {
         // deviceId đã lưu có thể không còn tồn tại (rút dây, cài lại driver, đổi tên cổng...)
@@ -1569,8 +1577,11 @@ document.addEventListener("DOMContentLoaded", () => {
         document.body.style.cursor = "default";
     });
 
-    // 2. Liệt kê thiết bị audio đầu vào (chỉ để debug/log)
-    listAudioInputDevices();
+    // 2. Liệt kê thiết bị audio đầu vào (chỉ để debug/log) — ĐÃ TẮT gọi tự động: hàm này mở
+    // 1 MediaStream/getUserMedia RIÊNG, không liên quan Key/BPM/MOD, chỉ để log console, chạy
+    // mỗi lần khởi động app -> vi phạm nguyên tắc "không tạo MediaStream thừa" (mục XVI). Giữ
+    // lại hàm để gọi tay từ DevTools console khi cần debug danh sách thiết bị, không tự chạy nữa.
+    // listAudioInputDevices();
 
     // 3. Kích hoạt Audio Engine (BPM) khi người dùng tương tác lần đầu
     document.body.addEventListener('click', () => {

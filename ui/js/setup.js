@@ -404,7 +404,7 @@ function initSetupPage() {
     setupCaptureButton("btnAutoKey2", "autokey2");
     setupCaptureButton("btnAutoTuneKey", "autotunekey");
     setupCaptureButton("btnChromatic", "chromatic");
-    // Task B — DAW Action Mapping (Mục 8/22): tái dùng ĐÚNG cơ chế setupCaptureButton +
+    // Task B/B2 — DAW Action Mapping (Mục V/X): tái dùng ĐÚNG cơ chế setupCaptureButton +
     // coordinateProfiles[selectedDAW] đã có sẵn, chỉ thêm 3 key mới (daw_play/daw_stop/
     // daw_record), không đụng autokey1/autokey2/autotunekey/chromatic (Key/Tone Plugin).
     setupCaptureButton("btnCaptureDawPlay", "daw_play");
@@ -544,8 +544,8 @@ function setupCaptureButton(buttonId, captureName) {
     });
 }
 
-/* ================= TASK B — MOUSE CONTROL ON/OFF + DAW ACTION MAPPING STATUS ================= */
-// Mục 15: Mouse Control ON/OFF. Đọc/ghi đúng key "mouseControlEnabled" đã thêm trong
+/* ================= TASK B/B2 — MOUSE CONTROL ON/OFF + DAW ACTION MAPPING STATUS ================= */
+// Mục VI (B2): Mouse Control ON/OFF. Đọc/ghi đúng key "mouseControlEnabled" đã thêm trong
 // appSettings.js (mặc định true). CHỈ ảnh hưởng ActionRegistry.executeAction() (Task B) —
 // không đụng gì tới clickAtPoint() gốc trong vocalCommandRouter.js (Key/Tone Plugin).
 function initMouseControlToggle() {
@@ -572,9 +572,10 @@ function initMouseControlToggle() {
     render();
 }
 
-// Mục 8: hiển thị trạng thái THẬT (không đoán) của 3 action DAW_PLAY/STOP/RECORD cho DAW
-// đang chọn — đọc trực tiếp coordinateProfiles + dawMidiOutMappings qua getSetting/getCoordinate
-// đã có sẵn, không cần nạp actionRegistry.js vào cửa sổ Setup (tránh 2 dispatcher MIDI).
+// Mục V/X (B2): hiển thị trạng thái THẬT (không đoán) của 3 action DAW_PLAY/STOP/RECORD cho
+// DAW đang chọn — đọc trực tiếp coordinateProfiles + dawMidiOutMappings qua getSetting/
+// getCoordinate đã có sẵn, không cần nạp actionRegistry.js vào cửa sổ Setup (tránh 2
+// dispatcher MIDI song song — đúng cảnh báo Mục XI).
 function initDawActionMappingStatus() {
     const el = document.getElementById("dawActionMappingStatus");
     if (!el) return;

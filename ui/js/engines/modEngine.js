@@ -86,7 +86,17 @@ const ModEngine = (() => {
 
             if (delta === 0) return; // trùng key gốc theo bán cung ngắn nhất (hiếm khi xảy ra ở đây, phòng hờ)
 
-            onModulation({ semitone: delta });
+            // MOD Output Contract (Section XI) — field CŨ `semitone` giữ nguyên 100% (renderer.js/
+            // vocalCommandRouter.js đang đọc field này, không đổi gì ở đó). Các field MỚI chỉ CỘNG
+            // THÊM, không thay thế gì — nơi gọi cũ (data.semitone) vẫn chạy y hệt trước.
+            onModulation({
+                semitone: delta,
+                originalKey: `${KeyEngine.NOTE_NAMES[originalRootIndex]}`,
+                targetKey: `${KeyEngine.NOTE_NAMES[result.rootIndex]} ${result.mode}`,
+                confidence: result.confidence,
+                stable: pendingStreak >= SUSTAIN_REQUIRED, // đã qua sustain-confirm mới gọi tới đây -> luôn true tại điểm này
+                timestamp: Date.now(),
+            });
 
         }, POLL_INTERVAL_MS);
     }

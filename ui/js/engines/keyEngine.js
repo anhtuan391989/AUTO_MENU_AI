@@ -49,11 +49,22 @@ const KeyEngine = (() => {
     const BASS_MAX_HZ = 260;       // nốt gốc của hợp âm gần như luôn nằm ở bass
     const BASS_WEIGHT = 4;         // ưu tiên bass gấp 4 lần so với phần giữa/cao (giai điệu hát)
 
+    // === v3.1 — Musical Content Gate (Section VII-A) — quyết định 1 khung FFT có ĐỦ tín hiệu
+    // nhạc để đóng góp vào chroma/bass-vote hay không, đo TRƯỚC khi correlation chạy (khác với
+    // MIN_CONFIDENCE hiện có, vốn chỉ lọc SAU KHI đã correlation xong). Lý do cần thêm bước này:
+    // trong im lặng/nhiễu nền, magnitudes gần 0 vẫn có thể kéo lệch chroma đang làm mượt (dù kéo
+    // về phía 0, không phải về phía 1 Key cụ thể nào) và bassRootVotes vẫn có thể "thắng" 1 nốt
+    // ngẫu nhiên từ nhiễu sàn. Ngưỡng đo bằng tổng biên độ (đã nén căn bậc 2) trên dải 65-2100Hz
+    // đã tính sẵn — không tính lại, không tốn thêm CPU đáng kể.
+    const MUSICAL_CONTENT_MIN_ENERGY = 0.08; // hằng số khởi điểm, tinh chỉnh lại khi có log thật
+    let hasMusicalContent = false; // đọc bởi estimateKeyFromChroma() để ép confidence=0 khi thiếu evidence
+
     let chromaAnalyser = null;
     let chromaDataArray = null;
     let audioCtxRef = null;
     let chromaVector = new Array(12).fill(0);
     let chromaVectorFast = new Array(12).fill(0); // v2.0 — xem giải thích CHROMA_SMOOTHING_FAST
+    let contentEnergyEMA = 0; // Musical Content Gate — EMA năng lượng khung, xem MUSICAL_CONTENT_MIN_ENERGY
 
     // Theo dõi RIÊNG nốt bass hay "THẮNG" (mạnh nhất trong TỪNG khung) nhiều lần nhất — ĐẾM SỐ
     // LẦN THẮNG, không cộng dồn độ to. Lý do đổi cách này: cộng dồn biên độ thô rất dễ bị 1 hợp
@@ -97,6 +108,8 @@ const KeyEngine = (() => {
         chromaDataArray = new Float32Array(chromaAnalyser.frequencyBinCount);
         chromaVector = new Array(12).fill(0);
         chromaVectorFast = new Array(12).fill(0);
+        contentEnergyEMA = 0;
+        hasMusicalContent = false;
         bassRootVotes = new Array(12).fill(0);
         lastTop1Key = null;
         lastTop1Label = null;
@@ -200,10 +213,27 @@ const KeyEngine = (() => {
             if (isBass) bassFrame[pc] += magnitude;
         }
 
-        for (let i = 0; i < 12; i++) {
-            chromaVector[i] = chromaVector[i] * CHROMA_SMOOTHING + frame[i] * (1 - CHROMA_SMOOTHING);
-            chromaVectorFast[i] = chromaVectorFast[i] * CHROMA_SMOOTHING_FAST + frame[i] * (1 - CHROMA_SMOOTHING_FAST);
+        // === Musical Content Gate — đo TRƯỚC khi cộng vào chroma. `magnitudes` đã tính sẵn ở
+        // BƯỚC 1 (biên độ nén căn bậc 2, KHÔNG whitened — whitened luôn tự chuẩn hoá về ~1 dù
+        // là nhiễu sàn thuần tuý, không phản ánh được "có tín hiệu thật hay không").
+        let frameEnergy = 0;
+        for (let idx = 0; idx < magnitudes.length; idx++) frameEnergy += magnitudes[idx];
+        const frameAvgEnergy = rangeLen > 0 ? frameEnergy / rangeLen : 0;
+
+        // Chống nhiễu tức thời (1 frame to bất thường không đủ để "mở cổng", 1 frame im ắng
+        // thoáng qua giữa 2 nốt không đủ để "đóng cổng ngay") — dùng EMA riêng, nhanh vừa phải.
+        contentEnergyEMA = contentEnergyEMA * 0.9 + frameAvgEnergy * 0.1;
+        hasMusicalContent = contentEnergyEMA >= MUSICAL_CONTENT_MIN_ENERGY;
+
+        if (hasMusicalContent) {
+            for (let i = 0; i < 12; i++) {
+                chromaVector[i] = chromaVector[i] * CHROMA_SMOOTHING + frame[i] * (1 - CHROMA_SMOOTHING);
+                chromaVectorFast[i] = chromaVectorFast[i] * CHROMA_SMOOTHING_FAST + frame[i] * (1 - CHROMA_SMOOTHING_FAST);
+            }
         }
+        // Thiếu musical content (im lặng/nhiễu nền/audio quá yếu) -> KHÔNG cộng frame này vào
+        // chroma (giữ nguyên giá trị đang có, không để nhiễu kéo lệch), và bassRootVotes bên
+        // dưới cũng bị gate theo hasMusicalContent — xem chỗ cộng phiếu.
 
         // ĐẾM PHIẾU: tìm nốt bass mạnh nhất CHỈ TRONG KHUNG NÀY rồi cộng đúng 1 phiếu cho nó —
         // không quan tâm nó to hơn nốt nhì bao nhiêu, chỉ tính có thắng hay không.
@@ -212,7 +242,7 @@ const KeyEngine = (() => {
             if (bassFrame[i] > winnerVal) { winnerVal = bassFrame[i]; winnerPc = i; }
         }
         for (let i = 0; i < 12; i++) bassRootVotes[i] *= BASS_VOTE_DECAY;
-        if (winnerPc >= 0 && winnerVal > 0.01) bassRootVotes[winnerPc] += 1;
+        if (hasMusicalContent && winnerPc >= 0 && winnerVal > 0.01) bassRootVotes[winnerPc] += 1;
 
         levelListeners.forEach((cb) => cb(chromaVector));
     }
@@ -282,15 +312,24 @@ const KeyEngine = (() => {
         const top2 = allScores[1];
         const margin = top1.score - top2.score;
 
+        // Musical Content Gate (Section VII-A) — nếu khung hiện tại không có đủ tín hiệu nhạc
+        // (im lặng/nhiễu nền/audio quá yếu), ép confidence về 0 dù correlation ra số gì đi nữa —
+        // "best"/"top1"/"top2" vẫn tính bình thường (không đổi field, không phá contract), CHỈ
+        // confidence bị ép để mọi nơi đang so sánh với MIN_CONFIDENCE (vote loop, provisional
+        // ticker, ModEngine) tự động bỏ qua lần đo này — đúng yêu cầu "không đoán khi thiếu
+        // evidence", không cần sửa logic lọc ở những nơi đó.
+        const gatedConfidence = hasMusicalContent ? best.score : 0;
+
         return {
             key: `${NOTE_NAMES[best.root]} ${best.mode}`,
             rootIndex: best.root,
             mode: best.mode,
-            confidence: best.score,
+            confidence: gatedConfidence,
             // v3.0 — Confidence Engine: field MỚI, chỉ để HIỂN THỊ (vd "97%"), không thay thế
             // `confidence` ở trên (giữ nguyên thang đo cũ — mọi so sánh với MIN_CONFIDENCE trong
             // toàn bộ file vẫn đúng y hệt, không silent-break). Kẹp về [0,1] rồi quy ra 0-100.
-            confidencePercent: Math.round(Math.max(0, Math.min(1, best.score)) * 100),
+            confidencePercent: Math.round(Math.max(0, Math.min(1, gatedConfidence)) * 100),
+            hasMusicalContent,
             top1,
             top2,
             margin,
