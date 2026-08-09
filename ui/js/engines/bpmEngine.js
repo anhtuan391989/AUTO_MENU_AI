@@ -14,6 +14,10 @@
 const BPMEngine = (() => {
     let analyser = null;
     let dataArray = null;
+    let timeDataArray = null; // VU METER V2 — buffer RIÊNG cho time-domain data (RMS), KHÔNG dùng chung
+                               // với dataArray (frequency-domain, dùng cho flux/beat) — cùng 1 AnalyserNode
+                               // vẫn phục vụ được cả 2 loại getter (getByteFrequencyData/getByteTimeDomainData),
+                               // KHÔNG cần tạo AnalyserNode/stream/AudioContext thứ hai.
     let running = false;
     let rafId = null;
 
@@ -38,13 +42,38 @@ const BPMEngine = (() => {
 
     let lastConfirmedBpm = null;
     const listeners = [];      // callback(bpm) khi có kết quả mới đủ tin cậy
-    const levelListeners = []; // callback({bassEnergy, localAvg, maxByte}) mỗi khung — dùng cho debug/VU meter
+    const levelListeners = []; // callback({bassEnergy, localAvg, maxByte, vuPercent, rms, dbfs}) mỗi khung
+
+    // === VU METER V2 (Section 6/7/11/12) — metric HOÀN TOÀN TÁCH BIỆT với bassEnergy/flux ở trên.
+    // BPM metric (flux) đo "độ đột biến phổ" — dùng cho beat detection, KHÔNG ĐỔI GÌ, vẫn nguyên
+    // xi từ dòng này trở lên. VU metric (RMS/dBFS) đo "mức năng lượng tín hiệu thật" trên miền
+    // thời gian (time-domain) — đúng bản chất 1 VU/level meter cần có, khác hẳn spectral flux.
+    // Đọc từ CHÍNH analyser đã có (analyser.getByteTimeDomainData) — không tạo analyser/stream mới.
+    const VU_DB_FLOOR = -50;  // dBFS coi như "im lặng" -> 0% (ngưỡng khởi điểm, tinh chỉnh khi có log thật)
+    const VU_DB_CEILING = -6; // dBFS gần full-scale nhưng chừa headroom -> 100%
+    let vuSmoothedPercent = 0; // state RIÊNG cho VU display, KHÔNG ảnh hưởng bassEnergyHistory/flux
+    const VU_ATTACK = 0.5;  // lên nhanh (đúng ballistics VU thật: bắt kịp transient tức thời)
+    const VU_RELEASE = 0.85; // xuống chậm hơn (không giật/nhấp nháy liên tục)
+
+    function computeRmsDbfsPercent(timeData) {
+        let sumSquares = 0;
+        for (let i = 0; i < timeData.length; i++) {
+            const sample = (timeData[i] - 128) / 128; // Uint8 time-domain, 128 = 0 (trung tâm)
+            sumSquares += sample * sample;
+        }
+        const rms = Math.sqrt(sumSquares / timeData.length); // 0..1
+        const dbfs = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+        const clampedDb = Math.max(VU_DB_FLOOR, Math.min(VU_DB_CEILING, dbfs === -Infinity ? VU_DB_FLOOR : dbfs));
+        const percent = ((clampedDb - VU_DB_FLOOR) / (VU_DB_CEILING - VU_DB_FLOOR)) * 100;
+        return { rms, dbfs, percent: Math.max(0, Math.min(100, percent)) };
+    }
 
     function init(audioContext, sourceNode) {
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 2048; // nhỏ, cập nhật nhanh -> phù hợp dò BEAT (cần độ trễ thấp)
         sourceNode.connect(analyser);
         dataArray = new Uint8Array(analyser.frequencyBinCount);
+        timeDataArray = new Uint8Array(analyser.fftSize); // VU METER V2 — buffer time-domain, cấp phát 1 LẦN
 
         beatTimes = [];
         bassEnergyHistory = [];
@@ -53,6 +82,7 @@ const BPMEngine = (() => {
         lastBeatTime = 0;
         lastConfirmedBpm = null;
         prevSpectrum = null;
+        vuSmoothedPercent = 0; // VU METER V2 — reset riêng, không đụng biến BPM nào ở trên
 
         running = true;
         loop();
@@ -93,7 +123,19 @@ const BPMEngine = (() => {
 
         let maxByte = 0;
         for (let i = 0; i < dataArray.length; i++) if (dataArray[i] > maxByte) maxByte = dataArray[i];
-        levelListeners.forEach((cb) => cb({ bassEnergy, localAvg, maxByte }));
+
+        // === VU METER V2 — đọc time-domain data TỪ CHÍNH analyser này (không phải dataArray ở
+        // trên, vốn là frequency-domain của flux). 2 lần gọi getter khác nhau trên CÙNG 1
+        // AnalyserNode, không cần AnalyserNode/stream thứ hai. Hoàn toàn KHÔNG dùng bassEnergy/flux.
+        analyser.getByteTimeDomainData(timeDataArray);
+        const { rms, dbfs, percent: rawVuPercent } = computeRmsDbfsPercent(timeDataArray);
+
+        // Smoothing RIÊNG cho VU display (ballistics attack/release) — biến `vuSmoothedPercent`
+        // không được đọc/ghi bởi bất kỳ logic BPM/beat nào ở trên hay dưới.
+        const vuAlpha = rawVuPercent > vuSmoothedPercent ? VU_ATTACK : VU_RELEASE;
+        vuSmoothedPercent = vuSmoothedPercent * vuAlpha + rawVuPercent * (1 - vuAlpha);
+
+        levelListeners.forEach((cb) => cb({ bassEnergy, localAvg, maxByte, rms, dbfs, vuPercent: vuSmoothedPercent }));
 
         const isBeat =
             bassEnergy > BASS_NOISE_FLOOR &&

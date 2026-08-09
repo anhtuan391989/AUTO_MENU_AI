@@ -1234,6 +1234,18 @@ function __debugLogAudioLevel(bassEnergy, localAvg, maxByte) {
     );
 }
 
+// VU METER V2 — log RIÊNG cho RMS/dBFS/vuPercent, tách khỏi __debugLogAudioLevel (bassEnergy/flux)
+// để không gây nhầm lẫn 2 metric khi đọc console lúc calibrate.
+let __debugLastVuLog = 0;
+function __debugLogVuLevel(rms, dbfs, vuPercent) {
+    const now = Date.now();
+    if (now - __debugLastVuLog < 1000) return;
+    __debugLastVuLog = now;
+    console.log(
+        `[DEBUG VU] rms=${rms.toFixed(4)} | dBFS=${dbfs === -Infinity ? "-Inf" : dbfs.toFixed(1)} | vuPercent=${vuPercent.toFixed(1)}%`
+    );
+}
+
 let __debugLastKeyLog = 0;
 function __debugLogKeyConfidence() {
     const now = Date.now();
@@ -1342,10 +1354,15 @@ async function startAudioMonitor() {
             window.electronAPI?.reportAiResult("bpm", { bpm });
         });
 
-        BPMEngine.onLevel(({ bassEnergy, localAvg, maxByte }) => {
+        BPMEngine.onLevel(({ bassEnergy, localAvg, maxByte, vuPercent, rms, dbfs }) => {
+            // VU METER V2 — dùng vuPercent (RMS/dBFS, metric RIÊNG cho level meter), KHÔNG dùng
+            // bassEnergy nữa (đó là spectral flux, metric của BPM/beat detection — vẫn giữ nguyên
+            // cho BPMEngine, chỉ không còn dùng để vẽ VU). VU là READ-ONLY consumer: chỉ đọc field
+            // đã tính sẵn từ callback, không gọi ngược lại bất kỳ hàm nào của BPMEngine/KeyEngine.
             const meter = document.getElementById("vu-fill");
-            if (meter) meter.style.width = Math.min(bassEnergy * 2, 100) + "%";
-            __debugLogAudioLevel(bassEnergy, localAvg, maxByte); // <-- DEBUG TẠM THỜI
+            if (meter) meter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
+            __debugLogAudioLevel(bassEnergy, localAvg, maxByte); // <-- DEBUG TẠM THỜI (vẫn log flux/BPM như cũ)
+            __debugLogVuLevel(rms, dbfs, vuPercent);             // <-- DEBUG TẠM THỜI (log RMS/dBFS để calibrate)
         });
 
         KeyEngine.onLevel(() => {
