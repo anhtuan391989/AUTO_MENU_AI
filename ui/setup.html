@@ -132,6 +132,9 @@
                 <div class="panel-card">
                     <div class="panel-card-title">🎙 Microphone (Input Device) <span class="badge badge-live">Đang hoạt động</span></div>
                     <div style="margin-bottom:10px;">🎧 <span id="statusSoundcardModal">Chưa chọn soundcard nào</span></div>
+                    <!-- S2 — trạng thái 3 mức RIÊNG cho Audio Interface: chưa chọn / đã chọn / không khả dụng.
+                         KHÔNG dùng chữ "Connected" (S2 chưa test stream — đó là việc của S3). -->
+                    <div style="margin-bottom:10px;"><span id="soundcardStatusBadge" class="badge badge-warn">⚠ Chưa chọn Audio Interface</span></div>
                     <select id="soundcardSelect" class="ph-select">
                         <option value="">Chọn Soundcard...</option>
                     </select>

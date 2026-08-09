@@ -1237,12 +1237,12 @@ function __debugLogAudioLevel(bassEnergy, localAvg, maxByte) {
 // VU METER V2 — log RIÊNG cho RMS/dBFS/vuPercent, tách khỏi __debugLogAudioLevel (bassEnergy/flux)
 // để không gây nhầm lẫn 2 metric khi đọc console lúc calibrate.
 let __debugLastVuLog = 0;
-function __debugLogVuLevel(rms, dbfs, vuPercent) {
+function __debugLogVuLevel(rms, dbfs, vuPercent, peak) {
     const now = Date.now();
-    if (now - __debugLastVuLog < 1000) return;
+    if (now - __debugLastVuLog < 1000) return; // throttle 1s — đủ để đọc, không spam console
     __debugLastVuLog = now;
     console.log(
-        `[DEBUG VU] rms=${rms.toFixed(4)} | dBFS=${dbfs === -Infinity ? "-Inf" : dbfs.toFixed(1)} | vuPercent=${vuPercent.toFixed(1)}%`
+        `[DEBUG VU] rms=${rms.toFixed(4)} | peak=${peak.toFixed(4)} | dBFS=${dbfs === -Infinity ? "-Inf" : dbfs.toFixed(1)} | vuPercent=${vuPercent.toFixed(1)}%`
     );
 }
 
@@ -1354,7 +1354,7 @@ async function startAudioMonitor() {
             window.electronAPI?.reportAiResult("bpm", { bpm });
         });
 
-        BPMEngine.onLevel(({ bassEnergy, localAvg, maxByte, vuPercent, rms, dbfs }) => {
+        BPMEngine.onLevel(({ bassEnergy, localAvg, maxByte, vuPercent, rms, dbfs, peak }) => {
             // VU METER V2 — dùng vuPercent (RMS/dBFS, metric RIÊNG cho level meter), KHÔNG dùng
             // bassEnergy nữa (đó là spectral flux, metric của BPM/beat detection — vẫn giữ nguyên
             // cho BPMEngine, chỉ không còn dùng để vẽ VU). VU là READ-ONLY consumer: chỉ đọc field
@@ -1362,7 +1362,7 @@ async function startAudioMonitor() {
             const meter = document.getElementById("vu-fill");
             if (meter) meter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
             __debugLogAudioLevel(bassEnergy, localAvg, maxByte); // <-- DEBUG TẠM THỜI (vẫn log flux/BPM như cũ)
-            __debugLogVuLevel(rms, dbfs, vuPercent);             // <-- DEBUG TẠM THỜI (log RMS/dBFS để calibrate)
+            __debugLogVuLevel(rms, dbfs, vuPercent, peak);       // <-- DEBUG TẠM THỜI (log RMS/dBFS/peak để calibrate)
         });
 
         KeyEngine.onLevel(() => {

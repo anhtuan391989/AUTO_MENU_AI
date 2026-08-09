@@ -57,15 +57,20 @@ const BPMEngine = (() => {
 
     function computeRmsDbfsPercent(timeData) {
         let sumSquares = 0;
+        let peak = 0; // VU METER V2.1 — biên độ TUYỆT ĐỐI lớn nhất trong khung (time-domain, cùng đơn vị
+                       // với rms/dbfs — KHÁC maxByte ở trên vốn là frequency-domain của flux). Tính trong
+                       // CÙNG 1 vòng lặp đã có sẵn (không thêm vòng lặp/allocate mới).
         for (let i = 0; i < timeData.length; i++) {
             const sample = (timeData[i] - 128) / 128; // Uint8 time-domain, 128 = 0 (trung tâm)
             sumSquares += sample * sample;
+            const abs = Math.abs(sample);
+            if (abs > peak) peak = abs;
         }
         const rms = Math.sqrt(sumSquares / timeData.length); // 0..1
         const dbfs = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
         const clampedDb = Math.max(VU_DB_FLOOR, Math.min(VU_DB_CEILING, dbfs === -Infinity ? VU_DB_FLOOR : dbfs));
         const percent = ((clampedDb - VU_DB_FLOOR) / (VU_DB_CEILING - VU_DB_FLOOR)) * 100;
-        return { rms, dbfs, percent: Math.max(0, Math.min(100, percent)) };
+        return { rms, dbfs, peak, percent: Math.max(0, Math.min(100, percent)) };
     }
 
     function init(audioContext, sourceNode) {
@@ -128,14 +133,14 @@ const BPMEngine = (() => {
         // trên, vốn là frequency-domain của flux). 2 lần gọi getter khác nhau trên CÙNG 1
         // AnalyserNode, không cần AnalyserNode/stream thứ hai. Hoàn toàn KHÔNG dùng bassEnergy/flux.
         analyser.getByteTimeDomainData(timeDataArray);
-        const { rms, dbfs, percent: rawVuPercent } = computeRmsDbfsPercent(timeDataArray);
+        const { rms, dbfs, peak, percent: rawVuPercent } = computeRmsDbfsPercent(timeDataArray);
 
         // Smoothing RIÊNG cho VU display (ballistics attack/release) — biến `vuSmoothedPercent`
         // không được đọc/ghi bởi bất kỳ logic BPM/beat nào ở trên hay dưới.
         const vuAlpha = rawVuPercent > vuSmoothedPercent ? VU_ATTACK : VU_RELEASE;
         vuSmoothedPercent = vuSmoothedPercent * vuAlpha + rawVuPercent * (1 - vuAlpha);
 
-        levelListeners.forEach((cb) => cb({ bassEnergy, localAvg, maxByte, rms, dbfs, vuPercent: vuSmoothedPercent }));
+        levelListeners.forEach((cb) => cb({ bassEnergy, localAvg, maxByte, rms, dbfs, peak, vuPercent: vuSmoothedPercent }));
 
         const isBeat =
             bassEnergy > BASS_NOISE_FLOOR &&

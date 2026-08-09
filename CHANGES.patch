@@ -1,172 +1,65 @@
-diff --git a/ui/index.html b/ui/index.html
-index 0f689da..97ecf0c 100644
---- a/ui/index.html
-+++ b/ui/index.html
-@@ -324,6 +324,7 @@
+diff --git a/ui/js/engines/keyEngine.js b/ui/js/engines/keyEngine.js
+index 868a807..c63617d 100644
+--- a/ui/js/engines/keyEngine.js
++++ b/ui/js/engines/keyEngine.js
+@@ -49,6 +49,14 @@ const KeyEngine = (() => {
+     const BASS_MAX_HZ = 260;       // nốt gốc của hợp âm gần như luôn nằm ở bass
+     const BASS_WEIGHT = 4;         // ưu tiên bass gấp 4 lần so với phần giữa/cao (giai điệu hát)
  
-     <script src="js/appSettings.js"></script>
-     <script src="js/vocalCommandRouter.js"></script>
-+    <script src="js/actionRegistry.js"></script>
-     <script src="js/engines/bpmEngine.js"></script>
-     <script src="js/engines/keyEngine.js"></script>
-     <script src="js/engines/modEngine.js"></script>
-diff --git a/ui/js/appSettings.js b/ui/js/appSettings.js
-index 3664622..d189c3e 100644
---- a/ui/js/appSettings.js
-+++ b/ui/js/appSettings.js
-@@ -29,7 +29,18 @@ const DEFAULT_APP_SETTINGS = {
-     projectOpenEnabled: false,
-     projectCopyEnabled: false,
-     projectOpenYoutube: false,
--    autoRestoreOnDawStart: false
-+    autoRestoreOnDawStart: false,
++    // Key Engine V8, Mục 8-9 — Musical Content Gate. Placeholder ban đầu (xem giải thích đầy đủ
++    // tại nơi dùng, trong updateChromaVector()) — CHƯA canh bằng audio thật, chỉ suy ra từ thang
++    // đo magnitudes. Nếu sau khi test thật thấy sai (chặn nhầm nhạc nhỏ tiếng, hoặc lọt nhiễu),
++    // CHỈ cần đổi đúng 1 số này, không cần đụng logic gate.
++    const MUSICAL_CONTENT_MIN_ENERGY = 0.02;
++    let lastFrameMeanEnergy = 0;   // telemetry — xem getDebugSnapshot()
++    let hasMusicalContentNow = false; // telemetry — xem getDebugSnapshot()
 +
-+    // ===== TASK B — Control/MIDI/DAW Mapping V1 =====
-+    // Mục 15: Mouse Control ON/OFF toàn cục — CHỈ áp dụng cho DAW Mouse Mapping mới
-+    // (actionRegistry.js), TUYỆT ĐỐI không đụng tới clickAtPoint() sẵn có trong
-+    // vocalCommandRouter.js (Key/Tone Plugin fallback) — xem actionRegistry.js.
-+    // Mặc định true để không đổi hành vi hiện tại của bất kỳ ai chưa từng bật/tắt nó.
-+    mouseControlEnabled: true,
-+    // Mục 8/9/22: mapping MIDI OUTPUT cho Logical Action, theo từng DAW — CHƯA có giá trị
-+    // mặc định nào (không tự bịa CC/note, đúng Mục 8). Cấu trúc:
-+    // { [dawName]: { DAW_PLAY: {kind:"cc"|"note", number, channel} | null, ... } }
-+    dawMidiOutMappings: {}
- };
+     let chromaAnalyser = null;
+     let chromaDataArray = null;
+     let audioCtxRef = null;
+@@ -200,6 +208,33 @@ const KeyEngine = (() => {
+             if (isBass) bassFrame[pc] += magnitude;
+         }
  
- const LEGACY_STORAGE_KEYS = [
-diff --git a/ui/js/setup.js b/ui/js/setup.js
-index 0ddab43..fad5592 100644
---- a/ui/js/setup.js
-+++ b/ui/js/setup.js
-@@ -404,6 +404,14 @@ function initSetupPage() {
-     setupCaptureButton("btnAutoKey2", "autokey2");
-     setupCaptureButton("btnAutoTuneKey", "autotunekey");
-     setupCaptureButton("btnChromatic", "chromatic");
-+    // Task B — DAW Action Mapping (Mục 8/22): tái dùng ĐÚNG cơ chế setupCaptureButton +
-+    // coordinateProfiles[selectedDAW] đã có sẵn, chỉ thêm 3 key mới (daw_play/daw_stop/
-+    // daw_record), không đụng autokey1/autokey2/autotunekey/chromatic (Key/Tone Plugin).
-+    setupCaptureButton("btnCaptureDawPlay", "daw_play");
-+    setupCaptureButton("btnCaptureDawStop", "daw_stop");
-+    setupCaptureButton("btnCaptureDawRecord", "daw_record");
-+    initMouseControlToggle();
-+    initDawActionMappingStatus();
-     initAhkPathSection();
- 
-     updateSetupStatus();
-@@ -536,6 +544,64 @@ function setupCaptureButton(buttonId, captureName) {
-     });
- }
- 
-+/* ================= TASK B — MOUSE CONTROL ON/OFF + DAW ACTION MAPPING STATUS ================= */
-+// Mục 15: Mouse Control ON/OFF. Đọc/ghi đúng key "mouseControlEnabled" đã thêm trong
-+// appSettings.js (mặc định true). CHỈ ảnh hưởng ActionRegistry.executeAction() (Task B) —
-+// không đụng gì tới clickAtPoint() gốc trong vocalCommandRouter.js (Key/Tone Plugin).
-+function initMouseControlToggle() {
-+    const btn = document.getElementById("btnMouseControlToggle");
-+    const badge = document.getElementById("mouseControlBadge");
-+    if (!btn || !badge) return;
++        // ==========================================================
++        // MUSICAL CONTENT GATE (Key Engine V8, Mục 8-9 của task) — CHỈ tái sử dụng mảng
++        // `magnitudes` đã tính sẵn ở bước 1 phía trên (không FFT lại, không allocation mới,
++        // đúng ràng buộc hiệu năng Mục 24). Nếu khung này quá yếu (im lặng/nhiễu nền) thì
++        // KHÔNG được cộng vào chromaVector/chromaVectorFast/bassRootVotes — nếu không, im
++        // lặng/nhiễu sẽ bị tính là "evidence" thật (đúng cảnh báo Mục 8: không được lấy
++        // "confidence thấp sau khi detect" để thay thế việc gate TRƯỚC khi cộng evidence).
++        //
++        // Ngưỡng MUSICAL_CONTENT_MIN_ENERGY: KHÔNG có threshold nào tồn tại từ trước cho gate
++        // này (grep xác nhận keyEngine.js trước đây chưa có silence/energy gate) nên không có
++        // gì để "giữ nguyên" theo đúng nghĩa Mục 9 — đây là placeholder ban đầu suy ra từ
++        // chính thang đo `magnitudes` (biên độ = sqrt(10^(dB/20)), dB floor -90 → gần 0; nhiễu
++        // nền -60..-70dB → ~0.001-0.03; nhạc thật -30..-10dB → ~0.3-3.2), CỐ Ý đặt thấp/bảo
++        // thủ (thà lọt nhiễu còn hơn chặn nhầm nhạc nhỏ tiếng thật) và có telemetry riêng
++        // (lastFrameMeanEnergy, xem getDebugSnapshot) để tự canh chỉnh bằng số liệu thật thay
++        // vì đoán — đúng yêu cầu "không tự tuyên bố 0.08 là chuẩn".
++        let energySum = 0;
++        for (let idx = 0; idx < rangeLen; idx++) energySum += magnitudes[idx];
++        lastFrameMeanEnergy = rangeLen > 0 ? energySum / rangeLen : 0;
 +
-+    function render() {
-+        const enabled = getSetting("mouseControlEnabled");
-+        const isOn = enabled === undefined || enabled === null || enabled === "" ? true : !!enabled;
-+        badge.textContent = isOn ? "ON" : "OFF";
-+        badge.className = isOn ? "badge badge-live" : "badge badge-unwired";
-+        btn.textContent = isOn ? "Tắt Mouse Control" : "Bật Mouse Control";
-+    }
-+
-+    btn.addEventListener("click", () => {
-+        const current = getSetting("mouseControlEnabled");
-+        const isOn = current === undefined || current === null || current === "" ? true : !!current;
-+        saveSetting("mouseControlEnabled", !isOn);
-+        render();
-+        notifySetupChanged();
-+    });
-+
-+    render();
-+}
-+
-+// Mục 8: hiển thị trạng thái THẬT (không đoán) của 3 action DAW_PLAY/STOP/RECORD cho DAW
-+// đang chọn — đọc trực tiếp coordinateProfiles + dawMidiOutMappings qua getSetting/getCoordinate
-+// đã có sẵn, không cần nạp actionRegistry.js vào cửa sổ Setup (tránh 2 dispatcher MIDI).
-+function initDawActionMappingStatus() {
-+    const el = document.getElementById("dawActionMappingStatus");
-+    if (!el) return;
-+
-+    function render() {
-+        const daw = getSetting("selectedDAW");
-+        if (!daw) {
-+            el.textContent = "Chưa chọn DAW ở mục \"Thiết lập AutoMenu\" — chưa thể capture toạ độ.";
-+            return;
++        if (lastFrameMeanEnergy < MUSICAL_CONTENT_MIN_ENERGY) {
++            hasMusicalContentNow = false;
++            levelListeners.forEach((cb) => cb(chromaVector)); // VU/level vẫn báo như cũ, không đổi hành vi này
++            return; // KHÔNG cộng frame[]/bassFrame[] vào history — dừng ở đây, giữ nguyên chroma/bassRootVotes cũ
 +        }
-+        const keys = [
-+            ["DAW_PLAY", "daw_play"],
-+            ["DAW_STOP", "daw_stop"],
-+            ["DAW_RECORD", "daw_record"]
-+        ];
-+        const parts = keys.map(([label, key]) => `${label}: ${getCoordinate(key) ? "✅ đã capture" : "— chưa capture"}`);
-+        el.textContent = `DAW "${daw}" — ${parts.join(" · ")}`;
-+    }
++        hasMusicalContentNow = true;
 +
-+    render();
-+    // Cập nhật lại mỗi khi bấm xong 1 capture (setupCaptureButton tự alert rồi mới xong async,
-+    // nên poll nhẹ khi panel này active là đủ, không cần event riêng)
-+    document.getElementById("btnCaptureDawPlay")?.addEventListener("click", () => setTimeout(render, 500));
-+    document.getElementById("btnCaptureDawStop")?.addEventListener("click", () => setTimeout(render, 500));
-+    document.getElementById("btnCaptureDawRecord")?.addEventListener("click", () => setTimeout(render, 500));
-+}
-+
- /* ================= PHÍM TẮT ================= */
- const SHORTCUT_FIELDS = [
-     { id: "shortcutNormal", key: "normal" },
-diff --git a/ui/setup.html b/ui/setup.html
-index 1c94824..ceee311 100644
---- a/ui/setup.html
-+++ b/ui/setup.html
-@@ -302,6 +302,31 @@
-                     <button class="setup-btn" disabled>🎯 Bắt đầu Learn (chưa khả dụng)</button>
-                 </div>
+         for (let i = 0; i < 12; i++) {
+             chromaVector[i] = chromaVector[i] * CHROMA_SMOOTHING + frame[i] * (1 - CHROMA_SMOOTHING);
+             chromaVectorFast[i] = chromaVectorFast[i] * CHROMA_SMOOTHING_FAST + frame[i] * (1 - CHROMA_SMOOTHING_FAST);
+@@ -614,7 +649,10 @@ const KeyEngine = (() => {
+     function onLevel(cb) { levelListeners.push(cb); } // dùng cho debug log
  
-+                <div class="panel-card">
-+                    <div class="panel-card-title">🖱 Mouse Control <span class="badge badge-live" id="mouseControlBadge">ON</span></div>
-+                    <p class="hint-text">Công tắc này CHỈ áp dụng cho "DAW Action Mapping" ngay bên dưới (Play/Stop/Record
-+                        bằng cách tự click chuột). <b>Không ảnh hưởng</b> tới đường click chuột dự phòng sẵn có của
-+                        Auto-Tune/Key/Manual (đường đó độc lập hoàn toàn, luôn hoạt động bất kể công tắc này ON hay OFF).</p>
-+                    <button id="btnMouseControlToggle" class="setup-btn">Tắt Mouse Control</button>
-+                </div>
-+
-+                <div class="panel-card">
-+                    <div class="panel-card-title">🎬 DAW Action Mapping — Play / Stop / Record <span class="badge badge-live">Task B</span></div>
-+                    <p class="hint-text">Chọn DAW ở mục "Thiết lập AutoMenu" trước. Bấm "Capture toạ độ" rồi click đúng vị
-+                        trí nút tương ứng trên DAW — AUTO_MENU_AI sẽ tự click lại đúng chỗ đó khi có nơi gọi
-+                        <code>ActionRegistry.executeAction()</code> trực tiếp (vd nút bấm ở menu chính, nếu có ở phase
-+                        sau). Đây là lối dự phòng bằng CHUỘT, <b>độc lập</b> với đường MIDI Input → Studio One Transport
-+                        đã có sẵn ở mục "MIDI Input"/"Sơ đồ nhóm Mapping" phía trên (đường đó không đi qua Capture toạ
-+                        độ này). Nếu đã cấu hình MIDI Output riêng cho action này (chưa có UI ở bản này), MIDI sẽ được
-+                        ưu tiên dùng trước, chuột chỉ là dự phòng.</p>
-+                    <div class="placeholder-grid">
-+                        <label class="ph-field">DAW_PLAY<button id="btnCaptureDawPlay" class="setup-btn">🎯 Capture toạ độ</button></label>
-+                        <label class="ph-field">DAW_STOP<button id="btnCaptureDawStop" class="setup-btn">🎯 Capture toạ độ</button></label>
-+                        <label class="ph-field">DAW_RECORD<button id="btnCaptureDawRecord" class="setup-btn">🎯 Capture toạ độ</button></label>
-+                    </div>
-+                    <div class="hint-text" id="dawActionMappingStatus">Chưa capture toạ độ nào.</div>
-+                </div>
-+
-                 <div class="panel-card">
-                     <div class="panel-card-title">Sơ đồ nhóm Mapping (khái niệm)
-                         <span class="badge badge-soon">Chỉ nhóm "DAW Control: Play/Stop/Record" đã nối thật</span>
-@@ -309,8 +334,13 @@
-                     <p class="hint-text">Mapping thật (Learn + Lưu + <b>dispatch thật tới Studio One</b> qua Command
-                         Engine) đã có ở Mapping đã lưu bên trên, nhưng chỉ 3 action
-                         <code>daw:play/daw:stop/daw:record</code> có capability thật trong
--                        <code>capabilityRegistry.js</code>. Các nhóm còn lại (Menu/Preset/Key-Mod/Plugin) vẫn Learn+Save
--                        được nhưng KHÔNG dispatch — bảng dưới chỉ minh hoạ khái niệm.</p>
-+                        <code>capabilityRegistry.js</code> (nối thật qua <code>core/command-engine-js/runtime.js</code>
-+                        ở main process — xem panel "Chọn DAW" bên dưới để biết trạng thái test). Các nhóm còn lại
-+                        (Menu/Preset/Key-Mod/Plugin) vẫn Learn+Save được nhưng KHÔNG dispatch — bảng dưới chỉ minh hoạ
-+                        khái niệm. <b>Task B bổ sung thêm</b> (không thay thế đường trên): mục "DAW Action Mapping" phía
-+                        trên dùng <code>ui/js/actionRegistry.js</code> làm lối gọi TRỰC TIẾP (vd nút UI trong menu
-+                        chính) với chuột làm dự phòng khi chưa cấu hình MIDI Output cho action đó — độc lập hoàn toàn
-+                        với đường MIDI Input ở trên, không tranh chấp.</p>
-                     <div class="mapping-tabs">
-                         <div class="mapping-block">
-                             <div class="mapping-block-title">Menu</div>
+     function getDebugSnapshot() {
+-        return { chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice() };
++        return {
++            chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice(),
++            lastFrameMeanEnergy, hasMusicalContentNow, MUSICAL_CONTENT_MIN_ENERGY // Key Engine V8 Mục 8-9 telemetry
++        };
+     }
+ 
+     return {

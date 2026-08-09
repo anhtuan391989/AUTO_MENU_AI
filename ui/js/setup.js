@@ -746,7 +746,7 @@ function initProjectSection() {
 /* ================= SOUNDCARD (AUDIO INTERFACE) ================= */
 async function populateSoundcardOptions(selectEl, selectedValue) {
     if (!navigator.mediaDevices?.enumerateDevices) {
-        return;
+        return { foundInRealList: false };
     }
 
     try {
@@ -771,13 +771,19 @@ async function populateSoundcardOptions(selectEl, selectedValue) {
             selectEl.appendChild(opt);
         });
 
+        // S2 mục 9 — phải phân biệt được: selectedValue có thật sự nằm trong danh sách device
+        // THẬT vừa liệt kê hay không (khác với việc UI có 1 <option> hiển thị cho nó hay không —
+        // option fallback bên dưới KHÔNG tính là "tồn tại thật").
+        const foundInRealList = !selectedValue ? false : inputs.some((d) => d.deviceId === selectedValue);
+
         if (selectedValue) {
             const match = [...selectEl.options].find(o => o.value === selectedValue);
             if (match) {
                 selectEl.value = selectedValue;
             } else {
                 // Thiết bị đã lưu không còn trong danh sách hiện tại (đổi máy/rút dây...):
-                // vẫn giữ lại lựa chọn cũ để không mất dữ liệu, thêm vào cuối danh sách.
+                // vẫn giữ lại lựa chọn cũ để KHÔNG MẤT setting (mục 6: không tự xoá), thêm vào
+                // cuối danh sách chỉ để UI có gì đó hiển thị — KHÔNG coi đây là "device khả dụng".
                 const fallbackOpt = document.createElement("option");
                 fallbackOpt.value = selectedValue;
                 fallbackOpt.textContent = `(Đã lưu trước đó) ${selectedValue}`;
@@ -785,16 +791,41 @@ async function populateSoundcardOptions(selectEl, selectedValue) {
                 selectEl.value = selectedValue;
             }
         }
+
+        return { foundInRealList };
     } catch (err) {
         console.error("Không thể liệt kê thiết bị audio:", err);
+        return { foundInRealList: false };
     }
 }
 
-function updateSoundcardDisplays() {
+function updateSoundcardDisplays(foundInRealList = false) {
     const saved = getSetting("selectedSoundcard");
+    const savedId = getSetting("selectedSoundcardId");
     const modalDisplay = document.getElementById("statusSoundcardModal");
     if (modalDisplay) {
         modalDisplay.textContent = saved || "Chưa chọn soundcard nào";
+    }
+
+    // S2 mục 3/4 — 3 trạng thái RÕ RÀNG, dựa DUY NHẤT vào selectedSoundcardId (không đổi tên
+    // field, không tạo field song song). KHÔNG dùng chữ "Connected" — S2 chưa test stream thật,
+    // đó là việc của S3 (AUDIO SIGNAL: OK/NO AUDIO SIGNAL).
+    const badge = document.getElementById("soundcardStatusBadge");
+    if (!badge) return;
+
+    if (!savedId) {
+        // A. Chưa chọn
+        badge.textContent = "⚠ Chưa chọn Audio Interface";
+        badge.className = "badge badge-warn";
+    } else if (foundInRealList) {
+        // B. Đã chọn và device vẫn tồn tại trong enumerateDevices() hiện tại
+        badge.textContent = "● Đã chọn Audio Interface";
+        badge.className = "badge badge-live";
+    } else {
+        // C. Đã lưu ID nhưng device hiện KHÔNG còn trong danh sách thật -> không giả vờ connected,
+        // không tự xoá setting (mục 6), không tự fallback sang device khác.
+        badge.textContent = "⚠ Audio Interface không khả dụng";
+        badge.className = "badge badge-warn";
     }
 }
 
@@ -882,11 +913,11 @@ function initSoundcardSection() {
     if (!select) return;
 
     const savedId = getSetting("selectedSoundcardId");
-    populateSoundcardOptions(select, savedId).then(updateSoundcardDisplays);
+    populateSoundcardOptions(select, savedId).then(({ foundInRealList }) => updateSoundcardDisplays(foundInRealList));
 
     // Làm mới danh sách mỗi lần mở modal (thiết bị có thể đã thay đổi)
     document.getElementById("openSoundcardModal")?.addEventListener("click", () => {
-        populateSoundcardOptions(select, getSetting("selectedSoundcardId")).then(updateSoundcardDisplays);
+        populateSoundcardOptions(select, getSetting("selectedSoundcardId")).then(({ foundInRealList }) => updateSoundcardDisplays(foundInRealList));
     });
 
     document.getElementById("btnSelectSoundcard")?.addEventListener("click", () => {
@@ -900,7 +931,11 @@ function initSoundcardSection() {
         saveSetting("selectedSoundcard", label);
         saveSetting("selectedSoundcardId", select.value);
 
-        updateSoundcardDisplays();
+        // S2 mục 5 — chỉ cấu hình + lưu + refresh UI status, KHÔNG restart KeyEngine/BPM/MOD/VU,
+        // KHÔNG tạo AudioContext/getUserMedia mới cho pipeline chính. Refresh lại đúng bằng cách
+        // liệt kê danh sách thật lần nữa để biết chắc device vừa lưu có thật trong danh sách hay
+        // không (an toàn hơn tự suy đoán từ select.value, tránh sai lệch nếu chọn nhầm option fallback).
+        populateSoundcardOptions(select, select.value).then(({ foundInRealList }) => updateSoundcardDisplays(foundInRealList));
         updateSetupStatus();
         updateSetupProgress();
         notifySetupChanged();

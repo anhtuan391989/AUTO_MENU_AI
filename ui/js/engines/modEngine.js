@@ -94,7 +94,11 @@ const ModEngine = (() => {
                 originalKey: `${KeyEngine.NOTE_NAMES[originalRootIndex]}`,
                 targetKey: `${KeyEngine.NOTE_NAMES[result.rootIndex]} ${result.mode}`,
                 confidence: result.confidence,
-                stable: pendingStreak >= SUSTAIN_REQUIRED, // đã qua sustain-confirm mới gọi tới đây -> luôn true tại điểm này
+                // BUG ĐÃ SỬA: trước đây đọc `pendingStreak >= SUSTAIN_REQUIRED` NHƯNG pendingStreak
+                // đã bị reset về 0 ở dòng 85 ngay TRƯỚC đó -> stable LUÔN LÀ false dù comment cũ ghi
+                // "luôn true tại điểm này". Code chỉ chạy tới đây sau khi guard ở dòng 80 đã xác nhận
+                // đủ streak liên tục -> tại điểm này stable chắc chắn là true, không cần đọc biến đã reset.
+                stable: true,
                 timestamp: Date.now(),
             });
 
