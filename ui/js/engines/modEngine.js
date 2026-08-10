@@ -44,6 +44,19 @@ const ModEngine = (() => {
      * @param {(data: {semitone: number}) => void} onModulation  gọi khi phát hiện lệch khỏi Key gốc (đã xác nhận sustained)
      * @param {() => boolean} isManualOverrideActiveFn  hàm renderer.js cung cấp để biết có đang bị ghi đè tay không
      */
+    /**
+     * Key Engine V9/Mod Engine V4 (Mục 10/16) — gửi telemetry NHẸ, an toàn no-op nếu không có
+     * window.electronAPI.sendTelemetry (giống hệt cơ chế đã có trong keyEngine.js, tự chứa ở
+     * đây thay vì gọi qua KeyEngine để không đổi public API của keyEngine.js). KHÔNG gửi mỗi
+     * tick — chỉ gửi lúc 1 candidate MỚI bắt đầu được theo dõi và lúc modulation được XÁC NHẬN,
+     * tránh spam console/IPC (đúng Mục 16: "nhẹ, không spam, không đổi logic").
+     */
+    function sendModTelemetry(record) {
+        if (typeof window !== "undefined" && window.electronAPI && typeof window.electronAPI.sendTelemetry === "function") {
+            window.electronAPI.sendTelemetry(record);
+        }
+    }
+
     function start(originalRootIndex, onModulation, isManualOverrideActiveFn) {
         stop(); // tránh chạy trùng nhiều watcher
 
@@ -75,6 +88,11 @@ const ModEngine = (() => {
                 // Root mới KHÁC với root đang chờ xác nhận trước đó -> bắt đầu đếm lại streak mới.
                 pendingRoot = result.rootIndex;
                 pendingStreak = 1;
+                // Mục 10/16 — chỉ 1 sự kiện lúc bắt đầu theo dõi 1 candidate mới, không spam mỗi tick.
+                sendModTelemetry({
+                    event: "MOD_CANDIDATE", candidate: `${KeyEngine.NOTE_NAMES[result.rootIndex]} ${result.mode}`,
+                    confidence: result.confidence, persistence: pendingStreak, sustainRequired: SUSTAIN_REQUIRED, timestamp: Date.now()
+                });
             }
 
             if (pendingStreak < SUSTAIN_REQUIRED) return; // CHƯA đủ liên tục -> chưa báo, tiếp tục chờ
@@ -89,18 +107,17 @@ const ModEngine = (() => {
             // MOD Output Contract (Section XI) — field CŨ `semitone` giữ nguyên 100% (renderer.js/
             // vocalCommandRouter.js đang đọc field này, không đổi gì ở đó). Các field MỚI chỉ CỘNG
             // THÊM, không thay thế gì — nơi gọi cũ (data.semitone) vẫn chạy y hệt trước.
-            onModulation({
+            const modData = {
                 semitone: delta,
                 originalKey: `${KeyEngine.NOTE_NAMES[originalRootIndex]}`,
                 targetKey: `${KeyEngine.NOTE_NAMES[result.rootIndex]} ${result.mode}`,
                 confidence: result.confidence,
-                // BUG ĐÃ SỬA: trước đây đọc `pendingStreak >= SUSTAIN_REQUIRED` NHƯNG pendingStreak
-                // đã bị reset về 0 ở dòng 85 ngay TRƯỚC đó -> stable LUÔN LÀ false dù comment cũ ghi
-                // "luôn true tại điểm này". Code chỉ chạy tới đây sau khi guard ở dòng 80 đã xác nhận
-                // đủ streak liên tục -> tại điểm này stable chắc chắn là true, không cần đọc biến đã reset.
-                stable: true,
+                stable: true, // đã qua sustain-confirm mới gọi tới đây -> luôn true tại điểm này
                 timestamp: Date.now(),
-            });
+            };
+
+            sendModTelemetry({ event: "MOD_CONFIRMED", ...modData, persistence: SUSTAIN_REQUIRED });
+            onModulation(modData);
 
         }, POLL_INTERVAL_MS);
     }

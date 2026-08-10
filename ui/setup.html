@@ -157,6 +157,10 @@
                         <button id="btnVuStop" class="setup-btn">■ Dừng đo</button>
                     </div>
                     <p class="hint-text" id="vuMeterStatus">Chưa đo.</p>
+                    <!-- S3 — trạng thái tín hiệu NHỊ PHÂN riêng: Chưa kiểm tra / OK / NO SIGNAL.
+                         Chỉ có nghĩa "có tín hiệu đi vào từ device đã chọn", KHÔNG khẳng định là
+                         System Audio/Loopback. -->
+                    <div style="margin-top:6px;"><span id="audioSignalStatus" class="badge badge-warn">Chưa kiểm tra tín hiệu</span></div>
                 </div>
 
                 <div class="panel-card">
@@ -328,6 +332,26 @@
                         <label class="ph-field">DAW_RECORD<button id="btnCaptureDawRecord" class="setup-btn">🎯 Capture toạ độ</button></label>
                     </div>
                     <div class="hint-text" id="dawActionMappingStatus">Chưa capture toạ độ nào.</div>
+                </div>
+
+                <!-- S8 — DAW MIDI OUTPUT MAPPING: UI thật cho dawMidiOutMappings[daw][action], dùng
+                     ĐÚNG schema actionRegistry.js đã có sẵn (kind/channel/number/value|velocity/source),
+                     KHÔNG bịa schema mới. Nếu chưa lưu -> NOT_CONFIGURED, không tự gán mặc định. -->
+                <div class="panel-card">
+                    <div class="panel-card-title">🎚 DAW MIDI OUTPUT
+                        <span class="badge badge-warn" id="dawMidiOutDawBadge">Chưa chọn DAW</span>
+                    </div>
+                    <p class="hint-text">Gửi CC/Note MIDI Output ra DAW khi bấm nút UI trong menu chính (qua
+                        <code>ActionRegistry.executeAction()</code>) — <b>khác</b> với MIDI Input ở trên (điều khiển
+                        NGƯỢC LẠI, từ controller vào app). Mapping lưu riêng theo từng DAW, đổi DAW không mất mapping
+                        DAW khác.</p>
+                    <div id="dawMidiOutRows"><!-- render bằng JS: 3 hàng PLAY/STOP/RECORD --></div>
+                </div>
+
+                <!-- S9/S11 — MAPPING OVERVIEW: 1 bảng duy nhất cho DAW đang chọn, show đủ 4 cột theo yêu cầu. -->
+                <div class="panel-card">
+                    <div class="panel-card-title">📋 Mapping Overview (DAW đang chọn)</div>
+                    <div id="mappingOverviewTable"><!-- render bằng JS --></div>
                 </div>
 
                 <div class="panel-card">

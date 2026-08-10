@@ -262,6 +262,14 @@ select, input[type="text"], input[type="number"] {
 .mapping-block-title { font-size: 12px; font-weight: 700; color: var(--cyan2); margin-bottom: 6px; }
 .mapping-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 4px 0; border-top: 1px solid rgba(255,255,255,.05); color: var(--text-dim); }
 .mapping-row:first-of-type { border-top: none; }
+/* S8/S9 — DAW MIDI OUTPUT rows + Mapping Overview table, CSS RIÊNG, không đụng .mapping-row cũ
+   (đang phục vụ khối "Sơ đồ nhóm Mapping (khái niệm)"). */
+.midiout-row { display: grid; grid-template-columns: 90px 90px 70px 70px 70px auto auto; gap: 6px; align-items: center; padding: 6px 0; border-top: 1px solid rgba(255,255,255,.05); font-size: 12px; }
+.midiout-row:first-of-type { border-top: none; }
+.midiout-row select, .midiout-row input { width: 100%; }
+.overview-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.overview-table th, .overview-table td { padding: 6px 8px; border-top: 1px solid rgba(255,255,255,.05); text-align: left; }
+.overview-table th { color: var(--text-dim); font-weight: 600; }
 .tag-unassigned { font-size: 10px; color: #ff8080; background: rgba(255,77,77,.1); border: 1px solid rgba(255,77,77,.25); padding: 1px 8px; border-radius: 20px; }
 
 /* ---------- SAVED MIDI MAPPING ROWS (thật) ---------- */

@@ -412,6 +412,7 @@ function initSetupPage() {
     setupCaptureButton("btnCaptureDawRecord", "daw_record");
     initMouseControlToggle();
     initDawActionMappingStatus();
+    initDawMidiOutputMappingSection();
     initAhkPathSection();
 
     updateSetupStatus();
@@ -576,6 +577,149 @@ function initMouseControlToggle() {
 // DAW đang chọn — đọc trực tiếp coordinateProfiles + dawMidiOutMappings qua getSetting/
 // getCoordinate đã có sẵn, không cần nạp actionRegistry.js vào cửa sổ Setup (tránh 2
 // dispatcher MIDI song song — đúng cảnh báo Mục XI).
+//
+// S8/S9/S11 — MỞ RỘNG (không thay kiến trúc trên): thêm UI thật cho dawMidiOutMappings +
+// bảng Mapping Overview đầy đủ 4 cột (MIDI Input / MIDI Output / Mouse Coordinate / Action
+// Status). VẪN giữ quyết định KHÔNG load actionRegistry.js vào Setup — mọi logic Action
+// Status ở đây được lặp lại NGUYÊN VĂN theo đúng thứ tự ưu tiên của getActionStatus() (MIDI
+// output trước, rồi mouse coordinate, rồi NOT_CONFIGURED) và ĐÚNG 5 giá trị enum ACTION_STATUS
+// (SUCCESS/NOT_CONFIGURED/NO_DEVICE/MOUSE_DISABLED/ERROR) — không tự bịa giá trị mới.
+
+const DAW_MIDI_ACTIONS = [
+    { action: "DAW_PLAY", label: "PLAY", coordKey: "daw_play", midiInputAction: "daw:play" },
+    { action: "DAW_STOP", label: "STOP", coordKey: "daw_stop", midiInputAction: "daw:stop" },
+    { action: "DAW_RECORD", label: "RECORD", coordKey: "daw_record", midiInputAction: "daw:record" },
+];
+
+function isMouseControlEnabledLocal() {
+    const v = getSetting("mouseControlEnabled");
+    return v === undefined || v === null || v === "" ? true : !!v;
+}
+
+// Đúng schema actionRegistry.js: dawMidiOutMappings[daw][action] = {kind, channel, number, value|velocity, source}
+function getDawMidiOutMapping(action) {
+    const daw = getSetting("selectedDAW");
+    if (!daw) return null;
+    const all = getSetting("dawMidiOutMappings") || {};
+    return (all[daw] && all[daw][action]) || null;
+}
+function setDawMidiOutMapping(action, mapping) {
+    const daw = getSetting("selectedDAW");
+    if (!daw) return false;
+    const all = getSetting("dawMidiOutMappings") || {};
+    if (!all[daw]) all[daw] = {};
+    all[daw][action] = mapping ? { ...mapping, source: "USER_DEFINED" } : null;
+    setSetting("dawMidiOutMappings", all);
+    return true;
+}
+
+// S8 — 3 hàng PLAY/STOP/RECORD, mỗi hàng: Type (CC/Note) + Channel + Number + Value/Velocity + Lưu + Xoá.
+function initDawMidiOutputMappingSection() {
+    const container = document.getElementById("dawMidiOutRows");
+    const dawBadge = document.getElementById("dawMidiOutDawBadge");
+    if (!container) return;
+
+    function render() {
+        const daw = getSetting("selectedDAW");
+        if (dawBadge) {
+            dawBadge.textContent = daw ? `DAW: ${daw}` : "Chưa chọn DAW";
+            dawBadge.className = daw ? "badge badge-live" : "badge badge-warn";
+        }
+        if (!daw) {
+            container.innerHTML = '<p class="hint-text">Chưa chọn DAW ở tab "Chọn DAW" — chưa thể cấu hình MIDI Output.</p>';
+            return;
+        }
+
+        container.innerHTML = "";
+        DAW_MIDI_ACTIONS.forEach(({ action, label }) => {
+            const existing = getDawMidiOutMapping(action);
+            const row = document.createElement("div");
+            row.className = "midiout-row";
+            row.innerHTML = `
+                <b>${label}</b>
+                <select class="mo-kind">
+                    <option value="cc" ${existing?.kind === "cc" ? "selected" : ""}>CC</option>
+                    <option value="note" ${existing?.kind === "note" ? "selected" : ""}>Note</option>
+                </select>
+                <input class="mo-channel" type="number" min="1" max="16" placeholder="Ch" value="${existing?.channel ?? 1}">
+                <input class="mo-number" type="number" min="0" max="127" placeholder="Số" value="${existing?.number ?? ""}">
+                <input class="mo-value" type="number" min="0" max="127" placeholder="Value/Vel" value="${existing?.kind === "note" ? (existing?.velocity ?? "") : (existing?.value ?? "")}">
+                <button class="setup-btn mo-save">💾 Lưu</button>
+                <span class="badge ${existing ? "badge-live" : "badge-warn"} mo-status">${existing ? "Đã cấu hình" : "NOT_CONFIGURED"}</span>
+            `;
+
+            row.querySelector(".mo-save").addEventListener("click", () => {
+                const kind = row.querySelector(".mo-kind").value;
+                const channel = parseInt(row.querySelector(".mo-channel").value, 10) || 1;
+                const number = parseInt(row.querySelector(".mo-number").value, 10);
+                const val = parseInt(row.querySelector(".mo-value").value, 10);
+                if (!Number.isFinite(number)) {
+                    alert("Vui lòng nhập Số (CC number / Note number).");
+                    return;
+                }
+                const mapping = { kind, channel, number };
+                if (kind === "note") mapping.velocity = Number.isFinite(val) ? val : 100;
+                else mapping.value = Number.isFinite(val) ? val : 127;
+
+                setDawMidiOutMapping(action, mapping);
+                notifySetupChanged();
+                render();
+                renderMappingOverview();
+            });
+
+            container.appendChild(row);
+        });
+    }
+
+    render();
+    document.getElementById("saveDawBtn")?.addEventListener("click", () => setTimeout(render, 300));
+}
+
+// S9/S11 — bảng Overview: PLAY/STOP/RECORD × {MIDI Input Mapping, MIDI Output Mapping,
+// Mouse Coordinate, Action Status}. Action Status lặp lại ĐÚNG thứ tự ưu tiên của
+// actionRegistry.js::getActionStatus() (không load file đó vào Setup — xem ghi chú đầu hàm).
+function renderMappingOverview() {
+    const el = document.getElementById("mappingOverviewTable");
+    if (!el) return;
+
+    const daw = getSetting("selectedDAW");
+    if (!daw) {
+        el.innerHTML = '<p class="hint-text">Chưa chọn DAW.</p>';
+        return;
+    }
+
+    const midiInputMappings = getSetting("midiMappingsV1") || [];
+    const mouseOn = isMouseControlEnabledLocal();
+
+    const rows = DAW_MIDI_ACTIONS.map(({ action, label, coordKey, midiInputAction }) => {
+        const inputMap = midiInputMappings.find((m) => m.action === midiInputAction);
+        const inputText = inputMap ? `${inputMap.kind?.toUpperCase() ?? "?"} ${inputMap.number} ch${inputMap.channel}` : "— chưa Learn";
+
+        const outputMap = getDawMidiOutMapping(action);
+        const outputText = outputMap
+            ? `${outputMap.kind === "note" ? "NOTE" : "CC"} ${outputMap.number} ch${outputMap.channel}`
+            : "— chưa cấu hình";
+
+        const coord = getCoordinate(coordKey);
+        const coordText = coord || "— chưa capture";
+
+        // Đúng thứ tự getActionStatus(): MIDI output trước, rồi mouse, rồi NOT_CONFIGURED.
+        let status;
+        if (outputMap) status = "SUCCESS (MIDI)";
+        else if (coord) status = mouseOn ? "SUCCESS (Mouse)" : "MOUSE_DISABLED";
+        else status = "NOT_CONFIGURED";
+
+        return `<tr><td><b>${label}</b></td><td>${inputText}</td><td>${outputText}</td><td>${coordText}</td><td>${status}</td></tr>`;
+    }).join("");
+
+    el.innerHTML = `
+        <table class="overview-table">
+            <thead><tr><th>Action</th><th>MIDI Input</th><th>MIDI Output</th><th>Mouse Coordinate</th><th>Action Status</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+}
+
 function initDawActionMappingStatus() {
     const el = document.getElementById("dawActionMappingStatus");
     if (!el) return;
@@ -593,6 +737,7 @@ function initDawActionMappingStatus() {
         ];
         const parts = keys.map(([label, key]) => `${label}: ${getCoordinate(key) ? "✅ đã capture" : "— chưa capture"}`);
         el.textContent = `DAW "${daw}" — ${parts.join(" · ")}`;
+        renderMappingOverview();
     }
 
     render();
@@ -601,6 +746,7 @@ function initDawActionMappingStatus() {
     document.getElementById("btnCaptureDawPlay")?.addEventListener("click", () => setTimeout(render, 500));
     document.getElementById("btnCaptureDawStop")?.addEventListener("click", () => setTimeout(render, 500));
     document.getElementById("btnCaptureDawRecord")?.addEventListener("click", () => setTimeout(render, 500));
+    document.getElementById("saveDawBtn")?.addEventListener("click", () => setTimeout(render, 300));
 }
 
 /* ================= PHÍM TẮT ================= */
