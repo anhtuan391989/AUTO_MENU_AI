@@ -237,11 +237,27 @@ document.getElementById("saveSetup")?.addEventListener("click", () => {
 /* ==========================================================
    4. PRESETS & CONTROLS (Nút chọn chế độ)
    ========================================================== */
+// MIDI-MASTER-01 / MENU-CONTROL-01 — thêm executeAction() SONG SONG với toggle CSS đã có
+// (không thay thế). ACTIONS.PRESET_* đã được actionRegistry.js khai báo sẵn, KHÔNG có mapping
+// mặc định — executeAction() tự trả NOT_CONFIGURED nếu user chưa gán MIDI/mouse cho preset đó,
+// không hề giả vờ thành công. Đây là "Plugin Preset", ngoài phạm vi MIDI-MASTER-01 (đã ghi rõ
+// trong actionRegistry.js: "KHÔNG kèm backend audio/preset thật") — chỉ nối đường DISPATCH,
+// không tự phát minh hành vi đổi preset thật của Plugin.
+const PRESET_NAME_TO_ACTION = {
+    NORM: "PRESET_NORM",
+    LOFI: "PRESET_LOFI",
+    RAP: "PRESET_RAP",
+};
 document.querySelectorAll(".preset-btn").forEach(btn => {
     btn.addEventListener("click", (e) => {
         document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
         e.target.classList.add("active");
         saveData();
+        const actionName = PRESET_NAME_TO_ACTION[e.target.textContent.trim()];
+        if (actionName && window.ActionRegistry?.executeAction) {
+            window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[actionName], { reason: "menu-button" })
+                .catch(err => console.error(`[MenuControl] PRESET (${actionName}) lỗi:`, err));
+        }
     });
 });
 
@@ -252,23 +268,42 @@ document.getElementById("musicBtn")?.addEventListener("click", (e) => {
     saveData();
 });
 
+const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2", fxBtn: "MONITOR_FX" };
 ["mic1Btn", "mic2Btn", "fxBtn"].forEach(id => {
     document.getElementById(id)?.addEventListener("click", (e) => {
         e.target.classList.toggle("active");
         saveData();
+        // MIDI-MASTER-01 / MENU-CONTROL-01 — nối SONG SONG tới executeAction() (không thay
+        // thế toggle CSS). Chưa có audio-routing backend thật (BACKEND_MISSING — xem báo cáo),
+        // nên executeAction() sẽ trả NOT_CONFIGURED trừ khi user tự gán MIDI/mouse trong Setup.
+        const actionName = MONITOR_BTN_TO_ACTION[id];
+        if (actionName && window.ActionRegistry?.executeAction) {
+            window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[actionName], { reason: "menu-button" })
+                .catch(err => console.error(`[MenuControl] ${actionName} lỗi:`, err));
+        }
     });
 });
 
 /* ==========================================================
    5. PLAY BUTTONS (Logic chuyển đổi PLAY/PLAYING)
    ========================================================== */
+const PRESET_SOUND_BTN_TO_ACTION = { clapPlayBtn: "CLAP", laughPlayBtn: "LAUGH" };
 ["clapPlayBtn", "laughPlayBtn"].forEach(id => {
     const btn = document.getElementById(id);
     // UI Final v1.0: nút đã chuyển lên hàng Preset với nhãn cố định (CLAP/LAUGH),
     // nên bỏ phần đổi chữ PLAY/PLAYING — chỉ còn toggle class "active" để báo trạng thái.
-    // Logic phát âm thanh (sự kiện click) giữ nguyên 100%.
+    // MIDI-MASTER-01 / MENU-CONTROL-01 — KHÔNG có audio file/Web Audio API nào trong repo
+    // để "phát âm thanh" thật (đã grep toàn bộ renderer.js/index.html, không có `new Audio`
+    // hay `.play()` nào — BACKEND_MISSING thật, không phải bị gỡ). Nối SONG SONG tới
+    // executeAction() để ít nhất CLAP/LAUGH có thể gửi MIDI/click chuột nếu user tự cấu hình,
+    // không tự bịa ra việc phát âm thanh nội bộ (đúng "không tự phát minh behavior").
     btn?.addEventListener("click", () => {
         btn.classList.toggle("active");
+        const actionName = PRESET_SOUND_BTN_TO_ACTION[id];
+        if (actionName && window.ActionRegistry?.executeAction) {
+            window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[actionName], { reason: "menu-button" })
+                .catch(err => console.error(`[MenuControl] ${actionName} lỗi:`, err));
+        }
     });
 });
 

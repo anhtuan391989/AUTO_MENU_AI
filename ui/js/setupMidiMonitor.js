@@ -22,36 +22,62 @@
         }
     }
 
-    // Chỉ log "đã gửi" khi thật sự có cổng MIDI được chọn — khớp đúng điều kiện guard
-    // mà setup.js dùng trước khi gọi sendMidiNotePulse/sendMidiCC (tránh log sai khi chưa chọn cổng).
-    function hasPortSelected() {
-        return !!document.getElementById("midiPortSelect")?.value;
-    }
+    // MIDI-MASTER-01 Phase 1 — SỬA lỗi audit A3 mục 3 ("Test Monitor báo PASS giả"):
+    // TRƯỚC bản vá này, 2 listener bên dưới tự log "đã gửi" ngay khi click, KHÔNG chờ kết quả
+    // thật từ sendMidiNotePulse()/sendMidiCC() (setup.js). Vì vậy Monitor có thể hiển thị
+    // "đã gửi" ngay cả khi lệnh gửi thật thất bại (setup.js alert lỗi song song, dòng log vẫn
+    // đứng yên nói đã gửi) — đúng kiểu "PASS giả" mà Mục 11 tài liệu MIDI SETUP + Mục 17 của
+    // MIDI-MASTER-01 cấm.
+    //
+    // SỬA: bỏ 2 listener tự log ở đây. Thay vào đó expose pushLine() ra window.MidiMonitor để
+    // setup.js (nơi DUY NHẤT biết kết quả `ok` thật sau khi await) gọi lại SAU khi biết kết quả —
+    // đúng luồng SEND -> RESULT -> SUCCESS/FAILURE bắt buộc.
+    window.MidiMonitor = {
+        pushLine,
+        logTestResult(kind, label, ok, detail) {
+            pushLine(ok ? `${kind} ${label} → ✅ SUCCESS` : `${kind} ${label} → ❌ FAILURE${detail ? " (" + detail + ")" : ""}`);
+        },
+    };
 
-    document.getElementById("btnTestMidiNote")?.addEventListener("click", () => {
-        if (!hasPortSelected()) return; // setup.js đã tự alert, không log gì thêm
-        const note = document.getElementById("midiTestNote")?.value ?? "?";
-        pushLine(`NOTE ${note} → đã gửi`);
-    });
+    // MIDI-MASTER-01 Phase 1 — SỬA lỗi audit A3 mục 1 ("2 hệ thống MIDI output độc lập, không
+    // có trạng thái tổng hợp"): TRƯỚC bản vá này, status chỉ đọc "dropdown có value hay không",
+    // KHÔNG phản ánh việc port có thật sự mở được ở renderer (Web MIDI) lẫn main process
+    // (easymidi/CommandRuntime) hay không. Giờ dùng window.MidiHealth.getMidiHealth() (mới thêm)
+    // làm nguồn sự thật duy nhất — đúng Mục 5/20 của MIDI-MASTER-01.
+    const STATE_LABEL = {
+        NO_DEVICE: "⚠ Không phát hiện cổng MIDI nào (bấm Refresh / kiểm tra loopMIDI).",
+        DEVICE_DETECTED: "● Có cổng khả dụng, chưa chọn.",
+        PORT_SELECTED: "◐ Đã chọn cổng, đang xác nhận kết nối thật (renderer/main)...",
+        CONNECTING: "◐ Đang kết nối...",
+        CONNECTED: "● CONNECTED — cả renderer và main process đều mở được cổng.",
+        CONFIGURED: "● CONFIGURED — đã kết nối và có mapping đã lưu.",
+        VERIFYING: "◐ Đang xác minh...",
+        VERIFIED: "● VERIFIED",
+        READY: "● READY",
+        ERROR: "❌ ERROR — xem chi tiết bên dưới.",
+    };
 
-    document.getElementById("btnTestMidiCC")?.addEventListener("click", () => {
-        if (!hasPortSelected()) return;
-        const cc = document.getElementById("midiTestCC")?.value ?? "?";
-        const val = document.getElementById("midiTestCCValue")?.value ?? "?";
-        pushLine(`CC${cc} → ${val}`);
-    });
-
-    // ---- Status thật cho MIDI Device (chỉ đọc trạng thái đã có, không thêm logic gửi/nhận mới) ----
-    function refreshMidiStatus() {
+    async function refreshMidiStatus() {
         const status = document.getElementById("midiOutputStatus");
-        const sel = document.getElementById("midiPortSelect");
-        if (!status || !sel) return;
-        if (!sel.options.length || (sel.options.length === 1 && !sel.options[0].value)) {
-            status.textContent = "Status: chưa có cổng MIDI nào (bấm Refresh / Reconnect).";
-        } else if (sel.value) {
-            status.textContent = `Status: đã chọn "${sel.selectedOptions[0]?.textContent}".`;
-        } else {
-            status.textContent = "Status: có cổng khả dụng, chưa chọn.";
+        if (!status) return;
+        if (!window.MidiHealth?.getMidiHealth) {
+            status.textContent = "Status: MidiHealth chưa tải xong.";
+            return;
+        }
+        status.textContent = "Status: đang kiểm tra...";
+        try {
+            const health = await window.MidiHealth.getMidiHealth();
+            let text = `Status: ${STATE_LABEL[health.state] || health.state}`;
+            if (health.state === "ERROR") {
+                const reason = health.main?.lastOutputError || (health.renderer.selectedPortFound === false ? "Cổng đã lưu không có trong danh sách renderer thật." : "");
+                if (reason) text += ` — ${reason}`;
+            }
+            if (!health.main?.available) {
+                text += " [main-process health không khả dụng]";
+            }
+            status.textContent = text;
+        } catch (err) {
+            status.textContent = `Status: lỗi khi kiểm tra (${err.message}).`;
         }
     }
     document.getElementById("midiPortSelect")?.addEventListener("change", refreshMidiStatus);

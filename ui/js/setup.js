@@ -589,6 +589,22 @@ const DAW_MIDI_ACTIONS = [
     { action: "DAW_PLAY", label: "PLAY", coordKey: "daw_play", midiInputAction: "daw:play" },
     { action: "DAW_STOP", label: "STOP", coordKey: "daw_stop", midiInputAction: "daw:stop" },
     { action: "DAW_RECORD", label: "RECORD", coordKey: "daw_record", midiInputAction: "daw:record" },
+    // MIDI-MASTER-01 / MENU-CONTROL-01 — mở rộng để nút Menu (renderer.js) có nơi thật để cấu
+    // hình MIDI Output, TÁI SỬ DỤNG nguyên vẹn cơ chế setDawMidiOutMapping()/executeAction() đã
+    // có, không tạo UI/schema thứ hai. Các action này chỉ dùng theo chiều OUTPUT (bấm nút Menu ->
+    // gửi MIDI) — không có coordKey (chưa có cơ chế capture toạ độ chuột riêng cho nhóm này) và
+    // không có midiInputAction (không phải nút nhận lệnh TỪ controller MIDI, đúng bản chất nút
+    // Menu bấm tay) — cả 2 field để undefined, initDawMidiOutputMappingSection()/
+    // renderMappingOverview() đã tự xử lý an toàn khi thiếu (đã kiểm tra: getCoordinate(undefined)
+    // trả "" , .find(m => m.action === undefined) không khớp gì — không throw).
+    { action: "PRESET_NORM", label: "PRESET NORM" },
+    { action: "PRESET_LOFI", label: "PRESET LOFI" },
+    { action: "PRESET_RAP", label: "PRESET RAP" },
+    { action: "CLAP", label: "CLAP" },
+    { action: "LAUGH", label: "LAUGH" },
+    { action: "MONITOR_MIC1", label: "MONITOR MIC1" },
+    { action: "MONITOR_MIC2", label: "MONITOR MIC2" },
+    { action: "MONITOR_FX", label: "MONITOR FX" },
 ];
 
 function isMouseControlEnabledLocal() {
@@ -1033,6 +1049,10 @@ function initMidiSection() {
 
         const note = parseInt(document.getElementById("midiTestNote")?.value, 10) || 0;
         const ok = await sendMidiNotePulse(note, 100, 0, 150);
+        // MIDI-MASTER-01 Phase 1 — log vào Monitor SAU khi biết kết quả thật (sửa "PASS giả", xem
+        // ghi chú trong setupMidiMonitor.js). Lưu ý: ok=true chỉ có nghĩa là lệnh gửi qua Web MIDI
+        // API không bị từ chối ở tầng trình duyệt — KHÔNG xác nhận phần cứng/DAW đã nhận được.
+        window.MidiMonitor?.logTestResult("NOTE", note, ok, ok ? null : "kiểm tra lại cổng MIDI đã chọn");
         if (!ok) {
             alert("Không gửi được — kiểm tra lại cổng MIDI đã chọn.");
         }
@@ -1048,6 +1068,7 @@ function initMidiSection() {
         const cc = parseInt(document.getElementById("midiTestCC")?.value, 10) || 0;
         const value = parseInt(document.getElementById("midiTestCCValue")?.value, 10) || 0;
         const ok = await sendMidiCC(cc, value, 0);
+        window.MidiMonitor?.logTestResult(`CC${cc}`, value, ok, ok ? null : "kiểm tra lại cổng MIDI đã chọn");
         if (!ok) {
             alert("Không gửi được — kiểm tra lại cổng MIDI đã chọn.");
         }

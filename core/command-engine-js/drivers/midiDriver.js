@@ -16,6 +16,19 @@ class MidiDriver extends BaseDriver {
     return !!this.output;
   }
 
+  // MIDI-MASTER-01 Phase 1 — cần để runtime.js đóng port cũ an toàn trước khi mở port mới
+  // (đổi cổng MIDI trong Setup mà không cần khởi động lại app). Không đổi hành vi execute()/isReady().
+  close() {
+    try {
+      this.output?.close?.();
+    } catch (err) {
+      // Đóng port lỗi không nên chặn việc mở port mới — chỉ log qua console, không throw.
+      console.error('[MidiDriver] close() lỗi (bỏ qua, tiếp tục mở port mới):', err.message);
+    } finally {
+      this.output = null;
+    }
+  }
+
   async execute(params) {
     // params: { cc, channel, value } hoặc { note, channel, velocity }
     try {

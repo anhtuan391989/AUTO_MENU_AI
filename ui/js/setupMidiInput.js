@@ -177,6 +177,17 @@
         });
     }
 
+    // MIDI-MASTER-01 Mục 13 — DUPLICATE / CONFLICT PROTECTION. TRƯỚC bản vá này, saveLearnedMapping()
+    // push() thẳng vào mảng, không kiểm tra xem {type,channel,number} vừa Learn đã được map cho
+    // Function/action KHÁC hay chưa. Vì buildMappingIndex() (core/command-engine-js/runtime.js) xây
+    // Map theo đúng key này, 2 entry trùng key sẽ bị ghi đè ÂM THẦM lúc dispatch — chỉ entry cuối
+    // mảng còn hiệu lực — dù renderMappingList() vẫn hiển thị CẢ HAI như đang hoạt động (đã ghi
+    // trong báo cáo audit A3 mục 2). Không có "explicit shared binding policy" nào được định nghĩa
+    // trong task -> mặc định CHẶN, không tự cho phép dùng chung.
+    function findConflict(list, kind, type, channel, number, action) {
+        return list.find((m) => m.type === type && m.channel === channel && m.number === number && m.action !== action);
+    }
+
     function saveLearnedMapping() {
         const { learnResult, actionSelect, saveBtn } = els();
         if (!learnResult?.dataset.kind) {
@@ -189,16 +200,43 @@
         }
         const trigger = learnResult.textContent.replace("✅ Đã nhận: ", "");
         const list = getMappings();
+        const kind = learnResult.dataset.kind;
+        const type = kind === "note" ? "note" : (kind === "cc" ? "cc" : kind);
+        const channel = Number(learnResult.dataset.channel);
+        const number = Number(learnResult.dataset.number);
+        const action = actionSelect.value;
+
+        const conflict = findConflict(list, kind, type, channel, number, action);
+        if (conflict) {
+            const confirmed = confirm(
+                `⚠ Tín hiệu MIDI này (${trigger}) đã được gán cho "${conflict.action}".\n` +
+                `Nếu tiếp tục, mapping cũ sẽ bị XOÁ để tránh 2 Function cùng khớp 1 tín hiệu ` +
+                `(1 trong 2 sẽ bị ghi đè âm thầm lúc thực thi nếu để cả hai).\n\n` +
+                `Xoá mapping cũ và gán cho "${action}" thay vào đó?`
+            );
+            if (!confirmed) {
+                if (learnResult) learnResult.textContent = `⚠ Đã huỷ lưu — trùng tín hiệu với "${conflict.action}".`;
+                return;
+            }
+            const idx = list.indexOf(conflict);
+            if (idx !== -1) list.splice(idx, 1);
+        }
+
+        // Nếu action NÀY đã có 1 mapping khác từ trước (re-learn cho cùng 1 Function), thay thế
+        // luôn thay vì cộng dồn — tránh registry phình ra nhiều dòng chết cho cùng 1 action.
+        const sameActionIdx = list.findIndex((m) => m.action === action);
+        if (sameActionIdx !== -1) list.splice(sameActionIdx, 1);
+
         // Lưu CẤU TRÚC thật (type/channel/number), không chỉ chuỗi hiển thị — đây là field
         // mà core/command-engine-js/runtime.js dùng để tra O(1) lúc dispatch thật. Thiếu field
         // này thì mapping chỉ để XEM, không bao giờ được Command Engine khớp/thực thi.
         list.push({
             trigger,
-            kind: learnResult.dataset.kind,
-            type: learnResult.dataset.kind === "note" ? "note" : (learnResult.dataset.kind === "cc" ? "cc" : learnResult.dataset.kind),
-            channel: Number(learnResult.dataset.channel),
-            number: Number(learnResult.dataset.number),
-            action: actionSelect.value,
+            kind,
+            type,
+            channel,
+            number,
+            action,
             savedAt: new Date().toISOString(),
         });
         saveMappings(list);

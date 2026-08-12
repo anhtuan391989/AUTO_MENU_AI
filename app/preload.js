@@ -66,4 +66,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
     // ---- UI FINAL v2.0: "Menu ôm sát nội dung" — CHỈ đổi chiều cao cửa sổ chính ----
     resizeWindow: (height) => ipcRenderer.send("resize-window", { height }),
+
+    // ---- MIDI-MASTER-01 Phase 1: trạng thái MIDI THẬT phía main process (easymidi) ----
+    // Dùng bởi ui/js/midiHealth.js để hợp nhất với trạng thái Web MIDI phía renderer.
+    getMainMidiHealth: () => ipcRenderer.invoke("midi-health"),
 });

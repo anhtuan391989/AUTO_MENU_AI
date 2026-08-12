@@ -48,7 +48,16 @@ const ACTIONS = Object.freeze({
     PRESET_LOFI: "PRESET_LOFI",
     PRESET_RAP: "PRESET_RAP",
     CLAP: "CLAP",
-    LAUGH: "LAUGH"
+    LAUGH: "LAUGH",
+    // MIDI-MASTER-01 / MENU-CONTROL-01 — cùng nhóm "khai báo trước, KHÔNG mapping mặc định"
+    // như DAW_PAUSE/DAW_LOOP/... ở trên. mic1Btn/mic2Btn/fxBtn (renderer.js) hiện CHỈ toggle
+    // CSS .active, không có bất kỳ audio-routing backend thật nào trong repo (đã grep toàn bộ
+    // renderer.js/index.html — không có Web Audio API, không IPC audio-monitor nào tồn tại).
+    // Khai báo action ở đây KHÔNG bịa ra hành vi audio thật — chỉ mở đường để executeAction()
+    // gửi MIDI/click chuột NẾU user tự cấu hình trong Setup, giống hệt cơ chế DAW_PAUSE.
+    MONITOR_MIC1: "MONITOR_MIC1",
+    MONITOR_MIC2: "MONITOR_MIC2",
+    MONITOR_FX: "MONITOR_FX"
 });
 
 // Action nào đã có Mouse Coordinate key tương ứng (Mục 8, ưu tiên DAW Play/Stop/Record —

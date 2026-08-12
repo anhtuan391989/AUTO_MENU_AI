@@ -235,6 +235,20 @@ ipcMain.handle("ai-command", async (event, payload) => {
 });
 
 // ================================
+// MIDI-MASTER-01 Phase 1 — MIDI HEALTH (phía main process).
+// Chỉ đọc lại state nội bộ đã có sẵn trong CommandRuntime (getHealth(), thêm ở Phase 1),
+// KHÔNG tự suy đoán/thêm logic mới ở tầng IPC này. Renderer (ui/js/midiHealth.js) gọi hàm
+// này để hợp nhất với trạng thái Web MIDI phía renderer.
+// ================================
+ipcMain.handle("midi-health", async () => {
+    try {
+        return CommandRuntime.getHealth();
+    } catch (err) {
+        return { started: false, error: err.message };
+    }
+});
+
+// ================================
 // NHẬN KẾT QUẢ KEY/BPM/MOD TỪ ui/js/engines/* (renderer) -> cập nhật AIContext -> phát EventBus
 // Không đổi thuật toán, không đổi UI — chỉ chuyển tiếp dữ liệu sang Core.
 // ================================
