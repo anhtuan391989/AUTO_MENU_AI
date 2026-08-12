@@ -39,21 +39,16 @@
         },
     };
 
-    // MIDI-MASTER-01 Phase 1 — SỬA lỗi audit A3 mục 1 ("2 hệ thống MIDI output độc lập, không
-    // có trạng thái tổng hợp"): TRƯỚC bản vá này, status chỉ đọc "dropdown có value hay không",
-    // KHÔNG phản ánh việc port có thật sự mở được ở renderer (Web MIDI) lẫn main process
-    // (easymidi/CommandRuntime) hay không. Giờ dùng window.MidiHealth.getMidiHealth() (mới thêm)
-    // làm nguồn sự thật duy nhất — đúng Mục 5/20 của MIDI-MASTER-01.
+    // TASK B1-A/B1-B — status label khớp đúng state machine mới (DISCONNECTED/DISCOVERING/
+    // CONNECTING/CONNECTED/CONFIGURED/VERIFIED/ERROR) và shape mới của getMidiHealth()
+    // ({input,output,verified,status,error}), thay cho shape cũ ({state,renderer,main}).
     const STATE_LABEL = {
-        NO_DEVICE: "⚠ Không phát hiện cổng MIDI nào (bấm Refresh / kiểm tra loopMIDI).",
-        DEVICE_DETECTED: "● Có cổng khả dụng, chưa chọn.",
-        PORT_SELECTED: "◐ Đã chọn cổng, đang xác nhận kết nối thật (renderer/main)...",
-        CONNECTING: "◐ Đang kết nối...",
-        CONNECTED: "● CONNECTED — cả renderer và main process đều mở được cổng.",
+        DISCOVERING: "● Có cổng khả dụng, chưa chọn (đang ở bước dò tìm).",
+        DISCONNECTED: "⚠ Cổng đã lưu KHÔNG có trong danh sách thật (mất/đổi tên/rút dây).",
+        CONNECTING: "◐ Cổng tồn tại, đang xác nhận kết nối thật (renderer/main)...",
+        CONNECTED: "● CONNECTED — output đã xác nhận mở ở cả renderer và main process.",
         CONFIGURED: "● CONFIGURED — đã kết nối và có mapping đã lưu.",
-        VERIFYING: "◐ Đang xác minh...",
         VERIFIED: "● VERIFIED",
-        READY: "● READY",
         ERROR: "❌ ERROR — xem chi tiết bên dưới.",
     };
 
@@ -67,12 +62,10 @@
         status.textContent = "Status: đang kiểm tra...";
         try {
             const health = await window.MidiHealth.getMidiHealth();
-            let text = `Status: ${STATE_LABEL[health.state] || health.state}`;
-            if (health.state === "ERROR") {
-                const reason = health.main?.lastOutputError || (health.renderer.selectedPortFound === false ? "Cổng đã lưu không có trong danh sách renderer thật." : "");
-                if (reason) text += ` — ${reason}`;
-            }
-            if (!health.main?.available) {
+            let text = `Status: ${STATE_LABEL[health.status] || health.status}`;
+            if (health.error) text += ` — ${health.error}`;
+            text += ` [IN: det=${health.input.detected ? "✓" : "✕"} conn=${health.input.connected ? "✓" : "✕"} · OUT: det=${health.output.detected ? "✓" : "✕"} conn=${health.output.connected ? "✓" : "✕"}]`;
+            if (!health._detail?.main?.available) {
                 text += " [main-process health không khả dụng]";
             }
             status.textContent = text;
