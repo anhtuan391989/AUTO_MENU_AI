@@ -248,6 +248,25 @@ ipcMain.handle("midi-health", async () => {
     }
 });
 
+// TASK B2 Mục 2/10 — nút "🔄 Auto Connect" trong Setup gọi tới đây. mode mặc định "manual"
+// (backward-compat) — renderer PHẢI truyền mode tường minh nếu muốn bật AUTO MENU AI priority.
+ipcMain.handle("midi-auto-connect", async (event, opts) => {
+    try {
+        return CommandRuntime.autoConnect(opts || {});
+    } catch (err) {
+        return { ok: false, detail: err.message };
+    }
+});
+
+// TASK B2 Mục 6/9 — Verification thật (loopback), KHÔNG dùng console.log làm bằng chứng.
+ipcMain.handle("midi-verify", async () => {
+    try {
+        return await CommandRuntime.verifyMidiOutput();
+    } catch (err) {
+        return { verified: false, reason: "IPC_ERROR", detail: err.message };
+    }
+});
+
 // ================================
 // NHẬN KẾT QUẢ KEY/BPM/MOD TỪ ui/js/engines/* (renderer) -> cập nhật AIContext -> phát EventBus
 // Không đổi thuật toán, không đổi UI — chỉ chuyển tiếp dữ liệu sang Core.
@@ -948,6 +967,17 @@ app.on("window-all-closed", () => {
         app.quit();
     }
 
+});
+
+// TASK B2 Mục 12 — SHUTDOWN SAFETY: đóng MIDI Input/Output trước khi process thoát hẳn,
+// tránh để RtMidi/easymidi port treo (đặc biệt quan trọng cho port ảo dùng chung — port
+// không đóng sạch có thể khiến lần mở app SAU không mở lại được, tuỳ driver/OS).
+app.on("before-quit", () => {
+    try {
+        CommandRuntime.stop();
+    } catch (err) {
+        console.error("CommandRuntime.stop() lúc shutdown lỗi (bỏ qua, app vẫn thoát):", err.message);
+    }
 });
 
 app.on("activate", () => {

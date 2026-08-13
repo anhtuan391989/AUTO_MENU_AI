@@ -76,4 +76,63 @@
     document.getElementById("midiPortSelect")?.addEventListener("change", refreshMidiStatus);
     document.getElementById("btnRefreshMidiPorts")?.addEventListener("click", () => setTimeout(refreshMidiStatus, 400));
     window.addEventListener("load", () => setTimeout(refreshMidiStatus, 500));
+
+    // TASK B2 Mục 10 — nút "Auto Connect": discover + đảm bảo "AUTO MENU AI" (nếu platform hỗ
+    // trợ) + connect. mode="auto" TƯỜNG MINH ở đây (chỉ khi user CHỦ ĐỘNG bấm nút này) — không
+    // tự bật auto mode ngầm ở bất kỳ đường nào khác, đúng "không ghi đè lựa chọn người dùng".
+    document.getElementById("btnAutoConnectMidi")?.addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        if (!window.MidiHealth?.autoConnect) {
+            alert("Auto Connect chưa khả dụng (không phải Electron renderer?).");
+            return;
+        }
+        const original = btn.textContent;
+        btn.textContent = "⏳ Đang dò tìm...";
+        btn.disabled = true;
+        try {
+            const result = await window.MidiHealth.autoConnect({ mode: "auto" });
+            if (result.ok) {
+                pushLine(`AUTO CONNECT → ✅ đã kết nối "${result.resolution.portName}" (nguồn: ${result.resolution.source}).`);
+            } else {
+                const vp = result.virtualPort;
+                let reason = vp && !vp.ok ? ` — ${vp.detail}` : " — không tìm thấy port khả dụng.";
+                pushLine(`AUTO CONNECT → ❌ KHÔNG kết nối được${reason}`);
+            }
+            await refreshMidiStatus();
+        } catch (err) {
+            pushLine(`AUTO CONNECT → ❌ lỗi: ${err.message}`);
+        } finally {
+            btn.textContent = original;
+            btn.disabled = false;
+        }
+    });
+
+    // TASK B2 Mục 6/9 — Verify thật (loopback), hiển thị đúng SUCCESS/FAILURE, không dùng
+    // console.log làm bằng chứng, không tự nâng lên VERIFIED nếu không nhận lại được message.
+    document.getElementById("btnVerifyMidiLoopback")?.addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        const verifyStatus = document.getElementById("midiVerifyStatus");
+        if (!window.MidiHealth?.verify) {
+            alert("Verify chưa khả dụng (không phải Electron renderer?).");
+            return;
+        }
+        const original = btn.textContent;
+        btn.textContent = "⏳ Đang gửi + chờ phản hồi...";
+        btn.disabled = true;
+        if (verifyStatus) verifyStatus.textContent = "Verification: đang chạy...";
+        try {
+            const result = await window.MidiHealth.verify();
+            if (verifyStatus) {
+                verifyStatus.textContent = result.verified
+                    ? `Verification: ✅ VERIFIED — ${result.detail}`
+                    : `Verification: ❌ NOT VERIFIED (${result.reason}) — ${result.detail}`;
+            }
+            pushLine(`VERIFY → ${result.verified ? "✅ VERIFIED" : `❌ NOT VERIFIED (${result.reason})`}`);
+        } catch (err) {
+            if (verifyStatus) verifyStatus.textContent = `Verification: lỗi (${err.message}).`;
+        } finally {
+            btn.textContent = original;
+            btn.disabled = false;
+        }
+    });
 })();

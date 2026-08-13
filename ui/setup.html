@@ -205,10 +205,13 @@
                     </select>
                     <div class="row-buttons">
                         <button id="btnRefreshMidiPorts" class="setup-btn">🔄 Refresh / Reconnect</button>
+                        <button id="btnAutoConnectMidi" class="setup-btn">⚡ Auto Connect (AUTO MENU AI)</button>
                         <button id="btnInstallLoopMidi" class="setup-btn">🎹 Cài loopMIDI (Virtual Port)</button>
                     </div>
                     <button id="saveMidiBtn" class="setup-btn" style="margin-top:8px;">💾 Lưu cổng MIDI</button>
+                    <button id="btnVerifyMidiLoopback" class="setup-btn" style="margin-top:8px;">🧪 Verify (loopback thật)</button>
                     <div class="hint-text" id="midiOutputStatus" style="margin-top:6px;">Status: chưa chọn cổng.</div>
+                    <div class="hint-text" id="midiVerifyStatus" style="margin-top:4px;">Verification: chưa chạy.</div>
                     <!-- id cũ, không dùng nữa vì không còn modal, giữ để initModal không lỗi -->
                     <button id="closeMidiBtn" style="display:none;"></button>
 

@@ -104,11 +104,14 @@
     async function getMidiHealth() {
         const [rendererPorts, main] = await Promise.all([getRendererPortLists(), getMainMidiHealth()]);
         // Kiến trúc hiện tại dùng CHUNG 1 portName cho input/output (xem ghi chú đầu file).
-        const portName = typeof getSetting === "function" ? getSetting("midiOutputPort") : "";
+        // TASK B2 Mục 4 — nếu user đã cấu hình midiInputPort riêng, dùng đúng nó cho phía INPUT;
+        // OUTPUT vẫn luôn đọc midiOutputPort (không đổi ý nghĩa field cũ).
+        const outputPortName = typeof getSetting === "function" ? getSetting("midiOutputPort") : "";
+        const inputPortName = (typeof getSetting === "function" ? getSetting("midiInputPort") : "") || outputPortName;
 
-        const output = buildSide("output", portName, rendererPorts.outputs, main);
-        const input = buildSide("input", portName, rendererPorts.inputs, main);
-        const status = deriveStatus(input, output, main, portName);
+        const output = buildSide("output", outputPortName, rendererPorts.outputs, main);
+        const input = buildSide("input", inputPortName, rendererPorts.inputs, main);
+        const status = deriveStatus(input, output, main, outputPortName);
 
         const error = main.available
             ? (main.lastOutputError || main.lastInputError || null)
@@ -117,14 +120,32 @@
         return {
             input,
             output,
-            verified: false, // luôn false ở B1 — chưa có Verification thật (Mục 16), không giả vờ
+            verified: false, // luôn false ở B1/B2 client-side — verification thật (loopback) chạy ở main process qua electronAPI.verifyMidiOutput(), không tự suy ở renderer
             status,
             error,
             // Chi tiết thô — KHÔNG thuộc shape bắt buộc của B1-B, giữ lại để UI/Setup hiển thị lý
             // do cụ thể (vd "cổng đã lưu không có trong danh sách renderer") mà không phải đoán.
-            _detail: { portName: portName || null, rendererSupported: rendererPorts.supported, main },
+            _detail: { portName: outputPortName || null, inputPortName: inputPortName || null, rendererSupported: rendererPorts.supported, main },
         };
     }
 
-    window.MidiHealth = { MIDI_STATE, getMidiHealth };
+    // TASK B2 Mục 10 — nút "🔄 Auto Connect": gọi main process discover+ensure+connect, rồi
+    // đọc lại getMidiHealth() để UI cập nhật NGAY (không cần chờ lần refresh định kỳ tiếp theo).
+    async function autoConnect(opts) {
+        if (!window.electronAPI?.autoConnectMidi) {
+            return { ok: false, detail: "electronAPI.autoConnectMidi không tồn tại (không phải Electron renderer?)." };
+        }
+        const result = await window.electronAPI.autoConnectMidi(opts);
+        return result;
+    }
+
+    // TASK B2 Mục 6/9 — verification thật (loopback), KHÔNG suy đoán ở renderer.
+    async function verify() {
+        if (!window.electronAPI?.verifyMidiOutput) {
+            return { verified: false, reason: "NOT_ELECTRON", detail: "electronAPI.verifyMidiOutput không tồn tại." };
+        }
+        return window.electronAPI.verifyMidiOutput();
+    }
+
+    window.MidiHealth = { MIDI_STATE, getMidiHealth, autoConnect, verify };
 })();

@@ -1695,8 +1695,19 @@ window.electronAPI?.onPluginCommand?.(async (message) => {
             // -> quy đổi bằng đúng cách notes/flatToSharp mà transposeKey() ở trên đã dùng
             // (tái sử dụng biến có sẵn, không phải logic MIDI/AHK mới).
             const delta = bridgeSemitoneDelta(originalKey, message.value);
-            const result = await sendToneStep(delta);
-            console.log("[Bridge] sendToneStep() ->", result, "(delta =", delta, ")");
+            // TASK B3-A / MOD-DUAL-TARGET — Manual Mod (dòng ~490-507) đã gửi ĐỒNG THỜI tới cả
+            // Auto-Tune VÀ SoundShifter bằng Promise.all từ trước; nhánh AI SHIFT_KEY này TRƯỚC
+            // bản vá chỉ gọi sendToneStep() (Auto-Tune), bỏ sót SoundShifter — đúng gap A6 đã
+            // xác nhận. Vá bằng ĐÚNG semantics Manual đang dùng: cùng delta, chạy song song,
+            // không coi là thành công nếu 1 trong 2 lỗi (không báo giả tạo).
+            const [autotuneResult, soundshifterResult] = await Promise.all([
+                sendToneStep(delta),
+                sendToneStepToSoundShifter(delta),
+            ]);
+            console.log("[Bridge] sendToneStep() ->", autotuneResult, "(delta =", delta, ")");
+            console.log("[Bridge] sendToneStepToSoundShifter() ->", soundshifterResult, "(delta =", delta, ")");
+            if (!autotuneResult.ok) console.error("[Bridge] sendToneStep (Auto-Tune) lỗi:", autotuneResult.detail);
+            if (!soundshifterResult.ok) console.error("[Bridge] sendToneStepToSoundShifter lỗi:", soundshifterResult.detail);
             break;
         }
 

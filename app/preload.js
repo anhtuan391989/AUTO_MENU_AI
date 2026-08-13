@@ -70,4 +70,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- MIDI-MASTER-01 Phase 1: trạng thái MIDI THẬT phía main process (easymidi) ----
     // Dùng bởi ui/js/midiHealth.js để hợp nhất với trạng thái Web MIDI phía renderer.
     getMainMidiHealth: () => ipcRenderer.invoke("midi-health"),
+
+    // ---- TASK B2: Auto Connect (discover + ensure AUTO MENU AI + connect) + Verification thật ----
+    autoConnectMidi: (opts) => ipcRenderer.invoke("midi-auto-connect", opts),
+    verifyMidiOutput: () => ipcRenderer.invoke("midi-verify"),
 });
