@@ -684,6 +684,7 @@ function cancelManualOverride() {
     keySource.manual.deadlineAt = null;
 
     if (wasActive) console.log("[Manual Override] OFF");
+    if (wasActive) reportManualStateSnapshot(); // TASK B3-C — Manual Key vừa TẮT thật, báo Core ngay (chỉ khi thực sự đổi, không gọi thừa)
 
 }
 
@@ -895,6 +896,7 @@ applyKeyBtn?.addEventListener("click", () => {
             // CHỈ commit Manual state khi Auto-Tune xác nhận nhận được Key (Mục 6: preview -> validate -> committed).
             keySource.manual.committedKey = selectedKey;
             keySource.manual.active = true;
+            reportManualStateSnapshot(); // TASK B3-C — Manual Key vừa BẬT thật (đã được Auto-Tune xác nhận), báo Core ngay
 
             setStatus("dot-key", "online"); // xanh: đã gửi thành công (qua MIDI hoặc click)
             if (keyInfoEl) keyInfoEl.textContent = `Manual Key (${result.driverUsed})`;
@@ -1078,6 +1080,7 @@ function loadData() {
 function turnManualOverrideOff() {
     modPowerBtn.classList.remove("active");
     modPowerBtn.textContent = "OFF";
+    reportManualStateSnapshot(); // TASK B3-C — Manual Mod vừa TẮT thật (click OFF hoặc auto-timeout 5 phút), báo Core ngay
     if (toneSelector) { toneSelector.value = "0"; toneSelector.disabled = true; } // Mục VI
     if (applyToneBtn) applyToneBtn.disabled = true; // Mục VI
     setStatus("dot-mod", "pending"); // cam: đang trả quyền lại cho AI, chưa xong
@@ -1114,6 +1117,7 @@ modPowerBtn?.addEventListener("click", () => {
     const isActive = modPowerBtn.classList.toggle("active");
 
     if (isActive) {
+        reportManualStateSnapshot(); // TASK B3-C — Manual Mod vừa BẬT thật, báo Core ngay. (Nhánh TẮT dùng chung turnManualOverrideOff() bên dưới — đã tự báo ở đó, không gọi trùng ở đây.)
         modPowerBtn.textContent = "ON";
         if (toneSelector) toneSelector.disabled = false; // Mục VII: MOD ON -> Dropdown cho phép chọn Preview
         if (applyToneBtn) applyToneBtn.disabled = false; // Mục VII: MOD ON -> SET cho phép gửi
@@ -1167,6 +1171,24 @@ let aiSemitoneOffset = 0;
 function isManualOverrideActive() {
     return !!(modPowerBtn && modPowerBtn.classList.contains("active"));
 }
+
+// ================================
+// TASK B3-C — REAL MANUAL STATE IPC. Gửi snapshot Manual Key/Mod THẬT lên Core khi state
+// thực sự đổi (không polling). Dùng ĐÚNG 2 nguồn đã tồn tại, không tự suy ra state khác:
+//   keyActive -> keySource.manual.active  (Manual Key override, ui/js/renderer.js ~dòng 532+)
+//   modActive -> isManualOverrideActive() (Manual Mod override — tên hàm chung chung nhưng
+//                thực chất chỉ đọc modPowerBtn.classList, xem định nghĩa ngay trên)
+// timestamp = Date.now() tại ĐÚNG lúc renderer tạo snapshot này (không phải lúc Core nhận).
+// ================================
+function reportManualStateSnapshot() {
+    if (!window.electronAPI?.reportManualState) return; // không phải Electron renderer (dev/test) -> bỏ qua, không throw
+    window.electronAPI.reportManualState({
+        keyActive: !!keySource.manual.active,
+        modActive: isManualOverrideActive(),
+        timestamp: Date.now(),
+    });
+}
+reportManualStateSnapshot(); // TASK B3-C — báo snapshot ban đầu ngay lúc renderer khởi tạo (cả 2 field false lúc app vừa mở), để Core không phải chờ tới lần đổi state đầu tiên mới có dữ liệu.
 
 // Điểm DUY NHẤT thực sự áp 1 sự kiện mod — được gọi từ startModulationWatcher() (mục 13B)
 // khi engine dò Mod thật (chromagram) phát hiện Key hiện tại lệch khỏi Key gốc.

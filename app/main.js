@@ -81,6 +81,7 @@ const AIContext = require("../core/ai/AIContext");
 const EventBus = require("../core/events/EventBus");
 const Events = require("../core/events/Events");
 const ControlSource = require("../core/shared/ControlSource");
+const ManualState = require("../core/shared/ManualState");
 const TelemetryLogger = require("../core/shared/TelemetryLogger");
 const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
 const NowPlayingResolver = require("../core/reference/NowPlayingResolver");
@@ -219,6 +220,21 @@ ipcMain.on("setup-changed", () => {
     mainWin?.webContents.send("setup-changed");
     // Nạp lại mapping MIDI + mở lại Input đúng cổng mới nhất — không ảnh hưởng dòng relay ở trên.
     try { CommandRuntime.reloadMappings(); } catch (err) { console.error("reloadMappings lỗi:", err); }
+});
+
+// ================================
+// TASK B3-C — REAL MANUAL STATE IPC. Renderer gửi snapshot Manual Key/Mod THẬT (đúng lúc
+// state thay đổi thật, không polling) — main CHỈ chuyển tiếp nguyên văn vào ManualState.js,
+// KHÔNG tự gán lại timestamp, KHÔNG tự suy đoán/validate thêm ngoài những gì ManualState.js
+// đã làm. ManualPriorityGuard (A7b) sẽ đọc ManualState.getManualState() khi module đó tồn tại
+// — HIỆN CHƯA CÓ trong repo (xem báo cáo B3-C, mục Files/Remaining Risks) — nên chuỗi
+// "Guard đọc dữ liệu này để ALLOW/BLOCK" chưa nối được ở đầu ra, chỉ mới có đầu vào.
+// ================================
+ipcMain.on("report-manual-state", (event, snapshot) => {
+    const result = ManualState.setManualState(snapshot);
+    if (!result.ok) {
+        console.error("[ManualState] Bỏ qua snapshot không hợp lệ:", result.detail, snapshot);
+    }
 });
 
 // ================================

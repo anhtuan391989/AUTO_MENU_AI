@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     openSetup: () => ipcRenderer.send("open-setup"),
     closeSetup: () => ipcRenderer.send("close-setup"),
     notifySetupChanged: () => ipcRenderer.send("setup-changed"),
+
+    // ---- TASK B3-C: báo cáo Manual State THẬT (Key/Mod override) lên Core, KHÔNG polling —
+    // chỉ gọi khi state thực sự đổi (xem ui/js/renderer.js, hàm reportManualStateSnapshot). ----
+    reportManualState: (snapshot) => ipcRenderer.send("report-manual-state", snapshot),
     onSetupChanged: (callback) => ipcRenderer.on("setup-changed", () => callback()),
 
     // ---- Kiểm tra kết nối main process ----
