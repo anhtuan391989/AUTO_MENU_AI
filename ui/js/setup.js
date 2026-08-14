@@ -605,6 +605,11 @@ const DAW_MIDI_ACTIONS = [
     { action: "MONITOR_MIC1", label: "MONITOR MIC1" },
     { action: "MONITOR_MIC2", label: "MONITOR MIC2" },
     { action: "MONITOR_FX", label: "MONITOR FX" },
+    // TASK B6 — Beat (input music level) và Master (final DAW output level) là 2 mapping
+    // ĐỘC LẬP hoàn toàn — 2 dòng riêng, không gộp, đúng yêu cầu "phải có khả năng cấu hình
+    // hai mapping độc lập". Không tự đặt CC — trống mặc định như mọi action khác ở đây.
+    { action: "BEAT_INPUT_VOLUME", label: "BEAT INPUT VOLUME" },
+    { action: "MASTER_OUTPUT_VOLUME", label: "MASTER OUTPUT VOLUME" },
 ];
 
 function isMouseControlEnabledLocal() {

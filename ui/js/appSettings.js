@@ -159,6 +159,24 @@ function setSetting(key, value) {
     saveSetup();
 }
 
+// TASK B6 (Beat/Master) — accessor SEMANTIC riêng cho từng control, KHÔNG dùng tên chung
+// "volume" cho cả hai. Đọc đúng appSettings.autoMenuData.knobs (KHÔNG tạo storage mới, giữ
+// nguyên 100% format cũ `{id, value}` — backward-compatible) nhưng lộ ra tên hàm RÕ NGHĨA để
+// có thể chứng minh khi audit: Beat state và Master state là 2 đường đọc TÁCH BIỆT, không có
+// hàm chung nào gộp cả hai. Đúng định nghĩa bắt buộc: Beat = INPUT MUSIC LEVEL (musicKnob),
+// Master = FINAL DAW OUTPUT LEVEL (masterKnob) — 2 khái niệm khác nhau, không phải cùng 1
+// "volume". Chỉ đọc (getter) — việc GHI vẫn qua đúng 1 đường saveData() sẵn có (renderer.js),
+// tránh tạo 2 cơ chế ghi cạnh tranh cho cùng 1 dữ liệu.
+function getBeatInputVolume() {
+    const knob = appSettings.autoMenuData?.knobs?.find((k) => k.id === "musicKnob");
+    return knob ? knob.value : null;
+}
+
+function getMasterOutputVolume() {
+    const knob = appSettings.autoMenuData?.knobs?.find((k) => k.id === "masterKnob");
+    return knob ? knob.value : null;
+}
+
 /* ==========================================================
    MIDI (Web MIDI API — có sẵn trong Chromium/Electron, không cần cài thư viện Node nào).
    Dùng để gửi Key/lệnh sang DAW qua 1 cổng MIDI ảo (vd loopMIDI), thay cho click tọa độ

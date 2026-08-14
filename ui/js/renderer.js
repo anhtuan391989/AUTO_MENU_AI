@@ -1611,6 +1611,24 @@ document.addEventListener("DOMContentLoaded", () => {
     let startY = 0;
     let startValue = 0;
 
+    // TASK B6 (Beat/Master) — dispatch RIÊNG cho đúng 2 knob này, KHÔNG áp dụng cho
+    // retune1/retune2/clapKnob/laughKnob (target của 4 knob đó vẫn UNKNOWN/chưa audit xong —
+    // xem TASK_B5_REPORT.md/TASK_B6_REPORT.md — cố tình KHÔNG đụng, tránh mở rộng phạm vi).
+    // Map 1-1 rõ ràng, không suy luận theo tên — đúng yêu cầu "Beat = INPUT MUSIC LEVEL,
+    // Master = FINAL DAW OUTPUT LEVEL" là 2 khái niệm khác nhau, không gộp chung "volume".
+    const KNOB_ID_TO_ACTION = {
+        musicKnob: "BEAT_INPUT_VOLUME",
+        masterKnob: "MASTER_OUTPUT_VOLUME",
+    };
+    function dispatchKnobVolume(knobId, value) {
+        const actionName = KNOB_ID_TO_ACTION[knobId];
+        if (!actionName || !window.ActionRegistry?.executeAction) return;
+        // Không await — đây là handler UI tần suất cao (wheel/mousemove), không được chặn vẽ
+        // lại UI để chờ kết quả gửi MIDI. Lỗi (nếu có) chỉ log, không throw ra ngoài listener.
+        window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[actionName], { reason: "knob", value })
+            .catch((err) => console.error(`[KnobControl] ${actionName} lỗi:`, err));
+    }
+
     knobData.forEach(k => {
         updateKnob(k);
         const knob = document.getElementById(k.id);
@@ -1621,6 +1639,7 @@ document.addEventListener("DOMContentLoaded", () => {
             k.value = Math.max(0, Math.min(100, k.value + (e.deltaY < 0 ? 1 : -1)));
             updateKnob(k);
             saveData();
+            dispatchKnobVolume(k.id, k.value);
         });
 
         knob.addEventListener("mousedown", (e) => {
@@ -1634,15 +1653,19 @@ document.addEventListener("DOMContentLoaded", () => {
             k.value = k.defaultValue;
             updateKnob(k);
             saveData();
+            dispatchKnobVolume(k.id, k.value);
         });
     });
 
     document.addEventListener("mousemove", (e) => {
         if (!activeKnob) return;
         const delta = startY - e.clientY;
-        activeKnob.value = Math.max(0, Math.min(100, startValue + Math.round(delta / 2)));
+        const newValue = Math.max(0, Math.min(100, startValue + Math.round(delta / 2)));
+        if (newValue === activeKnob.value) return; // TASK B6 Test Case 7 — không dispatch nếu giá trị chưa thực sự đổi (chống duplicate execution)
+        activeKnob.value = newValue;
         updateKnob(activeKnob);
         saveData();
+        dispatchKnobVolume(activeKnob.id, activeKnob.value);
     });
 
     document.addEventListener("mouseup", () => {

@@ -57,7 +57,14 @@ const ACTIONS = Object.freeze({
     // gửi MIDI/click chuột NẾU user tự cấu hình trong Setup, giống hệt cơ chế DAW_PAUSE.
     MONITOR_MIC1: "MONITOR_MIC1",
     MONITOR_MIC2: "MONITOR_MIC2",
-    MONITOR_FX: "MONITOR_FX"
+    MONITOR_FX: "MONITOR_FX",
+    // TASK B6 (Beat/Master) — khai báo trước, KHÔNG mapping mặc định, cùng khuôn với
+    // MONITOR_* ở trên. QUAN TRỌNG: 2 action này CỐ Ý tách biệt, KHÔNG gộp thành 1 tên
+    // "VOLUME" chung — đúng yêu cầu "Beat = INPUT MUSIC LEVEL, Master = FINAL DAW OUTPUT
+    // LEVEL", không phải cùng 1 khái niệm. Không tự đặt CC — user tự cấu hình qua Setup
+    // (bảng DAW_MIDI_ACTIONS đã mở rộng, xem ui/js/setup.js), giống hệt cơ chế Button.
+    BEAT_INPUT_VOLUME: "BEAT_INPUT_VOLUME",
+    MASTER_OUTPUT_VOLUME: "MASTER_OUTPUT_VOLUME"
 });
 
 // Action nào đã có Mouse Coordinate key tương ứng (Mục 8, ưu tiên DAW Play/Stop/Record —
@@ -167,10 +174,17 @@ async function executeAction(action, context = {}) {
     if (midiMap && midiMap.kind && Number.isFinite(midiMap.number)) {
         try {
             let sent = false;
+            // TASK B6 (Beat/Master) — cho phép value ĐỘNG từ caller (vd giá trị Knob 0-100)
+            // ghi đè value TĨNH đã cấu hình trong Setup. Backward-compatible: nếu caller
+            // KHÔNG truyền context.value (mọi Button hiện có — CLAP/LAUGH/PRESET_*/MONITOR_*/
+            // DAW_*), hành vi giữ NGUYÊN 100% như trước (dùng đúng midiMap.value/velocity tĩnh
+            // đã lưu). Chỉ áp dụng khi context.value là number hợp lệ — không đổi field CC/
+            // channel/kind nào, chỉ đổi phần VALUE gửi đi mỗi lần gọi.
+            const dynamicValue = Number.isFinite(context.value) ? context.value : undefined;
             if (midiMap.kind === "cc" && typeof sendMidiCC === "function") {
-                sent = await sendMidiCC(midiMap.number, midiMap.value ?? 127, (midiMap.channel || 1) - 1);
+                sent = await sendMidiCC(midiMap.number, dynamicValue ?? midiMap.value ?? 127, (midiMap.channel || 1) - 1);
             } else if (midiMap.kind === "note" && typeof sendMidiNotePulse === "function") {
-                sent = await sendMidiNotePulse(midiMap.number, midiMap.velocity ?? 100, (midiMap.channel || 1) - 1);
+                sent = await sendMidiNotePulse(midiMap.number, dynamicValue ?? midiMap.velocity ?? 100, (midiMap.channel || 1) - 1);
             } else {
                 throw new Error("Mapping MIDI không hợp lệ (thiếu hàm gửi tương ứng)");
             }
