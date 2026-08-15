@@ -1,0 +1,562 @@
+From aa9acb063712ab7aa4eaaaea4c5a109296803066 Mon Sep 17 00:00:00 2001
+From: Claude A <claude-a@anthropic.local>
+Date: Fri, 14 Aug 2026 05:13:06 +0000
+Subject: [PATCH] Task A11: Merge A7 Manual-Priority Guard with B3-C
+ ManualState IPC
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Hợp nhất 2 nửa đang bị tách giữa working tree (A7) và origin/main (B3-C):
+
+- core/shared/ManualPriorityGuard.js (mới): hàm thuần evaluate() quyết
+  định ALLOW/BLOCK cho AI command dựa trên ControlSource + ManualState +
+  loại action (Key/Mod), fail-safe BLOCK khi ManualState missing/stale.
+- core/ai/plugin/PluginController.js: tích hợp Guard vào
+  _onWorkflowReady(), kiểm tra từng action riêng biệt ngay trước khi
+  publish PLUGIN_COMMAND. Không đổi behavior LEGACY_CONTROL (vẫn observe-
+  only). Dùng ĐÚNG core/shared/ManualState.js bản B3-C thật (không phải
+  bản A7 cũ) làm nguồn dữ liệu Manual State.
+- ui/js/vocalCommandRouter.js + ui/js/midiMappingRegistry.js (mới, Task
+  A1/A2): tách MIDI Note/CC (AUTOKEY_MANUAL_SELECT, SOUNDSHIFTER_TONE_
+  TOGGLE) khỏi business logic, nạp qua dynamic import(), không đổi Note/
+  CC/behavior nào, có fallback an toàn nếu import() thất bại.
+- tests/unit/ManualPriorityGuard.verify.js (mới): 18 unit test case cho
+  Guard (9 case bắt buộc + 9 bổ sung).
+
+Verification (Task A11):
+- node --check PASS toàn bộ file thay đổi.
+- 8 test suite hiện có PASS 100% (115/115): ManualState 13, Manual-
+  StateReporter 11, ManualStateSequence 9, ManualPriorityGuard 18,
+  ModDualTarget 6, CommandRuntimeHealth 20, MidiHealth 15, PortSelection-
+  Policy 23.
+- Manual real integration test (7/7 case, dùng ĐÚNG ManualState.js +
+  PluginController.js thật, không mock Guard logic — chỉ mock
+  ControlSource để ép AI_CONTROL cho mục đích test, vì CURRENT_MODE thật
+  vẫn LEGACY_CONTROL): Manual Key/Mod active chặn đúng domain, không chặn
+  domain khác, missing/stale -> BLOCK fail-safe, inactive+fresh -> ALLOW.
+- Safety boundary: publish PLUGIN_COMMAND chỉ tại đúng 1 dòng
+  (PluginController.js), không bypass nào trong core/ai/*.
+- AI_CONTROL vẫn OFF (ControlSource.js không đổi, CURRENT_MODE=
+  LEGACY_CONTROL, đã xác nhận bằng lệnh gọi trực tiếp không mock).
+
+Không sửa: modEngine.js, keyEngine.js, ResultQueue, DecisionEngine,
+ControlSource.js (AI_CONTROL), MIDI CC/Note values, Mod confidence
+pipeline (finding riêng, chưa xử lý ở task này).
+---
+ core/ai/plugin/PluginController.js       |  18 ++++
+ core/shared/ManualPriorityGuard.js       |  95 +++++++++++++++++
+ tests/unit/ManualPriorityGuard.verify.js | 129 +++++++++++++++++++++++
+ ui/js/midiMappingRegistry.js             |  93 ++++++++++++++++
+ ui/js/vocalCommandRouter.js              |  73 +++++++++----
+ 5 files changed, 385 insertions(+), 23 deletions(-)
+ create mode 100644 core/shared/ManualPriorityGuard.js
+ create mode 100644 tests/unit/ManualPriorityGuard.verify.js
+ create mode 100644 ui/js/midiMappingRegistry.js
+
+diff --git a/core/ai/plugin/PluginController.js b/core/ai/plugin/PluginController.js
+index 3e84f0b..11ee02d 100644
+--- a/core/ai/plugin/PluginController.js
++++ b/core/ai/plugin/PluginController.js
+@@ -2,6 +2,8 @@ const EventBus = require("../../events/EventBus");
+ const Events = require("../../events/Events");
+ const Logger = require("../../shared/Logger");
+ const ControlSource = require("../../shared/ControlSource");
++const ManualState = require("../../shared/ManualState");
++const ManualPriorityGuard = require("../../shared/ManualPriorityGuard");
+ 
+ /**
+  * ==========================================================
+@@ -73,6 +75,22 @@ class PluginController {
+ 
+             }
+ 
++            // Task A7: Manual-Priority Guard — điểm DUY NHẤT áp dụng guard, ngay trước khi
++            // publish PLUGIN_COMMAND. Kiểm tra TỪNG action riêng biệt (không phải 1 lần cho
++            // cả mảng) — 1 WORKFLOW_READY có thể chứa cả action Key và Mod cùng lúc (xem
++            // Task A6 mục F: KEY_AXIS và BPM_AXIS độc lập), mỗi action cần đúng loại Manual
++            // state tương ứng (KEY_ACTIONS đọc keyActive, MOD_ACTIONS đọc modActive).
++            const manualState = ManualState.getManualState();
++            const guardResult = ManualPriorityGuard.evaluate(ControlSource.getControlSource(), manualState, decisionAction.action);
++
++            if (!guardResult.allowed) {
++
++                // Log rõ ràng lý do BLOCK — KHÔNG log "PLUGIN_COMMAND sent" khi bị chặn.
++                Logger.info("PluginController", guardResult.reason);
++                continue;
++
++            }
++
+             const message = {
+                 command,
+                 value: decisionAction.value,
+diff --git a/core/shared/ManualPriorityGuard.js b/core/shared/ManualPriorityGuard.js
+new file mode 100644
+index 0000000..de966e4
+--- /dev/null
++++ b/core/shared/ManualPriorityGuard.js
+@@ -0,0 +1,95 @@
++/**
++ * ==========================================================
++ * Auto Menu AI
++ * ManualPriorityGuard — Task A7: AI Execution Safety Guard Design
++ * ----------------------------------------------------------
++ * Hàm THUẦN (pure function) — không tự đọc ControlSource/ManualState, nhận đủ tham
++ * số từ nơi gọi (PluginController._onWorkflowReady()) để dễ test độc lập bằng mock,
++ * đúng convention DecisionRules.js/InferenceRules.js đã dùng trong project.
++ *
++ * TUYỆT ĐỐI KHÔNG: publish event, gọi MIDI/renderer, lưu state, đổi CURRENT_MODE.
++ *
++ * Quy tắc (đúng yêu cầu Task A7 mục 3-4):
++ *   - UPDATE_BPM: chưa có backend thật -> luôn BLOCK, không mở đường execution.
++ *   - LEGACY_CONTROL: giữ nguyên behavior hiện tại -> luôn BLOCK.
++ *   - AI_CONTROL + ManualState missing/stale/timestamp không hợp lệ -> FAIL-SAFE BLOCK
++ *     (không bao giờ coi các trường hợp này là "Manual inactive").
++ *   - AI_CONTROL + Manual Key active + action thuộc nhóm Key (SET_KEY/LOAD_NEW_SONG) -> BLOCK.
++ *   - AI_CONTROL + Manual Mod active + action thuộc nhóm Mod (SHIFT_KEY) -> BLOCK.
++ *   - Key active không chặn action Mod, và ngược lại (2 trạng thái độc lập).
++ * ==========================================================
++ */
++
++// Đề xuất ban đầu: 10 giây. Lý do: phải dài hơn NHIỀU so với độ trễ IPC bình thường
++// (thường chỉ vài ms tới vài trăm ms, xem AGGREGATION_WINDOW_MS=400ms ở ResultQueue.js
++// làm tham chiếu tốc độ pipeline hiện có), nhưng đủ ngắn để nếu renderer ngừng gửi cập
++// nhật (crash, đóng cửa sổ, IPC treo) trong hơn 10 giây, Core AI phải coi dữ liệu là cũ
++// và tự động fail-safe sang BLOCK thay vì tiếp tục tin vào 1 trạng thái Manual có thể đã
++// lỗi thời từ lâu. Đây là giá trị ĐỀ XUẤT BAN ĐẦU của Claude A — CHƯA được kiểm chứng với
++// tần suất gửi thật của kênh IPC Claude B sẽ xây (task đó chưa hoàn thành tại thời điểm
++// viết file này) — cần Khói/Claude B xác nhận lại khi có tần suất gửi thật.
++const STALE_TIMEOUT_MS = 10000;
++
++const KEY_ACTIONS = new Set(["SET_KEY", "LOAD_NEW_SONG"]);
++const MOD_ACTIONS = new Set(["SHIFT_KEY"]);
++
++/**
++ * @param {"LEGACY_CONTROL"|"AI_CONTROL"} controlSource
++ * @param {{keyActive: boolean, modActive: boolean, timestamp: number}|null} manualState
++ * @param {string} action - "SET_KEY" | "SHIFT_KEY" | "UPDATE_BPM" | "LOAD_NEW_SONG"
++ * @param {number} [now] - CHỈ dùng cho unit test (mock thời gian); mặc định Date.now()
++ * @returns {{allowed: boolean, reason: string}}
++ */
++function evaluate(controlSource, manualState, action, now = Date.now()) {
++
++    // UPDATE_BPM: chưa có backend thật — KHÔNG được tự mở đường execution ở A7, luôn
++    // BLOCK bất kể Manual/ControlSource ra sao (Task A7 mục 4 + mục 9).
++    if (action === "UPDATE_BPM") {
++        return { allowed: false, reason: "[AI Control] BLOCKED — UPDATE_BPM chưa có backend thật (out of scope A7)" };
++    }
++
++    // LEGACY_CONTROL: giữ NGUYÊN behavior hiện tại — luôn BLOCK, không đổi gì so với
++    // trước Task A7 (PluginController vẫn tự return sớm ở bước ControlSource như cũ,
++    // hàm này chỉ phản ánh lại đúng behavior đó để logic tập trung 1 chỗ).
++    if (controlSource !== "AI_CONTROL") {
++        return { allowed: false, reason: "[AI Control] BLOCKED — LEGACY_CONTROL (behavior không đổi)" };
++    }
++
++    // FAIL-SAFE: thiếu ManualState hoàn toàn -> BLOCK, KHÔNG coi là inactive.
++    if (!manualState) {
++        return { allowed: false, reason: "[AI Control] BLOCKED — ManualState missing (fail-safe)" };
++    }
++
++    // FAIL-SAFE: timestamp không hợp lệ -> BLOCK, KHÔNG coi là inactive.
++    if (typeof manualState.timestamp !== "number" || !Number.isFinite(manualState.timestamp)) {
++        return { allowed: false, reason: "[AI Control] BLOCKED — ManualState timestamp không hợp lệ (fail-safe)" };
++    }
++
++    // FAIL-SAFE: state cũ (stale) hoặc đồng hồ lệch (timestamp ở tương lai) -> BLOCK.
++    const age = now - manualState.timestamp;
++    if (age > STALE_TIMEOUT_MS || age < 0) {
++        return { allowed: false, reason: `[AI Control] BLOCKED — ManualState stale (age=${age}ms, giới hạn ${STALE_TIMEOUT_MS}ms, fail-safe)` };
++    }
++
++    // Guard phân biệt Key và Mod — chỉ kiểm tra đúng loại Manual tương ứng với action;
++    // Key active KHÔNG chặn action Mod và ngược lại (2 trạng thái độc lập).
++    if (KEY_ACTIONS.has(action)) {
++        if (manualState.keyActive) {
++            return { allowed: false, reason: "[AI Control] BLOCKED — Manual control (Key) is active" };
++        }
++        return { allowed: true, reason: "Manual (Key) inactive — AI command cho phép đi tiếp" };
++    }
++
++    if (MOD_ACTIONS.has(action)) {
++        if (manualState.modActive) {
++            return { allowed: false, reason: "[AI Control] BLOCKED — Manual control (Mod) is active" };
++        }
++        return { allowed: true, reason: "Manual (Mod) inactive — AI command cho phép đi tiếp" };
++    }
++
++    // action lạ, không thuộc KEY_ACTIONS/MOD_ACTIONS đã biết -> không có quy tắc rõ
++    // ràng, fail-safe BLOCK thay vì mặc định cho qua.
++    return { allowed: false, reason: `[AI Control] BLOCKED — action "${action}" không thuộc KEY_ACTIONS/MOD_ACTIONS đã biết (fail-safe)` };
++}
++
++module.exports = { evaluate, STALE_TIMEOUT_MS, KEY_ACTIONS, MOD_ACTIONS };
+diff --git a/tests/unit/ManualPriorityGuard.verify.js b/tests/unit/ManualPriorityGuard.verify.js
+new file mode 100644
+index 0000000..b352b77
+--- /dev/null
++++ b/tests/unit/ManualPriorityGuard.verify.js
+@@ -0,0 +1,129 @@
++/**
++ * ==========================================================
++ * Auto Menu AI — Kiểm chứng Manual-Priority Guard (Task A7)
++ * ----------------------------------------------------------
++ * Chạy bằng: node tests/unit/ManualPriorityGuard.verify.js
++ *
++ * Kiểm chứng đúng 9 Acceptance Case bắt buộc của Task A7 (mục 6), cộng thêm
++ * vài case bổ sung để phủ đầy đủ mục 4 (UPDATE_BPM/LOAD_NEW_SONG) và mục 3
++ * (timestamp không hợp lệ, đồng hồ lệch).
++ *
++ * Guard là hàm THUẦN (core/shared/ManualPriorityGuard.js) — test gọi trực
++ * tiếp bằng require() thật (module CommonJS chạy trong main process, không
++ * cần vm sandbox như các test cho code renderer/browser-only).
++ * ==========================================================
++ */
++
++const path = require("path");
++const Guard = require(path.join(__dirname, "..", "..", "core", "shared", "ManualPriorityGuard.js"));
++
++let passCount = 0;
++let failCount = 0;
++
++function check(name, actualAllowed, expectedAllowed) {
++    const pass = actualAllowed === expectedAllowed;
++    if (pass) passCount++; else failCount++;
++    console.log(`${pass ? "PASS" : "FAIL"} — ${name}: allowed=${actualAllowed}, expect=${expectedAllowed}`);
++}
++
++const NOW = 1_700_000_000_000; // mốc thời gian giả định cố định cho toàn bộ test
++
++console.log("=== 9 ACCEPTANCE CASE BẮT BUỘC (Task A7 mục 6) ===\n");
++
++// Case 1: LEGACY_CONTROL + Manual inactive -> BLOCK
++{
++    const r = Guard.evaluate("LEGACY_CONTROL", { keyActive: false, modActive: false, timestamp: NOW }, "SET_KEY", NOW);
++    check("Case 1: LEGACY_CONTROL + Manual inactive + SET_KEY -> BLOCK", r.allowed, false);
++}
++
++// Case 2: AI_CONTROL + Manual Key active + SET_KEY -> BLOCK
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: true, modActive: false, timestamp: NOW }, "SET_KEY", NOW);
++    check("Case 2: AI_CONTROL + Key active + SET_KEY -> BLOCK", r.allowed, false);
++}
++
++// Case 3: AI_CONTROL + Manual Mod active + SHIFT_KEY -> BLOCK
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: true, timestamp: NOW }, "SHIFT_KEY", NOW);
++    check("Case 3: AI_CONTROL + Mod active + SHIFT_KEY -> BLOCK", r.allowed, false);
++}
++
++// Case 4: AI_CONTROL + Manual inactive + SET_KEY -> ALLOW
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW }, "SET_KEY", NOW);
++    check("Case 4: AI_CONTROL + inactive + SET_KEY -> ALLOW", r.allowed, true);
++}
++
++// Case 5: AI_CONTROL + Manual inactive + SHIFT_KEY -> ALLOW
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW }, "SHIFT_KEY", NOW);
++    check("Case 5: AI_CONTROL + inactive + SHIFT_KEY -> ALLOW", r.allowed, true);
++}
++
++// Case 6: AI_CONTROL + stale ManualState -> BLOCK
++{
++    const staleTimestamp = NOW - (Guard.STALE_TIMEOUT_MS + 1000); // vượt quá ngưỡng stale
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: staleTimestamp }, "SET_KEY", NOW);
++    check("Case 6: AI_CONTROL + stale ManualState -> BLOCK", r.allowed, false);
++}
++
++// Case 7: AI_CONTROL + missing ManualState -> BLOCK
++{
++    const r = Guard.evaluate("AI_CONTROL", null, "SET_KEY", NOW);
++    check("Case 7: AI_CONTROL + missing ManualState -> BLOCK", r.allowed, false);
++}
++
++// Case 8: AI_CONTROL + Key active nhưng SHIFT_KEY -> không block (Key không liên quan Mod)
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: true, modActive: false, timestamp: NOW }, "SHIFT_KEY", NOW);
++    check("Case 8: Key active nhưng SHIFT_KEY -> ALLOW (không liên quan)", r.allowed, true);
++}
++
++// Case 9: AI_CONTROL + Mod active nhưng SET_KEY -> không block (Mod không liên quan Key)
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: true, timestamp: NOW }, "SET_KEY", NOW);
++    check("Case 9: Mod active nhưng SET_KEY -> ALLOW (không liên quan)", r.allowed, true);
++}
++
++console.log("\n=== CASE BỔ SUNG (mục 4/9 Task A7 — không nằm trong 9 case bắt buộc) ===\n");
++
++// UPDATE_BPM luôn BLOCK bất kể Manual/ControlSource (mục 4 + mục 9)
++{
++    const r1 = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW }, "UPDATE_BPM", NOW);
++    check("Bonus: UPDATE_BPM luôn BLOCK dù Manual inactive", r1.allowed, false);
++    const r2 = Guard.evaluate("LEGACY_CONTROL", null, "UPDATE_BPM", NOW);
++    check("Bonus: UPDATE_BPM luôn BLOCK ở LEGACY_CONTROL", r2.allowed, false);
++}
++
++// LOAD_NEW_SONG dùng chung nhóm KEY_ACTIONS với SET_KEY (mục 4)
++{
++    const r1 = Guard.evaluate("AI_CONTROL", { keyActive: true, modActive: false, timestamp: NOW }, "LOAD_NEW_SONG", NOW);
++    check("Bonus: LOAD_NEW_SONG + Key active -> BLOCK", r1.allowed, false);
++    const r2 = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW }, "LOAD_NEW_SONG", NOW);
++    check("Bonus: LOAD_NEW_SONG + inactive -> ALLOW", r2.allowed, true);
++}
++
++// timestamp không hợp lệ -> BLOCK fail-safe (mục 3, "không được coi stale là inactive")
++{
++    const r1 = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: "invalid" }, "SET_KEY", NOW);
++    check("Bonus: timestamp không hợp lệ (string) -> BLOCK fail-safe", r1.allowed, false);
++    const r2 = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NaN }, "SET_KEY", NOW);
++    check("Bonus: timestamp NaN -> BLOCK fail-safe", r2.allowed, false);
++}
++
++// timestamp ở tương lai (đồng hồ lệch) -> BLOCK fail-safe, an toàn hơn ALLOW
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW + 5000 }, "SET_KEY", NOW);
++    check("Bonus: timestamp tương lai (đồng hồ lệch) -> BLOCK fail-safe", r.allowed, false);
++}
++
++// Ranh giới CHÍNH XÁC ngưỡng stale — vừa đúng ngưỡng vẫn ALLOW, vượt 1ms đã BLOCK
++{
++    const rAtLimit = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW - Guard.STALE_TIMEOUT_MS }, "SET_KEY", NOW);
++    check("Bonus: age đúng bằng STALE_TIMEOUT_MS -> vẫn ALLOW (biên)", rAtLimit.allowed, true);
++    const rOverLimit = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW - Guard.STALE_TIMEOUT_MS - 1 }, "SET_KEY", NOW);
++    check("Bonus: age vượt STALE_TIMEOUT_MS 1ms -> BLOCK (biên)", rOverLimit.allowed, false);
++}
++
++console.log(`\n=== KẾT QUẢ: ${passCount} PASS, ${failCount} FAIL / ${passCount + failCount} tổng ===`);
++process.exit(failCount > 0 ? 1 : 0);
+diff --git a/ui/js/midiMappingRegistry.js b/ui/js/midiMappingRegistry.js
+new file mode 100644
+index 0000000..da00e49
+--- /dev/null
++++ b/ui/js/midiMappingRegistry.js
+@@ -0,0 +1,93 @@
++/* ==========================================================
++   MIDI MAPPING REGISTRY — TASK A2
++   -----------------------------------------------------------
++   Registry độc lập cho MIDI Mapping, tách khỏi ui/js/vocalCommandRouter.js
++   (Task A1 gộp tạm vào 1 object MIDI_FUNCTION_MAPPINGS ngay trong file đó
++   để chứng minh kiến trúc trước — A2 tách hẳn ra file riêng này).
++
++   Kiến trúc sau A2:
++     Function ID -> MIDI Mapping Registry (file này) -> Plugin Target/Mapping
++                 -> vocalCommandRouter.js -> sendMidiCC()/sendMidiNotePulse()
++
++   VỊ TRÍ FILE — LÝ DO CHỌN (yêu cầu giải thích theo Task A2 mục 2):
++   - Đặt CÙNG thư mục ui/js/ với vocalCommandRouter.js, KHÔNG tạo thư mục
++     con mới — khớp đúng cấu trúc phẳng hiện có của toàn bộ renderer
++     (renderer.js, actionRegistry.js, appSettings.js, setupNav.js... đều
++     nằm trực tiếp trong ui/js/, không có tiền lệ thư mục con nào).
++   - File này được NẠP BẰNG import() ĐỘNG (dynamic import, cú pháp ES2020
++     chuẩn, không phải Node API) ngay trong vocalCommandRouter.js, KHÔNG
++     thêm bất kỳ thẻ <script> nào vào ui/index.html — vì:
++       (a) Task A2 mục 2 chỉ cho phép sửa đúng 2 file (vocalCommandRouter.js
++           + 1 file registry mới), index.html không nằm trong danh sách đó.
++       (b) app/main.js xác nhận cả 2 BrowserWindow (main + setup) đều chạy
++           nodeIntegration:false / contextIsolation:true -> require() KHÔNG
++           khả dụng trong renderer, nên không thể nạp file mới kiểu CommonJS.
++     import() động là cách DUY NHẤT nạp thêm 1 file JS mới vào renderer mà
++     không cần khai báo trước trong HTML tĩnh — bản thân vocalCommandRouter.js
++     vẫn được load như cũ qua thẻ <script> (classic, không đổi kiểu), vì
++     import() hoạt động độc lập với việc script gọi nó có type="module" hay
++     không (đây là "dynamic import expression", khác import tĩnh).
++
++   ⚠️ Chỉ đăng ký ĐÚNG 2 Function ID theo đúng yêu cầu Task A2 — không tạo
++   placeholder cho Function nào khác (RESET_AI, MONITOR_*, RETUNE_*, v.v.
++   không thuộc phạm vi task này).
++
++   ⚠️ CURRENT EXISTING MAPPING — toàn bộ giá trị Note/CC dưới đây là bản
++   sao NGUYÊN VẸN 100% từ object MIDI_FUNCTION_MAPPINGS mà Task A1 đã tạo
++   trong vocalCommandRouter.js (không đổi bất kỳ số nào ở Task A2 này).
++   Đây vẫn chỉ là mapping ĐANG DÙNG (existing), CHƯA xác nhận là mapping
++   phần cứng/plugin cuối cùng — mỗi mục vẫn cần runtime verification sau
++   này, đúng như cảnh báo gốc đã ghi trong vocalCommandRouter.js.
++   ========================================================== */
++
++export const MIDI_MAPPING_REGISTRY = {
++
++    // Function ID: AUTOKEY_MANUAL_SELECT (keySelector + applyKeyBtn — "chọn tone bằng tay
++    // tại Auto Key"). Dùng bởi sendKeyToAutotune() trong vocalCommandRouter.js.
++    AUTOKEY_MANUAL_SELECT: {
++        target: "auto-tune",
++        type: "note",
++        // CURRENT EXISTING MAPPING — nguyên văn cảnh báo gốc (giữ từ Task A1): "giả định
++        // plugin Auto-Tune học phím theo đúng thứ tự đó khi bấm MIDI Learn." CHƯA có xác
++        // nhận runtime nào khác kể từ khi viết lần đầu.
++        noteMap: { "C": 0, "C#": 1, "D": 2, "D#": 3, "E": 4, "F": 5, "F#": 6, "G": 7, "G#": 8, "A": 9, "A#": 10, "B": 11 }
++    },
++
++    // Function ID: SOUNDSHIFTER_TONE_TOGGLE (modPowerBtn ON/OFF + toneSelector + applyToneBtn
++    // SET — "bật/tắt nâng hạ tone tại SoundShifter"). Khi bấm SET, renderer.js gửi ĐỒNG THỜI
++    // tới CẢ HAI target dưới đây (auto-tune + soundShifter) để 2 plugin luôn đồng bộ cùng 1 độ
++    // lệch tone — hành vi này có sẵn từ trước Task A1/A2, không bị đổi ở đây.
++    SOUNDSHIFTER_TONE_TOGGLE: {
++
++        // Nhánh target Auto-Tune (dịch tone giọng hát) — dùng bởi sendToneStep() trong
++        // vocalCommandRouter.js, được gọi chung bởi applyToneBtn (SET), MOD Engine tự động,
++        // và Bridge (Core AI, khi ControlSource=AI_CONTROL — hiện KHÔNG active).
++        autoTune: {
++            target: "auto-tune",
++            type: "cc",
++            // CURRENT EXISTING MAPPING — nguyên văn comment gốc (giữ từ Task A1): "CC 20 tăng
++            // / CC 21 giảm là VÍ DỤ — đổi theo đúng mapping MIDI Learn thật của plugin bạn."
++            // CHƯA xác nhận runtime.
++            ccUp: 20,
++            ccDown: 21
++        },
++
++        // Nhánh target SoundShifter (dịch tone nhạc nền + bật/tắt) — dùng bởi
++        // sendToneStepToSoundShifter() và setSoundShifterPower() trong vocalCommandRouter.js.
++        soundShifter: {
++            target: "soundshifter",
++            type: "cc",
++            // CURRENT EXISTING MAPPING — nguyên văn TODO gốc (giữ từ Task A1): "CC number
++            // dưới đây là VÍ DỤ, PHẢI vào SoundShifter bấm 'MIDI Learn'... rồi đối chiếu lại
++            // đúng số CC thật." CHƯA xác nhận runtime.
++            ccUp: 22,
++            ccDown: 23,
++            ccToggle: 24,
++            // Khác với 3 CC ở trên: giá trị này ĐÃ được người dùng xác nhận trực tiếp bằng tai
++            // (giữ nguyên nguyên văn ghi chú gốc từ Task A1): 1 bán cung (menu/Auto-Tune) = 2
++            // đơn vị SoundShifter.
++            stepRatio: 2
++        }
++    }
++
++};
+diff --git a/ui/js/vocalCommandRouter.js b/ui/js/vocalCommandRouter.js
+index 0ed735e..dde362a 100644
+--- a/ui/js/vocalCommandRouter.js
++++ b/ui/js/vocalCommandRouter.js
+@@ -13,33 +13,42 @@
+       không click mò hay gửi MIDI mò.
+ 
+    LƯU Ý CẦN BẠN KIỂM TRA LẠI (mình không có cách xác nhận từ đây):
+-   - Mapping note MIDI dưới đây (C=0..B=11) giả định plugin Auto-Tune của bạn
+-     học phím theo đúng thứ tự đó khi bạn bấm MIDI Learn. Nếu không đúng,
+-     chỉnh lại NOTE_MAP.
++   - Mapping note MIDI (C=0..B=11) giả định plugin Auto-Tune của bạn học phím
++     theo đúng thứ tự đó khi bạn bấm MIDI Learn. Nếu không đúng, chỉnh lại
++     MIDI_MAPPING_REGISTRY.AUTOKEY_MANUAL_SELECT.noteMap trong file riêng
++     ui/js/midiMappingRegistry.js (Task A2 đã tách toàn bộ Note/CC ra file
++     đó, business logic ở dưới không còn tự chứa số Note/CC nào nữa).
+    - Với "chromatic" (2 điểm đã capture ở Setup), mình giả định điểm capture
+      ĐẦU là nút tăng semitone (▲), điểm THỨ HAI là nút giảm (▼). Nếu ngược,
+      đổi CHROMATIC_UP_INDEX / CHROMATIC_DOWN_INDEX ở dưới.
+    ========================================================== */
+ 
+-const NOTE_MAP = { "C": 0, "C#": 1, "D": 2, "D#": 3, "E": 4, "F": 5, "F#": 6, "G": 7, "G#": 8, "A": 9, "A#": 10, "B": 11 };
+ const CHROMATIC_UP_INDEX = 0;
+ const CHROMATIC_DOWN_INDEX = 1;
+ const CLICK_STEP_DELAY_MS = 90; // khoảng nghỉ giữa các click liên tiếp khi dịch nhiều semitone
+ 
+ /* ==========================================================
+-   SOUNDSHIFTER (điều khiển hoàn toàn bằng MIDI, không còn click chuột)
++   MIDI MAPPING REGISTRY — TASK A2 (tách khỏi Task A1)
+    -----------------------------------------------------------
+-   - Dùng CHUNG cổng MIDI ảo với Auto-Tune (setting "midiOutputPort").
+-   - SOUNDSHIFTER_STEP_RATIO = 2: đã được người dùng xác nhận trực tiếp bằng tai —
+-     mỗi 1 bán cung (1 đơn vị trên menu/Auto-Tune) tương ứng 2 đơn vị bên SoundShifter.
+-     Ví dụ: menu chọn +2 (lên 1 tone, Dm -> Em) -> Auto-Tune nhận +2, SoundShifter nhận +4.
+-   - CC number dưới đây là VÍ DỤ, PHẢI vào SoundShifter bấm "MIDI Learn" trên chính 2 nút
+-     ▲/▼ và nút Bypass/Power của nó rồi đối chiếu lại đúng số CC thật, đổi lại ở đây.
++   Task A1 từng gộp tạm toàn bộ Note/CC vào 1 object MIDI_FUNCTION_MAPPINGS
++   ngay trong file này. Task A2 tách hẳn object đó ra file riêng
++   ui/js/midiMappingRegistry.js (xem file đó để biết lý do chọn vị trí +
++   lý do dùng import() động thay vì thẻ <script> mới trong index.html).
++
++   Nạp NGAY khi file này được parse (không đợi tới lúc hàm nào đó được gọi)
++   để giảm độ trễ ở lần gọi MIDI đầu tiên — mọi hàm bên dưới `await` CHUNG
++   đúng 1 Promise này; sau lần fetch/parse đầu tiên, trình duyệt tự cache
++   module nên các lần `await` sau gần như tức thời, không lặp lại I/O.
+    ========================================================== */
+-const SOUNDSHIFTER_STEP_RATIO = 2; // đã xác nhận với người dùng: 1 bán cung (menu) = 2 đơn vị SoundShifter
+-const SOUNDSHIFTER_UP_CC = 22;     // TODO: đổi theo đúng CC thật sau khi MIDI Learn nút ▲ của SoundShifter
+-const SOUNDSHIFTER_DOWN_CC = 23;   // TODO: đổi theo đúng CC thật sau khi MIDI Learn nút ▼ của SoundShifter
+-const SOUNDSHIFTER_TOGGLE_CC = 24; // TODO: đổi theo đúng CC thật sau khi MIDI Learn nút Bypass/Power
++const midiMappingRegistryPromise = import("./midiMappingRegistry.js").catch((err) => {
++    // An toàn runtime (Task A3): TRƯỚC A2, các hàm MIDI dưới đây không bao giờ throw — luôn trả
++    // về {ok, detail} rõ ràng cho caller (renderer.js gọi bằng .then()/await, KHÔNG file nào có
++    // .catch() bọc quanh — đã audit toàn bộ 9 call-site). Nếu để import() reject tự do lan ra
++    // ngoài, các hàm bên dưới sẽ THROW thay vì trả {ok:false}, phá vỡ đúng giả định đó. Bắt lỗi ở
++    // đây và trả về null để mỗi hàm tự phát hiện + trả lỗi rõ ràng, giữ nguyên contract cũ.
++    console.error("[vocalCommandRouter] Không nạp được ui/js/midiMappingRegistry.js:", err);
++    return null;
++});
+ 
+ /**
+  * Bật/tắt plugin SoundShifter (bypass on/off) qua MIDI CC.
+@@ -52,7 +61,11 @@ async function setSoundShifterPower(isOn) {
+         return { ok: false, detail: 'Chưa cấu hình cổng MIDI (Setup > MIDI) — SoundShifter chỉ điều khiển được qua MIDI.' };
+     }
+ 
+-    const sent = await sendMidiCC(SOUNDSHIFTER_TOGGLE_CC, isOn ? 127 : 0);
++    const registryModule = await midiMappingRegistryPromise;
++    if (!registryModule) {
++        return { ok: false, detail: "Không nạp được MIDI Mapping Registry (ui/js/midiMappingRegistry.js) — SoundShifter chỉ điều khiển được khi file này tải thành công." };
++    }
++    const sent = await sendMidiCC(registryModule.MIDI_MAPPING_REGISTRY.SOUNDSHIFTER_TONE_TOGGLE.soundShifter.ccToggle, isOn ? 127 : 0);
+     return sent
+         ? { ok: true, driverUsed: "midi" }
+         : { ok: false, driverUsed: "midi", detail: "Gửi MIDI CC thất bại (cổng MIDI có thể đã bị rút/đổi tên)." };
+@@ -60,7 +73,8 @@ async function setSoundShifterPower(isOn) {
+ 
+ /**
+  * Dịch tone của SoundShifter đi `semitoneDelta` bán cung THEO ĐÚNG ĐƠN VỊ CỦA MENU/AUTO-TUNE
+- * (hàm tự nhân với SOUNDSHIFTER_STEP_RATIO ở bên trong, nơi gọi không cần tự tính lại).
++ * (hàm tự nhân với MIDI_MAPPING_REGISTRY.SOUNDSHIFTER_TONE_TOGGLE.soundShifter.stepRatio ở
++ * bên trong, nơi gọi không cần tự tính lại).
+  * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string}>}
+  */
+ async function sendToneStepToSoundShifter(semitoneDelta) {
+@@ -71,9 +85,14 @@ async function sendToneStepToSoundShifter(semitoneDelta) {
+         return { ok: false, detail: 'Chưa cấu hình cổng MIDI (Setup > MIDI) — SoundShifter chỉ điều khiển được qua MIDI.' };
+     }
+ 
+-    const steps = Math.abs(semitoneDelta) * SOUNDSHIFTER_STEP_RATIO;
++    const registryModule = await midiMappingRegistryPromise;
++    if (!registryModule) {
++        return { ok: false, detail: "Không nạp được MIDI Mapping Registry (ui/js/midiMappingRegistry.js) — SoundShifter chỉ điều khiển được khi file này tải thành công." };
++    }
++    const soundShifterMap = registryModule.MIDI_MAPPING_REGISTRY.SOUNDSHIFTER_TONE_TOGGLE.soundShifter;
++    const steps = Math.abs(semitoneDelta) * soundShifterMap.stepRatio;
+     const goingUp = semitoneDelta > 0;
+-    const ccNumber = goingUp ? SOUNDSHIFTER_UP_CC : SOUNDSHIFTER_DOWN_CC;
++    const ccNumber = goingUp ? soundShifterMap.ccUp : soundShifterMap.ccDown;
+ 
+     for (let i = 0; i < steps; i++) {
+         const sent = await sendMidiCC(ccNumber, 127);
+@@ -102,7 +121,11 @@ function parseCapturedPoint(raw) {
+  */
+ async function sendKeyToAutotune(keyName) {
+     const root = keyName.match(/^[A-G]#?/)?.[0];
+-    const note = NOTE_MAP[root];
++    const registryModule = await midiMappingRegistryPromise;
++    // Nếu registry không nạp được, coi như không xác định được note (giống hệt trường hợp
++    // "root" không khớp regex) -> rơi xuống đúng fallback Mouse có sẵn bên dưới, KHÔNG return
++    // lỗi cứng ở đây (giữ nguyên behavior gốc: hàm này luôn có đường fallback Mouse).
++    const note = registryModule ? registryModule.MIDI_MAPPING_REGISTRY.AUTOKEY_MANUAL_SELECT.noteMap[root] : undefined;
+ 
+     // --- 1) Ưu tiên MIDI ---
+     const midiPort = getSetting("midiOutputPort");
+@@ -137,9 +160,13 @@ async function sendToneStep(semitoneDelta) {
+ 
+     // --- 1) Ưu tiên MIDI: gửi 1 nốt/CC đại diện cho hướng, lặp theo số bước ---
+     const midiPort = getSetting("midiOutputPort");
+-    if (midiPort) {
+-        // CC 20 tăng / CC 21 giảm là VÍ DỤ — đổi theo đúng mapping MIDI Learn thật của plugin bạn.
+-        const ccNumber = goingUp ? 20 : 21;
++    const registryModule = midiPort ? await midiMappingRegistryPromise : null;
++    // registryModule null khi: (a) chưa cấu hình midiOutputPort (giữ nguyên behavior gốc — chỉ
++    // gọi await khi thật sự cần), hoặc (b) import() thất bại. Cả 2 trường hợp đều rơi xuống
++    // đúng fallback Mouse có sẵn bên dưới, giống hệt cách xử lý gốc khi midiPort trống.
++    if (midiPort && registryModule) {
++        const autoTuneMap = registryModule.MIDI_MAPPING_REGISTRY.SOUNDSHIFTER_TONE_TOGGLE.autoTune;
++        const ccNumber = goingUp ? autoTuneMap.ccUp : autoTuneMap.ccDown;
+         let allSent = true;
+         for (let i = 0; i < steps; i++) {
+             const sent = await sendMidiCC(ccNumber, 127);
+-- 
+2.43.0
+
