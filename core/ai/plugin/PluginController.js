@@ -2,6 +2,8 @@ const EventBus = require("../../events/EventBus");
 const Events = require("../../events/Events");
 const Logger = require("../../shared/Logger");
 const ControlSource = require("../../shared/ControlSource");
+const ManualState = require("../../shared/ManualState");
+const ManualPriorityGuard = require("../../shared/ManualPriorityGuard");
 
 /**
  * ==========================================================
@@ -69,6 +71,22 @@ class PluginController {
             if (!command) {
 
                 Logger.info("PluginController", `Bỏ qua action không xác định: ${decisionAction.action}`);
+                continue;
+
+            }
+
+            // Task A7: Manual-Priority Guard — điểm DUY NHẤT áp dụng guard, ngay trước khi
+            // publish PLUGIN_COMMAND. Kiểm tra TỪNG action riêng biệt (không phải 1 lần cho
+            // cả mảng) — 1 WORKFLOW_READY có thể chứa cả action Key và Mod cùng lúc (xem
+            // Task A6 mục F: KEY_AXIS và BPM_AXIS độc lập), mỗi action cần đúng loại Manual
+            // state tương ứng (KEY_ACTIONS đọc keyActive, MOD_ACTIONS đọc modActive).
+            const manualState = ManualState.getManualState();
+            const guardResult = ManualPriorityGuard.evaluate(ControlSource.getControlSource(), manualState, decisionAction.action);
+
+            if (!guardResult.allowed) {
+
+                // Log rõ ràng lý do BLOCK — KHÔNG log "PLUGIN_COMMAND sent" khi bị chặn.
+                Logger.info("PluginController", guardResult.reason);
                 continue;
 
             }
