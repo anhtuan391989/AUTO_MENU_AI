@@ -1,0 +1,331 @@
+From 5871d0eeb5d14aa7f825d779d122b1013d4353bc Mon Sep 17 00:00:00 2001
+From: Claude A <claude-a@anthropic.local>
+Date: Sat, 15 Aug 2026 10:41:52 +0000
+Subject: [PATCH] Task A17: Restore Manual Priority Guard on current main
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Khôi phục A7 Manual-Priority Guard trên đúng nền origin/main hiện tại
+(c4b5b3a6fd6687efa10a420ab533baf3190557bf), sau khi phát hiện ở Task A16
+rằng patch A11 (base 6b68f04) không còn áp thẳng được vì Task B6
+(Beat/Master Knob) đã tiến xa hơn trên nền code.
+
+- core/shared/ManualPriorityGuard.js (khôi phục nguyên vẹn, hàm thuần
+  không phụ thuộc B6): evaluate(controlSource, manualState, action, now)
+  quyết định ALLOW/BLOCK. Manual Key active chặn SET_KEY/LOAD_NEW_SONG,
+  Manual Mod active chặn SHIFT_KEY, không chặn chéo domain. ManualState
+  missing/stale/timestamp không hợp lệ -> fail-safe BLOCK.
+- core/ai/plugin/PluginController.js: áp lại patch A7 (+18 dòng) — đã xác
+  nhận bằng diff rằng bản trên origin/main giống hệt bản A7-base
+  (6b68f04), B6 không hề đụng file này, nên áp lại nguyên vẹn, không
+  conflict.
+- tests/unit/ManualPriorityGuard.verify.js (khôi phục, 18 test case).
+
+Đã audit B6 trước/sau (Task A17 mục 6): BEAT_INPUT_VOLUME (3 chỗ),
+MASTER_OUTPUT_VOLUME (3 chỗ), musicKnob/masterKnob không đổi. Không đụng
+ui/js/actionRegistry.js, ui/js/setup.js, ui/js/appSettings.js,
+ui/js/renderer.js, ui/js/vocalCommandRouter.js — Beat và Master vẫn là
+2 control độc lập, không gộp.
+
+Verification:
+- node --check PASS cả 3 file.
+- 9 test suite: 134/134 PASS (ManualState 13, ManualStateReporter 11,
+  ManualStateSequence 9, ManualPriorityGuard 18, ModDualTarget 6,
+  CommandRuntimeHealth 20, MidiHealth 15, PortSelectionPolicy 23,
+  KnobBeatMaster 19).
+- Manual real integration (7/7 case, dùng ĐÚNG ManualState.js/
+  ManualPriorityGuard.js/PluginController.js thật, không mock Guard —
+  chỉ mock ControlSource để ép AI_CONTROL cho mục đích test): Manual
+  Key/Mod active chặn đúng domain, không chặn chéo domain, missing/stale
+  -> BLOCK fail-safe, inactive+fresh -> ALLOW.
+- Bypass check: EventBus.publish(PLUGIN_COMMAND) chỉ 1 nơi thật
+  (PluginController.js:104), ManualPriorityGuard chỉ require ở đúng 1
+  nơi, không require electron/easymidi thật trong core/ai/*.
+- AI_CONTROL không đổi (ControlSource.js không sửa, xác nhận
+  getControlSource() = LEGACY_CONTROL bằng lệnh gọi trực tiếp).
+- Mod confidence: không sửa, finding cũ vẫn giữ nguyên trạng thái đã
+  ghi nhận ở các task trước.
+---
+ core/ai/plugin/PluginController.js       |  18 ++++
+ core/shared/ManualPriorityGuard.js       |  95 +++++++++++++++++
+ tests/unit/ManualPriorityGuard.verify.js | 129 +++++++++++++++++++++++
+ 3 files changed, 242 insertions(+)
+ create mode 100644 core/shared/ManualPriorityGuard.js
+ create mode 100644 tests/unit/ManualPriorityGuard.verify.js
+
+diff --git a/core/ai/plugin/PluginController.js b/core/ai/plugin/PluginController.js
+index 3e84f0b..11ee02d 100644
+--- a/core/ai/plugin/PluginController.js
++++ b/core/ai/plugin/PluginController.js
+@@ -2,6 +2,8 @@ const EventBus = require("../../events/EventBus");
+ const Events = require("../../events/Events");
+ const Logger = require("../../shared/Logger");
+ const ControlSource = require("../../shared/ControlSource");
++const ManualState = require("../../shared/ManualState");
++const ManualPriorityGuard = require("../../shared/ManualPriorityGuard");
+ 
+ /**
+  * ==========================================================
+@@ -73,6 +75,22 @@ class PluginController {
+ 
+             }
+ 
++            // Task A7: Manual-Priority Guard — điểm DUY NHẤT áp dụng guard, ngay trước khi
++            // publish PLUGIN_COMMAND. Kiểm tra TỪNG action riêng biệt (không phải 1 lần cho
++            // cả mảng) — 1 WORKFLOW_READY có thể chứa cả action Key và Mod cùng lúc (xem
++            // Task A6 mục F: KEY_AXIS và BPM_AXIS độc lập), mỗi action cần đúng loại Manual
++            // state tương ứng (KEY_ACTIONS đọc keyActive, MOD_ACTIONS đọc modActive).
++            const manualState = ManualState.getManualState();
++            const guardResult = ManualPriorityGuard.evaluate(ControlSource.getControlSource(), manualState, decisionAction.action);
++
++            if (!guardResult.allowed) {
++
++                // Log rõ ràng lý do BLOCK — KHÔNG log "PLUGIN_COMMAND sent" khi bị chặn.
++                Logger.info("PluginController", guardResult.reason);
++                continue;
++
++            }
++
+             const message = {
+                 command,
+                 value: decisionAction.value,
+diff --git a/core/shared/ManualPriorityGuard.js b/core/shared/ManualPriorityGuard.js
+new file mode 100644
+index 0000000..de966e4
+--- /dev/null
++++ b/core/shared/ManualPriorityGuard.js
+@@ -0,0 +1,95 @@
++/**
++ * ==========================================================
++ * Auto Menu AI
++ * ManualPriorityGuard — Task A7: AI Execution Safety Guard Design
++ * ----------------------------------------------------------
++ * Hàm THUẦN (pure function) — không tự đọc ControlSource/ManualState, nhận đủ tham
++ * số từ nơi gọi (PluginController._onWorkflowReady()) để dễ test độc lập bằng mock,
++ * đúng convention DecisionRules.js/InferenceRules.js đã dùng trong project.
++ *
++ * TUYỆT ĐỐI KHÔNG: publish event, gọi MIDI/renderer, lưu state, đổi CURRENT_MODE.
++ *
++ * Quy tắc (đúng yêu cầu Task A7 mục 3-4):
++ *   - UPDATE_BPM: chưa có backend thật -> luôn BLOCK, không mở đường execution.
++ *   - LEGACY_CONTROL: giữ nguyên behavior hiện tại -> luôn BLOCK.
++ *   - AI_CONTROL + ManualState missing/stale/timestamp không hợp lệ -> FAIL-SAFE BLOCK
++ *     (không bao giờ coi các trường hợp này là "Manual inactive").
++ *   - AI_CONTROL + Manual Key active + action thuộc nhóm Key (SET_KEY/LOAD_NEW_SONG) -> BLOCK.
++ *   - AI_CONTROL + Manual Mod active + action thuộc nhóm Mod (SHIFT_KEY) -> BLOCK.
++ *   - Key active không chặn action Mod, và ngược lại (2 trạng thái độc lập).
++ * ==========================================================
++ */
++
++// Đề xuất ban đầu: 10 giây. Lý do: phải dài hơn NHIỀU so với độ trễ IPC bình thường
++// (thường chỉ vài ms tới vài trăm ms, xem AGGREGATION_WINDOW_MS=400ms ở ResultQueue.js
++// làm tham chiếu tốc độ pipeline hiện có), nhưng đủ ngắn để nếu renderer ngừng gửi cập
++// nhật (crash, đóng cửa sổ, IPC treo) trong hơn 10 giây, Core AI phải coi dữ liệu là cũ
++// và tự động fail-safe sang BLOCK thay vì tiếp tục tin vào 1 trạng thái Manual có thể đã
++// lỗi thời từ lâu. Đây là giá trị ĐỀ XUẤT BAN ĐẦU của Claude A — CHƯA được kiểm chứng với
++// tần suất gửi thật của kênh IPC Claude B sẽ xây (task đó chưa hoàn thành tại thời điểm
++// viết file này) — cần Khói/Claude B xác nhận lại khi có tần suất gửi thật.
++const STALE_TIMEOUT_MS = 10000;
++
++const KEY_ACTIONS = new Set(["SET_KEY", "LOAD_NEW_SONG"]);
++const MOD_ACTIONS = new Set(["SHIFT_KEY"]);
++
++/**
++ * @param {"LEGACY_CONTROL"|"AI_CONTROL"} controlSource
++ * @param {{keyActive: boolean, modActive: boolean, timestamp: number}|null} manualState
++ * @param {string} action - "SET_KEY" | "SHIFT_KEY" | "UPDATE_BPM" | "LOAD_NEW_SONG"
++ * @param {number} [now] - CHỈ dùng cho unit test (mock thời gian); mặc định Date.now()
++ * @returns {{allowed: boolean, reason: string}}
++ */
++function evaluate(controlSource, manualState, action, now = Date.now()) {
++
++    // UPDATE_BPM: chưa có backend thật — KHÔNG được tự mở đường execution ở A7, luôn
++    // BLOCK bất kể Manual/ControlSource ra sao (Task A7 mục 4 + mục 9).
++    if (action === "UPDATE_BPM") {
++        return { allowed: false, reason: "[AI Control] BLOCKED — UPDATE_BPM chưa có backend thật (out of scope A7)" };
++    }
++
++    // LEGACY_CONTROL: giữ NGUYÊN behavior hiện tại — luôn BLOCK, không đổi gì so với
++    // trước Task A7 (PluginController vẫn tự return sớm ở bước ControlSource như cũ,
++    // hàm này chỉ phản ánh lại đúng behavior đó để logic tập trung 1 chỗ).
++    if (controlSource !== "AI_CONTROL") {
++        return { allowed: false, reason: "[AI Control] BLOCKED — LEGACY_CONTROL (behavior không đổi)" };
++    }
++
++    // FAIL-SAFE: thiếu ManualState hoàn toàn -> BLOCK, KHÔNG coi là inactive.
++    if (!manualState) {
++        return { allowed: false, reason: "[AI Control] BLOCKED — ManualState missing (fail-safe)" };
++    }
++
++    // FAIL-SAFE: timestamp không hợp lệ -> BLOCK, KHÔNG coi là inactive.
++    if (typeof manualState.timestamp !== "number" || !Number.isFinite(manualState.timestamp)) {
++        return { allowed: false, reason: "[AI Control] BLOCKED — ManualState timestamp không hợp lệ (fail-safe)" };
++    }
++
++    // FAIL-SAFE: state cũ (stale) hoặc đồng hồ lệch (timestamp ở tương lai) -> BLOCK.
++    const age = now - manualState.timestamp;
++    if (age > STALE_TIMEOUT_MS || age < 0) {
++        return { allowed: false, reason: `[AI Control] BLOCKED — ManualState stale (age=${age}ms, giới hạn ${STALE_TIMEOUT_MS}ms, fail-safe)` };
++    }
++
++    // Guard phân biệt Key và Mod — chỉ kiểm tra đúng loại Manual tương ứng với action;
++    // Key active KHÔNG chặn action Mod và ngược lại (2 trạng thái độc lập).
++    if (KEY_ACTIONS.has(action)) {
++        if (manualState.keyActive) {
++            return { allowed: false, reason: "[AI Control] BLOCKED — Manual control (Key) is active" };
++        }
++        return { allowed: true, reason: "Manual (Key) inactive — AI command cho phép đi tiếp" };
++    }
++
++    if (MOD_ACTIONS.has(action)) {
++        if (manualState.modActive) {
++            return { allowed: false, reason: "[AI Control] BLOCKED — Manual control (Mod) is active" };
++        }
++        return { allowed: true, reason: "Manual (Mod) inactive — AI command cho phép đi tiếp" };
++    }
++
++    // action lạ, không thuộc KEY_ACTIONS/MOD_ACTIONS đã biết -> không có quy tắc rõ
++    // ràng, fail-safe BLOCK thay vì mặc định cho qua.
++    return { allowed: false, reason: `[AI Control] BLOCKED — action "${action}" không thuộc KEY_ACTIONS/MOD_ACTIONS đã biết (fail-safe)` };
++}
++
++module.exports = { evaluate, STALE_TIMEOUT_MS, KEY_ACTIONS, MOD_ACTIONS };
+diff --git a/tests/unit/ManualPriorityGuard.verify.js b/tests/unit/ManualPriorityGuard.verify.js
+new file mode 100644
+index 0000000..b352b77
+--- /dev/null
++++ b/tests/unit/ManualPriorityGuard.verify.js
+@@ -0,0 +1,129 @@
++/**
++ * ==========================================================
++ * Auto Menu AI — Kiểm chứng Manual-Priority Guard (Task A7)
++ * ----------------------------------------------------------
++ * Chạy bằng: node tests/unit/ManualPriorityGuard.verify.js
++ *
++ * Kiểm chứng đúng 9 Acceptance Case bắt buộc của Task A7 (mục 6), cộng thêm
++ * vài case bổ sung để phủ đầy đủ mục 4 (UPDATE_BPM/LOAD_NEW_SONG) và mục 3
++ * (timestamp không hợp lệ, đồng hồ lệch).
++ *
++ * Guard là hàm THUẦN (core/shared/ManualPriorityGuard.js) — test gọi trực
++ * tiếp bằng require() thật (module CommonJS chạy trong main process, không
++ * cần vm sandbox như các test cho code renderer/browser-only).
++ * ==========================================================
++ */
++
++const path = require("path");
++const Guard = require(path.join(__dirname, "..", "..", "core", "shared", "ManualPriorityGuard.js"));
++
++let passCount = 0;
++let failCount = 0;
++
++function check(name, actualAllowed, expectedAllowed) {
++    const pass = actualAllowed === expectedAllowed;
++    if (pass) passCount++; else failCount++;
++    console.log(`${pass ? "PASS" : "FAIL"} — ${name}: allowed=${actualAllowed}, expect=${expectedAllowed}`);
++}
++
++const NOW = 1_700_000_000_000; // mốc thời gian giả định cố định cho toàn bộ test
++
++console.log("=== 9 ACCEPTANCE CASE BẮT BUỘC (Task A7 mục 6) ===\n");
++
++// Case 1: LEGACY_CONTROL + Manual inactive -> BLOCK
++{
++    const r = Guard.evaluate("LEGACY_CONTROL", { keyActive: false, modActive: false, timestamp: NOW }, "SET_KEY", NOW);
++    check("Case 1: LEGACY_CONTROL + Manual inactive + SET_KEY -> BLOCK", r.allowed, false);
++}
++
++// Case 2: AI_CONTROL + Manual Key active + SET_KEY -> BLOCK
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: true, modActive: false, timestamp: NOW }, "SET_KEY", NOW);
++    check("Case 2: AI_CONTROL + Key active + SET_KEY -> BLOCK", r.allowed, false);
++}
++
++// Case 3: AI_CONTROL + Manual Mod active + SHIFT_KEY -> BLOCK
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: true, timestamp: NOW }, "SHIFT_KEY", NOW);
++    check("Case 3: AI_CONTROL + Mod active + SHIFT_KEY -> BLOCK", r.allowed, false);
++}
++
++// Case 4: AI_CONTROL + Manual inactive + SET_KEY -> ALLOW
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW }, "SET_KEY", NOW);
++    check("Case 4: AI_CONTROL + inactive + SET_KEY -> ALLOW", r.allowed, true);
++}
++
++// Case 5: AI_CONTROL + Manual inactive + SHIFT_KEY -> ALLOW
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW }, "SHIFT_KEY", NOW);
++    check("Case 5: AI_CONTROL + inactive + SHIFT_KEY -> ALLOW", r.allowed, true);
++}
++
++// Case 6: AI_CONTROL + stale ManualState -> BLOCK
++{
++    const staleTimestamp = NOW - (Guard.STALE_TIMEOUT_MS + 1000); // vượt quá ngưỡng stale
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: staleTimestamp }, "SET_KEY", NOW);
++    check("Case 6: AI_CONTROL + stale ManualState -> BLOCK", r.allowed, false);
++}
++
++// Case 7: AI_CONTROL + missing ManualState -> BLOCK
++{
++    const r = Guard.evaluate("AI_CONTROL", null, "SET_KEY", NOW);
++    check("Case 7: AI_CONTROL + missing ManualState -> BLOCK", r.allowed, false);
++}
++
++// Case 8: AI_CONTROL + Key active nhưng SHIFT_KEY -> không block (Key không liên quan Mod)
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: true, modActive: false, timestamp: NOW }, "SHIFT_KEY", NOW);
++    check("Case 8: Key active nhưng SHIFT_KEY -> ALLOW (không liên quan)", r.allowed, true);
++}
++
++// Case 9: AI_CONTROL + Mod active nhưng SET_KEY -> không block (Mod không liên quan Key)
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: true, timestamp: NOW }, "SET_KEY", NOW);
++    check("Case 9: Mod active nhưng SET_KEY -> ALLOW (không liên quan)", r.allowed, true);
++}
++
++console.log("\n=== CASE BỔ SUNG (mục 4/9 Task A7 — không nằm trong 9 case bắt buộc) ===\n");
++
++// UPDATE_BPM luôn BLOCK bất kể Manual/ControlSource (mục 4 + mục 9)
++{
++    const r1 = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW }, "UPDATE_BPM", NOW);
++    check("Bonus: UPDATE_BPM luôn BLOCK dù Manual inactive", r1.allowed, false);
++    const r2 = Guard.evaluate("LEGACY_CONTROL", null, "UPDATE_BPM", NOW);
++    check("Bonus: UPDATE_BPM luôn BLOCK ở LEGACY_CONTROL", r2.allowed, false);
++}
++
++// LOAD_NEW_SONG dùng chung nhóm KEY_ACTIONS với SET_KEY (mục 4)
++{
++    const r1 = Guard.evaluate("AI_CONTROL", { keyActive: true, modActive: false, timestamp: NOW }, "LOAD_NEW_SONG", NOW);
++    check("Bonus: LOAD_NEW_SONG + Key active -> BLOCK", r1.allowed, false);
++    const r2 = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW }, "LOAD_NEW_SONG", NOW);
++    check("Bonus: LOAD_NEW_SONG + inactive -> ALLOW", r2.allowed, true);
++}
++
++// timestamp không hợp lệ -> BLOCK fail-safe (mục 3, "không được coi stale là inactive")
++{
++    const r1 = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: "invalid" }, "SET_KEY", NOW);
++    check("Bonus: timestamp không hợp lệ (string) -> BLOCK fail-safe", r1.allowed, false);
++    const r2 = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NaN }, "SET_KEY", NOW);
++    check("Bonus: timestamp NaN -> BLOCK fail-safe", r2.allowed, false);
++}
++
++// timestamp ở tương lai (đồng hồ lệch) -> BLOCK fail-safe, an toàn hơn ALLOW
++{
++    const r = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW + 5000 }, "SET_KEY", NOW);
++    check("Bonus: timestamp tương lai (đồng hồ lệch) -> BLOCK fail-safe", r.allowed, false);
++}
++
++// Ranh giới CHÍNH XÁC ngưỡng stale — vừa đúng ngưỡng vẫn ALLOW, vượt 1ms đã BLOCK
++{
++    const rAtLimit = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW - Guard.STALE_TIMEOUT_MS }, "SET_KEY", NOW);
++    check("Bonus: age đúng bằng STALE_TIMEOUT_MS -> vẫn ALLOW (biên)", rAtLimit.allowed, true);
++    const rOverLimit = Guard.evaluate("AI_CONTROL", { keyActive: false, modActive: false, timestamp: NOW - Guard.STALE_TIMEOUT_MS - 1 }, "SET_KEY", NOW);
++    check("Bonus: age vượt STALE_TIMEOUT_MS 1ms -> BLOCK (biên)", rOverLimit.allowed, false);
++}
++
++console.log(`\n=== KẾT QUẢ: ${passCount} PASS, ${failCount} FAIL / ${passCount + failCount} tổng ===`);
++process.exit(failCount > 0 ? 1 : 0);
+-- 
+2.43.0
+
