@@ -19,6 +19,137 @@
 loadSetup?.();
 
 /* ==========================================================
+   TASK A20 — SOUND EFFECT ENGINE (Built-in Clap/Laugh, Internal Audio Backend)
+   ----------------------------------------------------------
+   Audio backend NỘI BỘ cho 2 hiệu ứng âm thanh built-in bundle sẵn trong app
+   (Vo-Tay.MP3 = CLAP, Cuoi-Deu.mp3 = LAUGH). Dùng HTMLAudioElement thuần —
+   KHÔNG qua MIDI, KHÔNG qua DAW, KHÔNG qua PluginController/EventBus/Core AI
+   (đúng ranh giới Task A20 mục 5/7). Hoàn toàn tách biệt khỏi AI_CONTROL/
+   ManualState/ManualPriorityGuard/Key/Mod/BPM/BEAT_INPUT_VOLUME/
+   MASTER_OUTPUT_VOLUME.
+
+   Đặt TRỰC TIẾP trong renderer.js (thay vì file riêng trong ui/js/engines/)
+   vì Task A20 yêu cầu KHÔNG được thêm thẻ <script> mới vào ui/index.html —
+   không có cách nạp file riêng nào đảm bảo an toàn 100% (không đổi HTML,
+   không phụ thuộc timing async, không phụ thuộc hành vi global-scope của
+   eval) tốt hơn là khai báo cùng scope với phần code sẽ gọi tới nó.
+
+   State machine (mục 2/3 của task, giống hệt cho cả Clap/Laugh):
+       IDLE --click--> PLAYING --click--> STOP --(tự động)--> IDLE
+       PLAYING --ended (tự chạy hết)--> IDLE
+   STOP và 'ended' đều reset playback position về 0 và không loop.
+   ========================================================== */
+const SoundEffectEngine = (() => {
+
+    // Built-in asset — đường dẫn TƯƠNG ĐỐI tới ui/index.html (Electron loadFile dùng
+    // file:// trỏ thẳng vào ui/index.html cả ở dev lẫn khi đóng gói — xem app/main.js
+    // mainWin.loadFile(...ui/index.html)) nên đường dẫn tương đối này resolve đúng ở
+    // CẢ 2 môi trường mà không cần sửa app/main.js/preload.js. Giữ NGUYÊN tên file gốc
+    // Khói cung cấp (đúng mục 4), đặt trong ui/assets/sounds/ (tách khỏi assets/ gốc ở
+    // repo root vốn dùng cho icon/app assets, không phải audio media).
+    const SOUND_SOURCES = Object.freeze({
+        CLAP: "assets/sounds/Vo-Tay.MP3",
+        LAUGH: "assets/sounds/Cuoi-Deu.mp3"
+    });
+
+    const DEFAULT_VOLUME_0_100 = 40; // khớp defaultValue của clapKnob/laughKnob (knobData bên dưới)
+
+    // Mỗi effect giữ 1 HTMLAudioElement + state IDLE/PLAYING RIÊNG — không chia sẻ bất kỳ
+    // biến nào giữa CLAP và LAUGH (đúng mục 6: volume/playback hoàn toàn độc lập).
+    const effects = {};
+    const listeners = [];
+
+    function notify(effectId, isPlaying) {
+        listeners.forEach((cb) => {
+            try { cb(effectId, isPlaying); } catch (err) { console.error("[SoundEffectEngine] listener lỗi:", err); }
+        });
+    }
+
+    function createEffect(effectId, src) {
+        const audio = new Audio(src);
+        audio.loop = false; // TUYỆT ĐỐI không loop — đúng mục 2/3
+        audio.volume = DEFAULT_VOLUME_0_100 / 100;
+        audio.addEventListener("ended", () => {
+            // Mục 2/3 "File tự chạy hết": PLAYING -> IDLE, reset position về 0, không loop.
+            audio.currentTime = 0;
+            effects[effectId].playing = false;
+            notify(effectId, false);
+        });
+        audio.addEventListener("error", () => {
+            console.error(`[SoundEffectEngine] Lỗi tải/phát ${effectId} (${src}):`, audio.error);
+        });
+        effects[effectId] = { audio, playing: false };
+    }
+
+    Object.keys(SOUND_SOURCES).forEach((id) => createEffect(id, SOUND_SOURCES[id]));
+
+    /**
+     * Toggle play/stop cho 1 effect. Đúng state machine mục 2/3:
+     *   IDLE -> PLAYING: phát từ đầu (currentTime=0), không loop.
+     *   PLAYING -> STOP -> IDLE: dừng ngay, reset currentTime=0, không để lại state playing.
+     *   Bấm lại sau STOP/ended -> luôn phát lại từ đầu.
+     * @param {"CLAP"|"LAUGH"} effectId
+     * @returns {boolean} trạng thái playing SAU khi toggle
+     */
+    function toggle(effectId) {
+        const effect = effects[effectId];
+        if (!effect) {
+            console.error(`[SoundEffectEngine] effect không tồn tại: ${effectId}`);
+            return false;
+        }
+        if (effect.playing) {
+            effect.audio.pause();
+            effect.audio.currentTime = 0;
+            effect.playing = false;
+        } else {
+            effect.audio.currentTime = 0;
+            const playPromise = effect.audio.play();
+            if (playPromise && typeof playPromise.catch === "function") {
+                playPromise.catch((err) => {
+                    console.error(`[SoundEffectEngine] play() ${effectId} lỗi:`, err);
+                    effect.playing = false;
+                    notify(effectId, false);
+                });
+            }
+            effect.playing = true;
+        }
+        notify(effectId, effect.playing);
+        return effect.playing;
+    }
+
+    /**
+     * Set volume cho 1 effect, thang 0-100 (khớp thang knob hiện có) -> tự quy đổi 0-1
+     * cho HTMLAudioElement.volume. Hoàn toàn độc lập giữa CLAP/LAUGH (mục 6).
+     * @param {"CLAP"|"LAUGH"} effectId
+     * @param {number} value0to100
+     */
+    function setVolume(effectId, value0to100) {
+        const effect = effects[effectId];
+        if (!effect) return;
+        const clamped = Math.max(0, Math.min(100, Number(value0to100) || 0));
+        effect.audio.volume = clamped / 100;
+    }
+
+    function isPlaying(effectId) {
+        return !!effects[effectId]?.playing;
+    }
+
+    /**
+     * Đăng ký callback được gọi mỗi khi trạng thái playing của 1 effect đổi — kể cả tự đổi
+     * do 'ended', không chỉ do gọi toggle(). renderer.js dùng callback này để đồng bộ UI
+     * (class "active" của clapPlayBtn/laughPlayBtn) luôn phản ánh ĐÚNG trạng thái audio
+     * thật, thay vì tự toggle mù theo mỗi lần click.
+     * @param {(effectId: "CLAP"|"LAUGH", isPlaying: boolean) => void} callback
+     */
+    function onChange(callback) {
+        if (typeof callback === "function") listeners.push(callback);
+    }
+
+    return { toggle, setVolume, isPlaying, onChange, SOUND_SOURCES };
+
+})();
+
+/* ==========================================================
    1. CLOCK (Cập nhật thời gian thực)
    ========================================================== */
 function updateClock() {
@@ -292,18 +423,27 @@ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2"
    5. PLAY BUTTONS (Logic chuyển đổi PLAY/PLAYING)
    ========================================================== */
 const PRESET_SOUND_BTN_TO_ACTION = { clapPlayBtn: "CLAP", laughPlayBtn: "LAUGH" };
+// TASK A20 — giờ ĐÃ có Internal Audio Backend thật (SoundEffectEngine, khai báo đầu file).
+// Class "active" của nút KHÔNG còn tự toggle mù theo click nữa — nó được điều khiển bởi
+// SoundEffectEngine.onChange() bên dưới, để LUÔN phản ánh đúng trạng thái audio thật, kể
+// cả khi audio tự kết thúc (event 'ended') mà không có click nào xảy ra (đúng mục 2/3:
+// "ended -> UI trở về IDLE" phải tự xảy ra, không chờ user bấm lại).
+SoundEffectEngine.onChange((effectId, isPlaying) => {
+    const btnId = effectId === "CLAP" ? "clapPlayBtn" : "laughPlayBtn";
+    document.getElementById(btnId)?.classList.toggle("active", isPlaying);
+});
 ["clapPlayBtn", "laughPlayBtn"].forEach(id => {
     const btn = document.getElementById(id);
-    // UI Final v1.0: nút đã chuyển lên hàng Preset với nhãn cố định (CLAP/LAUGH),
-    // nên bỏ phần đổi chữ PLAY/PLAYING — chỉ còn toggle class "active" để báo trạng thái.
-    // MIDI-MASTER-01 / MENU-CONTROL-01 — KHÔNG có audio file/Web Audio API nào trong repo
-    // để "phát âm thanh" thật (đã grep toàn bộ renderer.js/index.html, không có `new Audio`
-    // hay `.play()` nào — BACKEND_MISSING thật, không phải bị gỡ). Nối SONG SONG tới
-    // executeAction() để ít nhất CLAP/LAUGH có thể gửi MIDI/click chuột nếu user tự cấu hình,
-    // không tự bịa ra việc phát âm thanh nội bộ (đúng "không tự phát minh behavior").
+    // UI Final v1.0: nút đã chuyển lên hàng Preset với nhãn cố định (CLAP/LAUGH).
+    // TASK A20: click -> SoundEffectEngine.toggle() phát/dừng file built-in NGAY LẬP TỨC,
+    // không qua MIDI/DAW/PluginController (đúng mục 5/7). Giữ SONG SONG lời gọi
+    // executeAction() đã có từ trước (Mục 16/19, actionRegistry.js) — đây là 1 kênh
+    // MIDI-mapping TÙY CHỌN, ĐỘC LẬP với việc phát âm thanh, mặc định NOT_CONFIGURED trừ
+    // khi user tự MIDI Learn trong Setup; không rollback/không sửa hệ thống MIDI/DAW mapping
+    // đã khai báo trước đó (đúng ràng buộc mục 7 "không đụng hệ thống khác").
     btn?.addEventListener("click", () => {
-        btn.classList.toggle("active");
         const actionName = PRESET_SOUND_BTN_TO_ACTION[id];
+        SoundEffectEngine.toggle(actionName);
         if (actionName && window.ActionRegistry?.executeAction) {
             window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[actionName], { reason: "menu-button" })
                 .catch(err => console.error(`[MenuControl] ${actionName} lỗi:`, err));
@@ -390,6 +530,15 @@ const knobData = [
     { id: "clapKnob", valueId: "clapValue", value: 40, defaultValue: 40 },
     { id: "laughKnob", valueId: "laughValue", value: 40, defaultValue: 40 }
 ];
+
+// TASK A20 — clapKnob/laughKnob đi tới Internal Audio Backend (SoundEffectEngine), KHÔNG
+// qua ActionRegistry/MIDI (KNOB_ID_TO_ACTION bên dưới CỐ TÌNH KHÔNG có 2 knob này — giữ
+// nguyên, không đụng). Khai báo ở top-level (không phải trong closure DOMContentLoaded)
+// để cả dispatchKnobVolume() lẫn loadData() đều dùng chung được 1 map duy nhất.
+const KNOB_ID_TO_SOUND_EFFECT = Object.freeze({
+    clapKnob: "CLAP",
+    laughKnob: "LAUGH"
+});
 
 function updateKnob(k) {
     const knob = document.getElementById(k.id);
@@ -1066,6 +1215,15 @@ function loadData() {
             if (knob) {
                 knob.value = saved.value;
                 updateKnob(knob);
+                // TASK A20 — đồng bộ ngay volume Clap/Laugh vào SoundEffectEngine khi khôi
+                // phục giá trị đã lưu, để lần play ĐẦU TIÊN (trước khi user chạm knob) phát
+                // đúng âm lượng đang hiển thị trên UI, không bị lệch với DEFAULT_VOLUME_0_100.
+                if (typeof KNOB_ID_TO_SOUND_EFFECT !== "undefined" && typeof SoundEffectEngine !== "undefined") {
+                    const soundEffectId = KNOB_ID_TO_SOUND_EFFECT[knob.id];
+                    if (soundEffectId) {
+                        SoundEffectEngine.setVolume(soundEffectId, knob.value);
+                    }
+                }
             }
         });
     }
@@ -1632,6 +1790,21 @@ document.addEventListener("DOMContentLoaded", () => {
         // engine nội bộ chưa tồn tại trong repo — BLOCKED, không tự bịa hướng khác.
     };
     function dispatchKnobVolume(knobId, value) {
+        // TASK A20 — clapKnob/laughKnob: set volume THẲNG vào SoundEffectEngine (Internal
+        // Audio Backend), độc lập hoàn toàn với nhánh MIDI bên dưới (mục 6/7). Guard bằng
+        // typeof (không phải !window...) vì KNOB_ID_TO_SOUND_EFFECT/SoundEffectEngine là
+        // biến top-level cùng file, không phải property của window — typeof tránh
+        // ReferenceError khi hàm này được trích xuất chạy độc lập (vd trong test sandbox
+        // KnobBeatMaster.verify.js) mà không kéo theo 2 khai báo đó. Không return sớm ở đây
+        // vì clapKnob/laughKnob không có trong KNOB_ID_TO_ACTION nên nhánh MIDI phía dưới tự
+        // nhiên no-op cho chúng — không cần if/else lồng nhau.
+        if (typeof KNOB_ID_TO_SOUND_EFFECT !== "undefined" && typeof SoundEffectEngine !== "undefined") {
+            const soundEffectId = KNOB_ID_TO_SOUND_EFFECT[knobId];
+            if (soundEffectId) {
+                SoundEffectEngine.setVolume(soundEffectId, value);
+            }
+        }
+
         const actionName = KNOB_ID_TO_ACTION[knobId];
         if (!actionName || !window.ActionRegistry?.executeAction) return;
         // Không await — đây là handler UI tần suất cao (wheel/mousemove), không được chặn vẽ
