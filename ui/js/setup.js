@@ -610,6 +610,11 @@ const DAW_MIDI_ACTIONS = [
     // hai mapping độc lập". Không tự đặt CC — trống mặc định như mọi action khác ở đây.
     { action: "BEAT_INPUT_VOLUME", label: "BEAT INPUT VOLUME" },
     { action: "MASTER_OUTPUT_VOLUME", label: "MASTER OUTPUT VOLUME" },
+    // TASK B12 — mở rộng thêm 3 action mới nối ở B12 (musicBtn + Retune×2), tái dùng nguyên
+    // vẹn UI/schema đã có, không tạo cơ chế cấu hình thứ hai.
+    { action: "MONITOR_BEAT_TOGGLE", label: "MONITOR BEAT" },
+    { action: "RETUNE_SPEED_MIC1", label: "RETUNE SPEED MIC1" },
+    { action: "RETUNE_SPEED_MIC2", label: "RETUNE SPEED MIC2" },
 ];
 
 function isMouseControlEnabledLocal() {

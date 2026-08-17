@@ -57,7 +57,13 @@ function buildSandbox() {
     ];
 
     const calls = []; // { action, value }
-    const ACTIONS = { BEAT_INPUT_VOLUME: "BEAT_INPUT_VOLUME", MASTER_OUTPUT_VOLUME: "MASTER_OUTPUT_VOLUME" };
+    const ACTIONS = {
+        BEAT_INPUT_VOLUME: "BEAT_INPUT_VOLUME",
+        MASTER_OUTPUT_VOLUME: "MASTER_OUTPUT_VOLUME",
+        // TASK B12 — thêm vào mock để khớp đúng shape thật (renderer.js giờ tra cứu cả 2 tên này)
+        RETUNE_SPEED_MIC1: "RETUNE_SPEED_MIC1",
+        RETUNE_SPEED_MIC2: "RETUNE_SPEED_MIC2",
+    };
     const sandbox = {
         console,
         document: fakeDocument,
@@ -165,14 +171,22 @@ console.log('\n== Case 8: Beat=70 và Master=70 (cùng giá trị số) vẫn l�
     assert(calls.some(c => c.action === 'MASTER_OUTPUT_VOLUME' && c.value === 90), 'Master dispatch đúng giá trị riêng của nó, không bị lẫn với Beat');
 }
 
-console.log('\n== Kiểm tra bổ sung: 4 knob KHÔNG thuộc B6 (retune1/2, clap, laugh) KHÔNG dispatch gì (đúng phạm vi, không mở rộng) ==');
+console.log('\n== TASK B12: Retune1/Retune2 GIỜ ĐÃ dispatch đúng action riêng (RETUNE_SPEED_MIC1/2), không lẫn với Beat/Master ==');
 {
     const { elements, calls } = buildSandbox();
     elements.retune1.dispatch('wheel', { preventDefault() {}, deltaY: -1 });
     elements.retune2.dispatch('wheel', { preventDefault() {}, deltaY: -1 });
+    assert(calls.length === 2, `retune1 + retune2 dispatch đúng 2 lần (thực tế: ${calls.length})`);
+    assert(calls[0].action === 'RETUNE_SPEED_MIC1', `retune1 -> RETUNE_SPEED_MIC1 (thực tế: ${calls[0].action})`);
+    assert(calls[1].action === 'RETUNE_SPEED_MIC2', `retune2 -> RETUNE_SPEED_MIC2 (thực tế: ${calls[1].action})`);
+}
+
+console.log('\n== Kiểm tra bổ sung: Clap/Laugh Volume knob VẪN KHÔNG dispatch (target = internal audio engine, không phải MIDI — đúng bằng chứng, không mở rộng sai) ==');
+{
+    const { elements, calls } = buildSandbox();
     elements.clapKnob.dispatch('wheel', { preventDefault() {}, deltaY: -1 });
     elements.laughKnob.dispatch('wheel', { preventDefault() {}, deltaY: -1 });
-    assert(calls.length === 0, `0 dispatch nào cho 4 knob ngoài phạm vi B6 (thực tế: ${calls.length})`);
+    assert(calls.length === 0, `0 dispatch nào cho Clap/Laugh Volume (thực tế: ${calls.length}) — đúng BLOCKED, không tự nối MIDI sai hướng`);
 }
 
 console.log(`\n${pass} PASS, ${fail} FAIL`);

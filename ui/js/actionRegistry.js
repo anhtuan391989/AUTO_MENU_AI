@@ -58,6 +58,18 @@ const ACTIONS = Object.freeze({
     MONITOR_MIC1: "MONITOR_MIC1",
     MONITOR_MIC2: "MONITOR_MIC2",
     MONITOR_FX: "MONITOR_FX",
+    // TASK B12 — phát hiện mới: "musicBtn" (🎵 MUSIC, ui/index.html) trước đây bị B1 báo cáo
+    // nhầm là "MONITOR_BEAT_TOGGLE không có element nào tồn tại" — đã audit lại kỹ, xác nhận
+    // ĐÂY chính là element đó (chỉ đặt tên "music" thay vì "beat" trong id, cùng ngữ nghĩa
+    // "bật tắt monitor Beat" theo tài liệu xlsx tham chiếu — xem TASK_B6_REPORT.md). Khai báo
+    // theo đúng khuôn "trước, không mapping mặc định" như MONITOR_MIC1/2/FX ở trên.
+    MONITOR_BEAT_TOGGLE: "MONITOR_BEAT_TOGGLE",
+    // TASK B12 — Retune 1/2: target = Auto-Tune Retune Speed (Mic 1/2), đã xác nhận bằng
+    // bằng chứng độc lập (tài liệu xlsx + docs/kien-truc-tong-quan.md, xem TASK_B6_REPORT.md
+    // và TASK_B8_REPORT.md) — KHÔNG CÓ CC number nào được biết. Khai báo action theo đúng
+    // khuôn Beat/Master (B6): sẵn sàng dispatch, KHÔNG tự đặt CC, chờ user cấu hình qua Setup.
+    RETUNE_SPEED_MIC1: "RETUNE_SPEED_MIC1",
+    RETUNE_SPEED_MIC2: "RETUNE_SPEED_MIC2",
     // TASK B6 (Beat/Master) — khai báo trước, KHÔNG mapping mặc định, cùng khuôn với
     // MONITOR_* ở trên. QUAN TRỌNG: 2 action này CỐ Ý tách biệt, KHÔNG gộp thành 1 tên
     // "VOLUME" chung — đúng yêu cầu "Beat = INPUT MUSIC LEVEL, Master = FINAL DAW OUTPUT

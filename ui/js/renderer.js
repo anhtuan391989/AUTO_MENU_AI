@@ -266,6 +266,10 @@ document.getElementById("autoDetectBtn")?.classList.add("active");
 document.getElementById("musicBtn")?.addEventListener("click", (e) => {
     e.target.classList.toggle("disabled");
     saveData();
+    // TASK B12 — nối song song executeAction() (không thay đổi hành vi toggle CSS đã có).
+    // NOT_CONFIGURED mặc định — chỉ hoạt động thật nếu user tự cấu hình MIDI qua Setup.
+    window.ActionRegistry?.executeAction?.(window.ActionRegistry.ACTIONS.MONITOR_BEAT_TOGGLE, { reason: "menu-button" })
+        ?.catch?.((err) => console.error("[MenuControl] MONITOR_BEAT_TOGGLE lỗi:", err));
 });
 
 const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2", fxBtn: "MONITOR_FX" };
@@ -1617,8 +1621,15 @@ document.addEventListener("DOMContentLoaded", () => {
     // Map 1-1 rõ ràng, không suy luận theo tên — đúng yêu cầu "Beat = INPUT MUSIC LEVEL,
     // Master = FINAL DAW OUTPUT LEVEL" là 2 khái niệm khác nhau, không gộp chung "volume".
     const KNOB_ID_TO_ACTION = {
+        retune1: "RETUNE_SPEED_MIC1",
+        retune2: "RETUNE_SPEED_MIC2",
         musicKnob: "BEAT_INPUT_VOLUME",
         masterKnob: "MASTER_OUTPUT_VOLUME",
+        // TASK B12 — clapKnob/laughKnob CỐ TÌNH KHÔNG có trong map này: bằng chứng (xlsx
+        // tham chiếu "Âm lượng ... trên Menu, file đi kèm trong menu") chỉ ra target là
+        // audio engine NỘI BỘ (phát file mẫu bundled), KHÔNG phải MIDI/DAW — nối vào dispatch
+        // MIDI ở đây sẽ SAI theo đúng bằng chứng đã có (xem TASK_B6_REPORT.md/B5). Audio
+        // engine nội bộ chưa tồn tại trong repo — BLOCKED, không tự bịa hướng khác.
     };
     function dispatchKnobVolume(knobId, value) {
         const actionName = KNOB_ID_TO_ACTION[knobId];
