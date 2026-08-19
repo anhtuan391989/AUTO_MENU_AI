@@ -73,7 +73,7 @@ function makeFakeAudioCtor({ shouldFail = false, failMessage = 'NotSupportedErro
         const FailingAudio = makeFakeAudioCtor({ shouldFail: true });
         const r = await AudioEngine.playClap(FailingAudio);
         assert(r.ok === false && r.reason === 'PLAYBACK_FAILED', `PLAYBACK_FAILED khi Audio.play() thật sự lỗi (thực tế: ${JSON.stringify(r)})`);
-        assert(r.detail.includes('assets/sounds/clap.mp3'), `detail nêu đúng đường dẫn quy ước đang dùng (thực tế: ${r.detail})`);
+        assert(r.detail.includes('assets/sounds/Vo-Tay.MP3'), `detail nêu đúng đường dẫn CANONICAL đang dùng — Vo-Tay.MP3, không phải clap.mp3 (thực tế: ${r.detail})`);
     }
 
     console.log('\n== play(): file load + play thành công thật -> ok:true ==');
@@ -91,7 +91,59 @@ function makeFakeAudioCtor({ shouldFail = false, failMessage = 'NotSupportedErro
         const AudioEngine = loadAudioEngine();
         AudioEngine.setClapSamplePath('custom/my-clap.mp3');
         assert(AudioEngine.getClapResolvedPath() === 'custom/my-clap.mp3', `Clap dùng đúng path tự cấu hình (thực tế: ${AudioEngine.getClapResolvedPath()})`);
-        assert(AudioEngine.getLaughResolvedPath() === 'assets/sounds/laugh.mp3', `Laugh KHÔNG bị ảnh hưởng, vẫn dùng path quy ước mặc định (thực tế: ${AudioEngine.getLaughResolvedPath()})`);
+        assert(AudioEngine.getLaughResolvedPath() === 'assets/sounds/Cuoi-Deu.mp3', `Laugh KHÔNG bị ảnh hưởng, vẫn dùng path CANONICAL mặc định Cuoi-Deu.mp3 (thực tế: ${AudioEngine.getLaughResolvedPath()})`);
+    }
+
+    console.log('\n== A22 — CANONICAL ASSET: đường dẫn mặc định phải đúng Vo-Tay.MP3/Cuoi-Deu.mp3, KHÔNG được là clap.mp3/laugh.mp3 (bug B13 đã sửa) ==');
+    {
+        const AudioEngine = loadAudioEngine();
+        assert(AudioEngine.getClapResolvedPath() === 'assets/sounds/Vo-Tay.MP3', `Clap mặc định = assets/sounds/Vo-Tay.MP3 (thực tế: ${AudioEngine.getClapResolvedPath()})`);
+        assert(AudioEngine.getLaughResolvedPath() === 'assets/sounds/Cuoi-Deu.mp3', `Laugh mặc định = assets/sounds/Cuoi-Deu.mp3 (thực tế: ${AudioEngine.getLaughResolvedPath()})`);
+        const fs2 = require('fs');
+        const path2 = require('path');
+        const clapFile = path2.join(__dirname, '..', '..', 'ui', AudioEngine.getClapResolvedPath());
+        const laughFile = path2.join(__dirname, '..', '..', 'ui', AudioEngine.getLaughResolvedPath());
+        assert(fs2.existsSync(clapFile), `File Clap thật sự tồn tại trên đĩa tại ${AudioEngine.getClapResolvedPath()}`);
+        assert(fs2.existsSync(laughFile), `File Laugh thật sự tồn tại trên đĩa tại ${AudioEngine.getLaughResolvedPath()}`);
+    }
+
+    console.log('\n== A22 — State machine: click 1 = play, click 2 (toggle khi đang playing) = STOP + reset position 0 ==');
+    {
+        const AudioEngine = loadAudioEngine();
+        const WorkingAudio = makeFakeAudioCtor({ shouldFail: false });
+        assert(AudioEngine.isClapPlaying() === false, 'Trạng thái ban đầu: IDLE (isClapPlaying=false)');
+
+        const r1 = await AudioEngine.toggleClap(WorkingAudio);
+        assert(r1.ok === true, 'toggle() lần 1 (IDLE->PLAYING): ok:true');
+        assert(AudioEngine.isClapPlaying() === true, 'Sau toggle lần 1: isClapPlaying()=true (PLAYING)');
+
+        const r2 = await AudioEngine.toggleClap(WorkingAudio);
+        assert(r2.ok === true, 'toggle() lần 2 (PLAYING->STOP->IDLE): ok:true');
+        assert(AudioEngine.isClapPlaying() === false, 'Sau toggle lần 2: isClapPlaying()=false (IDLE — đã dừng)');
+    }
+
+    console.log('\n== A22 — onClapChange()/onLaughChange(): callback được gọi đúng khi play/stop, ĐỘC LẬP giữa 2 effect ==');
+    {
+        const AudioEngine = loadAudioEngine();
+        const WorkingAudio = makeFakeAudioCtor({ shouldFail: false });
+        const clapEvents = [];
+        const laughEvents = [];
+        AudioEngine.onClapChange((playing) => clapEvents.push(playing));
+        AudioEngine.onLaughChange((playing) => laughEvents.push(playing));
+
+        await AudioEngine.toggleClap(WorkingAudio); // play
+        assert(clapEvents.length === 1 && clapEvents[0] === true, `onClapChange nhận đúng 1 event true khi play (thực tế: ${JSON.stringify(clapEvents)})`);
+        assert(laughEvents.length === 0, 'onLaughChange KHÔNG nhận event nào khi chỉ Clap play — 2 effect độc lập');
+
+        await AudioEngine.toggleClap(WorkingAudio); // stop
+        assert(clapEvents.length === 2 && clapEvents[1] === false, `onClapChange nhận đúng event false khi stop (thực tế: ${JSON.stringify(clapEvents)})`);
+    }
+
+    console.log('\n== A22 — stopClap()/stopLaugh(): dừng ngay + reset, không throw nếu chưa từng play ==');
+    {
+        const AudioEngine = loadAudioEngine();
+        const r = AudioEngine.stopClap();
+        assert(r.ok === true, 'stopClap() khi chưa từng play() không throw, trả ok:true (no-op an toàn)');
     }
 
     console.log(`\n${pass} PASS, ${fail} FAIL`);

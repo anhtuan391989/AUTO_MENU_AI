@@ -292,25 +292,33 @@ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2"
    5. PLAY BUTTONS (Logic chuyển đổi PLAY/PLAYING)
    ========================================================== */
 const PRESET_SOUND_BTN_TO_ACTION = { clapPlayBtn: "CLAP", laughPlayBtn: "LAUGH" };
-// TASK B13 — nay ĐÃ có audio engine nội bộ (ui/js/audioEngine.js) cho đúng 2 nút này.
-const PRESET_SOUND_BTN_TO_AUDIO_PLAY = { clapPlayBtn: () => window.AudioEngine?.playClap(), laughPlayBtn: () => window.AudioEngine?.playLaugh() };
+// A22 — SỬA GAP: bản B13 dùng playClap()/playLaugh() (luôn phát lại từ đầu, không dừng được)
+// + btn.classList.toggle("active") MÙ (không phản ánh trạng thái audio thật) — mất đúng hành
+// vi Task A20 đã yêu cầu (click 2 = stop, ended tự về IDLE). Khôi phục: dùng toggleClap()/
+// toggleLaugh() (audioEngine.js, đã thêm lại state machine ở A22) + class "active" do
+// AudioEngine.onClapChange()/onLaughChange() điều khiển — LUÔN phản ánh đúng trạng thái audio
+// thật, kể cả khi tự về IDLE do 'ended' mà không có click nào xảy ra.
+window.AudioEngine?.onClapChange((isPlaying) => {
+    document.getElementById("clapPlayBtn")?.classList.toggle("active", isPlaying);
+});
+window.AudioEngine?.onLaughChange((isPlaying) => {
+    document.getElementById("laughPlayBtn")?.classList.toggle("active", isPlaying);
+});
+const PRESET_SOUND_BTN_TO_AUDIO_TOGGLE = { clapPlayBtn: () => window.AudioEngine?.toggleClap(), laughPlayBtn: () => window.AudioEngine?.toggleLaugh() };
 ["clapPlayBtn", "laughPlayBtn"].forEach(id => {
     const btn = document.getElementById(id);
-    // UI Final v1.0: nút đã chuyển lên hàng Preset với nhãn cố định (CLAP/LAUGH),
-    // nên bỏ phần đổi chữ PLAY/PLAYING — chỉ còn toggle class "active" để báo trạng thái.
     // Nối SONG SONG tới executeAction() (MIDI, nếu user tự cấu hình) VÀ tới AudioEngine
-    // (phát file mẫu nội bộ, nếu đã cấu hình đường dẫn/file tồn tại — xem audioEngine.js).
-    // Nếu chưa có file audio thật, playClap()/playLaugh() trả NOT_CONFIGURED rõ ràng,
-    // KHÔNG báo thành công giả.
+    // (phát file mẫu nội bộ built-in, luôn khả dụng — xem audioEngine.js). Nếu vì lý do gì
+    // đó file không load được, toggleClap()/toggleLaugh() trả NOT_CONFIGURED/PLAYBACK_FAILED
+    // rõ ràng, KHÔNG báo thành công giả — và class "active" sẽ không bật (đúng thực tế).
     btn?.addEventListener("click", () => {
-        btn.classList.toggle("active");
         const actionName = PRESET_SOUND_BTN_TO_ACTION[id];
         if (actionName && window.ActionRegistry?.executeAction) {
             window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[actionName], { reason: "menu-button" })
                 .catch(err => console.error(`[MenuControl] ${actionName} lỗi:`, err));
         }
-        const audioPlay = PRESET_SOUND_BTN_TO_AUDIO_PLAY[id];
-        audioPlay?.()?.then((result) => {
+        const audioToggle = PRESET_SOUND_BTN_TO_AUDIO_TOGGLE[id];
+        audioToggle?.()?.then((result) => {
             if (!result?.ok) console.warn(`[AudioEngine] ${id} chưa phát được:`, result?.reason, result?.detail);
         });
     });
@@ -1071,6 +1079,12 @@ function loadData() {
             if (knob) {
                 knob.value = saved.value;
                 updateKnob(knob);
+                // A22 — khôi phục đồng bộ volume Clap/Laugh vào AudioEngine khi restore giá
+                // trị đã lưu (bị B13 vô tình xoá mất so với A20): để lần play ĐẦU TIÊN (trước
+                // khi user chạm knob) phát đúng âm lượng đang hiển thị trên UI, không lệch với
+                // volume01=1 mặc định của audioEngine.js.
+                if (knob.id === "clapKnob") window.AudioEngine?.setClapVolume(knob.value);
+                if (knob.id === "laughKnob") window.AudioEngine?.setLaughVolume(knob.value);
             }
         });
     }
