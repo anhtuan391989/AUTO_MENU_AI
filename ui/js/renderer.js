@@ -561,7 +561,12 @@ const keySource = {
     // "value" chung cho cả 2 ý nghĩa nữa (đúng yêu cầu boundary mới — xem báo cáo).
     manual: { active: false, selectedKey: null, committedKey: null, deadlineAt: null, tickHandle: null },
     songDb: { active: false, value: null, bpm: null, title: null, artist: null },
-    ai: { value: appState.originalKey, provisional: null }
+    // hasResult: false lúc khởi tạo — value bên dưới CHỈ là placeholder nội bộ để không phá vỡ
+    // các hàm parse "X Major/Minor" ở nơi khác trót gọi trước khi có kết quả AI thật; KHÔNG
+    // được hiển thị/gửi xuống Plugin khi hasResult còn false (xem triggerAiKeyDetect/
+    // refreshKeySourceDisplay/startAiRealtimeLoop — đúng chỗ đang sửa để hết bug "quay lại
+    // G# Minor" khi bấm AUTO DETECT trước khi AI kịp dò lần đầu).
+    ai: { value: appState.originalKey, provisional: null, hasResult: false }
 };
 
 let lastPluginKey = appState.originalKey; // giá trị THẬT đã gửi xuống Plugin lần gần nhất (chống gửi trùng)
@@ -619,10 +624,16 @@ function refreshKeySourceDisplay() {
         // Mục A ("Key tạm"): nếu có ước lượng tạm mới hơn giá trị ĐÃ KHOÁ -> hiện kèm nhãn
         // "đang dò" cho cảm giác tức thì. Giá trị thật dùng để gửi Plugin (keySource.ai.value)
         // KHÔNG đổi ở đây — chỉ đổi hiển thị.
+        // Nếu AI CHƯA có kết quả thật lần nào (hasResult=false) -> keySource.ai.value vẫn là
+        // placeholder khởi tạo, TUYỆT ĐỐI không hiện ra (đúng bug đã sửa ở triggerAiKeyDetect).
         const showProvisional = keySource.ai.provisional && keySource.ai.provisional !== keySource.ai.value;
-        aiKeyDetectLineEl.textContent = showProvisional
-            ? `AI Detect: ${keySource.ai.provisional} (đang dò...)`
-            : `AI Detect: ${keySource.ai.value}`;
+        if (!keySource.ai.hasResult) {
+            aiKeyDetectLineEl.textContent = "AI Detect: đang dò...";
+        } else {
+            aiKeyDetectLineEl.textContent = showProvisional
+                ? `AI Detect: ${keySource.ai.provisional} (đang dò...)`
+                : `AI Detect: ${keySource.ai.value}`;
+        }
 
     }
 
@@ -826,6 +837,7 @@ function startAiRealtimeLoop() {
         window.__keyDetectStopWatcher = null;
 
         keySource.ai.value = result.key;
+        keySource.ai.hasResult = true; // đánh dấu ĐÃ có kết quả AI THẬT — hết placeholder giả
         window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
         refreshKeySourceDisplay();
 
@@ -852,14 +864,21 @@ function triggerAiKeyDetect() {
 
     // "Manual OFF -> Plugin lập tức dùng AI. Không mất dữ liệu. Không Detect lại từ đầu."
     // AI luôn chạy NỀN liên tục suốt lúc Manual bật (startAiRealtimeLoop không bao giờ dừng),
-    // nên keySource.ai.value LUÔN đã có sẵn giá trị mới nhất ngay tại thời điểm này -> áp dụng
-    // NGAY LẬP TỨC, không cần chờ vòng dò tiếp theo. (Khôi phục fix đã bị mất do revert ngoài
-    // ý muốn — xem báo cáo.)
+    // nên keySource.ai.value THƯỜNG đã có sẵn giá trị mới nhất ngay tại thời điểm này -> áp dụng
+    // NGAY LẬP TỨC, không cần chờ vòng dò tiếp theo.
+    //
+    // NGOẠI LỆ bắt buộc phải chặn (bug thật Khói báo cáo): nếu bấm AUTO DETECT ngay sau khi mở
+    // app, TRƯỚC KHI vòng AI kịp hoàn thành dò lần đầu tiên (AI dò có thể mất vài giây),
+    // keySource.ai.value vẫn còn là placeholder khởi tạo ("G# Minor" nội bộ, KHÔNG phải kết quả
+    // dò thật) — áp/gửi giá trị này xuống Plugin là SAI (gửi nhầm key). Phải đợi hasResult=true;
+    // nếu chưa, chỉ đảm bảo vòng dò đang chạy (đã tự chạy nền sẵn) và GIỮ NGUYÊN hiển thị hiện
+    // tại ("Listening..." — mục 12B) — applyActiveKeyToPlugin("AI Detect") sẽ tự được gọi ngay
+    // khi startAiRealtimeLoop() nhận được kết quả thật đầu tiên (xem code phía trên).
     if (keySource.songDb.active) {
 
         applyActiveKeyToPlugin("Song Database");
 
-    } else {
+    } else if (keySource.ai.hasResult) {
 
         applyActiveKeyToPlugin("AI Detect");
 
@@ -1349,7 +1368,11 @@ function updateSilenceUI(isSilent) {
             // Hết im lặng: hiển thị lại đúng giá trị AI hiện có — KHÔNG gọi lại
             // applyActiveKeyToPlugin() ở đây để tránh gửi trùng lệnh xuống Plugin
             // (giá trị chưa chắc đã đổi, chỉ là hiển thị đang được khôi phục).
-            if (currentKeyElNow) currentKeyElNow.textContent = keySource.ai.value;
+            if (currentKeyElNow) {
+                // Chỉ khôi phục hiển thị bằng keySource.ai.value nếu ĐÃ có kết quả AI thật —
+                // nếu chưa (hasResult=false), giữ nguyên "Listening..." (đúng bug đã sửa).
+                currentKeyElNow.textContent = keySource.ai.hasResult ? keySource.ai.value : "Listening...";
+            }
         }
     }
 
