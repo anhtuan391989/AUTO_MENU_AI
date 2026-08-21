@@ -19,6 +19,137 @@
 loadSetup?.();
 
 /* ==========================================================
+   TASK A20 — SOUND EFFECT ENGINE (Built-in Clap/Laugh, Internal Audio Backend)
+   ----------------------------------------------------------
+   Audio backend NỘI BỘ cho 2 hiệu ứng âm thanh built-in bundle sẵn trong app
+   (Vo-Tay.MP3 = CLAP, Cuoi-Deu.mp3 = LAUGH). Dùng HTMLAudioElement thuần —
+   KHÔNG qua MIDI, KHÔNG qua DAW, KHÔNG qua PluginController/EventBus/Core AI
+   (đúng ranh giới Task A20 mục 5/7). Hoàn toàn tách biệt khỏi AI_CONTROL/
+   ManualState/ManualPriorityGuard/Key/Mod/BPM/BEAT_INPUT_VOLUME/
+   MASTER_OUTPUT_VOLUME.
+
+   Đặt TRỰC TIẾP trong renderer.js (thay vì file riêng trong ui/js/engines/)
+   vì Task A20 yêu cầu KHÔNG được thêm thẻ <script> mới vào ui/index.html —
+   không có cách nạp file riêng nào đảm bảo an toàn 100% (không đổi HTML,
+   không phụ thuộc timing async, không phụ thuộc hành vi global-scope của
+   eval) tốt hơn là khai báo cùng scope với phần code sẽ gọi tới nó.
+
+   State machine (mục 2/3 của task, giống hệt cho cả Clap/Laugh):
+       IDLE --click--> PLAYING --click--> STOP --(tự động)--> IDLE
+       PLAYING --ended (tự chạy hết)--> IDLE
+   STOP và 'ended' đều reset playback position về 0 và không loop.
+   ========================================================== */
+const SoundEffectEngine = (() => {
+
+    // Built-in asset — đường dẫn TƯƠNG ĐỐI tới ui/index.html (Electron loadFile dùng
+    // file:// trỏ thẳng vào ui/index.html cả ở dev lẫn khi đóng gói — xem app/main.js
+    // mainWin.loadFile(...ui/index.html)) nên đường dẫn tương đối này resolve đúng ở
+    // CẢ 2 môi trường mà không cần sửa app/main.js/preload.js. Giữ NGUYÊN tên file gốc
+    // Khói cung cấp (đúng mục 4), đặt trong ui/assets/sounds/ (tách khỏi assets/ gốc ở
+    // repo root vốn dùng cho icon/app assets, không phải audio media).
+    const SOUND_SOURCES = Object.freeze({
+        CLAP: "assets/sounds/Vo-Tay.MP3",
+        LAUGH: "assets/sounds/Cuoi-Deu.mp3"
+    });
+
+    const DEFAULT_VOLUME_0_100 = 40; // khớp defaultValue của clapKnob/laughKnob (knobData bên dưới)
+
+    // Mỗi effect giữ 1 HTMLAudioElement + state IDLE/PLAYING RIÊNG — không chia sẻ bất kỳ
+    // biến nào giữa CLAP và LAUGH (đúng mục 6: volume/playback hoàn toàn độc lập).
+    const effects = {};
+    const listeners = [];
+
+    function notify(effectId, isPlaying) {
+        listeners.forEach((cb) => {
+            try { cb(effectId, isPlaying); } catch (err) { console.error("[SoundEffectEngine] listener lỗi:", err); }
+        });
+    }
+
+    function createEffect(effectId, src) {
+        const audio = new Audio(src);
+        audio.loop = false; // TUYỆT ĐỐI không loop — đúng mục 2/3
+        audio.volume = DEFAULT_VOLUME_0_100 / 100;
+        audio.addEventListener("ended", () => {
+            // Mục 2/3 "File tự chạy hết": PLAYING -> IDLE, reset position về 0, không loop.
+            audio.currentTime = 0;
+            effects[effectId].playing = false;
+            notify(effectId, false);
+        });
+        audio.addEventListener("error", () => {
+            console.error(`[SoundEffectEngine] Lỗi tải/phát ${effectId} (${src}):`, audio.error);
+        });
+        effects[effectId] = { audio, playing: false };
+    }
+
+    Object.keys(SOUND_SOURCES).forEach((id) => createEffect(id, SOUND_SOURCES[id]));
+
+    /**
+     * Toggle play/stop cho 1 effect. Đúng state machine mục 2/3:
+     *   IDLE -> PLAYING: phát từ đầu (currentTime=0), không loop.
+     *   PLAYING -> STOP -> IDLE: dừng ngay, reset currentTime=0, không để lại state playing.
+     *   Bấm lại sau STOP/ended -> luôn phát lại từ đầu.
+     * @param {"CLAP"|"LAUGH"} effectId
+     * @returns {boolean} trạng thái playing SAU khi toggle
+     */
+    function toggle(effectId) {
+        const effect = effects[effectId];
+        if (!effect) {
+            console.error(`[SoundEffectEngine] effect không tồn tại: ${effectId}`);
+            return false;
+        }
+        if (effect.playing) {
+            effect.audio.pause();
+            effect.audio.currentTime = 0;
+            effect.playing = false;
+        } else {
+            effect.audio.currentTime = 0;
+            const playPromise = effect.audio.play();
+            if (playPromise && typeof playPromise.catch === "function") {
+                playPromise.catch((err) => {
+                    console.error(`[SoundEffectEngine] play() ${effectId} lỗi:`, err);
+                    effect.playing = false;
+                    notify(effectId, false);
+                });
+            }
+            effect.playing = true;
+        }
+        notify(effectId, effect.playing);
+        return effect.playing;
+    }
+
+    /**
+     * Set volume cho 1 effect, thang 0-100 (khớp thang knob hiện có) -> tự quy đổi 0-1
+     * cho HTMLAudioElement.volume. Hoàn toàn độc lập giữa CLAP/LAUGH (mục 6).
+     * @param {"CLAP"|"LAUGH"} effectId
+     * @param {number} value0to100
+     */
+    function setVolume(effectId, value0to100) {
+        const effect = effects[effectId];
+        if (!effect) return;
+        const clamped = Math.max(0, Math.min(100, Number(value0to100) || 0));
+        effect.audio.volume = clamped / 100;
+    }
+
+    function isPlaying(effectId) {
+        return !!effects[effectId]?.playing;
+    }
+
+    /**
+     * Đăng ký callback được gọi mỗi khi trạng thái playing của 1 effect đổi — kể cả tự đổi
+     * do 'ended', không chỉ do gọi toggle(). renderer.js dùng callback này để đồng bộ UI
+     * (class "active" của clapPlayBtn/laughPlayBtn) luôn phản ánh ĐÚNG trạng thái audio
+     * thật, thay vì tự toggle mù theo mỗi lần click.
+     * @param {(effectId: "CLAP"|"LAUGH", isPlaying: boolean) => void} callback
+     */
+    function onChange(callback) {
+        if (typeof callback === "function") listeners.push(callback);
+    }
+
+    return { toggle, setVolume, isPlaying, onChange, SOUND_SOURCES };
+
+})();
+
+/* ==========================================================
    1. CLOCK (Cập nhật thời gian thực)
    ========================================================== */
 function updateClock() {
@@ -172,21 +303,12 @@ if (window.electronAPI?.onNowPlayingUnavailable) {
 /* ==========================================================
    2. INITIAL DATA (Dữ liệu mẫu)
    ========================================================== */
-// Yêu cầu Khói: Key/BPM/MOD KHÔNG được hiện dữ liệu mẫu giả (trước đây là "G# Minor"/"128"/
-// "02:15" — dễ gây hiểu nhầm là key/bpm THẬT của 1 bài hát) — phải hiện trạng thái CHỜ TÍN
-// HIỆU ngay từ lúc mở app, cho tới khi có audio thật để dò (xem mục 12B).
-document.getElementById("currentKey").textContent = "Listening...";
-document.getElementById("currentBpm").textContent = "--";
-document.getElementById("modTime").textContent = "--:--";
-// "modStatus"/"modTimeline" có sẵn text demo cứng trong ui/index.html ("G#m → Am") — không
-// được sửa HTML (UI LAYOUT = NO CHANGE), nên ghi đè bằng JS ngay tại đây, cùng chỗ với 3 dòng
-// trên, để không có demo data giả nào lọt ra màn hình dù chỉ 1 khung hình đầu tiên.
-document.getElementById("modStatus").textContent = "Listening...";
-const modTimelineElInit = document.getElementById("modTimeline");
-if (modTimelineElInit) modTimelineElInit.textContent = "--";
+document.getElementById("currentKey").textContent = "G# Minor";
+document.getElementById("currentBpm").textContent = "128";
+document.getElementById("modTime").textContent = "02:15";
 
 const appState = {
-    originalKey: "G# Minor", // baseline nội bộ để tính transpose tương đối — KHÔNG phải giá trị hiển thị
+    originalKey: "G# Minor",
     currentKey: "G# Minor",
     currentBpm: 128,
     autoKeyDetect: true,
@@ -301,35 +423,31 @@ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2"
    5. PLAY BUTTONS (Logic chuyển đổi PLAY/PLAYING)
    ========================================================== */
 const PRESET_SOUND_BTN_TO_ACTION = { clapPlayBtn: "CLAP", laughPlayBtn: "LAUGH" };
-// A22 — SỬA GAP: bản B13 dùng playClap()/playLaugh() (luôn phát lại từ đầu, không dừng được)
-// + btn.classList.toggle("active") MÙ (không phản ánh trạng thái audio thật) — mất đúng hành
-// vi Task A20 đã yêu cầu (click 2 = stop, ended tự về IDLE). Khôi phục: dùng toggleClap()/
-// toggleLaugh() (audioEngine.js, đã thêm lại state machine ở A22) + class "active" do
-// AudioEngine.onClapChange()/onLaughChange() điều khiển — LUÔN phản ánh đúng trạng thái audio
-// thật, kể cả khi tự về IDLE do 'ended' mà không có click nào xảy ra.
-window.AudioEngine?.onClapChange((isPlaying) => {
-    document.getElementById("clapPlayBtn")?.classList.toggle("active", isPlaying);
+// TASK A20 — giờ ĐÃ có Internal Audio Backend thật (SoundEffectEngine, khai báo đầu file).
+// Class "active" của nút KHÔNG còn tự toggle mù theo click nữa — nó được điều khiển bởi
+// SoundEffectEngine.onChange() bên dưới, để LUÔN phản ánh đúng trạng thái audio thật, kể
+// cả khi audio tự kết thúc (event 'ended') mà không có click nào xảy ra (đúng mục 2/3:
+// "ended -> UI trở về IDLE" phải tự xảy ra, không chờ user bấm lại).
+SoundEffectEngine.onChange((effectId, isPlaying) => {
+    const btnId = effectId === "CLAP" ? "clapPlayBtn" : "laughPlayBtn";
+    document.getElementById(btnId)?.classList.toggle("active", isPlaying);
 });
-window.AudioEngine?.onLaughChange((isPlaying) => {
-    document.getElementById("laughPlayBtn")?.classList.toggle("active", isPlaying);
-});
-const PRESET_SOUND_BTN_TO_AUDIO_TOGGLE = { clapPlayBtn: () => window.AudioEngine?.toggleClap(), laughPlayBtn: () => window.AudioEngine?.toggleLaugh() };
 ["clapPlayBtn", "laughPlayBtn"].forEach(id => {
     const btn = document.getElementById(id);
-    // Nối SONG SONG tới executeAction() (MIDI, nếu user tự cấu hình) VÀ tới AudioEngine
-    // (phát file mẫu nội bộ built-in, luôn khả dụng — xem audioEngine.js). Nếu vì lý do gì
-    // đó file không load được, toggleClap()/toggleLaugh() trả NOT_CONFIGURED/PLAYBACK_FAILED
-    // rõ ràng, KHÔNG báo thành công giả — và class "active" sẽ không bật (đúng thực tế).
+    // UI Final v1.0: nút đã chuyển lên hàng Preset với nhãn cố định (CLAP/LAUGH).
+    // TASK A20: click -> SoundEffectEngine.toggle() phát/dừng file built-in NGAY LẬP TỨC,
+    // không qua MIDI/DAW/PluginController (đúng mục 5/7). Giữ SONG SONG lời gọi
+    // executeAction() đã có từ trước (Mục 16/19, actionRegistry.js) — đây là 1 kênh
+    // MIDI-mapping TÙY CHỌN, ĐỘC LẬP với việc phát âm thanh, mặc định NOT_CONFIGURED trừ
+    // khi user tự MIDI Learn trong Setup; không rollback/không sửa hệ thống MIDI/DAW mapping
+    // đã khai báo trước đó (đúng ràng buộc mục 7 "không đụng hệ thống khác").
     btn?.addEventListener("click", () => {
         const actionName = PRESET_SOUND_BTN_TO_ACTION[id];
+        SoundEffectEngine.toggle(actionName);
         if (actionName && window.ActionRegistry?.executeAction) {
             window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[actionName], { reason: "menu-button" })
                 .catch(err => console.error(`[MenuControl] ${actionName} lỗi:`, err));
         }
-        const audioToggle = PRESET_SOUND_BTN_TO_AUDIO_TOGGLE[id];
-        audioToggle?.()?.then((result) => {
-            if (!result?.ok) console.warn(`[AudioEngine] ${id} chưa phát được:`, result?.reason, result?.detail);
-        });
     });
 });
 
@@ -412,6 +530,15 @@ const knobData = [
     { id: "clapKnob", valueId: "clapValue", value: 40, defaultValue: 40 },
     { id: "laughKnob", valueId: "laughValue", value: 40, defaultValue: 40 }
 ];
+
+// TASK A20 — clapKnob/laughKnob đi tới Internal Audio Backend (SoundEffectEngine), KHÔNG
+// qua ActionRegistry/MIDI (KNOB_ID_TO_ACTION bên dưới CỐ TÌNH KHÔNG có 2 knob này — giữ
+// nguyên, không đụng). Khai báo ở top-level (không phải trong closure DOMContentLoaded)
+// để cả dispatchKnobVolume() lẫn loadData() đều dùng chung được 1 map duy nhất.
+const KNOB_ID_TO_SOUND_EFFECT = Object.freeze({
+    clapKnob: "CLAP",
+    laughKnob: "LAUGH"
+});
 
 function updateKnob(k) {
     const knob = document.getElementById(k.id);
@@ -561,12 +688,7 @@ const keySource = {
     // "value" chung cho cả 2 ý nghĩa nữa (đúng yêu cầu boundary mới — xem báo cáo).
     manual: { active: false, selectedKey: null, committedKey: null, deadlineAt: null, tickHandle: null },
     songDb: { active: false, value: null, bpm: null, title: null, artist: null },
-    // hasResult: false lúc khởi tạo — value bên dưới CHỈ là placeholder nội bộ để không phá vỡ
-    // các hàm parse "X Major/Minor" ở nơi khác trót gọi trước khi có kết quả AI thật; KHÔNG
-    // được hiển thị/gửi xuống Plugin khi hasResult còn false (xem triggerAiKeyDetect/
-    // refreshKeySourceDisplay/startAiRealtimeLoop — đúng chỗ đang sửa để hết bug "quay lại
-    // G# Minor" khi bấm AUTO DETECT trước khi AI kịp dò lần đầu).
-    ai: { value: appState.originalKey, provisional: null, hasResult: false }
+    ai: { value: appState.originalKey, provisional: null }
 };
 
 let lastPluginKey = appState.originalKey; // giá trị THẬT đã gửi xuống Plugin lần gần nhất (chống gửi trùng)
@@ -624,16 +746,10 @@ function refreshKeySourceDisplay() {
         // Mục A ("Key tạm"): nếu có ước lượng tạm mới hơn giá trị ĐÃ KHOÁ -> hiện kèm nhãn
         // "đang dò" cho cảm giác tức thì. Giá trị thật dùng để gửi Plugin (keySource.ai.value)
         // KHÔNG đổi ở đây — chỉ đổi hiển thị.
-        // Nếu AI CHƯA có kết quả thật lần nào (hasResult=false) -> keySource.ai.value vẫn là
-        // placeholder khởi tạo, TUYỆT ĐỐI không hiện ra (đúng bug đã sửa ở triggerAiKeyDetect).
         const showProvisional = keySource.ai.provisional && keySource.ai.provisional !== keySource.ai.value;
-        if (!keySource.ai.hasResult) {
-            aiKeyDetectLineEl.textContent = "AI Detect: đang dò...";
-        } else {
-            aiKeyDetectLineEl.textContent = showProvisional
-                ? `AI Detect: ${keySource.ai.provisional} (đang dò...)`
-                : `AI Detect: ${keySource.ai.value}`;
-        }
+        aiKeyDetectLineEl.textContent = showProvisional
+            ? `AI Detect: ${keySource.ai.provisional} (đang dò...)`
+            : `AI Detect: ${keySource.ai.value}`;
 
     }
 
@@ -837,7 +953,6 @@ function startAiRealtimeLoop() {
         window.__keyDetectStopWatcher = null;
 
         keySource.ai.value = result.key;
-        keySource.ai.hasResult = true; // đánh dấu ĐÃ có kết quả AI THẬT — hết placeholder giả
         window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
         refreshKeySourceDisplay();
 
@@ -864,21 +979,14 @@ function triggerAiKeyDetect() {
 
     // "Manual OFF -> Plugin lập tức dùng AI. Không mất dữ liệu. Không Detect lại từ đầu."
     // AI luôn chạy NỀN liên tục suốt lúc Manual bật (startAiRealtimeLoop không bao giờ dừng),
-    // nên keySource.ai.value THƯỜNG đã có sẵn giá trị mới nhất ngay tại thời điểm này -> áp dụng
-    // NGAY LẬP TỨC, không cần chờ vòng dò tiếp theo.
-    //
-    // NGOẠI LỆ bắt buộc phải chặn (bug thật Khói báo cáo): nếu bấm AUTO DETECT ngay sau khi mở
-    // app, TRƯỚC KHI vòng AI kịp hoàn thành dò lần đầu tiên (AI dò có thể mất vài giây),
-    // keySource.ai.value vẫn còn là placeholder khởi tạo ("G# Minor" nội bộ, KHÔNG phải kết quả
-    // dò thật) — áp/gửi giá trị này xuống Plugin là SAI (gửi nhầm key). Phải đợi hasResult=true;
-    // nếu chưa, chỉ đảm bảo vòng dò đang chạy (đã tự chạy nền sẵn) và GIỮ NGUYÊN hiển thị hiện
-    // tại ("Listening..." — mục 12B) — applyActiveKeyToPlugin("AI Detect") sẽ tự được gọi ngay
-    // khi startAiRealtimeLoop() nhận được kết quả thật đầu tiên (xem code phía trên).
+    // nên keySource.ai.value LUÔN đã có sẵn giá trị mới nhất ngay tại thời điểm này -> áp dụng
+    // NGAY LẬP TỨC, không cần chờ vòng dò tiếp theo. (Khôi phục fix đã bị mất do revert ngoài
+    // ý muốn — xem báo cáo.)
     if (keySource.songDb.active) {
 
         applyActiveKeyToPlugin("Song Database");
 
-    } else if (keySource.ai.hasResult) {
+    } else {
 
         applyActiveKeyToPlugin("AI Detect");
 
@@ -1057,11 +1165,11 @@ function loadData() {
     const data = typeof appSettings !== "undefined" ? appSettings.autoMenuData : null;
     if (!data) return;
 
-    // Yêu cầu Khói: Key là giá trị SỐNG (live, do AI/Song Database/Manual quyết định ngay lúc
-    // đang chạy) — KHÔNG phải config tĩnh như DAW/MIDI port. Nếu khôi phục lại đúng chữ đã lưu
-    // từ phiên trước, màn hình sẽ hiện y hệt lỗi đang sửa (key của bài hát CŨ, trước khi có
-    // audio thật ở phiên mới). Cố tình BỎ QUA data.currentKey — để nguyên "Listening..." (đã
-    // set ở mục 2) cho tới khi có tín hiệu audio thật/Manual/Song Database thật của phiên này.
+    if (data.currentKey) {
+        const el = document.getElementById("currentKey");
+        if (el) el.textContent = data.currentKey;
+        originalKey = data.currentKey;
+    }
 
     if (data.tone) {
         const el = document.getElementById("toneSelector");
@@ -1107,12 +1215,15 @@ function loadData() {
             if (knob) {
                 knob.value = saved.value;
                 updateKnob(knob);
-                // A22 — khôi phục đồng bộ volume Clap/Laugh vào AudioEngine khi restore giá
-                // trị đã lưu (bị B13 vô tình xoá mất so với A20): để lần play ĐẦU TIÊN (trước
-                // khi user chạm knob) phát đúng âm lượng đang hiển thị trên UI, không lệch với
-                // volume01=1 mặc định của audioEngine.js.
-                if (knob.id === "clapKnob") window.AudioEngine?.setClapVolume(knob.value);
-                if (knob.id === "laughKnob") window.AudioEngine?.setLaughVolume(knob.value);
+                // TASK A20 — đồng bộ ngay volume Clap/Laugh vào SoundEffectEngine khi khôi
+                // phục giá trị đã lưu, để lần play ĐẦU TIÊN (trước khi user chạm knob) phát
+                // đúng âm lượng đang hiển thị trên UI, không bị lệch với DEFAULT_VOLUME_0_100.
+                if (typeof KNOB_ID_TO_SOUND_EFFECT !== "undefined" && typeof SoundEffectEngine !== "undefined") {
+                    const soundEffectId = KNOB_ID_TO_SOUND_EFFECT[knob.id];
+                    if (soundEffectId) {
+                        SoundEffectEngine.setVolume(soundEffectId, knob.value);
+                    }
+                }
             }
         });
     }
@@ -1317,80 +1428,6 @@ function updateSongPosition() {
 setInterval(updateSongPosition, 1000);
 
 /* ==========================================================
-   12B. TRẠNG THÁI CHỜ TÍN HIỆU ("Listening...") — Key/BPM/MOD
-   -----------------------------------------------------------
-   Yêu cầu Khói: khi KHÔNG có âm thanh (im lặng), Key/BPM/MOD không được
-   tiếp tục hiển thị giá trị CŨ (của bài hát/đoạn nhạc trước) như đang
-   "đứng hình" — phải chuyển sang trạng thái chờ rõ ràng "Listening...".
-
-   KHÔNG tạo engine mới, KHÔNG đụng keyEngine.js/bpmEngine.js/modEngine.js —
-   chỉ đọc lại đúng `vuPercent` mà BPMEngine.onLevel() đã tính sẵn (mục 13
-   bên dưới, đã tồn tại từ trước) để tự suy ra "có đang im lặng kéo dài hay
-   không", thuần ở tầng hiển thị (UI), không ảnh hưởng logic dò Key/BPM/Mod
-   thật bên trong 3 engine.
-
-   Tôn trọng đúng ranh giới ưu tiên đã có (mục 7B):
-     - Key: CHỈ ghi đè hiển thị khi nguồn đang active là "ai" — không đụng
-       Manual Override hay Song Database (2 nguồn đó không phụ thuộc âm
-       lượng tức thời, không được che bởi "Listening...").
-     - Mod: CHỈ ghi đè khi KHÔNG đang Manual Override (isManualOverrideActive()).
-     - BPM: không có khái niệm Manual override -> luôn phản ánh im lặng thật;
-       khi hết im lặng, BPMEngine.onUpdate(bpm) đã có sẵn TỰ ghi đè giá trị
-       thật ngay khi có kết quả mới — không cần thêm code "khôi phục" ở đây.
-   ========================================================== */
-const SILENCE_VU_THRESHOLD = 2;      // % — dưới ngưỡng này coi là không có tín hiệu đáng kể
-const SILENCE_DURATION_MS = 1500;    // phải im lặng LIÊN TỤC bằng này mới chuyển sang "Listening..."
-let lastLoudAt = Date.now();
-let audioSilent = false;
-
-function updateSilenceUI(isSilent) {
-    if (isSilent === audioSilent) return; // không ghi DOM thừa mỗi frame — chỉ ghi khi thực sự đổi trạng thái
-    audioSilent = isSilent;
-
-    const bpmEl1 = document.getElementById("currentBpm");
-    const bpmEl2 = document.getElementById("bpmValue");
-    if (audioSilent) {
-        if (bpmEl1) bpmEl1.textContent = "Listening...";
-        if (bpmEl2) bpmEl2.textContent = "Listening...";
-    }
-
-    if (audioSilent && !isManualOverrideActive()) {
-        const modStatusEl = document.getElementById("modStatus");
-        if (modStatusEl) modStatusEl.textContent = "Listening...";
-    }
-
-    if (getActiveSourceName() === "ai") {
-        const currentKeyElNow = document.getElementById("currentKey");
-        if (audioSilent) {
-            if (currentKeyElNow) currentKeyElNow.textContent = "Listening...";
-            if (keyInfoEl) keyInfoEl.textContent = "Đang chờ tín hiệu audio...";
-        } else {
-            // Hết im lặng: hiển thị lại đúng giá trị AI hiện có — KHÔNG gọi lại
-            // applyActiveKeyToPlugin() ở đây để tránh gửi trùng lệnh xuống Plugin
-            // (giá trị chưa chắc đã đổi, chỉ là hiển thị đang được khôi phục).
-            if (currentKeyElNow) {
-                // Chỉ khôi phục hiển thị bằng keySource.ai.value nếu ĐÃ có kết quả AI thật —
-                // nếu chưa (hasResult=false), giữ nguyên "Listening..." (đúng bug đã sửa).
-                currentKeyElNow.textContent = keySource.ai.hasResult ? keySource.ai.value : "Listening...";
-            }
-        }
-    }
-
-    refreshKeySourceDisplay();
-}
-
-// Gọi từ BPMEngine.onLevel() (mục 13 bên dưới) mỗi khi có dữ liệu mức âm lượng mới.
-function trackSilenceFromLevel(vuPercent) {
-    const now = Date.now();
-    if (vuPercent > SILENCE_VU_THRESHOLD) {
-        lastLoudAt = now;
-        if (audioSilent) updateSilenceUI(false);
-    } else if (!audioSilent && (now - lastLoudAt) >= SILENCE_DURATION_MS) {
-        updateSilenceUI(true);
-    }
-}
-
-/* ==========================================================
    13. AUDIO ENGINE — khởi tạo audio dùng chung, giao việc cho 3 engine riêng
    -----------------------------------------------------------
    renderer.js CHỈ lo phần chung bắt buộc phải làm 1 LẦN (xin quyền
@@ -1545,7 +1582,6 @@ async function startAudioMonitor() {
             if (meter) meter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
             __debugLogAudioLevel(bassEnergy, localAvg, maxByte); // <-- DEBUG TẠM THỜI (vẫn log flux/BPM như cũ)
             __debugLogVuLevel(rms, dbfs, vuPercent, peak);       // <-- DEBUG TẠM THỜI (log RMS/dBFS/peak để calibrate)
-            trackSilenceFromLevel(vuPercent); // mục 12B — Key/BPM/MOD tự chuyển "Listening..." khi im lặng kéo dài
         });
 
         KeyEngine.onLevel(() => {
@@ -1724,17 +1760,13 @@ document.addEventListener("DOMContentLoaded", () => {
     setStatus("dot-daw", "offline");
     setStatus("dot-autotune", "offline");
     updateOnlineStatus();
-    // updateNextModTime() ĐÃ BỊ BỎ GỌI — nó đọc từ `modTimeline` (mảng khai báo ở mục 2), vốn
-    // là dữ liệu lịch mod GIẢ còn sót lại từ hệ thống dự đoán cũ đã bị xoá (xem comment tại khai
-    // báo modTimeline/updateModInfo). Gọi nó sẽ ghi đè "--:--" (mục 2) bằng "02:15" giả — đúng
-    // lỗi Khói đang yêu cầu sửa. modTime giữ nguyên "--:--" cho tới khi có dữ liệu mod THẬT.
+    updateNextModTime();
     updateCacheDot();
     checkAllSystems();
     loadData();
 
-    // Yêu cầu Khói: bỏ dữ liệu minh hoạ giả ("02:15", "G# Minor -> C# Minor") — trước đây dòng
-    // này tự chạy ở MỌI lần mở app, đè lên cả "Listening..." vừa set lẫn dữ liệu loadData() vừa
-    // khôi phục, khiến MOD luôn hiện 1 ví dụ giả thay vì trạng thái chờ tín hiệu thật.
+    // Ví dụ minh hoạ mod info ban đầu
+    updateModInfo("02:15", "G# Minor", "C# Minor", 5);
 
     // 1. Khởi tạo Knobs — dùng 1 cặp mousemove/mouseup chung cho toàn bộ knob
     let activeKnob = null;
@@ -1751,22 +1783,28 @@ document.addEventListener("DOMContentLoaded", () => {
         retune2: "RETUNE_SPEED_MIC2",
         musicKnob: "BEAT_INPUT_VOLUME",
         masterKnob: "MASTER_OUTPUT_VOLUME",
-        // clapKnob/laughKnob CỐ TÌNH KHÔNG có trong map MIDI này — xem KNOB_ID_TO_AUDIO_ENGINE
-        // bên dưới (TASK B13): bằng chứng (xlsx "trên Menu, file đi kèm trong menu") xác nhận
-        // target là audio engine NỘI BỘ, không phải MIDI/DAW.
-    };
-    // TASK B13 — Clap/Laugh Volume đi qua backend NỘI BỘ (ui/js/audioEngine.js), TÁCH BIỆT
-    // hoàn toàn khỏi đường MIDI ở trên — đúng bằng chứng đã có, không nối nhầm.
-    const KNOB_ID_TO_AUDIO_ENGINE = {
-        clapKnob: (v) => window.AudioEngine?.setClapVolume(v),
-        laughKnob: (v) => window.AudioEngine?.setLaughVolume(v),
+        // TASK B12 — clapKnob/laughKnob CỐ TÌNH KHÔNG có trong map này: bằng chứng (xlsx
+        // tham chiếu "Âm lượng ... trên Menu, file đi kèm trong menu") chỉ ra target là
+        // audio engine NỘI BỘ (phát file mẫu bundled), KHÔNG phải MIDI/DAW — nối vào dispatch
+        // MIDI ở đây sẽ SAI theo đúng bằng chứng đã có (xem TASK_B6_REPORT.md/B5). Audio
+        // engine nội bộ chưa tồn tại trong repo — BLOCKED, không tự bịa hướng khác.
     };
     function dispatchKnobVolume(knobId, value) {
-        const audioSetter = KNOB_ID_TO_AUDIO_ENGINE[knobId];
-        if (audioSetter) {
-            audioSetter(value); // đồng bộ, không cần await — chỉ set thuộc tính .volume
-            return;
+        // TASK A20 — clapKnob/laughKnob: set volume THẲNG vào SoundEffectEngine (Internal
+        // Audio Backend), độc lập hoàn toàn với nhánh MIDI bên dưới (mục 6/7). Guard bằng
+        // typeof (không phải !window...) vì KNOB_ID_TO_SOUND_EFFECT/SoundEffectEngine là
+        // biến top-level cùng file, không phải property của window — typeof tránh
+        // ReferenceError khi hàm này được trích xuất chạy độc lập (vd trong test sandbox
+        // KnobBeatMaster.verify.js) mà không kéo theo 2 khai báo đó. Không return sớm ở đây
+        // vì clapKnob/laughKnob không có trong KNOB_ID_TO_ACTION nên nhánh MIDI phía dưới tự
+        // nhiên no-op cho chúng — không cần if/else lồng nhau.
+        if (typeof KNOB_ID_TO_SOUND_EFFECT !== "undefined" && typeof SoundEffectEngine !== "undefined") {
+            const soundEffectId = KNOB_ID_TO_SOUND_EFFECT[knobId];
+            if (soundEffectId) {
+                SoundEffectEngine.setVolume(soundEffectId, value);
+            }
         }
+
         const actionName = KNOB_ID_TO_ACTION[knobId];
         if (!actionName || !window.ActionRegistry?.executeAction) return;
         // Không await — đây là handler UI tần suất cao (wheel/mousemove), không được chặn vẽ
@@ -1777,11 +1815,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     knobData.forEach(k => {
         updateKnob(k);
-        // TASK B13 — CHỈ đồng bộ AudioEngine (Clap/Laugh) với giá trị knob đã LOAD ngay lúc
-        // khởi tạo — tránh phát ở volume mặc định sai lệch với số đang hiển thị trên UI. CỐ Ý
-        // KHÔNG áp dụng cho Beat/Master/Retune (đường MIDI) để không đổi hành vi đã có từ B6/B7
-        // (vốn chỉ dispatch khi user thực sự tương tác, không dispatch lúc khởi tạo).
-        if (KNOB_ID_TO_AUDIO_ENGINE[k.id]) dispatchKnobVolume(k.id, k.value);
         const knob = document.getElementById(k.id);
         if (!knob) return;
 
