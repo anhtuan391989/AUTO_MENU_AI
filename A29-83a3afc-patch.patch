@@ -1,0 +1,73 @@
+From 83a3afcbf9f8f2b844f41b87169c7c04eb8fd8d4 Mon Sep 17 00:00:00 2001
+From: Claude A <claude-a@anthropic.local>
+Date: Sat, 22 Aug 2026 16:14:51 +0000
+Subject: [PATCH] Claude A: A29 - Setup calibration and stale UI cleanup
+
+---
+ ui/setup.html | 36 +++++++++++++++++++++++-------------
+ 1 file changed, 23 insertions(+), 13 deletions(-)
+
+diff --git a/ui/setup.html b/ui/setup.html
+index aae6643..c826c9a 100644
+--- a/ui/setup.html
++++ b/ui/setup.html
+@@ -306,18 +306,14 @@
+                 </div>
+ 
+                 <div class="panel-card">
+-                    <div class="panel-card-title">MIDI Learn <span class="badge badge-unwired">Chưa có Engine Input</span></div>
+-                    <p class="hint-text">Setup chỉ GỬI MIDI ra (Web MIDI Output). Chưa có Driver lắng nghe MIDI Input từ
+-                        hardware nên chưa thể "xoay Knob → tự nhận CC". Vị trí UI đặt sẵn, chờ nối Driver.</p>
+-                    <button class="setup-btn" disabled>🎯 Bắt đầu Learn (chưa khả dụng)</button>
+-                </div>
+-
+-                <div class="panel-card">
+-                    <div class="panel-card-title">🖱 Mouse Control <span class="badge badge-live" id="mouseControlBadge">ON</span></div>
+-                    <p class="hint-text">Công tắc này CHỈ áp dụng cho "DAW Action Mapping" ngay bên dưới (Play/Stop/Record
+-                        bằng cách tự click chuột). <b>Không ảnh hưởng</b> tới đường click chuột dự phòng sẵn có của
+-                        Auto-Tune/Key/Manual (đường đó độc lập hoàn toàn, luôn hoạt động bất kể công tắc này ON hay OFF).</p>
+-                    <button id="btnMouseControlToggle" class="setup-btn">Tắt Mouse Control</button>
++                    <div class="panel-card-title">MIDI Learn (mục lưu trữ cũ) <span class="badge badge-warn">Đã gộp vào panel "MIDI Learn" phía trên</span></div>
++                    <p class="hint-text">A29 — text cũ ở đây ghi "chưa có Engine Input" ĐÃ LỖI THỜI: từ Task A26, Setup
++                        đã có Driver lắng nghe MIDI Input thật (Web MIDI API), đọc đúng Note/CC/Channel/Value khi xoay
++                        Knob — xem panel "🎯 MIDI Learn" ngay phía trên (badge "Thật — đọc tín hiệu Input thật"), đó là
++                        nơi duy nhất còn hoạt động. Nút bên dưới đây chưa từng được nối vào bất kỳ handler nào
++                        (không có id, không được backend dùng) nên giữ nguyên trạng thái disabled, không tự bật lên
++                        giả PASS — chỉ sửa lại text cho đúng sự thật, không xoá control.</p>
++                    <button class="setup-btn" disabled>🎯 (Đã thay thế bởi panel phía trên)</button>
+                 </div>
+ 
+                 <div class="panel-card">
+@@ -328,7 +324,9 @@
+                         sau). Đây là lối dự phòng bằng CHUỘT, <b>độc lập</b> với đường MIDI Input → Studio One Transport
+                         đã có sẵn ở mục "MIDI Input"/"Sơ đồ nhóm Mapping" phía trên (đường đó không đi qua Capture toạ
+                         độ này). Nếu đã cấu hình MIDI Output riêng cho action này (chưa có UI ở bản này), MIDI sẽ được
+-                        ưu tiên dùng trước, chuột chỉ là dự phòng.</p>
++                        ưu tiên dùng trước, chuột chỉ là dự phòng. <b>Công tắc bật/tắt tính năng click chuột này (Mouse
++                        Control) đã được chuyển sang mục "Calibration"</b> (A29) — vì đó là nơi quản lý toạ độ/click
++                        point, không còn nằm ở mục MIDI.</p>
+                     <div class="placeholder-grid">
+                         <label class="ph-field">DAW_PLAY<button id="btnCaptureDawPlay" class="setup-btn">🎯 Capture toạ độ</button></label>
+                         <label class="ph-field">DAW_STOP<button id="btnCaptureDawStop" class="setup-btn">🎯 Capture toạ độ</button></label>
+@@ -611,6 +609,18 @@
+                     MIDI, phím tắt hoặc API. Ưu tiên cấu hình ở mục <b>MIDI</b> trước. Không popup.
+                 </div>
+ 
++                <!-- A29 — Mouse Control chuyển từ mục MIDI sang đây (Calibration là nơi quản lý tọa độ/click
++                     point/mapping vị trí chuột). Giữ nguyên id/handler (btnMouseControlToggle, mouseControlBadge)
++                     — không đổi logic, chỉ đổi vị trí UI. -->
++                <div class="panel-card">
++                    <div class="panel-card-title">🖱 Mouse Control <span class="badge badge-live" id="mouseControlBadge">ON</span></div>
++                    <p class="hint-text">Công tắc này CHỈ áp dụng cho "DAW Action Mapping" ở mục <b>MIDI</b> (Play/Stop/
++                        Record bằng cách tự click chuột theo toạ độ đã capture bên dưới). <b>Không ảnh hưởng</b> tới
++                        đường click chuột dự phòng sẵn có của Auto-Tune/Key/Manual (đường đó độc lập hoàn toàn, luôn
++                        hoạt động bất kể công tắc này ON hay OFF).</p>
++                    <button id="btnMouseControlToggle" class="setup-btn">Tắt Mouse Control</button>
++                </div>
++
+                 <div class="panel-card">
+                     <div class="panel-card-title">🎯 DAW / Plugin Auto-Tune Coordinate
+                         <span class="badge" id="calibStatusBadge">—</span>
+-- 
+2.43.0
+
