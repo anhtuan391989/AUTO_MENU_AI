@@ -2,10 +2,16 @@
    Dùng navigator.requestMIDIAccess() (qua getMidiAccess() đã có sẵn trong appSettings.js) để:
    1) liệt kê INPUT thật + trạng thái Connected/Disconnected thật (input.state)
    2) MIDI Learn thật: lắng nghe input.onmidimessage, đọc đúng Note/CC/Channel/Value vừa nhận
-   3) Lưu Mapping cục bộ (trigger -> tên action) qua setSetting/getSetting đã có sẵn — CHỈ LƯU,
-      KHÔNG THỰC THI. Thực thi (bấm nút Menu / gửi lệnh DAW / Plugin thật) cần CommandEngine nối
-      vào main.js (xem core/command-engine-js/ — phát hiện tồn tại nhưng chưa được require ở đâu
-      trong app đang chạy) — nằm ngoài phạm vi sửa Setup UI, không tự ý làm ở đây. */
+   3) Lưu Mapping cục bộ (trigger -> tên action) qua setSetting/getSetting đã có sẵn.
+
+   TASK A26 — cập nhật comment (bản cũ ghi "CommandEngine chưa được require ở đâu trong app
+   đang chạy" — ĐÃ LỖI THỜI, xác nhận lại: app/main.js dòng ~92 đã
+   `require("../core/command-engine-js/runtime")` và gọi `CommandRuntime.start()` trong
+   `app.whenReady()` từ trước). Thực thi mapping daw:play/daw:stop/daw:record ĐÃ dispatch thật
+   qua CommandRuntime (đọc đúng `midiMappingsV1` — cùng key module này ghi). Các nhóm mapping
+   khác (Menu/Preset/Key-Mod/Plugin) Learn+Save được nhưng KHÔNG có capability dispatch tương
+   ứng trong capabilityRegistry.js — đây là tính năng CHƯA XÂY (Coming Soon hợp lệ), không phải
+   dây đứt cần nối, xem báo cáo Task A26 mục 3C. */
 (function () {
     const MAPPING_KEY = "midiMappingsV1"; // lưu trong appSettings, không đụng key cũ nào
     let learnActive = false;
@@ -53,7 +59,18 @@
                 opt.textContent = `${inp.name} (${inp.state})`;
                 inputSelect.appendChild(opt);
             });
-            if (prevValue) inputSelect.value = prevValue;
+            if (prevValue) {
+                inputSelect.value = prevValue;
+            } else if (typeof getSetting === "function") {
+                // TASK A26 — lần đầu mở Setup (chưa có prevValue trong DOM), khôi phục lựa chọn
+                // đã lưu từ phiên trước qua TÊN thiết bị (midiInputPort) — vì Web MIDI `.id` có
+                // thể đổi giữa các lần cắm lại/khởi động, chỉ TÊN mới ổn định để so khớp.
+                const savedName = getSetting("midiInputPort");
+                if (savedName) {
+                    const match = inputs.find((inp) => inp.name === savedName);
+                    if (match) inputSelect.value = match.id;
+                }
+            }
 
             if (inputs.length === 0) {
                 if (inputStatus) inputStatus.textContent = "Không phát hiện MIDI Input nào đang cắm.";
@@ -247,12 +264,36 @@
         setTimeout(() => { if (saveBtn) saveBtn.textContent = "💾 Lưu Mapping"; }, 1200);
     }
 
-    const { learnBtn, cancelBtn, clearBtn, saveBtn, inputSelect } = els();
-    learnBtn?.addEventListener("click", startLearn);
-    cancelBtn?.addEventListener("click", cancelLearn);
-    clearBtn?.addEventListener("click", clearLearnResult);
-    saveBtn?.addEventListener("click", saveLearnedMapping);
-    inputSelect?.addEventListener("change", cancelLearn);
+// TASK A26 — Setup scope: dropdown chọn MIDI Input CHỈ dùng để chọn thiết bị lắng nghe cho
+// UX "Learn" (bấm nút, xoay knob controller để tự nhận Note/CC) — nhưng KHÔNG có mapping
+// storage nào lưu lựa chọn này thành `midiInputPort` (setting mà CommandRuntime thật ở main
+// process dùng để mở easymidi.Input() — xem core/command-engine-js/runtime.js
+// resolveInputPortName(), TASK B2). Trước đây engine chỉ fallback sang `midiOutputPort`, đúng
+// với đa số trường hợp 1 thiết bị 2 chiều, nhưng SAI nếu user có 2 thiết bị MIDI riêng cho
+// Input/Output. Nối lại: khi đổi dropdown, lưu TÊN thiết bị (easymidi khớp theo tên, không phải
+// Web MIDI id) vào `midiInputPort`, rồi notifySetupChanged() để CommandRuntime.reloadMappings()
+// mở lại đúng Input port ngay, không cần khởi động lại app.
+async function persistSelectedInputPort() {
+    const { inputSelect } = els();
+    if (!inputSelect || !inputSelect.value) return;
+    try {
+        const access = await getMidiAccess();
+        const input = access.inputs.get(inputSelect.value);
+        if (input && typeof setSetting === "function") {
+            setSetting("midiInputPort", input.name);
+            window.electronAPI?.notifySetupChanged?.();
+        }
+    } catch (err) {
+        console.error("persistSelectedInputPort() lỗi:", err);
+    }
+}
+
+const { learnBtn, cancelBtn, clearBtn, saveBtn, inputSelect } = els();
+learnBtn?.addEventListener("click", startLearn);
+cancelBtn?.addEventListener("click", cancelLearn);
+clearBtn?.addEventListener("click", clearLearnResult);
+saveBtn?.addEventListener("click", saveLearnedMapping);
+inputSelect?.addEventListener("change", () => { cancelLearn(); persistSelectedInputPort(); });
 
     window.addEventListener("load", () => {
         setTimeout(() => {

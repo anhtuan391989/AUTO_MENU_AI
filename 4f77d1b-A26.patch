@@ -1,0 +1,178 @@
+From 4f77d1b040dcc641739d38e573341dda4e05131f Mon Sep 17 00:00:00 2001
+From: Claude A <claude-a@anthropic.local>
+Date: Sat, 22 Aug 2026 09:59:01 +0000
+Subject: [PATCH] Claude A: Task A26 - noi lai MIDI Input port selection ->
+ midiInputPort setting
+
+A26_ORIGIN_MAIN_SHA = b139783e4a9b371eab82e55a81704567d54bf2d0
+
+PHAM VI: chi sua ui/js/setupMidiInput.js (Setup MIDI Input Learn UI).
+KHONG dung keyEngine.js/modEngine.js/BPM engine/Manual Key/Manual MOD/
+ManualPriorityGuard/ControlSource/ui/index.html/ui/setup.html (khong doi
+UI layout).
+
+CODE GAP THAT PHAT HIEN (khop dung phan loai task: "co mapping storage
+nhung chua dispatch -> PHAI noi"): dropdown chon MIDI Input trong Setup
+CHI dung cho UX "Learn" (lang nghe tam thoi de bat Note/CC khi user xoay
+knob) nhung KHONG luu lua chon nay thanh setting `midiInputPort` - setting
+ma CommandRuntime THAT o main process dung de mo easymidi.Input() (xem
+core/command-engine-js/runtime.js, resolveInputPortName()). Truoc day
+engine chi fallback sang `midiOutputPort`, dung voi da so truong hop 1
+thiet bi 2 chieu, nhung SAI neu user co 2 thiet bi MIDI rieng cho
+Input/Output - luc do khong co cach nao tu Setup UI de chi dinh dung
+thiet bi Input can dung.
+
+FIX:
+1. Khi doi dropdown Input, luu TEN thiet bi (khong phai Web MIDI id - vi
+   easymidi khop theo ten) vao midiInputPort qua setSetting(), roi goi
+   notifySetupChanged() (co san) de CommandRuntime.reloadMappings() mo
+   lai dung Input port ngay, khong can khoi dong lai app.
+2. Khi mo lai Setup (session moi, chua co gia tri DOM cu), tu khoi phuc
+   dung lua chon da luu bang cach so khop TEN thiet bi (Web MIDI .id co
+   the doi giua cac lan cam lai, chi TEN moi on dinh).
+3. Sua comment dau file DA LOI THOI (ghi "CommandEngine chua duoc require
+   o dau trong app dang chay" - xac nhan lai: app/main.js dong 92 DA
+   require + CommandRuntime.start() tu truoc). Comment sai nay khong anh
+   huong hanh vi, nhung gay hieu nham khi audit (chinh toi luc dau cung
+   suyt hieu nham la co code gap o day). Sua lai cho dung thuc te, khong
+   doi hanh vi gi.
+
+PHAT HIEN KHAC (khong sua, dung phan loai task):
+- Panel "MIDI Learn (chua kha dung)" (ui/setup.html dong ~308-313) voi
+  chu "chua co Driver lang nghe MIDI Input" - UI_STALE, khong phai CODE
+  GAP (panel MIDI Input THAT o tren da hoat dong dung). Khong sua vi
+  UI LAYOUT = NO CHANGE.
+- Cac nhom MIDI Learn khac ngoai "DAW Control: Play/Stop/Record" (Menu/
+  Preset/Key-Mod/Plugin) - Learn+Save duoc nhung KHONG co capability
+  dispatch tuong ung trong capabilityRegistry.js. Day la tinh nang CHUA
+  XAY (Coming Soon hop le, tu UI da ghi ro "chi minh hoa khai niem"),
+  KHONG phai day dut can noi - xay dung day du se can them dispatch
+  engine moi trong core/command-engine-js/ (pham vi lon hon 1 fix Setup
+  don gian), KHONG lam trong A26.
+- VST2 "Cai dat kha dung - chua noi Mapping": day la PLUGIN INSTALLER
+  (tai/cai VST2 bundle), khong lien quan MIDI mapping infrastructure -
+  OUT_OF_SCOPE cho task nay.
+- Desktop Audio/MIDI Clock/DAW khac/Melodyne/SoundShifter/VST3 - Coming
+  Soon hop le, khong co backend, dung nhu badge da ghi trung thuc.
+
+DA XAC NHAN (khong can sua, da hoan chinh tu truoc):
+- DAW selection -> setSetting -> saveSetup() -> IPC that
+  (load/save-settings-sync) -> file -> runtime doc lai qua getSetting().
+- MIDI Output Mapping: DAW -> Action -> CC/Note/Channel -> persistence ->
+  runtime dispatch qua actionRegistry.js - day du cho tat ca action (Beat/
+  Master/Retune/Preset/Monitor/Clap/Laugh), khong hardcode CC/Note nao,
+  NOT_CONFIGURED trung thuc khi chua cau hinh.
+- MIDI Input Learn (daw:play/stop/record): dispatch THAT qua CommandRuntime
+  (doc dung midiMappingsV1), IPC setup-changed -> reloadMappings() hoat
+  dong dung, khong can restart app.
+- AUTO MENU AI virtual port: ensureAutoMenuAiPort() (core/command-engine-js/
+  runtime.js) kiem tra port da ton tai truoc khi tao (khong duplicate), tu
+  connect luc app.whenReady(), khong bao gio bao CONNECTED gia.
+
+VERIFIED (vm sandbox, chay that setupMidiInput.js da sua):
+- Chon Input trong dropdown -> midiInputPort luu dung TEN thiet bi,
+  notifySetupChanged() duoc goi.
+- Mo lai Setup (session moi) voi midiInputPort da luu -> dropdown tu khoi
+  phuc dung lua chon (khop theo ten, khong phai id).
+
+Regression: 0 NEW FAIL that (28 test suite, 2 fail la self-check "khong
+sua file cu" cua AutoSongCollector/NowPlayingResolver - bat buoc FAIL vi
+task nay dung la sua 1 file cu). Rieng Key/MOD (A25): KeyEngineV2,
+ConfidenceV2, MarginEngine, MarginLogger, ModEngineV2, StabilityTracker,
+Top1StabilityTimer, TelemetryLogger - TAT CA PASS, khong bi anh huong
+(dung nhu yeu cau, khong dung file nao trong nhom bi khoa).
+---
+ ui/js/setupMidiInput.js | 63 ++++++++++++++++++++++++++++++++++-------
+ 1 file changed, 52 insertions(+), 11 deletions(-)
+
+diff --git a/ui/js/setupMidiInput.js b/ui/js/setupMidiInput.js
+index c079d32..5e67a30 100644
+--- a/ui/js/setupMidiInput.js
++++ b/ui/js/setupMidiInput.js
+@@ -2,10 +2,16 @@
+    Dùng navigator.requestMIDIAccess() (qua getMidiAccess() đã có sẵn trong appSettings.js) để:
+    1) liệt kê INPUT thật + trạng thái Connected/Disconnected thật (input.state)
+    2) MIDI Learn thật: lắng nghe input.onmidimessage, đọc đúng Note/CC/Channel/Value vừa nhận
+-   3) Lưu Mapping cục bộ (trigger -> tên action) qua setSetting/getSetting đã có sẵn — CHỈ LƯU,
+-      KHÔNG THỰC THI. Thực thi (bấm nút Menu / gửi lệnh DAW / Plugin thật) cần CommandEngine nối
+-      vào main.js (xem core/command-engine-js/ — phát hiện tồn tại nhưng chưa được require ở đâu
+-      trong app đang chạy) — nằm ngoài phạm vi sửa Setup UI, không tự ý làm ở đây. */
++   3) Lưu Mapping cục bộ (trigger -> tên action) qua setSetting/getSetting đã có sẵn.
++
++   TASK A26 — cập nhật comment (bản cũ ghi "CommandEngine chưa được require ở đâu trong app
++   đang chạy" — ĐÃ LỖI THỜI, xác nhận lại: app/main.js dòng ~92 đã
++   `require("../core/command-engine-js/runtime")` và gọi `CommandRuntime.start()` trong
++   `app.whenReady()` từ trước). Thực thi mapping daw:play/daw:stop/daw:record ĐÃ dispatch thật
++   qua CommandRuntime (đọc đúng `midiMappingsV1` — cùng key module này ghi). Các nhóm mapping
++   khác (Menu/Preset/Key-Mod/Plugin) Learn+Save được nhưng KHÔNG có capability dispatch tương
++   ứng trong capabilityRegistry.js — đây là tính năng CHƯA XÂY (Coming Soon hợp lệ), không phải
++   dây đứt cần nối, xem báo cáo Task A26 mục 3C. */
+ (function () {
+     const MAPPING_KEY = "midiMappingsV1"; // lưu trong appSettings, không đụng key cũ nào
+     let learnActive = false;
+@@ -53,7 +59,18 @@
+                 opt.textContent = `${inp.name} (${inp.state})`;
+                 inputSelect.appendChild(opt);
+             });
+-            if (prevValue) inputSelect.value = prevValue;
++            if (prevValue) {
++                inputSelect.value = prevValue;
++            } else if (typeof getSetting === "function") {
++                // TASK A26 — lần đầu mở Setup (chưa có prevValue trong DOM), khôi phục lựa chọn
++                // đã lưu từ phiên trước qua TÊN thiết bị (midiInputPort) — vì Web MIDI `.id` có
++                // thể đổi giữa các lần cắm lại/khởi động, chỉ TÊN mới ổn định để so khớp.
++                const savedName = getSetting("midiInputPort");
++                if (savedName) {
++                    const match = inputs.find((inp) => inp.name === savedName);
++                    if (match) inputSelect.value = match.id;
++                }
++            }
+ 
+             if (inputs.length === 0) {
+                 if (inputStatus) inputStatus.textContent = "Không phát hiện MIDI Input nào đang cắm.";
+@@ -247,12 +264,36 @@
+         setTimeout(() => { if (saveBtn) saveBtn.textContent = "💾 Lưu Mapping"; }, 1200);
+     }
+ 
+-    const { learnBtn, cancelBtn, clearBtn, saveBtn, inputSelect } = els();
+-    learnBtn?.addEventListener("click", startLearn);
+-    cancelBtn?.addEventListener("click", cancelLearn);
+-    clearBtn?.addEventListener("click", clearLearnResult);
+-    saveBtn?.addEventListener("click", saveLearnedMapping);
+-    inputSelect?.addEventListener("change", cancelLearn);
++// TASK A26 — Setup scope: dropdown chọn MIDI Input CHỈ dùng để chọn thiết bị lắng nghe cho
++// UX "Learn" (bấm nút, xoay knob controller để tự nhận Note/CC) — nhưng KHÔNG có mapping
++// storage nào lưu lựa chọn này thành `midiInputPort` (setting mà CommandRuntime thật ở main
++// process dùng để mở easymidi.Input() — xem core/command-engine-js/runtime.js
++// resolveInputPortName(), TASK B2). Trước đây engine chỉ fallback sang `midiOutputPort`, đúng
++// với đa số trường hợp 1 thiết bị 2 chiều, nhưng SAI nếu user có 2 thiết bị MIDI riêng cho
++// Input/Output. Nối lại: khi đổi dropdown, lưu TÊN thiết bị (easymidi khớp theo tên, không phải
++// Web MIDI id) vào `midiInputPort`, rồi notifySetupChanged() để CommandRuntime.reloadMappings()
++// mở lại đúng Input port ngay, không cần khởi động lại app.
++async function persistSelectedInputPort() {
++    const { inputSelect } = els();
++    if (!inputSelect || !inputSelect.value) return;
++    try {
++        const access = await getMidiAccess();
++        const input = access.inputs.get(inputSelect.value);
++        if (input && typeof setSetting === "function") {
++            setSetting("midiInputPort", input.name);
++            window.electronAPI?.notifySetupChanged?.();
++        }
++    } catch (err) {
++        console.error("persistSelectedInputPort() lỗi:", err);
++    }
++}
++
++const { learnBtn, cancelBtn, clearBtn, saveBtn, inputSelect } = els();
++learnBtn?.addEventListener("click", startLearn);
++cancelBtn?.addEventListener("click", cancelLearn);
++clearBtn?.addEventListener("click", clearLearnResult);
++saveBtn?.addEventListener("click", saveLearnedMapping);
++inputSelect?.addEventListener("change", () => { cancelLearn(); persistSelectedInputPort(); });
+ 
+     window.addEventListener("load", () => {
+         setTimeout(() => {
+-- 
+2.43.0
+
