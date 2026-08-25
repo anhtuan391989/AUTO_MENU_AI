@@ -12,4 +12,4 @@ git commit -m "Auto-sync %date% %time%"
 git push -u origin main
 
 echo Da day du lieu len nhanh main thanh cong!
-timeout /t 5
+timeout /t 10
