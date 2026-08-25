@@ -1,0 +1,15 @@
+{"event":"FIRST_EVIDENCE","frame":3592}
+{"event":"FIRST_PROVISIONAL","frame":3594,"key":"A Minor","confidence":1.4404193783111598}
+{"time":3625.5,"top1":"A# Major","top2":"A# Minor","confidence":1.4644880522821635,"margin":0.010150226776065141,"stability":1,"top1Stable":0,"decisionScore":0.6200252149185492,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"event":"TOP1_CHANGED","from":"A# Major","to":"C# Major","time":3627}
+{"time":3627,"top1":"C# Major","top2":"C# Minor","confidence":1.4584823428725782,"margin":0.05427553244993133,"stability":0.25,"top1Stable":0,"decisionScore":0.6037065261245207,"votes":1,"window":2,"locked":false,"highConfidenceStreak":0}
+{"time":3628.5,"top1":"C# Major","top2":"C# Minor","confidence":1.4470238820608223,"margin":0.0024039081044369137,"stability":0.4444444444444444,"top1Stable":1.501,"decisionScore":0.48682232956467464,"votes":2,"window":3,"locked":false,"highConfidenceStreak":0}
+{"event":"TOP1_CHANGED","from":"C# Major","to":"B Major","time":3630}
+{"time":3630,"top1":"B Major","top2":"B Minor","confidence":1.4510744863400515,"margin":0.007679325661720249,"stability":0.25,"top1Stable":0,"decisionScore":0.46013041185420445,"votes":2,"window":4,"locked":false,"highConfidenceStreak":0}
+{"time":3631.5,"top1":"B Major","top2":"B Minor","confidence":1.43119150517107,"margin":0.024823465961347324,"stability":0.16000000000000003,"top1Stable":1.501,"decisionScore":0.4972204796198973,"votes":2,"window":5,"locked":false,"highConfidenceStreak":0}
+{"event":"TOP1_CHANGED","from":"B Major","to":"A# Minor","time":3633}
+{"time":3633,"top1":"A# Minor","top2":"B Major","confidence":1.4731863917003931,"margin":0.09829330914138157,"stability":0.1111111111111111,"top1Stable":0,"decisionScore":0.7735117354590908,"votes":2,"window":6,"locked":false,"highConfidenceStreak":0}
+{"event":"LOCK","time":3633.6,"key":"A# Minor","decisionScore":0.9791291454611439,"reason":"fast-path-A35","frame":4225,"framesToStable":4225,"firstEvidenceAt":1787634217729,"firstEvidenceFrame":3592,"firstProvisionalAt":1787634217760,"firstProvisionalFrame":3594}
+{"event":"LOCK","time":2,"key":"A# Minor","decisionScore":0.8230241280693603,"reason":"fast-path-A35","frame":4375,"framesToStable":4375,"firstEvidenceAt":1787634217729,"firstEvidenceFrame":3592,"firstProvisionalAt":1787634217760,"firstProvisionalFrame":3594}
+{"time":1.5,"top1":"A# Minor","top2":"A# Major","confidence":1.5209135210760223,"margin":0.12700012602859423,"stability":1,"top1Stable":4.103,"decisionScore":0.8749489865250359,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"event":"LOCK","time":2.4,"key":"A# Minor","decisionScore":0.8086059014556153,"reason":"fast-path-A35","frame":4555,"framesToStable":4555,"firstEvidenceAt":1787634217729,"firstEvidenceFrame":3592,"firstProvisionalAt":1787634217760,"firstProvisionalFrame":3594}

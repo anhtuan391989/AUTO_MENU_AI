@@ -1,0 +1,139 @@
+From 4f557038444e4a220e0b24c27fc791e922c106a4 Mon Sep 17 00:00:00 2001
+From: Claude A <claude-a@anthropic.local>
+Date: Thu, 20 Aug 2026 00:15:55 +0000
+Subject: [PATCH] Claude A: fix Key quay lai gia tri gia "G# Minor" khi bam
+ AUTO DETECT som
+
+Bug that Khoi bao cao sau khi ap patch A25: bam AUTO DETECT ngay sau khi mo
+app (truoc khi vong AI kip hoan thanh lan do dau tien) khien currentKey
+quay lai "G# Minor" thay vi giu "Listening...".
+
+ROOT CAUSE (co that tu truoc A25, A25 chi lam no LO RA ro hon vi truoc do
+UI luon hien san "G# Minor" ngay tu dau nen khong thay bi "nhay nguoc"):
+keySource.ai.value duoc khoi tao bang appState.originalKey ("G# Minor" -
+gia tri noi bo, KHONG phai ket qua AI that) va CHI duoc ghi de bang ket qua
+that ben trong callback cua KeyEngine.detectOnce() (startAiRealtimeLoop).
+Neu AI dot dau tien chua chay xong ma bam AUTO DETECT,
+triggerAiKeyDetect() goi thang applyActiveKeyToPlugin("AI Detect") ->
+doc keySource.ai.value van con la placeholder gia -> HIEN + GUI xuong
+Plugin gia tri SAI. Day la bug chuc nang that (co the gui nham key xuong
+Studio One Auto-Tune that), khong chi la loi hien thi.
+
+FIX (renderer.js, khong dung keyEngine.js/modEngine.js/bpmEngine.js):
+1. them keySource.ai.hasResult = false luc khoi tao, chi bat true trong
+   callback KeyEngine.detectOnce() khi co ket qua that (startAiRealtimeLoop).
+2. triggerAiKeyDetect(): CHI goi applyActiveKeyToPlugin("AI Detect") khi
+   keySource.ai.hasResult === true. Neu chua co, KHONG ap/gui gi ca - giu
+   nguyen "Listening..." dang hien, applyActiveKeyToPlugin se tu duoc goi
+   dung luc AI co ket qua that dau tien (code co san trong
+   startAiRealtimeLoop, khong doi).
+3. refreshKeySourceDisplay(): dong phu "AI Detect: ..." cung khong con lo
+   gia tri gia - hien "AI Detect: dang do..." khi chua co hasResult.
+4. updateSilenceUI() (A25): nhanh khoi phuc hien thi khi het im lang cung
+   kiem tra hasResult truoc khi doc keySource.ai.value.
+
+VERIFIED (jsdom tren index.html that): bam AUTO DETECT truoc khi AI co ket
+qua -> currentKey van "Listening...", KHONG con "G# Minor". AI co ket qua
+that (vd "Db Major") -> hien/gui dung. Bam AUTO DETECT lai sau khi da co
+ket qua that -> giu dung "Db Major", khong bi reset.
+
+Ve toc do AI/BPM/MOD "cham" Khoi bao cao rieng: KHONG lien quan patch nay -
+khong dung keyEngine.js/bpmEngine.js/modEngine.js, toc do do thuat toan
+trong 3 file do quyet dinh, tu truoc gio khong doi. A25 chi lam do tre that
+(von bi che giau boi du lieu demo gia truoc day) tro nen de nhan thay hon.
+
+Regression: 0 NEW FAIL (9 fail quan sat = 7 pre-existing tu truoc A20 + 2
+self-check "khong sua file cu" bat buoc FAIL vi patch nay dung la sua
+renderer.js).
+---
+ ui/js/renderer.js | 41 ++++++++++++++++++++++++++++++++---------
+ 1 file changed, 32 insertions(+), 9 deletions(-)
+
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 7d68c40..6dccfa6 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -561,7 +561,12 @@ const keySource = {
+     // "value" chung cho cả 2 ý nghĩa nữa (đúng yêu cầu boundary mới — xem báo cáo).
+     manual: { active: false, selectedKey: null, committedKey: null, deadlineAt: null, tickHandle: null },
+     songDb: { active: false, value: null, bpm: null, title: null, artist: null },
+-    ai: { value: appState.originalKey, provisional: null }
++    // hasResult: false lúc khởi tạo — value bên dưới CHỈ là placeholder nội bộ để không phá vỡ
++    // các hàm parse "X Major/Minor" ở nơi khác trót gọi trước khi có kết quả AI thật; KHÔNG
++    // được hiển thị/gửi xuống Plugin khi hasResult còn false (xem triggerAiKeyDetect/
++    // refreshKeySourceDisplay/startAiRealtimeLoop — đúng chỗ đang sửa để hết bug "quay lại
++    // G# Minor" khi bấm AUTO DETECT trước khi AI kịp dò lần đầu).
++    ai: { value: appState.originalKey, provisional: null, hasResult: false }
+ };
+ 
+ let lastPluginKey = appState.originalKey; // giá trị THẬT đã gửi xuống Plugin lần gần nhất (chống gửi trùng)
+@@ -619,10 +624,16 @@ function refreshKeySourceDisplay() {
+         // Mục A ("Key tạm"): nếu có ước lượng tạm mới hơn giá trị ĐÃ KHOÁ -> hiện kèm nhãn
+         // "đang dò" cho cảm giác tức thì. Giá trị thật dùng để gửi Plugin (keySource.ai.value)
+         // KHÔNG đổi ở đây — chỉ đổi hiển thị.
++        // Nếu AI CHƯA có kết quả thật lần nào (hasResult=false) -> keySource.ai.value vẫn là
++        // placeholder khởi tạo, TUYỆT ĐỐI không hiện ra (đúng bug đã sửa ở triggerAiKeyDetect).
+         const showProvisional = keySource.ai.provisional && keySource.ai.provisional !== keySource.ai.value;
+-        aiKeyDetectLineEl.textContent = showProvisional
+-            ? `AI Detect: ${keySource.ai.provisional} (đang dò...)`
+-            : `AI Detect: ${keySource.ai.value}`;
++        if (!keySource.ai.hasResult) {
++            aiKeyDetectLineEl.textContent = "AI Detect: đang dò...";
++        } else {
++            aiKeyDetectLineEl.textContent = showProvisional
++                ? `AI Detect: ${keySource.ai.provisional} (đang dò...)`
++                : `AI Detect: ${keySource.ai.value}`;
++        }
+ 
+     }
+ 
+@@ -826,6 +837,7 @@ function startAiRealtimeLoop() {
+         window.__keyDetectStopWatcher = null;
+ 
+         keySource.ai.value = result.key;
++        keySource.ai.hasResult = true; // đánh dấu ĐÃ có kết quả AI THẬT — hết placeholder giả
+         window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
+         refreshKeySourceDisplay();
+ 
+@@ -852,14 +864,21 @@ function triggerAiKeyDetect() {
+ 
+     // "Manual OFF -> Plugin lập tức dùng AI. Không mất dữ liệu. Không Detect lại từ đầu."
+     // AI luôn chạy NỀN liên tục suốt lúc Manual bật (startAiRealtimeLoop không bao giờ dừng),
+-    // nên keySource.ai.value LUÔN đã có sẵn giá trị mới nhất ngay tại thời điểm này -> áp dụng
+-    // NGAY LẬP TỨC, không cần chờ vòng dò tiếp theo. (Khôi phục fix đã bị mất do revert ngoài
+-    // ý muốn — xem báo cáo.)
++    // nên keySource.ai.value THƯỜNG đã có sẵn giá trị mới nhất ngay tại thời điểm này -> áp dụng
++    // NGAY LẬP TỨC, không cần chờ vòng dò tiếp theo.
++    //
++    // NGOẠI LỆ bắt buộc phải chặn (bug thật Khói báo cáo): nếu bấm AUTO DETECT ngay sau khi mở
++    // app, TRƯỚC KHI vòng AI kịp hoàn thành dò lần đầu tiên (AI dò có thể mất vài giây),
++    // keySource.ai.value vẫn còn là placeholder khởi tạo ("G# Minor" nội bộ, KHÔNG phải kết quả
++    // dò thật) — áp/gửi giá trị này xuống Plugin là SAI (gửi nhầm key). Phải đợi hasResult=true;
++    // nếu chưa, chỉ đảm bảo vòng dò đang chạy (đã tự chạy nền sẵn) và GIỮ NGUYÊN hiển thị hiện
++    // tại ("Listening..." — mục 12B) — applyActiveKeyToPlugin("AI Detect") sẽ tự được gọi ngay
++    // khi startAiRealtimeLoop() nhận được kết quả thật đầu tiên (xem code phía trên).
+     if (keySource.songDb.active) {
+ 
+         applyActiveKeyToPlugin("Song Database");
+ 
+-    } else {
++    } else if (keySource.ai.hasResult) {
+ 
+         applyActiveKeyToPlugin("AI Detect");
+ 
+@@ -1349,7 +1368,11 @@ function updateSilenceUI(isSilent) {
+             // Hết im lặng: hiển thị lại đúng giá trị AI hiện có — KHÔNG gọi lại
+             // applyActiveKeyToPlugin() ở đây để tránh gửi trùng lệnh xuống Plugin
+             // (giá trị chưa chắc đã đổi, chỉ là hiển thị đang được khôi phục).
+-            if (currentKeyElNow) currentKeyElNow.textContent = keySource.ai.value;
++            if (currentKeyElNow) {
++                // Chỉ khôi phục hiển thị bằng keySource.ai.value nếu ĐÃ có kết quả AI thật —
++                // nếu chưa (hasResult=false), giữ nguyên "Listening..." (đúng bug đã sửa).
++                currentKeyElNow.textContent = keySource.ai.hasResult ? keySource.ai.value : "Listening...";
++            }
+         }
+     }
+ 
+-- 
+2.43.0
+

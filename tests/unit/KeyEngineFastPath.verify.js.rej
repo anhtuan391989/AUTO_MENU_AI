@@ -1,0 +1,36 @@
+diff a/tests/unit/KeyEngineFastPath.verify.js b/tests/unit/KeyEngineFastPath.verify.js	(rejected hunks)
+@@ -125,12 +125,24 @@ function createSandboxEngine(fakeSpectrumFn) {
+ }
+ 
+ function spectrumFor(freqs) {
++    // Mô phỏng overtone TỰ NHIÊN như nhạc cụ/giọng hát thật (khớp HARMONIC_AMP trong
++    // keyEngine.js: [1.0, 0.60, 0.42, 0.30, 0.20, 0.15, 0.10, 0.07]) — sine đơn thuần (không
++    // harmonic) KHÔNG phải tín hiệu đại diện công bằng cho "audio rõ ràng thật" dưới thuật toán
++    // harmonic-template chroma hiện tại (mỗi phím được so khớp bằng CẢ 8 harmonic, không chỉ 1
++    // tần số đơn — test phải cho input tương ứng, nếu không sẽ đo margin thấp giả tạo do chính
++    // cách dựng test, không phải do thuật toán thật sự yếu).
++    const HARMONIC_AMP = [1.0, 0.60, 0.42, 0.30, 0.20, 0.15, 0.10, 0.07];
+     return () => {
+         const arr = new Float32Array(4096).fill(-100);
+         const binHz = 48000 / 8192;
+         for (const f of freqs) {
+-            const bin = Math.round(f / binHz);
+-            if (bin >= 0 && bin < arr.length) arr[bin] = -10;
++            for (let h = 0; h < HARMONIC_AMP.length; h++) {
++                const bin = Math.round((f * (h + 1)) / binHz);
++                if (bin >= 0 && bin < arr.length) {
++                    const db = -10 + 20 * Math.log10(HARMONIC_AMP[h]); // quy đổi biên độ tương đối -> dB, gốc -10dB cho harmonic 1
++                    arr[bin] = Math.max(arr[bin], db);
++                }
++            }
+         }
+         return arr;
+     };
+@@ -281,6 +316,7 @@ runTest2_PhysicalFloorRespected();
+ runTest3_NoFastLockOnFlickeringCandidate();
+ runTest4_NoLockOnSilence();
+ runTest5_OldPathsStillWorkWhenFastPathBlocked();
++runTest6_AmbiguousChordNoThirdMustNotFastLock();
+ 
+ console.log(`\n${failCount === 0 ? "✅ TẤT CẢ" : `❌ ${failCount} kiểm chứng FAIL`} — KeyEngine Fast Path (A32, SYNTHETIC, không phải audio thật).`);
+ process.exit(failCount > 0 ? 1 : 0);

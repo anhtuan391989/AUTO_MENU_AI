@@ -1,0 +1,49 @@
+diff a/ui/js/engines/keyEngine.js b/ui/js/engines/keyEngine.js	(rejected hunks)
+@@ -113,7 +113,19 @@ const KeyEngine = (() => {
+     let lastTop1Key = null;
+     let lastTop1Label = null;
+     let lastTop1ChangedAt = null;
+-    const BASS_VOTE_DECAY = 0.999; // "rò rỉ" phiếu cũ dần theo thời gian, ưu tiên xu hướng gần đây
++    // === TASK A35 — BASS_VOTE_DECAY hiệu chỉnh bằng bằng chứng đo được (không phải đoán) ===
++    // Half-life cũ (0.999) ≈ ln(0.5)/ln(0.999) ≈ 693 frame (~11.5s ở ~60fps). Half-life của
++    // CHROMA_SMOOTHING (0.96, dùng tính chroma) ≈ ln(0.5)/ln(0.96) ≈ 17 frame (~0.3s). Lệch ~40
++    // LẦN — bassRootVotes "nhớ" một nốt bass đã ngừng vang lên LÂU HƠN chroma nhớ nó rất nhiều,
++    // trong khi bassBoost (+0.5, dòng ~119) được cộng vào CẢ majorScore lẫn minorScore của đúng
++    // root đó — nghĩa là 1 nốt bass đã tắt từ 5-10 giây trước vẫn có thể kéo root về phía nó dù
++    // chroma (phần phản ánh nội dung ĐANG vang lên) đã hoàn toàn chuyển sang nội dung khác. Đây
++    // chính là cơ chế gây ra chuỗi "A#→C→D→A#" — bass cũ lôi kéo, không phải chroma đổi thật.
++    // Hiệu chỉnh về CÙNG bậc độ lớn với CHROMA_SMOOTHING (0.97 ≈ half-life 23 frame, ~0.4s) — bass
++    // vẫn giữ trí nhớ HƠI dài hơn chroma một chút (root hợp âm thường bền hơn các nốt trang trí ở
++    // bè cao), nhưng không còn lệch 40 lần, đúng tinh thần "ưu tiên xu hướng gần đây" mà chính
++    // comment gốc của hằng số này đã ghi nhưng giá trị cũ lại mâu thuẫn.
++    const BASS_VOTE_DECAY = 0.97;
+                                     // hơn 1 chút so với đầu bài, nhưng vẫn giữ được suốt ~15-20s
+ 
+     const BASS_ROOT_BOOST_WEIGHT = 0.5; // đủ mạnh để phá thế hoà I/V khi correlation gần bằng nhau
+@@ -722,8 +734,24 @@ const KeyEngine = (() => {
+             // — onWinner() vẫn nhận đúng object y hệt bản gốc, contract không đổi).
+             const confidenceV2 = buildConfidenceV2(result, stability);
+ 
+-            // === Đường 1 (GIỮ NGUYÊN 100%, không sửa) — vote-window + sàn 15s, luôn là fallback an toàn. ===
+-            const willLockByVote = bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS;
++            // === TASK A35 — sanity floor cho vote-window (đường 1), dùng TRỰC TIẾP marginNorm ===
++            // TRƯỚC A35: willLockByVote CHỈ cần bestCount>=5/8 + đủ 15s — KHÔNG hề tham chiếu
++            // margin/confidence. Thử gate bằng confidenceV2.combined (trung bình 4 thành phần)
++            // trước, nhưng ĐO ĐƯỢC bằng số: hợp âm THẬT SỰ mập mờ (margin=0.006, gần như hoà tuyệt
++            // đối giữa Major/Minor) vẫn cho combined=0.742 — vì pearsonNorm/stabilityNorm/bassNorm
++            // đều gần tối đa (tín hiệu RÕ về mặt năng lượng/ổn định, chỉ RIÊNG margin là kém), 3
++            // thành phần mạnh "gánh" trung bình lên, che mất đúng tín hiệu ambiguity mà ta cần lọc.
++            // Margin/marginNorm mới là chiều đo TRỰC TIẾP "Major/Minor discrimination" (mục 2 yêu
++            // cầu) — dùng thẳng, không qua trung bình, để không bị pha loãng bởi 3 thành phần khác.
++            // VOTE_WINDOW_MIN_MARGIN_NORM=0.30 (margin thật >=0.03) — hiệu chỉnh bằng ĐÚNG bộ dữ
++            // liệu thật đã dùng để calibrate MARGIN_NORM_RANGE ở A34: case ĐÚNG/rõ margin 0.05-0.09
++            // (marginNorm 0.5-0.9) -> qua được; case SAI/mập mờ margin 0.01-0.02 (marginNorm 0.1-
++            // 0.2) VÀ power-chord test margin=0.006 (marginNorm 0.06) -> đều bị chặn đúng.
++            const VOTE_WINDOW_MIN_MARGIN_NORM = 0.30;
++
++            // === Đường 1 (vote-window + sàn 15s, luôn là fallback an toàn) — A35: thêm sanity
++            // floor confidenceV2.marginNorm (xem giải thích phía trên), phần còn lại GIỮ NGUYÊN. ===
++            const willLockByVote = bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS && confidenceV2.marginNorm >= VOTE_WINDOW_MIN_MARGIN_NORM;
+ 
+             // === Đường 2 (MỚI) — Adaptive Lock: confidence cao LIÊN TỤC nhiều lần -> khoá sớm hơn. ===
+             if (bestCount >= VOTE_MIN_AGREE && confidenceV2.combined >= ADAPTIVE_LOCK_CONFIDENCE) {

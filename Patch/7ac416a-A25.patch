@@ -1,0 +1,227 @@
+From 7ac416a097b1e8db4f1f9f075ffa31bbad4ba448 Mon Sep 17 00:00:00 2001
+From: Claude A <claude-a@anthropic.local>
+Date: Wed, 19 Aug 2026 11:44:49 +0000
+Subject: [PATCH] Claude A: Key/BPM/MOD hien "Listening..." khi khong co tin
+ hieu audio
+
+Yeu cau truc tiep tu Khoi: Key/BPM/MOD dang giu nguyen gia tri CU (cua bai
+hat/doan nhac truoc) ngay ca khi khong con am thanh, gay hieu nham day la
+gia tri THAT dang song. Sua tai renderer.js (khong dung engine moi, khong
+dung keyEngine.js/bpmEngine.js/modEngine.js):
+
+1. Them silence-detector nhe o tang UI: doc lai vuPercent da co san tu
+   BPMEngine.onLevel() (khong tao audio pipeline moi), im lang lien tuc
+   >= 1500ms (nguong 2%) -> currentKey/currentBpm/modStatus chuyen
+   "Listening...". Co tin hieu tro lai -> tu thoat trang thai nay.
+
+2. Ton trong dung ranh gioi uu tien da co:
+   - Key: CHI de len khi active source = "ai" (getActiveSourceName()) -
+     khong dung khi Manual Override hoac Song Database dang active (2
+     nguon nay khong phu thuoc am luong tuc thoi). Da verify rieng: ep
+     keySource.manual.active=true that -> "Listening..." KHONG de len.
+   - Mod: CHI de len khi KHONG dang Manual Override
+     (isManualOverrideActive() - doc modPowerBtn, ham co san).
+   - BPM: khong co khai niem Manual override -> luon phan anh im lang
+     that; BPMEngine.onUpdate(bpm) co san se tu ghi de gia tri that ngay
+     khi tinh hieu tro lai, khong can code them de "khoi phuc".
+
+3. Sua them 3 diem lo ra du lieu demo/gia (cung 1 loai loi, phat hien
+   trong luc doc code):
+   - Section 2 (INITIAL DATA): "G# Minor"/"128"/"02:15" hardcode hien
+     ngay luc mo app truoc khi co audio that -> doi thanh "Listening..."/
+     "--"/"--:--".
+   - #modStatus co demo cung "G#m -> Am" ngay trong ui/index.html (KHONG
+     sua HTML - UI LAYOUT = NO CHANGE) -> ghi de bang JS cung cho voi 3
+     dong tren.
+   - updateModInfo("02:15","G# Minor","C# Minor",5) - dong demo chay o
+     MOI lan mo app (comment goc: "Vi du minh hoa mod info ban dau"), de
+     len ca gia tri that da restore -> bo goi.
+   - updateNextModTime() doc modTimeline[] - mang lich mod GIA con sot
+     lai tu he thong du doan cu da bi xoa (xem comment tai khai bao) ->
+     bo goi, modTime giu "--:--" cho toi khi co du lieu that.
+
+4. loadData(): KHONG con phuc hoi data.currentKey vao text/originalKey
+   luc mo lai app - Key la gia tri SONG (live), khong phai config tinh
+   nhu DAW/MIDI port; phuc hoi no se tai hien dung loi dang sua (hien
+   key cu cua phien truoc thay vi cho tin hieu that cua phien nay).
+
+VERIFIED (jsdom tren ui/index.html + script that):
+- Trang thai dau tien (chua audio, chua click gi): currentKey/currentBpm/
+  modTime/modStatus/modTimeline deu la trang thai cho, khong con demo data.
+- Im lang > 1500ms: Key/BPM/Mod chuyen "Listening..." dung.
+- Co tin hieu lai: currentKey thoat "Listening..." dung (BPM cho
+  BPMEngine.onUpdate that tu ghi de).
+- Settings cu co currentKey="F Major" -> loadData() KHONG phuc hoi, van
+  "Listening...".
+- Manual Key THAT SU active (ep keySource.manual.active=true, mo phong
+  dung luc sendKeyToAutotune() da confirm) -> "Listening..." KHONG de len,
+  van giu dung gia tri Manual.
+
+Regression: 0 NEW FAIL (9 fail quan sat duoc = 7 pre-existing tu truoc
+A20 + 2 self-check "khong sua file cu" cua AutoSongCollector/
+NowPlayingResolver - buoc phai FAIL vi task nay dung la sua renderer.js,
+khong phai loi chuc nang that).
+
+KHONG dung: keyEngine.js, modEngine.js, bpmEngine.js, core/ai/*,
+ControlSource.js, ManualPriorityGuard, Beat/Master separation,
+ui/index.html (khong doi HTML/UI layout).
+---
+ ui/js/renderer.js | 108 ++++++++++++++++++++++++++++++++++++++++------
+ 1 file changed, 96 insertions(+), 12 deletions(-)
+
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 5324df1..7d68c40 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -172,12 +172,21 @@ if (window.electronAPI?.onNowPlayingUnavailable) {
+ /* ==========================================================
+    2. INITIAL DATA (Dữ liệu mẫu)
+    ========================================================== */
+-document.getElementById("currentKey").textContent = "G# Minor";
+-document.getElementById("currentBpm").textContent = "128";
+-document.getElementById("modTime").textContent = "02:15";
++// Yêu cầu Khói: Key/BPM/MOD KHÔNG được hiện dữ liệu mẫu giả (trước đây là "G# Minor"/"128"/
++// "02:15" — dễ gây hiểu nhầm là key/bpm THẬT của 1 bài hát) — phải hiện trạng thái CHỜ TÍN
++// HIỆU ngay từ lúc mở app, cho tới khi có audio thật để dò (xem mục 12B).
++document.getElementById("currentKey").textContent = "Listening...";
++document.getElementById("currentBpm").textContent = "--";
++document.getElementById("modTime").textContent = "--:--";
++// "modStatus"/"modTimeline" có sẵn text demo cứng trong ui/index.html ("G#m → Am") — không
++// được sửa HTML (UI LAYOUT = NO CHANGE), nên ghi đè bằng JS ngay tại đây, cùng chỗ với 3 dòng
++// trên, để không có demo data giả nào lọt ra màn hình dù chỉ 1 khung hình đầu tiên.
++document.getElementById("modStatus").textContent = "Listening...";
++const modTimelineElInit = document.getElementById("modTimeline");
++if (modTimelineElInit) modTimelineElInit.textContent = "--";
+ 
+ const appState = {
+-    originalKey: "G# Minor",
++    originalKey: "G# Minor", // baseline nội bộ để tính transpose tương đối — KHÔNG phải giá trị hiển thị
+     currentKey: "G# Minor",
+     currentBpm: 128,
+     autoKeyDetect: true,
+@@ -1029,11 +1038,11 @@ function loadData() {
+     const data = typeof appSettings !== "undefined" ? appSettings.autoMenuData : null;
+     if (!data) return;
+ 
+-    if (data.currentKey) {
+-        const el = document.getElementById("currentKey");
+-        if (el) el.textContent = data.currentKey;
+-        originalKey = data.currentKey;
+-    }
++    // Yêu cầu Khói: Key là giá trị SỐNG (live, do AI/Song Database/Manual quyết định ngay lúc
++    // đang chạy) — KHÔNG phải config tĩnh như DAW/MIDI port. Nếu khôi phục lại đúng chữ đã lưu
++    // từ phiên trước, màn hình sẽ hiện y hệt lỗi đang sửa (key của bài hát CŨ, trước khi có
++    // audio thật ở phiên mới). Cố tình BỎ QUA data.currentKey — để nguyên "Listening..." (đã
++    // set ở mục 2) cho tới khi có tín hiệu audio thật/Manual/Song Database thật của phiên này.
+ 
+     if (data.tone) {
+         const el = document.getElementById("toneSelector");
+@@ -1288,6 +1297,76 @@ function updateSongPosition() {
+ }
+ setInterval(updateSongPosition, 1000);
+ 
++/* ==========================================================
++   12B. TRẠNG THÁI CHỜ TÍN HIỆU ("Listening...") — Key/BPM/MOD
++   -----------------------------------------------------------
++   Yêu cầu Khói: khi KHÔNG có âm thanh (im lặng), Key/BPM/MOD không được
++   tiếp tục hiển thị giá trị CŨ (của bài hát/đoạn nhạc trước) như đang
++   "đứng hình" — phải chuyển sang trạng thái chờ rõ ràng "Listening...".
++
++   KHÔNG tạo engine mới, KHÔNG đụng keyEngine.js/bpmEngine.js/modEngine.js —
++   chỉ đọc lại đúng `vuPercent` mà BPMEngine.onLevel() đã tính sẵn (mục 13
++   bên dưới, đã tồn tại từ trước) để tự suy ra "có đang im lặng kéo dài hay
++   không", thuần ở tầng hiển thị (UI), không ảnh hưởng logic dò Key/BPM/Mod
++   thật bên trong 3 engine.
++
++   Tôn trọng đúng ranh giới ưu tiên đã có (mục 7B):
++     - Key: CHỈ ghi đè hiển thị khi nguồn đang active là "ai" — không đụng
++       Manual Override hay Song Database (2 nguồn đó không phụ thuộc âm
++       lượng tức thời, không được che bởi "Listening...").
++     - Mod: CHỈ ghi đè khi KHÔNG đang Manual Override (isManualOverrideActive()).
++     - BPM: không có khái niệm Manual override -> luôn phản ánh im lặng thật;
++       khi hết im lặng, BPMEngine.onUpdate(bpm) đã có sẵn TỰ ghi đè giá trị
++       thật ngay khi có kết quả mới — không cần thêm code "khôi phục" ở đây.
++   ========================================================== */
++const SILENCE_VU_THRESHOLD = 2;      // % — dưới ngưỡng này coi là không có tín hiệu đáng kể
++const SILENCE_DURATION_MS = 1500;    // phải im lặng LIÊN TỤC bằng này mới chuyển sang "Listening..."
++let lastLoudAt = Date.now();
++let audioSilent = false;
++
++function updateSilenceUI(isSilent) {
++    if (isSilent === audioSilent) return; // không ghi DOM thừa mỗi frame — chỉ ghi khi thực sự đổi trạng thái
++    audioSilent = isSilent;
++
++    const bpmEl1 = document.getElementById("currentBpm");
++    const bpmEl2 = document.getElementById("bpmValue");
++    if (audioSilent) {
++        if (bpmEl1) bpmEl1.textContent = "Listening...";
++        if (bpmEl2) bpmEl2.textContent = "Listening...";
++    }
++
++    if (audioSilent && !isManualOverrideActive()) {
++        const modStatusEl = document.getElementById("modStatus");
++        if (modStatusEl) modStatusEl.textContent = "Listening...";
++    }
++
++    if (getActiveSourceName() === "ai") {
++        const currentKeyElNow = document.getElementById("currentKey");
++        if (audioSilent) {
++            if (currentKeyElNow) currentKeyElNow.textContent = "Listening...";
++            if (keyInfoEl) keyInfoEl.textContent = "Đang chờ tín hiệu audio...";
++        } else {
++            // Hết im lặng: hiển thị lại đúng giá trị AI hiện có — KHÔNG gọi lại
++            // applyActiveKeyToPlugin() ở đây để tránh gửi trùng lệnh xuống Plugin
++            // (giá trị chưa chắc đã đổi, chỉ là hiển thị đang được khôi phục).
++            if (currentKeyElNow) currentKeyElNow.textContent = keySource.ai.value;
++        }
++    }
++
++    refreshKeySourceDisplay();
++}
++
++// Gọi từ BPMEngine.onLevel() (mục 13 bên dưới) mỗi khi có dữ liệu mức âm lượng mới.
++function trackSilenceFromLevel(vuPercent) {
++    const now = Date.now();
++    if (vuPercent > SILENCE_VU_THRESHOLD) {
++        lastLoudAt = now;
++        if (audioSilent) updateSilenceUI(false);
++    } else if (!audioSilent && (now - lastLoudAt) >= SILENCE_DURATION_MS) {
++        updateSilenceUI(true);
++    }
++}
++
+ /* ==========================================================
+    13. AUDIO ENGINE — khởi tạo audio dùng chung, giao việc cho 3 engine riêng
+    -----------------------------------------------------------
+@@ -1443,6 +1522,7 @@ async function startAudioMonitor() {
+             if (meter) meter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
+             __debugLogAudioLevel(bassEnergy, localAvg, maxByte); // <-- DEBUG TẠM THỜI (vẫn log flux/BPM như cũ)
+             __debugLogVuLevel(rms, dbfs, vuPercent, peak);       // <-- DEBUG TẠM THỜI (log RMS/dBFS/peak để calibrate)
++            trackSilenceFromLevel(vuPercent); // mục 12B — Key/BPM/MOD tự chuyển "Listening..." khi im lặng kéo dài
+         });
+ 
+         KeyEngine.onLevel(() => {
+@@ -1621,13 +1701,17 @@ document.addEventListener("DOMContentLoaded", () => {
+     setStatus("dot-daw", "offline");
+     setStatus("dot-autotune", "offline");
+     updateOnlineStatus();
+-    updateNextModTime();
++    // updateNextModTime() ĐÃ BỊ BỎ GỌI — nó đọc từ `modTimeline` (mảng khai báo ở mục 2), vốn
++    // là dữ liệu lịch mod GIẢ còn sót lại từ hệ thống dự đoán cũ đã bị xoá (xem comment tại khai
++    // báo modTimeline/updateModInfo). Gọi nó sẽ ghi đè "--:--" (mục 2) bằng "02:15" giả — đúng
++    // lỗi Khói đang yêu cầu sửa. modTime giữ nguyên "--:--" cho tới khi có dữ liệu mod THẬT.
+     updateCacheDot();
+     checkAllSystems();
+     loadData();
+ 
+-    // Ví dụ minh hoạ mod info ban đầu
+-    updateModInfo("02:15", "G# Minor", "C# Minor", 5);
++    // Yêu cầu Khói: bỏ dữ liệu minh hoạ giả ("02:15", "G# Minor -> C# Minor") — trước đây dòng
++    // này tự chạy ở MỌI lần mở app, đè lên cả "Listening..." vừa set lẫn dữ liệu loadData() vừa
++    // khôi phục, khiến MOD luôn hiện 1 ví dụ giả thay vì trạng thái chờ tín hiệu thật.
+ 
+     // 1. Khởi tạo Knobs — dùng 1 cặp mousemove/mouseup chung cho toàn bộ knob
+     let activeKnob = null;
+-- 
+2.43.0
+

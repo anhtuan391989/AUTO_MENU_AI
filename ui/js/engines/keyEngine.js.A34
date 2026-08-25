@@ -1,0 +1,861 @@
+/* ==========================================================
+   KEY ENGINE — tự quản lý toàn bộ việc dò Key (NNLS-style harmonic-template
+   chroma + Bayesian-flavored cosine scoring, baseline V6_TOAN_PRO)
+   -----------------------------------------------------------
+   TASK A25 — thay THUẬT TOÁN trích/chấm điểm chroma (đã CHỨNG MINH BẰNG SỐ
+   là nguyên nhân trực tiếp khiến Key=null/Mod=null: cách cũ "peak-picking +
+   spectral whitening" + Musical Content Gate (ngưỡng năng lượng thô) chặn
+   đứng ngay cả 1 hợp âm sạch/full volume tổng hợp — xem báo cáo A25). Lấy
+   V6_TOAN_PRO (Extension/content.js) làm baseline: NNLS-style harmonic-
+   template chroma (duyệt 88 phím piano, cộng năng lượng harmonic 1-8 nội
+   suy từ FFT), profile Krumhansl-Temperley+Albrecht-Shanahan tuned cho
+   nhạc pop/karaoke Việt Nam, cosine similarity, Musical Content Gate RMS
+   đơn giản (đã kiểm chứng nhạy hơn hẳn, không chặn nhầm tín hiệu thật ở
+   nhiều mức âm lượng, kể cả 5%).
+
+   KHÔNG copy mù quáng — GIỮ NGUYÊN kiến trúc AUTO_MENU_AI: vote-window,
+   Adaptive Lock, Stability Tracker, Confidence V2, Margin Logger,
+   Telemetry, dual-rate smoothing, bass-root-voting boost (V6 không có,
+   AUTO_MENU_AI tự thêm để phân biệt giọng song song) — TẤT CẢ giữ nguyên
+   100%, chỉ thay phần TRÍCH XUẤT + CHẤM ĐIỂM chroma bên trong
+   updateChromaVector()/estimateKeyFromChroma().
+
+   QUAN TRỌNG: đây là xử lý tín hiệu số (DSP) chạy ngay trong trình duyệt
+   qua Web Audio API — KHÔNG phải gọi Claude/Anthropic API.
+
+   Độc lập hoàn toàn với BPMEngine/ModEngine: có analyser riêng, vòng lặp
+   riêng. Chỉ chia sẻ chung AudioContext + source node do renderer.js tạo.
+   ModEngine đọc kết quả qua estimateKeyFromChroma()/watchContinuous() —
+   KeyEngine không biết gì về ModEngine (1 chiều).
+
+   Cách dùng từ renderer.js:
+     KeyEngine.init(audioContext, sourceNode);
+     KeyEngine.detectOnce((result) => { ...chốt Key gốc... });          // 1 lần, tự dừng khi xong
+     const stop = KeyEngine.watchContinuous((result) => { ... });        // chạy mãi, dùng cho ModEngine
+   ========================================================== */
+const KeyEngine = (() => {
+    const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+    // === TASK A25 — Profile V6_TOAN_PRO (Krumhansl-Temperley + Albrecht-Shanahan, tuned cho
+    // nhạc pop/karaoke Việt Nam — nhiều bài thứ, pentatonic) — THAY cho KS 1990 gốc (không
+    // tuned riêng cho thể loại nhạc thực tế đang dùng). Dùng với cosine similarity (không phải
+    // Pearson correlation — xem estimateKeyFromChroma()).
+    const KS_MAJOR_PROFILE = [1.000, 0.065, 0.630, 0.088, 0.710, 0.568, 0.095, 0.851, 0.075, 0.688, 0.098, 0.425];
+    const KS_MINOR_PROFILE = [1.000, 0.072, 0.573, 0.782, 0.082, 0.571, 0.082, 0.851, 0.608, 0.082, 0.629, 0.082];
+
+    // === TASK A25 — NNLS-style harmonic-template chroma (baseline V6) — thay hoàn toàn cách
+    // "FFT peak-picking + spectral whitening + harmonic suppression" cũ. Duyệt 88 phím piano
+    // MIDI 21-108 (A0-C8), với MỖI phím cộng năng lượng của 8 harmonic đầu tiên (nội suy tuyến
+    // tính từ FFT bin gần nhất) — mô hình hoá đúng cách nhạc cụ/giọng hát thật tạo ra overtone,
+    // thay vì chỉ nhìn đỉnh phổ đơn lẻ (dễ bị nhiễu/lệch octave).
+    const A4_HZ = 440.0;
+    const HARMONIC_AMP = [1.0, 0.60, 0.42, 0.30, 0.20, 0.15, 0.10, 0.07];
+
+
+    const CHROMA_SMOOTHING = 0.96; // càng gần 1 càng mượt/chậm đổi, cần thiết vì tín hiệu qua loopback ảo khá nhiễu
+
+    // === v2.0 — Dual-rate smoothing (kỹ thuật "fast/slow envelope follower" chuẩn trong DSP,
+    // không riêng phần mềm nào). chromaVector (0.96, chậm) vẫn là nguồn DUY NHẤT cho vote/khoá
+    // thật — KHÔNG đổi gì ở đường đó. chromaVectorFast (nhanh hơn nhiều) chỉ phục vụ Provisional
+    // Estimate — hội tụ ~95% sau ~225ms thay vì ~1.2s, giúp "Key tạm" bắt kịp âm thanh thật nhanh
+    // hơn nhiều mà KHÔNG cần FFT/analyser thứ hai (tốn thêm CPU) — dùng lại nguyên `frame` đã
+    // tính 1 lần trong updateChromaVector(), chỉ thêm 1 vòng lặp EMA 12 phần tử (rẻ không đáng kể).
+    const CHROMA_SMOOTHING_FAST = 0.80;
+
+    const MIN_CONFIDENCE = 0.35;   // dưới ngưỡng này coi là chưa đủ tin cậy
+    const STABLE_CHECKS = 4;        // (giữ lại để tương thích, không còn dùng trực tiếp)
+    const CHECK_INTERVAL_MS = 1500; // kiểm tra thường xuyên hơn (trước: 3000ms)
+    const VOTE_WINDOW = 8;          // giữ 8 lần đo gần nhất (~12 giây ở 1.5s/lần)
+    const VOTE_MIN_AGREE = 5;       // cần ít nhất 5/8 lần đo RA CÙNG 1 kết quả mới chốt — không
+                                     // bắt buộc phải liên tiếp tuyệt đối, chịu được vài lần nhiễu/trật
+    const BASS_MAX_HZ = 260;       // nốt gốc của hợp âm gần như luôn nằm ở bass
+    const BASS_WEIGHT = 4;         // ưu tiên bass gấp 4 lần so với phần giữa/cao (giai điệu hát)
+
+    // === v3.1 — Musical Content Gate (Section VII-A) — quyết định 1 khung FFT có ĐỦ tín hiệu
+    // nhạc để đóng góp vào chroma/bass-vote hay không, đo TRƯỚC khi correlation chạy (khác với
+    // MIN_CONFIDENCE hiện có, vốn chỉ lọc SAU KHI đã correlation xong). Lý do cần thêm bước này:
+    // trong im lặng/nhiễu nền, magnitudes gần 0 vẫn có thể kéo lệch chroma đang làm mượt (dù kéo
+    // về phía 0, không phải về phía 1 Key cụ thể nào) và bassRootVotes vẫn có thể "thắng" 1 nốt
+    // ngẫu nhiên từ nhiễu sàn. Ngưỡng đo bằng tổng biên độ (đã nén căn bậc 2) trên dải 65-2100Hz
+    // đã tính sẵn — không tính lại, không tốn thêm CPU đáng kể.
+    const MUSICAL_CONTENT_MIN_ENERGY = 0.08; // hằng số khởi điểm, tinh chỉnh lại khi có log thật
+    let hasMusicalContent = false; // đọc bởi estimateKeyFromChroma() để ép confidence=0 khi thiếu evidence
+
+    // === Key Engine V9 (Mục 4/16) — Latency telemetry THUẦN QUAN SÁT, KHÔNG đụng bất kỳ điều
+    // kiện quyết định nào (không đổi hasMusicalContent/MIN_CONFIDENCE/vote/lock). Mục đích: đo
+    // audio frame -> first evidence -> first provisional -> stable, vì trước đây KHÔNG có cách
+    // nào tách riêng 2 mốc đầu (chỉ có LOCK time cho "stable" qua sendTelemetry() có sẵn — xem
+    // runVoteLoop). frameCounter đếm số khung updateChromaVector() đã chạy kể từ init() gần nhất
+    // (không tạo timer/rAF mới — chỉ cộng thêm 1 dòng vào vòng lặp render đã có sẵn).
+    let frameCounter = 0;
+    let firstEvidenceAt = null;   // Date.now() lúc hasMusicalContent lần đầu true kể từ init()
+    let firstEvidenceFrame = null;
+    let firstProvisionalAt = null; // Date.now() lúc provisional ticker lần đầu bắn kể từ init()
+    let firstProvisionalFrame = null;
+
+    let chromaAnalyser = null;
+    let chromaDataArray = null;
+    let audioCtxRef = null;
+    let chromaVector = new Array(12).fill(0);
+    let chromaVectorFast = new Array(12).fill(0); // v2.0 — xem giải thích CHROMA_SMOOTHING_FAST
+    let contentEnergyEMA = 0; // Musical Content Gate — EMA năng lượng khung, xem MUSICAL_CONTENT_MIN_ENERGY
+
+    // Theo dõi RIÊNG nốt bass hay "THẮNG" (mạnh nhất trong TỪNG khung) nhiều lần nhất — ĐẾM SỐ
+    // LẦN THẮNG, không cộng dồn độ to. Lý do đổi cách này: cộng dồn biên độ thô rất dễ bị 1 hợp
+    // âm ngân dài/to (vd hợp âm bậc 5) lấn át hoàn toàn, dù nốt chủ thực ra xuất hiện NHIỀU LẦN
+    // hơn (chỉ là mỗi lần không ngân to bằng). Đếm số lần thắng coi mỗi khung là 1 phiếu ngang
+    // nhau, không để 1-2 khung quá to quyết định hết.
+    let bassRootVotes = new Array(12).fill(0);
+
+    // === Top1 Stability Timer (Phase 3.5) — CHỈ dữ liệu quan sát, không ảnh hưởng bất kỳ
+    // quyết định nào. Theo dõi "Top1 hiện tại đã giữ nguyên liên tục bao lâu", reset ĐÚNG
+    // khi Top1 (root-mode) đổi, KHÔNG reset khi confidence/margin/stability đổi.
+    let lastTop1Key = null;
+    let lastTop1Label = null;
+    let lastTop1ChangedAt = null;
+    const BASS_VOTE_DECAY = 0.999; // "rò rỉ" phiếu cũ dần theo thời gian, ưu tiên xu hướng gần đây
+                                    // hơn 1 chút so với đầu bài, nhưng vẫn giữ được suốt ~15-20s
+
+    const BASS_ROOT_BOOST_WEIGHT = 0.5; // đủ mạnh để phá thế hoà I/V khi correlation gần bằng nhau
+
+    let running = false;
+    let rafId = null;
+
+    const levelListeners = []; // callback(chromaVectorSnapshot) mỗi khung — dùng cho debug
+
+    // === Provisional Estimate (mục A — "Key tạm") ===
+    // Cập nhật NHANH HƠN NHIỀU so với vote loop (CHECK_INTERVAL_MS=1500ms), CHỈ để hiển
+    // thị "đang dò..." cho cảm giác tức thì — KHÔNG dùng để khoá/gửi Plugin (việc đó vẫn
+    // 100% qua runVoteLoop()/detectOnce() như cũ, không đổi gì). Vì estimateKeyFromChroma()
+    // chỉ là ~24 phép correlation trên vector đã có sẵn (rẻ), tăng tần suất đọc không đáng kể
+    // về CPU so với việc render mỗi rAF frame vốn đã chạy liên tục.
+    const PROVISIONAL_INTERVAL_MS = 400;
+    const provisionalListeners = [];
+    let provisionalTimerId = null;
+
+    function init(audioContext, sourceNode) {
+        audioCtxRef = audioContext;
+        chromaAnalyser = audioContext.createAnalyser();
+        chromaAnalyser.fftSize = 8192; // lớn -> phân giải tần số tốt hơn, đánh đổi độ trễ (chấp nhận được vì Key không cần phản ứng tức thời như beat)
+        chromaAnalyser.smoothingTimeConstant = 0; // tự làm mượt bằng tay (CHROMA_SMOOTHING)
+        sourceNode.connect(chromaAnalyser);
+        chromaDataArray = new Float32Array(chromaAnalyser.frequencyBinCount);
+        chromaVector = new Array(12).fill(0);
+        chromaVectorFast = new Array(12).fill(0);
+        contentEnergyEMA = 0;
+        hasMusicalContent = false;
+        bassRootVotes = new Array(12).fill(0);
+        lastTop1Key = null;
+        lastTop1Label = null;
+        lastTop1ChangedAt = null;
+
+        // Key Engine V9 Mục 4 — reset mốc đo latency mỗi lần init() mới (vd đổi bài/khởi động lại)
+        frameCounter = 0;
+        firstEvidenceAt = null;
+        firstEvidenceFrame = null;
+        firstProvisionalAt = null;
+        firstProvisionalFrame = null;
+
+        running = true;
+        loop();
+        startProvisionalTicker();
+    }
+
+    function frequencyToPitchClass(freq) {
+        if (freq <= 0) return -1;
+        const midi = 69 + 12 * Math.log2(freq / 440); // 440Hz = A4 = MIDI note 69
+        return (((Math.round(midi) % 12) + 12) % 12);
+    }
+
+    function updateChromaVector() {
+        if (!chromaAnalyser || !chromaDataArray) return;
+        chromaAnalyser.getFloatFrequencyData(chromaDataArray); // đơn vị dB, thường âm
+
+        const sampleRate = audioCtxRef?.sampleRate || 48000;
+        const binHz = sampleRate / chromaAnalyser.fftSize;
+        const binCount = chromaDataArray.length;
+        const frame = new Array(12).fill(0);
+        const bassFrame = new Array(12).fill(0);
+
+        // === TASK A25 — NNLS-style harmonic-template chroma (baseline V6_TOAN_PRO) ===
+        // Duyệt 88 phím piano MIDI 21-108 (A0-C8). Với MỖI phím, cộng năng lượng của 8
+        // harmonic đầu tiên (nội suy tuyến tính giữa 2 FFT bin gần nhất từ tần số harmonic),
+        // nhân trọng số HARMONIC_AMP (biên độ overtone giảm dần — mô hình source-filter cho
+        // giọng hát + nhạc cụ điển hình). Đây là kỹ thuật "khớp mẫu" (template matching) —
+        // hoàn toàn khác cách "peak-picking + spectral whitening" cũ (chỉ nhìn đỉnh phổ đơn
+        // lẻ, dễ lệch octave/nhiễu). Thay thế TOÀN BỘ BƯỚC 1-3 của bản cũ.
+        for (let midi = 21; midi <= 108; midi++) {
+            const pc = ((midi % 12) + 12) % 12;
+            const fFun = A4_HZ * Math.pow(2, (midi - 69) / 12);
+            if (fFun < 27 || fFun > 6000) continue;
+            let energy = 0;
+            for (let h = 0; h < HARMONIC_AMP.length; h++) {
+                const fH = fFun * (h + 1);
+                if (fH > sampleRate / 2) break;
+                const bin = fH / binHz;
+                const b0 = Math.floor(bin);
+                const b1 = b0 + 1;
+                if (b1 >= binCount) break;
+                const frac = bin - b0;
+                const db0 = chromaDataArray[b0];
+                const db1 = chromaDataArray[b1];
+                if (db0 <= -100 && db1 <= -100) continue;
+                const amp0 = Math.pow(10, Math.max(-100, db0) / 20);
+                const amp1 = Math.pow(10, Math.max(-100, db1) / 20);
+                const amp = amp0 * (1 - frac) + amp1 * frac;
+                energy += amp * HARMONIC_AMP[h];
+            }
+            frame[pc] += energy * energy; // power domain — giống V6, tương phản rõ nốt chủ đạo
+            if (fFun <= BASS_MAX_HZ) bassFrame[pc] += energy; // dùng amplitude (không bình phương) cho bass-vote, giữ nguyên logic AUTO_MENU_AI
+        }
+
+        // === TASK A25 — Musical Content Gate: RMS đơn giản trên dải 50-6000Hz (baseline V6)
+        // — THAY cho ngưỡng năng lượng thô (MUSICAL_CONTENT_MIN_ENERGY=0.08 cũ) đã CHỨNG MINH
+        // BẰNG SỐ chặn đứng cả 1 hợp âm sạch/full volume tổng hợp (xem báo cáo A25). Ngưỡng
+        // RMS>0.0005 (~-48dBFS trung bình dải nhạc) đã kiểm chứng nhạy đúng ở nhiều mức âm
+        // lượng thực tế (kể cả 5% volume) mà vẫn lọc đúng nhiễu nền thuần tuý.
+        const BIN_LO = Math.max(1, Math.ceil(50 / binHz));
+        const BIN_HI = Math.min(binCount - 1, Math.floor(6000 / binHz));
+        // A25 fix: KHÔNG loại bỏ bin nền (db<=-100) khỏi tổng/đếm — cộng cả bin nền (biên độ
+        // gần 0, không ảnh hưởng đáng kể) để mẫu số CỐ ĐỊNH theo độ rộng dải tần, giống cách
+        // đo RMS thật. Bản đầu (loại bin nền + yêu cầu count>=20) khiến 1 tín hiệu THẬT nhưng
+        // chỉ có vài đỉnh phổ rời rạc rõ ràng (tone thuần/synth đơn giản, ít bin "nổi bật" hơn
+        // nhạc thu âm tự nhiên) bị chặn nhầm — phát hiện qua MarginEngine.verify.js (đã kiểm
+        // chứng bằng số: 6 đỉnh -10dB rõ ràng giữa nền -100dB vẫn cho RMS ~0.024, gấp ~48 lần
+        // ngưỡng 0.0005, trong khi im lặng thật cho RMS ~1e-5, thấp hơn ngưỡng 50 lần — ngưỡng
+        // vẫn phân biệt đúng nhạc thật vs im lặng, chỉ không còn đòi hỏi số lượng bin tối thiểu
+        // vô lý với tín hiệu tần số đơn/ít bồi âm).
+        let contentRms = 0;
+        const contentCount = BIN_HI - BIN_LO + 1;
+        for (let b = BIN_LO; b <= BIN_HI; b++) {
+            const amp = Math.pow(10, chromaDataArray[b] / 20);
+            contentRms += amp * amp;
+        }
+        const frameHasContent = contentCount > 0 && Math.sqrt(contentRms / contentCount) > 0.0005;
+
+        // Chống nhiễu tức thời — vẫn giữ EMA riêng (kiến trúc AUTO_MENU_AI, V6 không có bước
+        // này vì chỉ chạy 1 lần/session ngắn) để 1 frame to/im bất thường không tự mở/đóng cổng.
+        contentEnergyEMA = contentEnergyEMA * 0.9 + (frameHasContent ? 1 : 0) * 0.1;
+        hasMusicalContent = contentEnergyEMA >= 0.5; // đa số các frame gần đây đều có tín hiệu thật
+        frameCounter++; // Key Engine V9 Mục 4 — đếm khung, THUẦN quan sát, không dùng ở bất kỳ điều kiện nào
+
+        // Key Engine V9 Mục 4/16 — CHỈ ghi nhận mốc THỜI GIAN, không đổi giá trị hasMusicalContent
+        // vừa tính ở trên hay bất kỳ nhánh nào bên dưới nó (chroma/bassRootVotes vẫn y hệt cũ).
+        if (hasMusicalContent && firstEvidenceAt === null) {
+            firstEvidenceAt = Date.now();
+            firstEvidenceFrame = frameCounter;
+            sendTelemetry({ event: "FIRST_EVIDENCE", frame: firstEvidenceFrame });
+        }
+
+        if (hasMusicalContent) {
+            for (let i = 0; i < 12; i++) {
+                chromaVector[i] = chromaVector[i] * CHROMA_SMOOTHING + frame[i] * (1 - CHROMA_SMOOTHING);
+                chromaVectorFast[i] = chromaVectorFast[i] * CHROMA_SMOOTHING_FAST + frame[i] * (1 - CHROMA_SMOOTHING_FAST);
+            }
+        }
+        // Thiếu musical content (im lặng/nhiễu nền/audio quá yếu) -> KHÔNG cộng frame này vào
+        // chroma (giữ nguyên giá trị đang có, không để nhiễu kéo lệch), và bassRootVotes bên
+        // dưới cũng bị gate theo hasMusicalContent — xem chỗ cộng phiếu.
+
+        // ĐẾM PHIẾU: tìm nốt bass mạnh nhất CHỈ TRONG KHUNG NÀY rồi cộng đúng 1 phiếu cho nó —
+        // không quan tâm nó to hơn nốt nhì bao nhiêu, chỉ tính có thắng hay không.
+        let winnerPc = -1, winnerVal = 0;
+        for (let i = 0; i < 12; i++) {
+            if (bassFrame[i] > winnerVal) { winnerVal = bassFrame[i]; winnerPc = i; }
+        }
+        for (let i = 0; i < 12; i++) bassRootVotes[i] *= BASS_VOTE_DECAY;
+        if (hasMusicalContent && winnerPc >= 0 && winnerVal > 0.01) bassRootVotes[winnerPc] += 1;
+
+        levelListeners.forEach((cb) => cb(chromaVector));
+    }
+
+    function pearsonCorrelation(a, b) {
+        const meanA = a.reduce((s, v) => s + v, 0) / a.length;
+        const meanB = b.reduce((s, v) => s + v, 0) / b.length;
+        let num = 0, denomA = 0, denomB = 0;
+        for (let i = 0; i < a.length; i++) {
+            const da = a[i] - meanA;
+            const db = b[i] - meanB;
+            num += da * db;
+            denomA += da * da;
+            denomB += db * db;
+        }
+        const denom = Math.sqrt(denomA * denomB);
+        return denom === 0 ? 0 : num / denom;
+    }
+
+    // === TASK A25 — Cosine similarity (baseline V6) — thay Pearson correlation ở trên (giữ
+    // lại hàm cũ KHÔNG XOÁ, phòng chỗ khác trong codebase còn tham chiếu, nhưng KHÔNG còn
+    // dùng trong estimateKeyFromChroma() bên dưới). Cosine similarity trên chroma đã nén
+    // power-law (^0.67) + L2-normalize là phần LÕI thuật toán V6 — nhạy hơn Pearson với chroma
+    // vector thưa (nhiều pitch-class = 0), vốn là tình huống rất thường gặp với nhạc thật.
+    function powerLawNormalize(vector) {
+        const out = new Array(12).fill(0);
+        let norm = 0;
+        for (let i = 0; i < 12; i++) out[i] = Math.pow(Math.max(0, vector[i]), 0.67);
+        for (let i = 0; i < 12; i++) norm += out[i] * out[i];
+        norm = Math.sqrt(norm);
+        if (norm > 0) for (let i = 0; i < 12; i++) out[i] /= norm;
+        return out;
+    }
+
+    function cosineSimilarity12(a, b) {
+        let dot = 0, na = 0, nb = 0;
+        for (let i = 0; i < 12; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+        return (na > 0 && nb > 0) ? dot / Math.sqrt(na * nb) : 0;
+    }
+
+    // BUG ĐÃ SỬA: bản cũ dùng slice(steps).concat(slice(0,steps)) — đây là XOAY TRÁI, đặt nốt
+    // chủ (tonic, giá trị lớn nhất của profile) vào SAI vị trí (root' = (12-steps)%12 thay vì
+    // đúng "steps"). Hệ quả: suốt từ đầu, thuật toán so sánh chroma thật với khuôn mẫu của SAI
+    // nốt gốc, gây chốt Key sai có hệ thống (không phải do nhiễu tín hiệu). Đã đổi sang XOAY PHẢI
+    // — kiểm chứng bằng tay: với steps=4 (gốc E), tonic phải rơi đúng vào index 4 của mảng kết quả.
+    function rotateProfile(profile, steps) {
+        const s = ((steps % 12) + 12) % 12;
+        return profile.slice(12 - s).concat(profile.slice(0, 12 - s));
+    }
+
+    /**
+     * @param {number[]} [sourceVector] Mặc định dùng chromaVector (chậm, dùng cho vote/khoá thật).
+     *   Tham số tuỳ chọn này CHỈ để tái sử dụng cho Provisional Estimate (chromaVectorFast) — gọi
+     *   estimateKeyFromChroma() KHÔNG tham số vẫn giữ NGUYÊN 100% hành vi/API công khai cũ.
+     * @returns {{ key: string, rootIndex: number, mode: string, confidence: number }}
+     */
+    function estimateKeyFromChroma(sourceVector) {
+        const vector = sourceVector || chromaVector;
+        const maxBassVotes = Math.max(...bassRootVotes, 1e-9);
+
+        // === TASK A25 — power-law compress + L2 normalize chroma 1 LẦN trước vòng lặp 12
+        // root (baseline V6) — cosineSimilarity12() bên dưới dùng vector ĐÃ chuẩn hoá này,
+        // KHÔNG dùng `vector` thô nữa (khác Pearson correlation cũ, tự trừ mean bên trong).
+        const chromaNorm = powerLawNormalize(vector);
+
+        let best = { score: -Infinity, root: 0, mode: "Major" };
+
+        // === Margin Engine (Phase 1) — CHỈ thu thập song song để tính Top1/Top2/Margin,
+        // KHÔNG đụng tới vòng lặp/điều kiện chọn `best` phía dưới (giữ nguyên y hệt bản gốc).
+        // Chưa dùng để quyết định gì — chỉ phục vụ logging/giai đoạn sau (Decision Engine...).
+        const allScores = [];
+
+        for (let root = 0; root < 12; root++) {
+            // Boost cho root trùng với nốt bass hay lặp lại nhất — phá thế hoà giữa các giọng
+            // song song/họ hàng gần (vd E Major vs C# Minor) mà chỉ correlation không phân biệt nổi.
+            // Tách riêng bassAgreement (tỉ lệ RAW, tự nhiên trong [0,1]) — bassBoost tính từ đó,
+            // GIÁ TRỊ Y HỆT bản gốc, chỉ đặt tên lại để dùng cho Confidence V2 (Phase 3).
+            const bassAgreement = bassRootVotes[root] / maxBassVotes;
+            const bassBoost = bassAgreement * BASS_ROOT_BOOST_WEIGHT;
+
+            // === TASK A25 — cosine similarity [-1,1] map về [0,1] (baseline V6), THAY Pearson
+            // correlation. Vẫn CỘNG bassBoost y hệt kiến trúc cũ (không đổi cách kết hợp).
+            const majorScore = (cosineSimilarity12(chromaNorm, rotateProfile(KS_MAJOR_PROFILE, root)) + 1) / 2 + bassBoost;
+            const minorScore = (cosineSimilarity12(chromaNorm, rotateProfile(KS_MINOR_PROFILE, root)) + 1) / 2 + bassBoost;
+            if (majorScore > best.score) best = { score: majorScore, root, mode: "Major" };
+            if (minorScore > best.score) best = { score: minorScore, root, mode: "Minor" };
+
+            allScores.push({ score: majorScore, root, mode: "Major", bassAgreement });
+            allScores.push({ score: minorScore, root, mode: "Minor", bassAgreement });
+        }
+
+
+        // Top1/Top2/Margin tính RIÊNG, SAU KHI vòng lặp gốc đã xong — không ảnh hưởng `best`.
+        allScores.sort((a, b) => b.score - a.score);
+        const top1 = allScores[0];
+        const top2 = allScores[1];
+        const margin = top1.score - top2.score;
+
+        // Musical Content Gate (Section VII-A) — nếu khung hiện tại không có đủ tín hiệu nhạc
+        // (im lặng/nhiễu nền/audio quá yếu), ép confidence về 0 dù correlation ra số gì đi nữa —
+        // "best"/"top1"/"top2" vẫn tính bình thường (không đổi field, không phá contract), CHỈ
+        // confidence bị ép để mọi nơi đang so sánh với MIN_CONFIDENCE (vote loop, provisional
+        // ticker, ModEngine) tự động bỏ qua lần đo này — đúng yêu cầu "không đoán khi thiếu
+        // evidence", không cần sửa logic lọc ở những nơi đó.
+        const gatedConfidence = hasMusicalContent ? best.score : 0;
+
+        return {
+            key: `${NOTE_NAMES[best.root]} ${best.mode}`,
+            rootIndex: best.root,
+            mode: best.mode,
+            confidence: gatedConfidence,
+            // v3.0 — Confidence Engine: field MỚI, chỉ để HIỂN THỊ (vd "97%"), không thay thế
+            // `confidence` ở trên (giữ nguyên thang đo cũ — mọi so sánh với MIN_CONFIDENCE trong
+            // toàn bộ file vẫn đúng y hệt, không silent-break). Kẹp về [0,1] rồi quy ra 0-100.
+            confidencePercent: Math.round(Math.max(0, Math.min(1, gatedConfidence)) * 100),
+            hasMusicalContent,
+            top1,
+            top2,
+            margin,
+            bassAgreement: top1.bassAgreement
+        };
+    }
+
+    // Chênh lệch bán cung NGẮN NHẤT giữa 2 nốt (vd C->A# nên hiểu là -2, không phải +10).
+    function shortestSemitoneDelta(fromIndex, toIndex) {
+        let delta = (toIndex - fromIndex + 12) % 12;
+        if (delta > 6) delta -= 12;
+        return delta;
+    }
+
+    // Bỏ phiếu đa số trong cửa sổ trượt — gọi onWinner(result, count) mỗi khi 1 kết quả chiếm
+    // đa số trong VOTE_WINDOW lần đo gần nhất. Dùng chung cho cả detectOnce lẫn watchContinuous.
+    // Thời gian tối thiểu phải chờ trước khi CHO PHÉP chốt bất kỳ kết quả nào — bass root
+    // histogram cần thời gian này để phân biệt được nhà (I) và bậc 5 (V), nếu chốt quá sớm
+    // (trước khi histogram kịp lệch rõ) rất dễ vồ nhầm sang bậc 5.
+    const MIN_ELAPSED_BEFORE_LOCK_MS = 15000;
+
+    // === Adaptive Lock (Phase 4) — được dự trù sẵn từ comment cũ ở buildConfidenceV2(),
+    // giờ triển khai thật. Ý tưởng: sàn 15000ms ở trên là "chuẩn/an toàn" cho MỌI bài kể cả
+    // mơ hồ nhất, nhưng nếu confidenceV2.combined CAO và ỔN ĐỊNH liên tục qua nhiều lần đo,
+    // không có lý do bắt bài đó chờ đủ 15s như bài khó. Đây là con đường khoá THỨ HAI, chạy
+    // SONG SONG với con đường vote-window+15s cũ (giữ NGUYÊN 100%, không xoá/sửa) — willLock
+    // cuối cùng là HOẶC của cả 2 đường, không đường nào thay thế đường nào.
+    const FAST_LOCK_MIN_ELAPSED_MS = 3000;   // sàn tuyệt đối, kể cả confidence tối đa cũng không khoá sớm hơn
+                                              // (thời gian vật lý tối thiểu để FFT 8192 + làm mượt chroma ổn định)
+    const ADAPTIVE_LOCK_CONFIDENCE = 0.80;   // confidenceV2.combined (thang 0-1, đã chuẩn hoá) phải đạt mức này
+    const ADAPTIVE_LOCK_STREAK_REQUIRED = 3; // phải đạt ngưỡng LIÊN TỤC 3 lần đo mới cho khoá sớm —
+                                              // chống 1 lần đo nhiễu ngẫu nhiên đạt cao rồi tụt ngay
+
+    // === TASK A32 — FAST PATH (initial Key detection ≤2s) ===
+    // Đường 1 (vote-window, 15s) và Đường 2 (adaptive) ĐỀU bị khoá cứng bởi cùng 1 điều kiện:
+    // bestCount >= VOTE_MIN_AGREE (5), tức phải đợi ít nhất 5 lần đo của vòng CHECK_INTERVAL_MS
+    // (1500ms) => tối thiểu ~7.5s trong điều kiện lý tưởng nhất, thực tế thường xa hơn nhiều —
+    // ĐÂY LÀ NGUYÊN NHÂN GỐC khiến "initial detection" không thể nào dưới 2s dù đã có Adaptive
+    // Lock, KHÔNG PHẢI do FAST_LOCK_MIN_ELAPSED_MS=3000ms "chưa đủ thấp" (xem A32 REPORT).
+    //
+    // Fast Path dùng LẠI hạ tầng chromaVectorFast/estimateKeyFromChroma(chromaVectorFast) đã có
+    // sẵn từ Provisional Estimate (v2.0) — trước đây CHỈ dùng để hiển thị "Key tạm", không bao
+    // giờ dùng để khoá thật. Fast Path chạy trên nhịp NHANH hơn hẳn (FAST_PATH_INTERVAL_MS=400ms,
+    // giống PROVISIONAL_INTERVAL_MS) THAY VÌ đợi đủ 5 mẫu của vòng 1500ms chậm.
+    //
+    // KHÔNG hạ ngưỡng tin cậy so với Adaptive Lock (vẫn đúng 0.80) — chỉ đổi NGUỒN dữ liệu (chroma
+    // hội tụ nhanh hơn) + nhịp đo (nhanh hơn), không đổi độ khắt khe. NGOÀI RA còn khắt khe HƠN
+    // Adaptive Lock ở 1 điểm: Adaptive Lock cũ chỉ yêu cầu highConfidenceStreak (CONFIDENCE cao
+    // liên tục), KHÔNG bắt buộc candidate phải là CÙNG 1 Key suốt streak đó (2 Key khác nhau đều
+    // confidence cao liên tiếp vẫn tính là streak hợp lệ). Fast Path bắt buộc CÙNG root+mode suốt
+    // FAST_PATH_STREAK_REQUIRED lần liên tiếp — chặn đúng rủi ro "không nhận candidate chỉ từ một
+    // frame" mà A32 yêu cầu.
+    const FAST_PATH_INTERVAL_MS = PROVISIONAL_INTERVAL_MS; // dùng lại hằng số đã khai báo phía trên (dòng ~132, cùng ý nghĩa nhịp đo nhanh), không tạo số trùng
+    const FAST_PATH_MIN_ELAPSED_MS = 1200;      // 3 lần đo x 400ms — sàn vật lý, không khoá sớm hơn dù confidence tối đa
+    const FAST_PATH_STREAK_REQUIRED = 3;        // 3 lần đo LIÊN TỤC cùng candidate + cùng đạt ngưỡng — ~1.2s xác nhận
+    const FAST_PATH_MIN_CONFIDENCE = ADAPTIVE_LOCK_CONFIDENCE; // GIỮ NGUYÊN 0.80 — không hạ ngưỡng để đổi lấy tốc độ
+
+    function formatElapsedSeconds(ms) {
+        return (ms / 1000).toFixed(1);
+    }
+
+    function formatCandidate(candidate) {
+        if (!candidate) return "?";
+        return `${NOTE_NAMES[candidate.root]} ${candidate.mode} (${candidate.score.toFixed(2)})`;
+    }
+
+    // Nhãn NGƯỜI ĐỌC được, KHÔNG kèm điểm số — dùng cho telemetry (Phase 4A), khác
+    // formatCandidate() ở trên (dùng cho log console, có kèm điểm).
+    function candidateLabel(candidate) {
+        if (!candidate) return null;
+        return `${NOTE_NAMES[candidate.root]} ${candidate.mode}`;
+    }
+
+    // === Telemetry (Phase 4A) — CHỈ gửi dữ liệu ĐÃ TÍNH XONG sang main process qua IPC
+    // (nếu có window.electronAPI.sendTelemetry — an toàn no-op nếu không có, vd trong môi
+    // trường sandbox/test). KHÔNG gửi FFT/chroma vector/spectrum/audio buffer thô. KHÔNG
+    // ảnh hưởng bất kỳ quyết định nào — chỉ là quan sát thêm, giống các Phase log trước.
+    function sendTelemetry(record) {
+        if (typeof window !== "undefined" && window.electronAPI && typeof window.electronAPI.sendTelemetry === "function") {
+            window.electronAPI.sendTelemetry(record);
+        }
+    }
+
+    // === Margin Logger (Phase 1.5) — CHỈ ghi nhận dữ liệu, KHÔNG quyết định gì. Dùng để thu
+    // thập thực tế margin/confidence của nhạc thật, làm nền tảng chọn ngưỡng cho Adaptive Lock
+    // (Phase 4) sau này thay vì đoán theo cảm tính. `locked` được TRUYỀN VÀO từ đúng biến
+    // `willLock` mà runVoteLoop() dùng để quyết định thật — đảm bảo log không bao giờ lệch so
+    // với những gì engine THỰC SỰ làm.
+    function logMarginSnapshot(result, startedAt, bestCount, locked, stability, confidenceV2, top1StableMs, note) {
+        const lines = [
+            `[KeyEngine] Time: ${formatElapsedSeconds(Date.now() - startedAt)}s`,
+            `  Top1: ${formatCandidate(result.top1)}`,
+            `  Top2: ${formatCandidate(result.top2)}`,
+            `  Margin: ${typeof result.margin === "number" ? result.margin.toFixed(2) : "?"}`,
+            `  Stability: ${typeof stability === "number" ? stability.toFixed(2) : "?"}`,
+            `  Top1 Stable: ${formatElapsedSeconds(top1StableMs)}s`,
+            `  Confidence: ${result.confidence.toFixed(2)}`,
+            `  DecisionScore: ${confidenceV2.combined.toFixed(2)}`, // alias hiển thị của confidenceV2.combined đã có sẵn — KHÔNG tính toán mới
+            `  Key: ${result.key}`,
+            `  Votes: ${bestCount}/${VOTE_MIN_AGREE}`,
+            `  Locked: ${locked ? "Yes" : "No"}${note ? ` (${note})` : ""}`,
+            `  ConfidenceV2: ${JSON.stringify(confidenceV2)}`
+        ];
+        console.log(lines.join("\n"));
+    }
+
+    // === Stability Tracker (Phase 2) — CHỈ đọc lại đúng bestCount/độ dài Vote Window đã có
+    // sẵn (KHÔNG thêm cấu trúc dữ liệu song song, KHÔNG đụng cách Vote Window tự đếm phiếu/
+    // quyết định). Công thức: bình phương tỉ lệ đồng thuận trong cửa sổ hiện tại — phạt mạnh
+    // hơn khi kết quả dao động qua lại. Vd 5/5 đồng thuận -> 1.00; 3/5 -> (0.6)^2 = 0.36.
+    function computeStability(bestCount, windowSize) {
+        if (!windowSize) return 0;
+        const agreement = bestCount / windowSize;
+        return agreement * agreement;
+    }
+
+    // === Top1 Stability Timer (Phase 3.5) — không tạo timer/setInterval riêng, chỉ tính
+    // `now - lastTop1ChangedAt` NGAY KHI được gọi (từ trong tick đã có sẵn của runVoteLoop).
+    // Reset ĐÚNG khi Top1 (root-mode) đổi — KHÔNG reset khi confidence/margin/stability đổi,
+    // vì các giá trị đó không được đọc/so sánh ở đây.
+    function updateTop1StabilityTimer(top1) {
+        const currentKey = `${top1.root}-${top1.mode}`;
+        const currentLabel = candidateLabel(top1);
+        const now = Date.now();
+
+        let changed = false;
+        let previousLabel = null;
+
+        if (currentKey !== lastTop1Key) {
+            previousLabel = lastTop1Label;
+            changed = lastTop1Key !== null; // lần đầu tiên (chưa có gì để so sánh) không tính là "đổi"
+            lastTop1Key = currentKey;
+            lastTop1Label = currentLabel;
+            lastTop1ChangedAt = now;
+        }
+
+        return { stableMs: now - lastTop1ChangedAt, changed, from: previousLabel, to: currentLabel };
+    }
+
+    function clamp01(x) {
+        return Math.max(0, Math.min(1, x));
+    }
+
+    // === Confidence V2 (Phase 3) — LẮP RÁP để LOG, VÀ (từ A32/A34) LÀ GATE THẬT cho Fast Path
+    // (runVoteLoop) lẫn Adaptive Lock (dòng ~695, confidenceV2.combined >= ADAPTIVE_LOCK_CONFIDENCE)
+    // — comment "KHÔNG tham gia điều kiện khoá" ở bản gốc đã LỖI THỜI, sửa lại cho đúng thực tế.
+    // `confidence` gốc (top-level, field riêng) vẫn giữ nguyên tuyệt đối để đảm bảo tương thích.
+    //
+    // PEARSON_NORM_MAX = 1.5 = điểm tối đa LÝ THUYẾT (Pearson tối đa 1.0 + BASS_ROOT_BOOST_WEIGHT
+    // tối đa 0.5) — có căn cứ trực tiếp từ code, không phải số đoán.
+    //
+    // === TASK A34 — MARGIN_NORM_RANGE hiệu chỉnh lại bằng DỮ LIỆU THẬT (không còn là số tạm) ===
+    // Bằng chứng: (1) log thật của Khói (audio thật) cho thấy margin của các lần Top1/Top2 GẦN
+    // HOÀ (A# Major/A# Minor mập mờ, hay dao động qua lại) rơi vào khoảng 0.01-0.02; margin của
+    // các lần candidate tương đối RÕ hơn rơi vào khoảng 0.05-0.09. (2) Test synthetic với hợp âm
+    // C Major SẠCH (đủ harmonic tự nhiên, không nhiễu) cho margin=0.074, pearsonNorm=0.94,
+    // stability=1.0, bassAgreement=1.0 — TỨC LÀ GẦN NHƯ LÝ TƯỞNG NHẤT CÓ THỂ ĐẠT ĐƯỢC — nhưng với
+    // MARGIN_NORM_RANGE=0.5 (cũ), marginNorm chỉ = 0.074/0.5 = 0.148, kéo combined xuống còn 0.77,
+    // KHÔNG BAO GIỜ vượt được ngưỡng khoá 0.80 dù tín hiệu đã sạch nhất có thể — chứng minh 0.5 là
+    // hằng số sai/quá rộng so với thang giá trị margin THẬT của thuật toán KS-profile+cosine hiện
+    // tại (Major/Minor cùng gốc vốn RẤT gần nhau về mặt cấu trúc, margin hiếm khi vượt ~0.10).
+    // Đổi sang 0.10 — hiệu chỉnh sao cho margin=0.10 (rõ ràng) -> marginNorm≈1.0, margin=0.02 (mập
+    // mờ) -> marginNorm≈0.2, tạo đủ khoảng cách để combined phân biệt được 2 loại case này (verify
+    // bằng test thật bên dưới), thay vì dồn cả 2 vào cùng 1 vùng thấp như cũ.
+    const PEARSON_NORM_MAX = 1 + BASS_ROOT_BOOST_WEIGHT;
+    const MARGIN_NORM_RANGE = 0.10;
+
+    function buildConfidenceV2(result, stability) {
+        const pearson = result.confidence; // === confidence hiện tại, chỉ đọc lại, không đổi field gốc
+        const pearsonNorm = clamp01(pearson / PEARSON_NORM_MAX);
+
+        const margin = result.margin;
+        const marginNorm = clamp01(margin / MARGIN_NORM_RANGE);
+
+        const stabilityNorm = clamp01(stability); // đã tự nhiên trong [0,1] (bình phương tỉ lệ)
+
+        const bassAgreement = result.bassAgreement;
+        const bassNorm = clamp01(bassAgreement); // đã tự nhiên trong [0,1] (tỉ lệ so với max)
+
+        // Trung bình cộng đơn giản, trọng số bằng nhau (0.25 mỗi thành phần) — CHƯA có dữ liệu
+        // thực tế để chọn trọng số khác biệt, đây là điểm khởi đầu trung lập nhất có thể.
+        const combined = (pearsonNorm + marginNorm + stabilityNorm + bassNorm) / 4;
+
+        // Margin thấp = 2 ứng viên gần nhau = mập mờ cao.
+        const ambiguity = 1 - marginNorm;
+
+        return { pearson, pearsonNorm, margin, marginNorm, stability, stabilityNorm, bassAgreement, bassNorm, combined, ambiguity };
+    }
+
+    function runVoteLoop(onWinner) {
+        const voteWindow = []; // các phần tử dạng {key: "rootIndex-mode", result}
+        const startedAt = Date.now();
+        let highConfidenceStreak = 0; // Adaptive Lock — đếm số lần đo LIÊN TỤC đạt ngưỡng cao
+
+        // === TASK A32 — Fast Path state (biệt lập hoàn toàn với voteWindow/highConfidenceStreak
+        // ở trên — không đọc/ghi chung biến, không ảnh hưởng Đường 1/Đường 2 nếu Fast Path tắt/lỗi) ===
+        let fastPathStreak = 0;
+        let fastPathStreakKey = null; // "rootIndex-mode" của lần đo gần nhất trong streak — phải GIỐNG HỆT liên tục
+        let fastPathLastFiredKey = null; // candidate GẦN NHẤT đã báo qua Fast Path — chặn log/onWinner
+                                          // lặp lại MỖI TICK cho CÙNG 1 candidate (chỉ báo 1 lần khi streak
+                                          // vừa đạt ngưỡng); candidate đổi -> tự động cho báo lại (KHÔNG phải
+                                          // cờ chặn vĩnh viễn như trước, watchContinuous() vẫn phát hiện đổi Key bình thường)
+
+        function stopBoth() {
+            clearInterval(timer);
+            clearInterval(fastTimer);
+        }
+
+        const fastTimer = setInterval(() => {
+            const elapsed = Date.now() - startedAt;
+            if (elapsed < FAST_PATH_MIN_ELAPSED_MS) return; // sàn vật lý, không xét sớm hơn dù confidence tối đa
+
+            const result = estimateKeyFromChroma(chromaVectorFast); // NGUỒN NHANH — hội tụ ~225ms, KHÔNG đụng chromaVector chậm (vote/khoá đường cũ vẫn y hệt)
+
+            // === TASK A34 — ROOT CAUSE đã xác định bằng log thật của Khói: điều kiện gate CŨ so
+            // sánh `result.confidence` (= best.score = cosine[0,1] + bassBoost, bassBoost tối đa
+            // +0.5 => THỰC TẾ có thể vượt 1.0, và HOÀN TOÀN KHÔNG chứa thông tin margin giữa
+            // Top1/Top2) với FAST_PATH_MIN_CONFIDENCE=0.80 — vì gần như luôn > 0.80 (log thật cho
+            // thấy 1.32-1.43 dù margin chỉ 0.01-0.09, ambiguity tới 0.96), gate này THỰC TẾ luôn
+            // pass, không lọc được gì. Đường Adaptive Lock (chậm, dòng ~695) làm ĐÚNG ngay từ đầu:
+            // so sánh confidenceV2.combined (chuẩn hoá [0,1], CÓ marginNorm) — Fast Path phải làm
+            // giống hệt, không được dùng field khác.
+            if (!hasMusicalContent || result.confidence < MIN_CONFIDENCE) {
+                // Vẫn giữ MIN_CONFIDENCE (ngưỡng cơ bản có sẵn, dùng CHUNG cho mọi nơi trong file
+                // này) để loại sớm frame im lặng/nhiễu hoàn toàn — KHÔNG phải gate quyết định khoá.
+                fastPathStreak = 0;
+                fastPathStreakKey = null;
+                fastPathLastFiredKey = null;
+                return;
+            }
+
+            const candidateKey = `${result.rootIndex}-${result.mode}`;
+            if (candidateKey === fastPathStreakKey) {
+                fastPathStreak++;
+            } else {
+                fastPathStreakKey = candidateKey;
+                fastPathStreak = 1; // lần đầu thấy candidate này (hoặc candidate vừa đổi) -> streak bắt đầu lại từ 1, không phải 0
+            }
+
+            if (fastPathStreak < FAST_PATH_STREAK_REQUIRED) return;
+
+            // Tính confidenceV2 THẬT (stability theo streak hiện tại, kẹp về FAST_PATH_STREAK_REQUIRED
+            // để không vượt 1.0) — ĐÂY MỚI LÀ GATE THẬT của Fast Path, thay cho result.confidence.
+            const fastStability = computeStability(Math.min(fastPathStreak, FAST_PATH_STREAK_REQUIRED), FAST_PATH_STREAK_REQUIRED);
+            const fastConfidenceV2 = buildConfidenceV2(result, fastStability);
+            if (fastConfidenceV2.combined < FAST_PATH_MIN_CONFIDENCE) {
+                // Streak đủ dài (cùng candidate 3 lần) NHƯNG margin/ambiguity giữa Top1-Top2 chưa
+                // đủ chắc (vd Major/Minor gần hoà) -> KHÔNG khoá qua Fast Path. KHÔNG reset streak
+                // (candidate vẫn đang đúng hướng, chỉ chưa đủ chắc) — để đường chậm (vote-window/
+                // adaptive, có thêm dữ liệu tích luỹ theo thời gian) tự quyết định sau, đúng tinh
+                // thần "chưa chắc chắn thì không lock" mà A34 yêu cầu.
+                return;
+            }
+
+            if (candidateKey === fastPathLastFiredKey) return; // đã báo candidate NÀY rồi -> không lặp lại mỗi tick, chỉ chờ candidate đổi
+            fastPathLastFiredKey = candidateKey;
+
+            // Đủ điều kiện Fast Path: hasMusicalContent + confidenceV2.combined>=0.80 (margin-aware,
+            // KHÔNG hạ so với Adaptive Lock) + CÙNG candidate liên tục FAST_PATH_STREAK_REQUIRED lần.
+            // KHÔNG dùng cờ "đã bắn 1 lần rồi thì thôi" ở đây — watchContinuous() cần tick tiếp theo
+            // vẫn hoạt động bình thường để phát hiện lần ĐỔI Key kế tiếp (đúng hành vi đường chậm
+            // gốc trước A32: mỗi tick tự do gọi onWinner nếu điều kiện còn đúng, dedup theo Key là
+            // việc của watchContinuous() ở tầng trên, KHÔNG phải việc của runVoteLoop()). Với
+            // detectOnce(), stopBoth() bên dưới đã clearInterval() THẬT — tick tiếp theo của cả 2
+            // interval sẽ không bao giờ chạy nữa, không cần thêm cờ nào khác.
+
+            // Ghi log TEXT nhất quán với đường chậm (logMarginSnapshot) — để mọi công cụ/quan sát
+            // đang đọc log "Locked: Yes" vẫn thấy đúng, dù khoá qua đường nào. Dùng LẠI
+            // fastStability/fastConfidenceV2 đã tính ở bước gate phía trên (không tính lại lần 2 —
+            // tránh 2 nguồn tính ra 2 giá trị khác nhau cho cùng 1 lần khoá).
+            // top1StableMs ở đây là "candidate ổn định bao lâu THEO GÓC NHÌN Fast Path" (streak x
+            // nhịp đo) — KHÔNG dùng/không đụng updateTop1StabilityTimer() (state DÙNG CHUNG với
+            // slow timer, nếu gọi từ đây sẽ bị 2 nguồn chroma khác nhau tranh nhau ghi đè, làm sai
+            // lệch cả log của đường chậm).
+            logMarginSnapshot(result, startedAt, fastPathStreak, true, fastStability, fastConfidenceV2, fastPathStreak * FAST_PATH_INTERVAL_MS, "khoá qua đường: fast-path");
+
+            sendTelemetry({
+                event: "LOCK", time: parseFloat(formatElapsedSeconds(elapsed)), key: result.key,
+                decisionScore: fastConfidenceV2.combined, reason: "fast-path", // A34: đồng bộ decisionScore với gate thật (confidenceV2.combined), không dùng result.confidence thô nữa
+                frame: frameCounter, framesToStable: frameCounter,
+                firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
+            });
+            onWinner(result, fastPathStreak, stopBoth);
+        }, FAST_PATH_INTERVAL_MS);
+
+        const timer = setInterval(() => {
+            const result = estimateKeyFromChroma();
+
+            // Phase 3.5 — cập nhật/đọc thời gian ổn định của Top1 NGAY tại đây, không tạo
+            // timer/setInterval riêng. Chạy cho MỌI lần đo (kể cả bị lọc dưới đây), vì "Top1"
+            // là kết quả của estimateKeyFromChroma() ở MỌI lần đo, không riêng gì lần được vote.
+            const top1Update = updateTop1StabilityTimer(result.top1);
+            const top1StableMs = top1Update.stableMs;
+            const elapsedSec = parseFloat(formatElapsedSeconds(Date.now() - startedAt));
+
+            // Phase 4A — TOP1_CHANGED: chỉ ghi nhận, dùng đúng dữ liệu Phase 3.5 đã tính,
+            // không thêm điều kiện/so sánh mới nào.
+            if (top1Update.changed) {
+                sendTelemetry({ event: "TOP1_CHANGED", from: top1Update.from, to: top1Update.to, time: elapsedSec });
+            }
+
+            if (result.confidence < MIN_CONFIDENCE) {
+                // Margin Logger: vẫn ghi nhận lần đo bị loại (để biết thực tế bao lâu bị dưới
+                // ngưỡng) — KHÔNG đổi hành vi return bên dưới, vẫn y hệt bản gốc.
+                const cv2Rejected = buildConfidenceV2(result, 0);
+                logMarginSnapshot(result, startedAt, 0, false, 0, cv2Rejected, top1StableMs, "dưới MIN_CONFIDENCE, bị loại khỏi vote window");
+                sendTelemetry({
+                    time: elapsedSec,
+                    top1: candidateLabel(result.top1),
+                    top2: candidateLabel(result.top2),
+                    confidence: result.confidence,
+                    margin: result.margin,
+                    stability: 0,
+                    top1Stable: top1StableMs / 1000,
+                    decisionScore: cv2Rejected.combined,
+                    votes: 0,
+                    window: voteWindow.length,
+                    locked: false
+                });
+                highConfidenceStreak = 0; // dưới ngưỡng tin cậy tối thiểu -> chuỗi Adaptive Lock mất, phải tích luỹ lại từ đầu
+                return; // không đủ tin cậy, bỏ qua lần đo này, không tính vào cửa sổ
+            }
+
+            voteWindow.push({ key: `${result.rootIndex}-${result.mode}`, result });
+            if (voteWindow.length > VOTE_WINDOW) voteWindow.shift();
+
+            const counts = {};
+            let bestKey = null, bestCount = 0, bestResult = null;
+            voteWindow.forEach((v) => {
+                counts[v.key] = (counts[v.key] || 0) + 1;
+                if (counts[v.key] > bestCount) { bestCount = counts[v.key]; bestKey = v.key; bestResult = v.result; }
+            });
+
+            const stability = computeStability(bestCount, voteWindow.length); // Phase 2 — chỉ đọc lại, không đổi gì ở trên
+            const elapsed = Date.now() - startedAt;
+
+            // Phase 3 — confidenceV2 giờ KHÔNG CÒN "chỉ để log": combined được dùng thật cho
+            // Adaptive Lock bên dưới (nhưng vẫn KHÔNG gắn vào `result`/`bestResult` trả ra ngoài
+            // — onWinner() vẫn nhận đúng object y hệt bản gốc, contract không đổi).
+            const confidenceV2 = buildConfidenceV2(result, stability);
+
+            // === Đường 1 (GIỮ NGUYÊN 100%, không sửa) — vote-window + sàn 15s, luôn là fallback an toàn. ===
+            const willLockByVote = bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS;
+
+            // === Đường 2 (MỚI) — Adaptive Lock: confidence cao LIÊN TỤC nhiều lần -> khoá sớm hơn. ===
+            if (bestCount >= VOTE_MIN_AGREE && confidenceV2.combined >= ADAPTIVE_LOCK_CONFIDENCE) {
+                highConfidenceStreak++;
+            } else {
+                highConfidenceStreak = 0;
+            }
+            const willLockByAdaptive = elapsed >= FAST_LOCK_MIN_ELAPSED_MS && highConfidenceStreak >= ADAPTIVE_LOCK_STREAK_REQUIRED;
+
+            const willLock = willLockByVote || willLockByAdaptive;
+            const lockReason = willLockByAdaptive && !willLockByVote ? "adaptive" : "vote-window";
+
+            logMarginSnapshot(result, startedAt, bestCount, willLock, stability, confidenceV2, top1StableMs, willLock ? `khoá qua đường: ${lockReason}` : undefined);
+
+            sendTelemetry({
+                time: elapsedSec,
+                top1: candidateLabel(result.top1),
+                top2: candidateLabel(result.top2),
+                confidence: result.confidence,
+                margin: result.margin,
+                stability,
+                top1Stable: top1StableMs / 1000,
+                decisionScore: confidenceV2.combined,
+                votes: bestCount,
+                window: voteWindow.length,
+                locked: willLock,
+                highConfidenceStreak
+            });
+
+            if (willLock) {
+                // Phase 4A — LOCK: bản ghi RIÊNG, đúng lúc onWinner() được gọi thật (dùng chung
+                // biến willLock/confidenceV2/bestResult, không tính toán lại/không đoán).
+                sendTelemetry({
+                    event: "LOCK", time: elapsedSec, key: bestResult.key, decisionScore: confidenceV2.combined, reason: lockReason,
+                    frame: frameCounter, framesToStable: frameCounter, // Mục 4 — mốc cuối cùng của pipeline latency
+                    firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
+                });
+                onWinner(bestResult, bestCount, stopBoth);
+            }
+        }, CHECK_INTERVAL_MS);
+
+        return stopBoth;
+    }
+
+    /**
+     * Dò 1 LẦN cho tới khi 1 kết quả chiếm đa số trong cửa sổ gần nhất rồi tự dừng.
+     * Dùng khi cần chốt Key gốc lúc bắt đầu bài hát.
+     * @returns {() => void} hàm huỷ, phòng khi cần dừng giữa chừng
+     */
+    function detectOnce(onStable) {
+        return runVoteLoop((result, count, stop) => {
+            stop();
+            onStable(result);
+        });
+    }
+
+    /**
+     * Chạy MÃI, báo mỗi khi Key thắng phiếu bầu KHÁC với lần báo trước — dùng cho ModEngine
+     * theo dõi suốt bài (không báo lặp lại liên tục khi vẫn đang giữ nguyên 1 Key).
+     * @returns {() => void} hàm huỷ
+     */
+    function watchContinuous(onStableChange) {
+        let lastReportedKey = null;
+        return runVoteLoop((result) => {
+            const key = `${result.rootIndex}-${result.mode}`;
+            if (key === lastReportedKey) return;
+            lastReportedKey = key;
+            onStableChange(result);
+        });
+    }
+
+    function loop() {
+        if (!running) return;
+        updateChromaVector();
+        rafId = requestAnimationFrame(loop);
+    }
+
+    function startProvisionalTicker() {
+        stopProvisionalTicker();
+
+        provisionalTimerId = setInterval(() => {
+            // v2.0: dùng chromaVectorFast (hội tụ ~225ms) thay vì chromaVector chậm (~1.2s) —
+            // đây là thay đổi CHÍNH giúp "Key tạm" bắt kịp âm thanh thật nhanh hơn nhiều.
+            const result = estimateKeyFromChroma(chromaVectorFast);
+
+            // Vẫn tôn trọng ngưỡng tin cậy tối thiểu — không hiện "Key tạm" là rác khi
+            // audio chưa đủ tín hiệu (vd vài trăm ms đầu, hoặc intro chỉ có trống).
+            if (result.confidence < MIN_CONFIDENCE) return;
+
+            // Key Engine V9 Mục 4 — CHỈ ghi nhận mốc thời gian lần bắn ĐẦU TIÊN, không đổi
+            // gì ở điều kiện confidence phía trên hay dữ liệu gửi cho provisionalListeners.
+            if (firstProvisionalAt === null) {
+                firstProvisionalAt = Date.now();
+                firstProvisionalFrame = frameCounter;
+                sendTelemetry({ event: "FIRST_PROVISIONAL", frame: firstProvisionalFrame, key: result.key, confidence: result.confidence });
+            }
+
+            provisionalListeners.forEach((cb) => cb({ key: result.key, confidence: result.confidence }));
+        }, PROVISIONAL_INTERVAL_MS);
+    }
+
+    function stopProvisionalTicker() {
+        if (provisionalTimerId) {
+            clearInterval(provisionalTimerId);
+            provisionalTimerId = null;
+        }
+    }
+
+    function onProvisionalEstimate(cb) { provisionalListeners.push(cb); }
+
+    function stop() {
+        running = false;
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = null;
+        stopProvisionalTicker();
+    }
+
+    function onLevel(cb) { levelListeners.push(cb); } // dùng cho debug log
+
+    function getDebugSnapshot() {
+        return {
+            chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice(),
+            // Key Engine V9 Mục 4/16 — telemetry latency, thuần quan sát
+            frameCounter, hasMusicalContent, contentEnergyEMA,
+            firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
+        };
+    }
+
+    return {
+        init, stop, detectOnce, watchContinuous, estimateKeyFromChroma,
+        shortestSemitoneDelta, onLevel, onProvisionalEstimate, NOTE_NAMES, MIN_CONFIDENCE, getDebugSnapshot,
+    };
+})();
+
+window.KeyEngine = KeyEngine;

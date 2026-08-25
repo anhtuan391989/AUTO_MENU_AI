@@ -1,0 +1,552 @@
+From 4de1e2b0eb9fd7933dba2badeffb67aeef41b3c3 Mon Sep 17 00:00:00 2001
+From: Claude A <claude-a@anthropic.local>
+Date: Sun, 23 Aug 2026 13:48:22 +0000
+Subject: [PATCH] Claude A: A32 - Key Initial Detection Fast Path (<=2s)
+
+---
+ tests/unit/ConfidenceV2.verify.js       |   5 +-
+ tests/unit/KeyEngineFastPath.verify.js  | 286 ++++++++++++++++++++++++
+ tests/unit/MarginLogger.verify.js       |   4 +-
+ tests/unit/StabilityTracker.verify.js   |   8 +-
+ tests/unit/TelemetryLogger.verify.js    |   4 +-
+ tests/unit/Top1StabilityTimer.verify.js |  18 +-
+ ui/js/engines/keyEngine.js              |  98 +++++++-
+ 7 files changed, 412 insertions(+), 11 deletions(-)
+ create mode 100644 tests/unit/KeyEngineFastPath.verify.js
+
+diff --git a/tests/unit/ConfidenceV2.verify.js b/tests/unit/ConfidenceV2.verify.js
+index 5745229..80ee1e9 100644
+--- a/tests/unit/ConfidenceV2.verify.js
++++ b/tests/unit/ConfidenceV2.verify.js
+@@ -126,7 +126,10 @@ async function runPartB() {
+     if (onWinnerResult) {
+         check(typeof onWinnerResult.confidence === "number", "Object trả cho onWinner() vẫn có field `confidence` gốc, đúng kiểu số");
+         check(onWinnerResult.confidenceV2 === undefined, "Object trả cho onWinner() KHÔNG chứa confidenceV2 — chứng minh không rò rỉ vào luồng dữ liệu thật, đúng yêu cầu 'chỉ dùng để log'");
+-        check(onWinnerElapsedMs >= 15000, `Vẫn khoá sau >= 15000ms (đúng MIN_ELAPSED_BEFORE_LOCK_MS gốc, KHÔNG đổi), thực tế: ${onWinnerElapsedMs}ms`);
++        // A32 — Fast Path (mới) cho phép khoá sớm nhất ~1200ms (FAST_PATH_MIN_ELAPSED_MS) khi tín
++        // hiệu rõ/ổn định liên tục — KHÔNG còn bắt buộc >=15000ms như trước A32. Test này chỉ quan
++        // tâm ConfidenceV2 vẫn đúng CẤU TRÚC dù khoá qua đường nào, không phải thời điểm khoá.
++        check(onWinnerElapsedMs >= 1200, `Khoá sau >= 1200ms (sàn vật lý FAST_PATH_MIN_ELAPSED_MS, A32), thực tế: ${onWinnerElapsedMs}ms`);
+     }
+ 
+     const confidenceV2Blocks = logLines
+diff --git a/tests/unit/KeyEngineFastPath.verify.js b/tests/unit/KeyEngineFastPath.verify.js
+new file mode 100644
+index 0000000..5f96aa5
+--- /dev/null
++++ b/tests/unit/KeyEngineFastPath.verify.js
+@@ -0,0 +1,286 @@
++/**
++ * ==========================================================
++ * Auto Menu AI — Kiểm chứng KeyEngine Fast Path (TASK A32)
++ * ----------------------------------------------------------
++ * Chạy bằng: node tests/unit/KeyEngineFastPath.verify.js
++ *
++ * SYNTHETIC TEST — chạy trong sandbox Node (vm), KHÔNG phải audio thật, KHÔNG chạy trên
++ * Windows/Electron thật. Dùng để kiểm chứng LOGIC/TIMING của Fast Path mới thêm vào
++ * runVoteLoop() (ui/js/engines/keyEngine.js) một cách xác định (deterministic) — không phụ
++ * thuộc CPU máy chạy nhanh/chậm. Đây KHÔNG thay thế yêu cầu test bằng audio thật trên máy
++ * Windows của Khói (xem A32 REPORT — mục "Test bằng audio thật CHƯA THỰC HIỆN được trong
++ * sandbox này").
++ *
++ * Kiểm chứng:
++ *   1. Fast Path chốt Key ĐẦU TIÊN trong ≤2000ms (giả lập) khi tín hiệu rõ + ổn định.
++ *   2. Fast Path KHÔNG chốt sớm hơn FAST_PATH_MIN_ELAPSED_MS dù confidence tối đa (sàn vật lý).
++ *   3. Fast Path KHÔNG chốt nếu candidate ĐỔI liên tục (không đủ streak cùng 1 Key) — chặn
++ *      false positive kiểu "vồ nhầm 1 frame".
++ *   4. Fast Path KHÔNG chốt khi hasMusicalContent=false (im lặng/nhiễu).
++ *   5. onWinner() CHỈ được gọi ĐÚNG 1 LẦN cho mỗi detectOnce() — không double-fire dù cả 2
++ *      đường (fast + chậm) cùng "chín".
++ *   6. Đường VOTE-WINDOW (15s) và ADAPTIVE (cũ) vẫn hoạt động Y HỆT trước khi có A32 — verify
++ *      bằng cách chặn Fast Path (ép confidence dưới ngưỡng ở nhánh nhanh) rồi xem đường chậm
++ *      vẫn tự chốt đúng sau đủ thời gian như thiết kế gốc.
++ *   7. Nhiều Key khác nhau (C Major, A Minor, D Minor, D# Minor) đều được Fast Path nhận
++ *      ĐÚNG — không chỉ đúng với 1 case.
++ * ==========================================================
++ */
++
++const assert = require("assert");
++const fs = require("fs");
++const path = require("path");
++const vm = require("vm");
++
++let failCount = 0;
++function check(condition, message) {
++    try {
++        assert.ok(condition, message);
++        console.log(`  ✅ ${message}`);
++    } catch (err) {
++        failCount++;
++        console.log(`  ❌ ${message} -- ${err.message}`);
++    }
++}
++
++const keyEngineSource = fs.readFileSync(
++    path.resolve(__dirname, "../../ui/js/engines/keyEngine.js"),
++    "utf-8"
++);
++
++function makeFakeAnalyser(fakeSpectrumFn) {
++    return {
++        fftSize: 8192,
++        smoothingTimeConstant: 0,
++        frequencyBinCount: 4096,
++        getFloatFrequencyData(arr) {
++            const spectrum = fakeSpectrumFn();
++            for (let i = 0; i < arr.length; i++) arr[i] = spectrum[i] ?? -120;
++        }
++    };
++}
++
++/**
++ * Sandbox có kiểm soát HOÀN TOÀN: requestAnimationFrame (audio frame), setInterval (các vòng
++ * lặp thời gian), VÀ Date.now() (đồng hồ giả — test tự "tua" thời gian, không phụ thuộc tốc
++ * độ máy chạy test thật).
++ */
++function createSandboxEngine(fakeSpectrumFn) {
++    let capturedRaf = null;
++    let capturedIntervals = []; // {id, cb, ms} — KHÔNG tự chạy, test tự gọi tay
++    let fakeNow = 0;
++    let intervalIdSeq = 0;
++
++    const fakeAudioContext = { sampleRate: 48000, createAnalyser: () => makeFakeAnalyser(fakeSpectrumFn) };
++    const fakeSourceNode = { connect: () => {} };
++
++    const sandbox = {
++        window: {},
++        Float32Array,
++        Math,
++        Array,
++        Date: { now: () => fakeNow },
++        console: { log: () => {} },
++        requestAnimationFrame: (cb) => { capturedRaf = cb; return 1; },
++        cancelAnimationFrame: () => {},
++        setInterval: (cb, ms) => { const id = ++intervalIdSeq; capturedIntervals.push({ id, cb, ms }); return id; },
++        clearInterval: (id) => { capturedIntervals = capturedIntervals.filter((e) => e.id !== id); }
++    };
++    vm.createContext(sandbox);
++    vm.runInContext(keyEngineSource, sandbox, { filename: "keyEngine.js" });
++
++    const KeyEngine = sandbox.window.KeyEngine;
++    KeyEngine.init(fakeAudioContext, fakeSourceNode);
++
++    function stepFrame() {
++        if (capturedRaf) { const cb = capturedRaf; capturedRaf = null; cb(); }
++    }
++    function stepFrames(n) { for (let i = 0; i < n; i++) stepFrame(); }
++
++    // Tua đồng hồ giả thêm `ms`, rồi bắn TẤT CẢ interval đã đăng ký đúng nhịp của chúng
++    // (vd advance(400) sẽ bắn interval ms=400 đúng 1 lần, interval ms=1500 thì KHÔNG bắn nếu
++    // 400 < 1500) — dùng bộ đếm riêng cho từng interval, mô phỏng đúng hành vi setInterval thật.
++    const elapsedSinceRegister = new Map(); // id -> ms đã tích luỹ kể từ lần bắn gần nhất
++    function advance(ms, framesPerStep = 1) {
++        const stepMs = 10; // tua từng bước nhỏ để không bỏ lỡ mốc nào, đồng thời step vài audio frame
++        let remaining = ms;
++        while (remaining > 0) {
++            const dt = Math.min(stepMs, remaining);
++            fakeNow += dt;
++            remaining -= dt;
++            stepFrames(framesPerStep); // cập nhật chromaVector/chromaVectorFast liên tục theo thời gian trôi
++            capturedIntervals.forEach((entry) => {
++                const acc = (elapsedSinceRegister.get(entry.id) || 0) + dt;
++                if (acc >= entry.ms) {
++                    elapsedSinceRegister.set(entry.id, acc - entry.ms);
++                    entry.cb();
++                } else {
++                    elapsedSinceRegister.set(entry.id, acc);
++                }
++            });
++        }
++    }
++
++    return { KeyEngine, stepFrame, stepFrames, advance, getFakeNow: () => fakeNow };
++}
++
++function spectrumFor(freqs) {
++    return () => {
++        const arr = new Float32Array(4096).fill(-100);
++        const binHz = 48000 / 8192;
++        for (const f of freqs) {
++            const bin = Math.round(f / binHz);
++            if (bin >= 0 && bin < arr.length) arr[bin] = -10;
++        }
++        return arr;
++    };
++}
++
++const SPECTRA = {
++    "C Major": spectrumFor([65.4, 130.8, 261.6, 329.6, 392.0, 523.3]),      // C2,C3,C4,E4,G4,C5
++    "A Minor": spectrumFor([55.0, 110.0, 220.0, 261.6, 329.6, 440.0]),      // A1,A2,A3,C4,E4,A4 (A-C-E)
++    "D Minor": spectrumFor([73.4, 146.8, 293.7, 349.2, 440.0, 587.3]),      // D2,D3,D4,F4,A4,D5 (D-F-A)
++    "D# Minor": spectrumFor([77.8, 155.6, 311.1, 370.0, 466.2, 622.3]),     // D#2,D#3,D#4,F#4,A#4,D#5
++};
++function silenceSpectrum() { return new Float32Array(4096).fill(-100); }
++
++// ================================
++// TEST 1 — Fast Path chốt trong ≤2000ms với tín hiệu rõ/ổn định, đúng Key, cho NHIỀU Key khác nhau
++// ================================
++function runTest1_FastPathLatencyAndAccuracy() {
++    console.log("\n=== TEST 1: Fast Path — latency ≤2000ms + đúng Key (nhiều Key khác nhau) ===");
++
++    Object.entries(SPECTRA).forEach(([expectedKey, spectrumFn]) => {
++        const { KeyEngine, advance, getFakeNow } = createSandboxEngine(spectrumFn);
++
++        // Cho vài frame "khởi động" để chromaVector/chromaVectorFast có dữ liệu trước khi bắt
++        // đầu đo latency thật (đúng tinh thần T0 = audio hợp lệ bắt đầu, không tính lúc mảng
++        // còn toàn số 0 lúc mới init()).
++        let winnerResult = null, winnerElapsedMs = null, winnerCount = 0;
++        const stop = KeyEngine.detectOnce((result) => {
++            winnerResult = result;
++            winnerElapsedMs = getFakeNow();
++            winnerCount++;
++        });
++
++        advance(2500); // tua 2.5s giả lập — đủ để Fast Path (sàn 1200ms + 3 nhịp 400ms) kích hoạt nếu đúng thiết kế
++
++        check(winnerResult !== null, `[${expectedKey}] Fast Path CÓ chốt được Key trong 2.5s giả lập (thực tế: ${winnerResult ? "có" : "KHÔNG có kết quả nào"})`);
++        if (winnerResult) {
++            check(winnerResult.key === expectedKey, `[${expectedKey}] Key chốt ĐÚNG (thực tế: ${winnerResult.key})`);
++            check(winnerElapsedMs <= 2000, `[${expectedKey}] Latency ≤2000ms (thực tế: ${winnerElapsedMs}ms)`);
++            check(winnerCount === 1, `[${expectedKey}] onWinner() chỉ gọi ĐÚNG 1 LẦN, không double-fire (thực tế: ${winnerCount} lần)`);
++        }
++        stop();
++    });
++}
++
++// ================================
++// TEST 2 — Sàn vật lý FAST_PATH_MIN_ELAPSED_MS: không chốt sớm hơn dù confidence tối đa
++// ================================
++function runTest2_PhysicalFloorRespected() {
++    console.log("\n=== TEST 2: Fast Path KHÔNG chốt sớm hơn sàn vật lý (FAST_PATH_MIN_ELAPSED_MS=1200ms) ===");
++
++    const { KeyEngine, advance, getFakeNow } = createSandboxEngine(SPECTRA["C Major"]);
++    let winnerAt = null;
++    const stop = KeyEngine.detectOnce((result) => { winnerAt = getFakeNow(); });
++
++    advance(1199); // NGAY TRƯỚC sàn 1200ms
++    check(winnerAt === null, `Chưa chốt ở 1199ms — đúng sàn vật lý (thực tế: ${winnerAt === null ? "chưa chốt" : `đã chốt lúc ${winnerAt}ms`})`);
++
++    advance(50); // vượt qua mốc 1200ms
++    // Không assert winnerAt !== null ở đây bắt buộc (còn tuỳ streak vừa đủ hay chưa), chỉ cần
++    // đảm bảo nó KHÔNG chốt trước 1200ms là đủ cho mục tiêu test này.
++    stop();
++}
++
++// ================================
++// TEST 3 — Candidate đổi liên tục -> KHÔNG đủ streak -> KHÔNG chốt qua Fast Path
++// ================================
++function runTest3_NoFastLockOnFlickeringCandidate() {
++    console.log("\n=== TEST 3: Candidate ĐỔI đúng nhịp mỗi lần kiểm tra Fast Path (400ms) -> KHÔNG chốt (chặn false positive) ===");
++
++    // Đổi tín hiệu THẬT theo mốc 400ms (đúng nhịp FAST_PATH_INTERVAL_MS) — mỗi cửa sổ 400ms có
++    // ĐỦ thời gian để chromaVectorFast (EMA 0.80/frame, ~40 frame/400ms ở bước 10ms) hội tụ gần
++    // như hoàn toàn về 1 trong 2 Key, nên mỗi lần Fast Path kiểm tra sẽ thấy 1 candidate RÕ
++    // RÀNG (không bị trộn lẫn) nhưng LUÔN KHÁC lần trước — đúng kịch bản "ambiguous/dao động
++    // giữa 2 khả năng", streak phải reset liên tục, không bao giờ đủ 3 lần liên tiếp CÙNG 1 Key.
++    let t = 0;
++    const alternating = () => (Math.floor(t / 400) % 2 === 0) ? SPECTRA["C Major"]() : SPECTRA["D Minor"]();
++
++    const { KeyEngine, advance, getFakeNow } = createSandboxEngine(() => alternating());
++    let winnerAt = null, winnerKey = null;
++    const stop = KeyEngine.detectOnce((result) => { winnerAt = getFakeNow(); winnerKey = result.key; });
++
++    const stepMs = 10;
++    for (let elapsed = 0; elapsed < 2900 && winnerAt === null; elapsed += stepMs) {
++        t = elapsed;
++        advance(stepMs);
++    }
++
++    check(winnerAt === null, `Chưa chốt qua BẤT KỲ đường nào trong 2.9s khi candidate đổi đúng nhịp mỗi 400ms (thực tế: ${winnerAt === null ? "chưa chốt" : `đã chốt "${winnerKey}" lúc ${winnerAt}ms — SAI, false positive`})`);
++    stop();
++}
++
++// ================================
++// TEST 4 — Im lặng (hasMusicalContent=false) -> không bao giờ chốt
++// ================================
++function runTest4_NoLockOnSilence() {
++    console.log("\n=== TEST 4: Im lặng hoàn toàn -> KHÔNG BAO GIỜ chốt Key (Fast Path lẫn đường chậm) ===");
++
++    const { KeyEngine, advance, getFakeNow } = createSandboxEngine(silenceSpectrum);
++    let winnerAt = null;
++    const stop = KeyEngine.detectOnce((result) => { winnerAt = getFakeNow(); });
++
++    advance(20000); // tua xa hơn cả sàn 15s của đường chậm — vẫn phải KHÔNG có kết quả
++
++    check(winnerAt === null, `Im lặng 20s giả lập -> vẫn KHÔNG chốt Key nào (thực tế: ${winnerAt === null ? "đúng, không chốt" : `SAI — đã chốt lúc ${winnerAt}ms`})`);
++    stop();
++}
++
++// ================================
++// TEST 5 — Đường VOTE-WINDOW/ADAPTIVE cũ vẫn hoạt động y hệt khi Fast Path bị chặn (candidate
++// đổi liên tục trong 1.2s đầu để Fast Path không kịp tích streak, sau đó ổn định lại)
++// ================================
++function runTest5_OldPathsStillWorkWhenFastPathBlocked() {
++    console.log("\n=== TEST 5: Đường VOTE-WINDOW/ADAPTIVE cũ (trước A32) vẫn hoạt động khi Fast Path không kích hoạt được ===");
++
++    // 1.3s đầu: candidate đổi liên tục (Fast Path không tích đủ streak). Sau đó: ổn định D Minor
++    // liên tục -> phải rơi vào đường ADAPTIVE hoặc VOTE-WINDOW như thiết kế GỐC (không đổi).
++    let t = 0;
++    const mixedThenStable = () => {
++        if (t < 1300) return (Math.floor(t / 100) % 2 === 0) ? SPECTRA["C Major"]() : SPECTRA["A Minor"]();
++        return SPECTRA["D Minor"]();
++    };
++
++    const { KeyEngine, advance, getFakeNow } = createSandboxEngine(() => mixedThenStable());
++    let winnerResult = null, winnerAt = null, winnerCount = 0;
++    const stop = KeyEngine.detectOnce((result) => { winnerResult = result; winnerAt = getFakeNow(); winnerCount++; });
++
++    // Tua thủ công đồng thời cập nhật biến t dùng trong spectrum callback
++    const stepMs = 10;
++    for (let elapsed = 0; elapsed < 16000 && winnerResult === null; elapsed += stepMs) {
++        t = elapsed;
++        advance(stepMs);
++    }
++
++    check(winnerResult !== null, `Vẫn chốt được Key qua đường cũ (vote-window/adaptive) khi Fast Path bị chặn lúc đầu (thực tế: ${winnerResult ? "có chốt" : "KHÔNG chốt — REGRESSION so với hành vi trước A32"})`);
++    if (winnerResult) {
++        check(winnerResult.key === "D Minor", `Key chốt ĐÚNG D Minor (thực tế: ${winnerResult.key})`);
++        check(winnerAt > 1300, `Thời điểm chốt SAU khi tín hiệu ổn định (đúng logic vote-window cần dữ liệu ổn định) (thực tế: ${winnerAt}ms)`);
++        check(winnerCount === 1, `onWinner() vẫn chỉ gọi ĐÚNG 1 LẦN (thực tế: ${winnerCount})`);
++    }
++    stop();
++}
++
++// ================================
++// RUN ALL
++// ================================
++runTest1_FastPathLatencyAndAccuracy();
++runTest2_PhysicalFloorRespected();
++runTest3_NoFastLockOnFlickeringCandidate();
++runTest4_NoLockOnSilence();
++runTest5_OldPathsStillWorkWhenFastPathBlocked();
++
++console.log(`\n${failCount === 0 ? "✅ TẤT CẢ" : `❌ ${failCount} kiểm chứng FAIL`} — KeyEngine Fast Path (A32, SYNTHETIC, không phải audio thật).`);
++process.exit(failCount > 0 ? 1 : 0);
+diff --git a/tests/unit/MarginLogger.verify.js b/tests/unit/MarginLogger.verify.js
+index 8d0780b..90f4ec0 100644
+--- a/tests/unit/MarginLogger.verify.js
++++ b/tests/unit/MarginLogger.verify.js
+@@ -118,7 +118,9 @@ async function main() {
+ 
+     if (lockedYesSnaps.length > 0) {
+         const lockedTimeSec = parseFloat(lockedYesSnaps[0].time.replace("s", ""));
+-        check(lockedTimeSec >= 15.0, `Thời điểm "Locked: Yes" trong log phải >= 15.0s (đúng MIN_ELAPSED_BEFORE_LOCK_MS gốc), thực tế: ${lockedTimeSec}s`);
++        // A32 — Fast Path cho phép khoá sớm nhất ~1.2s (FAST_PATH_MIN_ELAPSED_MS), không còn bắt
++        // buộc >=15.0s như trước. Test này chỉ quan tâm ĐỊNH DẠNG dòng log, không phải thời điểm.
++        check(lockedTimeSec >= 1.2, `Thời điểm "Locked: Yes" trong log phải >= 1.2s (sàn vật lý FAST_PATH_MIN_ELAPSED_MS, A32), thực tế: ${lockedTimeSec}s`);
+         check(Math.abs(lockedTimeSec * 1000 - onWinnerElapsedMs) < 1600, `Thời điểm log "Locked: Yes" (${lockedTimeSec}s) phải khớp thời điểm onWinner() thật (${onWinnerElapsedMs}ms), lệch trong 1 nhịp CHECK_INTERVAL_MS`);
+     }
+ 
+diff --git a/tests/unit/StabilityTracker.verify.js b/tests/unit/StabilityTracker.verify.js
+index 57c9585..103baab 100644
+--- a/tests/unit/StabilityTracker.verify.js
++++ b/tests/unit/StabilityTracker.verify.js
+@@ -128,14 +128,18 @@ async function runPartB() {
+     check(!!lockedSnap, "Có snapshot 'Locked: Yes'");
+     if (lockedSnap) {
+         const lockedTimeSec = parseFloat(lockedSnap.time);
+-        check(lockedTimeSec >= 15.0, `Thời điểm khoá vẫn >= 15.0s (đúng MIN_ELAPSED_BEFORE_LOCK_MS gốc, KHÔNG đổi), thực tế: ${lockedTimeSec}s`);
++        // A32 — Fast Path cho phép khoá sớm nhất ~1.2s, không còn bắt buộc >=15.0s. Test này chỉ
++        // quan tâm field Stability trong log tính đúng công thức, không phải thời điểm khoá.
++        check(lockedTimeSec >= 1.2, `Thời điểm khoá vẫn >= 1.2s (sàn vật lý FAST_PATH_MIN_ELAPSED_MS, A32), thực tế: ${lockedTimeSec}s`);
+         check(Math.abs(lockedTimeSec * 1000 - onWinnerElapsedMs) < 1600, "Thời điểm log khoá khớp thời điểm onWinner() thật — Lock KHÔNG bị ảnh hưởng bởi Stability Tracker");
+ 
+         const stabilityVal = parseFloat(lockedSnap.stability);
+         check(stabilityVal >= 0.85, `Với phổ ổn định suốt (C Major không đổi), Stability lúc khoá phải cao (>=0.85), thực tế: ${stabilityVal}`);
+ 
+         const [votesNum] = lockedSnap.votes.split("/").map(Number);
+-        check(votesNum >= 5, `Votes lúc khoá vẫn phải >= 5 (đúng VOTE_MIN_AGREE gốc, KHÔNG đổi), thực tế: ${lockedSnap.votes}`);
++        // A32 — Nếu khoá qua Fast Path, "Votes" trong log là fastPathStreak (mặc định yêu cầu 3),
++        // KHÔNG phải VOTE_MIN_AGREE(5) của đường chậm — đây là 2 cơ chế độc lập, cả 2 đều hợp lệ.
++        check(votesNum >= 3, `Votes lúc khoá phải >= 3 (FAST_PATH_STREAK_REQUIRED nếu qua Fast Path, hoặc >=5 nếu qua đường chậm — A32), thực tế: ${lockedSnap.votes}`);
+     }
+ }
+ 
+diff --git a/tests/unit/TelemetryLogger.verify.js b/tests/unit/TelemetryLogger.verify.js
+index 8f1e815..b9ad038 100644
+--- a/tests/unit/TelemetryLogger.verify.js
++++ b/tests/unit/TelemetryLogger.verify.js
+@@ -191,7 +191,9 @@ async function runPartB() {
+ 
+     // Không đổi Lock / thời gian chạy
+     check(!!onWinnerResult, "KeyEngine vẫn khoá được sau khi thêm Telemetry");
+-    check(onWinnerElapsedMs >= 15000 && onWinnerElapsedMs < 16600, `Vẫn khoá trong khoảng [15000, 16600)ms như các Phase trước (KHÔNG đổi thời gian chạy), thực tế: ${onWinnerElapsedMs}ms`);
++    // A32 — Fast Path cho phép khoá sớm nhất ~1.2s. Test này chỉ quan tâm cấu trúc/tính đúng đắn
++    // của telemetry record LOCK, không phải thời điểm khoá cụ thể.
++    check(onWinnerElapsedMs >= 1200, `Khoá sau >= 1200ms (sàn vật lý FAST_PATH_MIN_ELAPSED_MS, A32), thực tế: ${onWinnerElapsedMs}ms`);
+ 
+     if (lockRecords.length > 0) {
+         check(lockRecords[0].key === onWinnerResult.key, "Key trong record LOCK khớp đúng key thật của onWinner()");
+diff --git a/tests/unit/Top1StabilityTimer.verify.js b/tests/unit/Top1StabilityTimer.verify.js
+index 562e4a4..d8da7c7 100644
+--- a/tests/unit/Top1StabilityTimer.verify.js
++++ b/tests/unit/Top1StabilityTimer.verify.js
+@@ -157,17 +157,24 @@ async function runPartB() {
+         if (snaps[i].top1Stable < snaps[i - 1].top1Stable) monotonic = false;
+     }
+     check(monotonic, "Case 1: Top1Stable tăng liên tục (không giảm) khi Top1 không đổi suốt phiên");
+-    check(snaps.length > 0 && snaps[snaps.length - 1].top1Stable >= 12.0, `Case 1: Top1Stable ở lần đo cuối gần bằng tổng thời gian phiên (thực tế: ${snaps[snaps.length - 1]?.top1Stable}s trong phiên ~15s)`);
++    // A32 — Case 1 dùng detectOnce(), giờ dừng SỚM qua Fast Path (~1.2-2s, KHÔNG còn phải chạy đủ
++    // ~15s như trước A32). Ngưỡng đổi từ 12.0s -> 1.0s (đúng sàn FAST_PATH_MIN_ELAPSED_MS=1200ms),
++    // vẫn giữ nguyên MỤC ĐÍCH test: Top1Stable ở lần đo cuối phải gần bằng tổng thời gian phiên
++    // THẬT SỰ đã chạy (dù phiên đó ngắn hơn nhiều so với trước).
++    check(snaps.length > 0 && snaps[snaps.length - 1].top1Stable >= 1.0, `Case 1: Top1Stable ở lần đo cuối gần bằng tổng thời gian phiên (thực tế: ${snaps[snaps.length - 1]?.top1Stable}s trong phiên ~2s với Fast Path, A32)`);
+ 
+     // Case 4: vẫn khoá đúng 15s, Top1Stable không ảnh hưởng Lock
+     check(!!onWinnerResult, "Case 4: KeyEngine vẫn khoá được sau khi thêm Top1 Stability Timer");
+-    check(onWinnerElapsedMs >= 15000, `Case 4: vẫn khoá sau >= 15000ms (đúng MIN_ELAPSED_BEFORE_LOCK_MS gốc), thực tế: ${onWinnerElapsedMs}ms`);
++    // A32 — Fast Path cho phép khoá sớm nhất ~1.2s. Case 4 chỉ quan tâm object trả cho onWinner()
++    // không rò rỉ field Top1Stable, không phải thời điểm khoá cụ thể.
++    check(onWinnerElapsedMs >= 1200, `Case 4: khoá sau >= 1200ms (sàn vật lý FAST_PATH_MIN_ELAPSED_MS, A32), thực tế: ${onWinnerElapsedMs}ms`);
+     check(onWinnerResult && onWinnerResult.top1StableMs === undefined && onWinnerResult.top1Stable === undefined,
+         "Object trả cho onWinner() KHÔNG chứa field Top1Stable nào — không rò rỉ vào luồng dữ liệu thật");
+     const lockedSnap = snaps.find((s) => s.locked === "Yes");
+     if (lockedSnap) {
+         const [votesNum] = lockedSnap.votes.split("/").map(Number);
+-        check(votesNum >= 5, `Case 4: Votes lúc khoá vẫn >= 5 (Vote Window không đổi), thực tế: ${lockedSnap.votes}`);
++        // A32 — Votes lúc khoá qua Fast Path là fastPathStreak (mặc định 3), không phải VOTE_MIN_AGREE(5).
++        check(votesNum >= 3, `Case 4: Votes lúc khoá >= 3 (FAST_PATH_STREAK_REQUIRED nếu qua Fast Path, hoặc >=5 nếu qua đường chậm — A32), thực tế: ${lockedSnap.votes}`);
+         check(Math.abs(lockedSnap.confidence - onWinnerResult.confidence) < 0.01, "Case 4: Confidence trong log lúc khoá khớp confidence thật của onWinner (Confidence không đổi)");
+     }
+ }
+@@ -191,7 +198,10 @@ async function runPartC() {
+         { sampleRate: 48000, createAnalyser: () => makeSwitchingAnalyser(() => (Date.now() < switchAt ? C_MAJOR_SPECTRUM : A_MINOR_SPECTRUM)) },
+         { connect: () => {} }
+     );
+-    KeyEngine.detectOnce(() => {}); // khởi động vòng lặp bỏ phiếu (nơi logMarginSnapshot chạy) — init() một mình không tự chạy vote loop
++    KeyEngine.watchContinuous(() => {}); // A32: đổi từ detectOnce() sang watchContinuous() — detectOnce
++    // giờ có Fast Path, tự dừng SỚM (~2s) khi đoạn đầu ổn định, không kịp chạy tới mốc đổi phổ (9s)
++    // mà Case 2/3 cần quan sát. watchContinuous() không tự dừng khi thắng phiếu — đúng ý định gốc
++    // của test này ("phiên dài, đổi phổ giữa chừng"), không đổi bất kỳ assertion/logic nào khác.
+ 
+     // Không đợi khoá (đổi phổ giữa chừng có thể không đủ 5/8 phiếu để khoá — đúng và không sao,
+     // Case 2/3 chỉ quan tâm nhãn Top1/Top1Stable trong log, không cần chờ onWinner).
+diff --git a/ui/js/engines/keyEngine.js b/ui/js/engines/keyEngine.js
+index e1cbdf4..439e767 100644
+--- a/ui/js/engines/keyEngine.js
++++ b/ui/js/engines/keyEngine.js
+@@ -414,6 +414,30 @@ const KeyEngine = (() => {
+     const ADAPTIVE_LOCK_STREAK_REQUIRED = 3; // phải đạt ngưỡng LIÊN TỤC 3 lần đo mới cho khoá sớm —
+                                               // chống 1 lần đo nhiễu ngẫu nhiên đạt cao rồi tụt ngay
+ 
++    // === TASK A32 — FAST PATH (initial Key detection ≤2s) ===
++    // Đường 1 (vote-window, 15s) và Đường 2 (adaptive) ĐỀU bị khoá cứng bởi cùng 1 điều kiện:
++    // bestCount >= VOTE_MIN_AGREE (5), tức phải đợi ít nhất 5 lần đo của vòng CHECK_INTERVAL_MS
++    // (1500ms) => tối thiểu ~7.5s trong điều kiện lý tưởng nhất, thực tế thường xa hơn nhiều —
++    // ĐÂY LÀ NGUYÊN NHÂN GỐC khiến "initial detection" không thể nào dưới 2s dù đã có Adaptive
++    // Lock, KHÔNG PHẢI do FAST_LOCK_MIN_ELAPSED_MS=3000ms "chưa đủ thấp" (xem A32 REPORT).
++    //
++    // Fast Path dùng LẠI hạ tầng chromaVectorFast/estimateKeyFromChroma(chromaVectorFast) đã có
++    // sẵn từ Provisional Estimate (v2.0) — trước đây CHỈ dùng để hiển thị "Key tạm", không bao
++    // giờ dùng để khoá thật. Fast Path chạy trên nhịp NHANH hơn hẳn (FAST_PATH_INTERVAL_MS=400ms,
++    // giống PROVISIONAL_INTERVAL_MS) THAY VÌ đợi đủ 5 mẫu của vòng 1500ms chậm.
++    //
++    // KHÔNG hạ ngưỡng tin cậy so với Adaptive Lock (vẫn đúng 0.80) — chỉ đổi NGUỒN dữ liệu (chroma
++    // hội tụ nhanh hơn) + nhịp đo (nhanh hơn), không đổi độ khắt khe. NGOÀI RA còn khắt khe HƠN
++    // Adaptive Lock ở 1 điểm: Adaptive Lock cũ chỉ yêu cầu highConfidenceStreak (CONFIDENCE cao
++    // liên tục), KHÔNG bắt buộc candidate phải là CÙNG 1 Key suốt streak đó (2 Key khác nhau đều
++    // confidence cao liên tiếp vẫn tính là streak hợp lệ). Fast Path bắt buộc CÙNG root+mode suốt
++    // FAST_PATH_STREAK_REQUIRED lần liên tiếp — chặn đúng rủi ro "không nhận candidate chỉ từ một
++    // frame" mà A32 yêu cầu.
++    const FAST_PATH_INTERVAL_MS = PROVISIONAL_INTERVAL_MS; // dùng lại hằng số đã khai báo phía trên (dòng ~132, cùng ý nghĩa nhịp đo nhanh), không tạo số trùng
++    const FAST_PATH_MIN_ELAPSED_MS = 1200;      // 3 lần đo x 400ms — sàn vật lý, không khoá sớm hơn dù confidence tối đa
++    const FAST_PATH_STREAK_REQUIRED = 3;        // 3 lần đo LIÊN TỤC cùng candidate + cùng đạt ngưỡng — ~1.2s xác nhận
++    const FAST_PATH_MIN_CONFIDENCE = ADAPTIVE_LOCK_CONFIDENCE; // GIỮ NGUYÊN 0.80 — không hạ ngưỡng để đổi lấy tốc độ
++
+     function formatElapsedSeconds(ms) {
+         return (ms / 1000).toFixed(1);
+     }
+@@ -538,6 +562,76 @@ const KeyEngine = (() => {
+         const startedAt = Date.now();
+         let highConfidenceStreak = 0; // Adaptive Lock — đếm số lần đo LIÊN TỤC đạt ngưỡng cao
+ 
++        // === TASK A32 — Fast Path state (biệt lập hoàn toàn với voteWindow/highConfidenceStreak
++        // ở trên — không đọc/ghi chung biến, không ảnh hưởng Đường 1/Đường 2 nếu Fast Path tắt/lỗi) ===
++        let fastPathStreak = 0;
++        let fastPathStreakKey = null; // "rootIndex-mode" của lần đo gần nhất trong streak — phải GIỐNG HỆT liên tục
++        let fastPathLastFiredKey = null; // candidate GẦN NHẤT đã báo qua Fast Path — chặn log/onWinner
++                                          // lặp lại MỖI TICK cho CÙNG 1 candidate (chỉ báo 1 lần khi streak
++                                          // vừa đạt ngưỡng); candidate đổi -> tự động cho báo lại (KHÔNG phải
++                                          // cờ chặn vĩnh viễn như trước, watchContinuous() vẫn phát hiện đổi Key bình thường)
++
++        function stopBoth() {
++            clearInterval(timer);
++            clearInterval(fastTimer);
++        }
++
++        const fastTimer = setInterval(() => {
++            const elapsed = Date.now() - startedAt;
++            if (elapsed < FAST_PATH_MIN_ELAPSED_MS) return; // sàn vật lý, không xét sớm hơn dù confidence tối đa
++
++            const result = estimateKeyFromChroma(chromaVectorFast); // NGUỒN NHANH — hội tụ ~225ms, KHÔNG đụng chromaVector chậm (vote/khoá đường cũ vẫn y hệt)
++
++            if (!hasMusicalContent || result.confidence < FAST_PATH_MIN_CONFIDENCE) {
++                fastPathStreak = 0;
++                fastPathStreakKey = null;
++                fastPathLastFiredKey = null;
++                return;
++            }
++
++            const candidateKey = `${result.rootIndex}-${result.mode}`;
++            if (candidateKey === fastPathStreakKey) {
++                fastPathStreak++;
++            } else {
++                fastPathStreakKey = candidateKey;
++                fastPathStreak = 1; // lần đầu thấy candidate này (hoặc candidate vừa đổi) -> streak bắt đầu lại từ 1, không phải 0
++            }
++
++            if (fastPathStreak < FAST_PATH_STREAK_REQUIRED) return;
++            if (candidateKey === fastPathLastFiredKey) return; // đã báo candidate NÀY rồi -> không lặp lại mỗi tick, chỉ chờ candidate đổi
++            fastPathLastFiredKey = candidateKey;
++
++            // Đủ điều kiện Fast Path: hasMusicalContent + confidence>=0.80 (KHÔNG hạ so với Adaptive
++            // Lock) + CÙNG candidate liên tục FAST_PATH_STREAK_REQUIRED lần ở nhịp FAST_PATH_INTERVAL_MS.
++            // KHÔNG dùng cờ "đã bắn 1 lần rồi thì thôi" ở đây — watchContinuous() cần tick tiếp theo
++            // vẫn hoạt động bình thường để phát hiện lần ĐỔI Key kế tiếp (đúng hành vi đường chậm
++            // gốc trước A32: mỗi tick tự do gọi onWinner nếu điều kiện còn đúng, dedup theo Key là
++            // việc của watchContinuous() ở tầng trên, KHÔNG phải việc của runVoteLoop()). Với
++            // detectOnce(), stopBoth() bên dưới đã clearInterval() THẬT — tick tiếp theo của cả 2
++            // interval sẽ không bao giờ chạy nữa, không cần thêm cờ nào khác.
++
++            // Ghi log TEXT nhất quán với đường chậm (logMarginSnapshot) — để mọi công cụ/quan sát
++            // đang đọc log "Locked: Yes" vẫn thấy đúng, dù khoá qua đường nào. stability=1.0 vì
++            // định nghĩa của Fast Path CHÍNH LÀ 100% đồng thuận liên tục (không có khái niệm cửa
++            // sổ trượt như đường chậm) — không suy diễn, tính đúng theo công thức computeStability
++            // đã có sẵn (fastPathStreak/fastPathStreak = 1.0).
++            const fastStability = computeStability(fastPathStreak, fastPathStreak);
++            const fastConfidenceV2 = buildConfidenceV2(result, fastStability);
++            // top1StableMs ở đây là "candidate ổn định bao lâu THEO GÓC NHÌN Fast Path" (streak x
++            // nhịp đo) — KHÔNG dùng/không đụng updateTop1StabilityTimer() (state DÙNG CHUNG với
++            // slow timer, nếu gọi từ đây sẽ bị 2 nguồn chroma khác nhau tranh nhau ghi đè, làm sai
++            // lệch cả log của đường chậm).
++            logMarginSnapshot(result, startedAt, fastPathStreak, true, fastStability, fastConfidenceV2, fastPathStreak * FAST_PATH_INTERVAL_MS, "khoá qua đường: fast-path");
++
++            sendTelemetry({
++                event: "LOCK", time: parseFloat(formatElapsedSeconds(elapsed)), key: result.key,
++                decisionScore: result.confidence, reason: "fast-path",
++                frame: frameCounter, framesToStable: frameCounter,
++                firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
++            });
++            onWinner(result, fastPathStreak, stopBoth);
++        }, FAST_PATH_INTERVAL_MS);
++
+         const timer = setInterval(() => {
+             const result = estimateKeyFromChroma();
+ 
+@@ -633,11 +727,11 @@ const KeyEngine = (() => {
+                     frame: frameCounter, framesToStable: frameCounter, // Mục 4 — mốc cuối cùng của pipeline latency
+                     firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
+                 });
+-                onWinner(bestResult, bestCount, () => clearInterval(timer));
++                onWinner(bestResult, bestCount, stopBoth);
+             }
+         }, CHECK_INTERVAL_MS);
+ 
+-        return () => clearInterval(timer);
++        return stopBoth;
+     }
+ 
+     /**
+-- 
+2.43.0
+

@@ -1,0 +1,389 @@
+From e9a9f99348c7dbe94654c20485ae95c94244059c Mon Sep 17 00:00:00 2001
+From: Claude A <claude-a@anthropic.local>
+Date: Fri, 21 Aug 2026 02:07:29 +0000
+Subject: [PATCH] Claude A: Task A25 - fix Key=null/Mod=null bang thuat toan
+ baseline V6_TOAN_PRO
+
+ROOT CAUSE (chung minh bang so, khong doan mo): Musical Content Gate cu
+(MUSICAL_CONTENT_MIN_ENERGY=0.08, tinh tren nang luong FFT peak-picking +
+spectral whitening) CHAN DUNG ca 1 hop am sach/full volume tong hop
+(frameAvgEnergy do duoc = 0.033, duoi nguong 0.08). Vi hasMusicalContent
+luon false, chromaVector KHONG BAO GIO duoc cap nhat -> estimateKeyFromChroma()
+luon tra confidence=0 (gated) -> runVoteLoop luon reject vi < MIN_CONFIDENCE
+-> vote window khong bao gio day -> Key khong bao gio chot -> Mod (phu
+thuoc 100% vao KeyEngine.estimateKeyFromChroma().confidence) cung khong
+bao gio chay theo. Day la nguyen nhan DUY NHAT cua ca Key=null va Mod=null
+(1 diem hong duy nhat, khong phai 2 loi rieng biet).
+
+FIX (chi sua ui/js/engines/keyEngine.js, KHONG dung modEngine.js/
+renderer.js/ui/index.html/MIDI/BPM/ManualState/ManualPriorityGuard/
+PluginController - dung pham vi task yeu cau):
+
+Lay V6_TOAN_PRO (Extension/content.js) lam baseline, CHUYEN thuat toan
+sang kien truc AUTO_MENU_AI (khong copy mu quang):
+
+1. Chroma extraction: thay "FFT peak-picking + spectral whitening +
+   harmonic suppression" bang NNLS-style harmonic-template (duyet 88 phim
+   piano MIDI 21-108, cong nang luong 8 harmonic dau tien noi suy tuyen
+   tinh tu FFT bin gan nhat, nhan HARMONIC_AMP giam dan) - mo hinh hoa
+   dung cach nhac cu/giong hat that tao overtone.
+
+2. Musical Content Gate: thay nguong nang luong tho bang RMS tren toan
+   dai 50-6000Hz (V6 baseline), CO SUA THEM: khong loai bo bin nen khoi
+   tong/dem (phat hien qua MarginEngine.verify.js - mot tin hieu that
+   nhung it dinh pho ro rang bi chan nham voi cach loc bin nen + doi hoi
+   toi thieu 20 bin "noi bat", da kiem chung bang so: 6 dinh -10dB giua
+   nen -100dB van cho RMS~0.024, gap 48 lan nguong, trong khi im lang that
+   cho RMS~1e-5, thap hon nguong 50 lan - nguong van phan biet dung).
+
+3. Profile: thay Krumhansl-Kessler 1990 goc bang profile V6
+   (Krumhansl-Temperley + Albrecht-Shanahan, tuned cho nhac pop/karaoke
+   Viet Nam).
+
+4. Scoring: thay Pearson correlation bang cosine similarity tren chroma
+   da nen power-law (^0.67) + L2-normalize (V6 baseline) - nhay hon voi
+   chroma vector thua (nhieu pitch-class=0), tinh huong rat thuong gap
+   voi nhac that.
+
+GIU NGUYEN 100% (kien truc AUTO_MENU_AI, khong dung): vote-window,
+VOTE_MIN_AGREE, Adaptive Lock, Stability Tracker, Confidence V2, Margin
+Logger/Engine, Telemetry, dual-rate smoothing (chromaVector/
+chromaVectorFast), bass-root-voting boost (BASS_ROOT_BOOST_WEIGHT - V6
+khong co, AUTO_MENU_AI tu them de phan biet giong song song), toan bo
+public API (init/detectOnce/watchContinuous/stop/onLevel/
+onProvisionalEstimate/estimateKeyFromChroma/getDebugSnapshot/
+shortestSemitoneDelta/NOTE_NAMES/MIN_CONFIDENCE) - renderer.js/modEngine.js
+KHONG can sua gi.
+
+VERIFIED (jsdom + vm sandbox, chay THAT ui/js/engines/keyEngine.js +
+modEngine.js trich xuat nguyen van, khong phai code mo phong rieng, tren
+tin hieu am thanh tong hop THAT qua FFT Radix-2 that - PCM voi harmonic
+giong nhac cu/giong hat that, khong phai sine don thuan):
+
+- C Major, A Minor, D Minor, D#/Eb Minor: nhan dung root + Major/Minor o
+  nhieu muc am luong (100%, 33%, ca 5%).
+- Nhieu nen thuan tuy: hasMusicalContent dung false (khong bao gio bao co
+  tin hieu gia).
+- detectOnce() end-to-end: CHOT duoc Key sau 15.0s (san vote-window, vi
+  margin tren 1 hop am tinh/khong doi thap hon nguong Adaptive Lock
+  0.80 - nhac that co giai dieu bien doi lien tuc se hoi tu nhanh hon,
+  ca V6 goc cung can nhieu frame lien tuc de hoi tu Bayesian voi tin hieu
+  tinh khong doi, xem so sanh truc tiep V6 vs AUTO_MENU_AI trong bao cao).
+- MOD end-to-end (dung modEngine.js that, khong sua gi): giu D Minor 5s ->
+  chuyen sang Eb Minor -> onModulation() bao chinh xac
+  {semitone:1, originalKey:"D", targetKey:"D# Minor", stable:true} -
+  DUNG VI DU Khoi da nay ra (Chay ve noi phia anh - D Minor -> Eb Minor).
+
+VE MOD - lam ro theo yeu cau Khoi: modEngine.js hien tai da dung dung y
+nghia can co (phat hien modulation THAT SU xay ra trong bai hat, bao thoi
+gian + tone dich cho Key xu ly, KHONG dung nghia "MOD tay" - phan Manual
+Mod/set tone bang tay giu nguyen KHONG DUNG). Display Khoi mo ta (thoi
+gian + tone can len) da co san trong updateModInfo()/#modTime/#modStatus
+tu truoc (renderer.js, KHONG sua trong task nay) - chi la KHONG BAO GIO
+chay duoc vi phu thuoc KeyEngine, gio da tu hoat dong dung sau fix nay.
+
+Regression: 0 NEW FAIL. Bat ngo tich cuc: 7 test TUNG fail tu truoc A20
+(ConfidenceV2, KeyEngineV2, MarginLogger, ModEngineV2, StabilityTracker,
+TelemetryLogger, Top1StabilityTimer) nay TU PASS - vi tat ca deu kiem tra
+tinh nhat quan noi tai cua keyEngine.js THAT, ma truoc day luon degenerate
+(chromaVector toan so 0) nen luon fail; gio thuat toan cho ket qua that,
+cac test nay tu nhien pass. Phat hien 1 regression thuc su trong luc sua
+(MarginEngine.verify.js) - da sua ngay (xem muc 2), khong che giau.
+
+NOT RUN - GIOI HAN MOI TRUONG: audio thuc/WASAPI Loopback that/Studio One
+that (sandbox khong co Windows/audio hardware). Da bu bang tin hieu tong
+hop qua FFT that (khong phai gia dinh/doan) chay dung code that trong
+keyEngine.js/modEngine.js - day la bang chung gan nhat co the tao duoc
+trong moi truong hien tai, KHONG thay the duoc test tren nhac that/Windows
+that.
+---
+ ui/js/engines/keyEngine.js | 223 ++++++++++++++++++++-----------------
+ 1 file changed, 123 insertions(+), 100 deletions(-)
+
+diff --git a/ui/js/engines/keyEngine.js b/ui/js/engines/keyEngine.js
+index fb91e57..e1cbdf4 100644
+--- a/ui/js/engines/keyEngine.js
++++ b/ui/js/engines/keyEngine.js
+@@ -1,16 +1,27 @@
+ /* ==========================================================
+-   KEY ENGINE — tự quản lý toàn bộ việc dò Key (chroma vector +
+-   Krumhansl-Schmuckler)
++   KEY ENGINE — tự quản lý toàn bộ việc dò Key (NNLS-style harmonic-template
++   chroma + Bayesian-flavored cosine scoring, baseline V6_TOAN_PRO)
+    -----------------------------------------------------------
+-   QUAN TRỌNG: đây là xử lý tín hiệu số (DSP) chạy ngay trong trình duyệt
+-   qua Web Audio API — KHÔNG phải gọi Claude/Anthropic API. aiLayer.js
+-   (nếu có, gọi Claude) chỉ dùng để hiểu LỆNH BẰNG CHỮ, không nhận audio
+-   thô để phân tích cao độ. Dò Key bắt buộc phải là DSP.
++   TASK A25 — thay THUẬT TOÁN trích/chấm điểm chroma (đã CHỨNG MINH BẰNG SỐ
++   là nguyên nhân trực tiếp khiến Key=null/Mod=null: cách cũ "peak-picking +
++   spectral whitening" + Musical Content Gate (ngưỡng năng lượng thô) chặn
++   đứng ngay cả 1 hợp âm sạch/full volume tổng hợp — xem báo cáo A25). Lấy
++   V6_TOAN_PRO (Extension/content.js) làm baseline: NNLS-style harmonic-
++   template chroma (duyệt 88 phím piano, cộng năng lượng harmonic 1-8 nội
++   suy từ FFT), profile Krumhansl-Temperley+Albrecht-Shanahan tuned cho
++   nhạc pop/karaoke Việt Nam, cosine similarity, Musical Content Gate RMS
++   đơn giản (đã kiểm chứng nhạy hơn hẳn, không chặn nhầm tín hiệu thật ở
++   nhiều mức âm lượng, kể cả 5%).
++
++   KHÔNG copy mù quáng — GIỮ NGUYÊN kiến trúc AUTO_MENU_AI: vote-window,
++   Adaptive Lock, Stability Tracker, Confidence V2, Margin Logger,
++   Telemetry, dual-rate smoothing, bass-root-voting boost (V6 không có,
++   AUTO_MENU_AI tự thêm để phân biệt giọng song song) — TẤT CẢ giữ nguyên
++   100%, chỉ thay phần TRÍCH XUẤT + CHẤM ĐIỂM chroma bên trong
++   updateChromaVector()/estimateKeyFromChroma().
+ 
+-   Nguyên lý: với mỗi khung FFT, tính năng lượng âm thanh rơi vào 12 nốt
+-   nhạc (chroma vector), làm mượt theo thời gian, so khớp với 24 khuôn mẫu
+-   chuẩn (12 Trưởng + 12 Thứ, trọng số Krumhansl-Kessler 1990) để tìm khuôn
+-   khớp nhất.
++   QUAN TRỌNG: đây là xử lý tín hiệu số (DSP) chạy ngay trong trình duyệt
++   qua Web Audio API — KHÔNG phải gọi Claude/Anthropic API.
+ 
+    Độc lập hoàn toàn với BPMEngine/ModEngine: có analyser riêng, vòng lặp
+    riêng. Chỉ chia sẻ chung AudioContext + source node do renderer.js tạo.
+@@ -25,10 +36,21 @@
+ const KeyEngine = (() => {
+     const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+ 
+-    // Trọng số chuẩn ngành (Krumhansl & Kessler, 1990) — số liệu thực nghiệm công khai
+-    // về cảm nhận độ "ổn định" của từng bậc trong 1 điệu, không tự bịa.
+-    const KS_MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+-    const KS_MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
++    // === TASK A25 — Profile V6_TOAN_PRO (Krumhansl-Temperley + Albrecht-Shanahan, tuned cho
++    // nhạc pop/karaoke Việt Nam — nhiều bài thứ, pentatonic) — THAY cho KS 1990 gốc (không
++    // tuned riêng cho thể loại nhạc thực tế đang dùng). Dùng với cosine similarity (không phải
++    // Pearson correlation — xem estimateKeyFromChroma()).
++    const KS_MAJOR_PROFILE = [1.000, 0.065, 0.630, 0.088, 0.710, 0.568, 0.095, 0.851, 0.075, 0.688, 0.098, 0.425];
++    const KS_MINOR_PROFILE = [1.000, 0.072, 0.573, 0.782, 0.082, 0.571, 0.082, 0.851, 0.608, 0.082, 0.629, 0.082];
++
++    // === TASK A25 — NNLS-style harmonic-template chroma (baseline V6) — thay hoàn toàn cách
++    // "FFT peak-picking + spectral whitening + harmonic suppression" cũ. Duyệt 88 phím piano
++    // MIDI 21-108 (A0-C8), với MỖI phím cộng năng lượng của 8 harmonic đầu tiên (nội suy tuyến
++    // tính từ FFT bin gần nhất) — mô hình hoá đúng cách nhạc cụ/giọng hát thật tạo ra overtone,
++    // thay vì chỉ nhìn đỉnh phổ đơn lẻ (dễ bị nhiễu/lệch octave).
++    const A4_HZ = 440.0;
++    const HARMONIC_AMP = [1.0, 0.60, 0.42, 0.30, 0.20, 0.15, 0.10, 0.07];
++
+ 
+     const CHROMA_SMOOTHING = 0.96; // càng gần 1 càng mượt/chậm đổi, cần thiết vì tín hiệu qua loopback ảo khá nhiễu
+ 
+@@ -151,98 +173,70 @@ const KeyEngine = (() => {
+ 
+         const sampleRate = audioCtxRef?.sampleRate || 48000;
+         const binHz = sampleRate / chromaAnalyser.fftSize;
++        const binCount = chromaDataArray.length;
+         const frame = new Array(12).fill(0);
+         const bassFrame = new Array(12).fill(0);
+ 
+-        // Dải ~65Hz (C2) tới ~2100Hz (khoảng C7) — bao trùm hầu hết nhạc cụ/giọng hát,
+-        // loại bớt nhiễu tần số quá thấp (rumble) hoặc quá cao (harmonics rối).
+-        const minBin = Math.max(1, Math.floor(65 / binHz));
+-        const maxBin = Math.min(chromaDataArray.length - 1, Math.ceil(2100 / binHz));
+-        const rangeLen = maxBin - minBin + 1;
+-
+-        // === v2.0 BƯỚC 1 — dB -> biên độ (NÉN căn bậc 2, giữ nguyên lý do như bản cũ: giảm ảnh
+-        // hưởng của bin vỡ tiếng), tính 1 LẦN, dùng lại cho cả whitening lẫn peak-picking bên dưới
+-        // (tránh tính lại 2 lần, giữ chi phí CPU tương đương bản cũ).
+-        const magnitudes = new Float32Array(rangeLen);
+-        for (let idx = 0; idx < rangeLen; idx++) {
+-            const db = chromaDataArray[minBin + idx];
+-            magnitudes[idx] = db < -90 ? 0 : Math.sqrt(Math.pow(10, db / 20));
+-        }
+-
+-        // === v2.0 BƯỚC 2 — Spectral Whitening: chia mỗi bin cho "sàn phổ cục bộ" (trung bình
+-        // trượt ±WHITEN_RADIUS bin quanh nó). Nhạc thật luôn có bass to hơn treble một cách tự
+-        // nhiên (độ nghiêng phổ) — whitening làm phẳng độ nghiêng này, giúp bước peak-picking bên
+-        // dưới CHỈ so sánh 1 bin với hàng xóm GẦN nó (cùng "vùng" âm lượng), không bị âm trầm luôn
+-        // thắng chỉ vì to hơn tự nhiên. Kỹ thuật chuẩn MIR (không riêng phần mềm nào) — xem báo cáo.
+-        const WHITEN_RADIUS = 8;
+-        const whitened = new Float32Array(rangeLen);
+-        let runningSum = 0;
+-        for (let idx = 0; idx < Math.min(WHITEN_RADIUS, rangeLen); idx++) runningSum += magnitudes[idx];
+-        for (let idx = 0; idx < rangeLen; idx++) {
+-            const lo = Math.max(0, idx - WHITEN_RADIUS);
+-            const hi = Math.min(rangeLen - 1, idx + WHITEN_RADIUS);
+-            let sum = 0;
+-            for (let j = lo; j <= hi; j++) sum += magnitudes[j]; // rangeLen nhỏ (~350 bin ở dải 65-2100Hz) -> vẫn rẻ
+-            const floor = sum / (hi - lo + 1);
+-            whitened[idx] = magnitudes[idx] / (floor + 1e-6);
+-        }
+-
+-        // === v3.0 BƯỚC 3 — Peak-picking (giữ nguyên từ v2.0) + Harmonic Suppression (MỚI):
+-        // trước tiên xác định TOÀN BỘ tập đỉnh cục bộ, sau đó với MỖI đỉnh, kiểm tra có đỉnh
+-        // NÀO KHÁC nằm gần đúng ở f/2 hoặc f/3 hay không — nếu có, đỉnh này nhiều khả năng là
+-        // HÀI ÂM (harmonic overtone) của đỉnh thấp hơn đó, giảm nhẹ trọng số đóng góp (KHÔNG
+-        // loại bỏ hoàn toàn — hài âm vẫn mang thông tin thật, octave doubling có ý nghĩa âm
+-        // nhạc). Đây là kỹ thuật "Harmonic Suppression" chuẩn trong tách pitch/chroma (họ hàng
+-        // với Harmonic Product Spectrum), giảm lỗi octave/nhầm bậc do năng lượng hài âm bị đếm
+-        // 2 lần vào chroma. FFT tuyến tính -> bin của f/2 CHÍNH XÁC bằng bin(f)/2, không cần quy
+-        // đổi qua tần số Hz (rẻ, không tăng độ phức tạp thuật toán).
+-        const peakIndices = [];
+-        for (let idx = 0; idx < rangeLen; idx++) {
+-            if (magnitudes[idx] <= 0) continue;
+-            const isPeak = (idx === 0 || whitened[idx] >= whitened[idx - 1]) &&
+-                           (idx === rangeLen - 1 || whitened[idx] >= whitened[idx + 1]);
+-            if (isPeak) peakIndices.push(idx);
+-        }
+-        const peakSet = new Set(peakIndices);
+-
+-        const HARMONIC_TOLERANCE_BINS = 2;   // sai số cho phép khi so khớp vị trí hài âm (do rời rạc hoá bin)
+-        const HARMONIC_SUPPRESS_FACTOR = 0.7; // giảm 30% trọng số mỗi lần khớp hài âm bậc 2 HOẶC bậc 3
+-
+-        function hasPeakNear(targetIdxInRange) {
+-            if (targetIdxInRange < 0) return false;
+-            for (let d = -HARMONIC_TOLERANCE_BINS; d <= HARMONIC_TOLERANCE_BINS; d++) {
+-                if (peakSet.has(targetIdxInRange + d)) return true;
++        // === TASK A25 — NNLS-style harmonic-template chroma (baseline V6_TOAN_PRO) ===
++        // Duyệt 88 phím piano MIDI 21-108 (A0-C8). Với MỖI phím, cộng năng lượng của 8
++        // harmonic đầu tiên (nội suy tuyến tính giữa 2 FFT bin gần nhất từ tần số harmonic),
++        // nhân trọng số HARMONIC_AMP (biên độ overtone giảm dần — mô hình source-filter cho
++        // giọng hát + nhạc cụ điển hình). Đây là kỹ thuật "khớp mẫu" (template matching) —
++        // hoàn toàn khác cách "peak-picking + spectral whitening" cũ (chỉ nhìn đỉnh phổ đơn
++        // lẻ, dễ lệch octave/nhiễu). Thay thế TOÀN BỘ BƯỚC 1-3 của bản cũ.
++        for (let midi = 21; midi <= 108; midi++) {
++            const pc = ((midi % 12) + 12) % 12;
++            const fFun = A4_HZ * Math.pow(2, (midi - 69) / 12);
++            if (fFun < 27 || fFun > 6000) continue;
++            let energy = 0;
++            for (let h = 0; h < HARMONIC_AMP.length; h++) {
++                const fH = fFun * (h + 1);
++                if (fH > sampleRate / 2) break;
++                const bin = fH / binHz;
++                const b0 = Math.floor(bin);
++                const b1 = b0 + 1;
++                if (b1 >= binCount) break;
++                const frac = bin - b0;
++                const db0 = chromaDataArray[b0];
++                const db1 = chromaDataArray[b1];
++                if (db0 <= -100 && db1 <= -100) continue;
++                const amp0 = Math.pow(10, Math.max(-100, db0) / 20);
++                const amp1 = Math.pow(10, Math.max(-100, db1) / 20);
++                const amp = amp0 * (1 - frac) + amp1 * frac;
++                energy += amp * HARMONIC_AMP[h];
+             }
+-            return false;
++            frame[pc] += energy * energy; // power domain — giống V6, tương phản rõ nốt chủ đạo
++            if (fFun <= BASS_MAX_HZ) bassFrame[pc] += energy; // dùng amplitude (không bình phương) cho bass-vote, giữ nguyên logic AUTO_MENU_AI
+         }
+ 
+-        for (const idx of peakIndices) {
+-            const absoluteBin = minBin + idx;
+-
+-            let harmonicWeight = 1.0;
+-            if (hasPeakNear(Math.round(absoluteBin / 2) - minBin)) harmonicWeight *= HARMONIC_SUPPRESS_FACTOR;
+-            if (hasPeakNear(Math.round(absoluteBin / 3) - minBin)) harmonicWeight *= HARMONIC_SUPPRESS_FACTOR;
+-
+-            const magnitude = magnitudes[idx] * harmonicWeight; // biên độ GỐC (đã nén căn bậc 2) x hệ số hài âm
+-            const pc = frequencyToPitchClass(absoluteBin * binHz);
+-            if (pc < 0) continue;
+-            const isBass = (absoluteBin * binHz) <= BASS_MAX_HZ;
+-            const weight = isBass ? BASS_WEIGHT : 1;
+-            frame[pc] += magnitude * weight;
+-            if (isBass) bassFrame[pc] += magnitude;
++        // === TASK A25 — Musical Content Gate: RMS đơn giản trên dải 50-6000Hz (baseline V6)
++        // — THAY cho ngưỡng năng lượng thô (MUSICAL_CONTENT_MIN_ENERGY=0.08 cũ) đã CHỨNG MINH
++        // BẰNG SỐ chặn đứng cả 1 hợp âm sạch/full volume tổng hợp (xem báo cáo A25). Ngưỡng
++        // RMS>0.0005 (~-48dBFS trung bình dải nhạc) đã kiểm chứng nhạy đúng ở nhiều mức âm
++        // lượng thực tế (kể cả 5% volume) mà vẫn lọc đúng nhiễu nền thuần tuý.
++        const BIN_LO = Math.max(1, Math.ceil(50 / binHz));
++        const BIN_HI = Math.min(binCount - 1, Math.floor(6000 / binHz));
++        // A25 fix: KHÔNG loại bỏ bin nền (db<=-100) khỏi tổng/đếm — cộng cả bin nền (biên độ
++        // gần 0, không ảnh hưởng đáng kể) để mẫu số CỐ ĐỊNH theo độ rộng dải tần, giống cách
++        // đo RMS thật. Bản đầu (loại bin nền + yêu cầu count>=20) khiến 1 tín hiệu THẬT nhưng
++        // chỉ có vài đỉnh phổ rời rạc rõ ràng (tone thuần/synth đơn giản, ít bin "nổi bật" hơn
++        // nhạc thu âm tự nhiên) bị chặn nhầm — phát hiện qua MarginEngine.verify.js (đã kiểm
++        // chứng bằng số: 6 đỉnh -10dB rõ ràng giữa nền -100dB vẫn cho RMS ~0.024, gấp ~48 lần
++        // ngưỡng 0.0005, trong khi im lặng thật cho RMS ~1e-5, thấp hơn ngưỡng 50 lần — ngưỡng
++        // vẫn phân biệt đúng nhạc thật vs im lặng, chỉ không còn đòi hỏi số lượng bin tối thiểu
++        // vô lý với tín hiệu tần số đơn/ít bồi âm).
++        let contentRms = 0;
++        const contentCount = BIN_HI - BIN_LO + 1;
++        for (let b = BIN_LO; b <= BIN_HI; b++) {
++            const amp = Math.pow(10, chromaDataArray[b] / 20);
++            contentRms += amp * amp;
+         }
++        const frameHasContent = contentCount > 0 && Math.sqrt(contentRms / contentCount) > 0.0005;
+ 
+-        // === Musical Content Gate — đo TRƯỚC khi cộng vào chroma. `magnitudes` đã tính sẵn ở
+-        // BƯỚC 1 (biên độ nén căn bậc 2, KHÔNG whitened — whitened luôn tự chuẩn hoá về ~1 dù
+-        // là nhiễu sàn thuần tuý, không phản ánh được "có tín hiệu thật hay không").
+-        let frameEnergy = 0;
+-        for (let idx = 0; idx < magnitudes.length; idx++) frameEnergy += magnitudes[idx];
+-        const frameAvgEnergy = rangeLen > 0 ? frameEnergy / rangeLen : 0;
+-
+-        // Chống nhiễu tức thời (1 frame to bất thường không đủ để "mở cổng", 1 frame im ắng
+-        // thoáng qua giữa 2 nốt không đủ để "đóng cổng ngay") — dùng EMA riêng, nhanh vừa phải.
+-        contentEnergyEMA = contentEnergyEMA * 0.9 + frameAvgEnergy * 0.1;
+-        hasMusicalContent = contentEnergyEMA >= MUSICAL_CONTENT_MIN_ENERGY;
++        // Chống nhiễu tức thời — vẫn giữ EMA riêng (kiến trúc AUTO_MENU_AI, V6 không có bước
++        // này vì chỉ chạy 1 lần/session ngắn) để 1 frame to/im bất thường không tự mở/đóng cổng.
++        contentEnergyEMA = contentEnergyEMA * 0.9 + (frameHasContent ? 1 : 0) * 0.1;
++        hasMusicalContent = contentEnergyEMA >= 0.5; // đa số các frame gần đây đều có tín hiệu thật
+         frameCounter++; // Key Engine V9 Mục 4 — đếm khung, THUẦN quan sát, không dùng ở bất kỳ điều kiện nào
+ 
+         // Key Engine V9 Mục 4/16 — CHỈ ghi nhận mốc THỜI GIAN, không đổi giá trị hasMusicalContent
+@@ -290,6 +284,27 @@ const KeyEngine = (() => {
+         return denom === 0 ? 0 : num / denom;
+     }
+ 
++    // === TASK A25 — Cosine similarity (baseline V6) — thay Pearson correlation ở trên (giữ
++    // lại hàm cũ KHÔNG XOÁ, phòng chỗ khác trong codebase còn tham chiếu, nhưng KHÔNG còn
++    // dùng trong estimateKeyFromChroma() bên dưới). Cosine similarity trên chroma đã nén
++    // power-law (^0.67) + L2-normalize là phần LÕI thuật toán V6 — nhạy hơn Pearson với chroma
++    // vector thưa (nhiều pitch-class = 0), vốn là tình huống rất thường gặp với nhạc thật.
++    function powerLawNormalize(vector) {
++        const out = new Array(12).fill(0);
++        let norm = 0;
++        for (let i = 0; i < 12; i++) out[i] = Math.pow(Math.max(0, vector[i]), 0.67);
++        for (let i = 0; i < 12; i++) norm += out[i] * out[i];
++        norm = Math.sqrt(norm);
++        if (norm > 0) for (let i = 0; i < 12; i++) out[i] /= norm;
++        return out;
++    }
++
++    function cosineSimilarity12(a, b) {
++        let dot = 0, na = 0, nb = 0;
++        for (let i = 0; i < 12; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
++        return (na > 0 && nb > 0) ? dot / Math.sqrt(na * nb) : 0;
++    }
++
+     // BUG ĐÃ SỬA: bản cũ dùng slice(steps).concat(slice(0,steps)) — đây là XOAY TRÁI, đặt nốt
+     // chủ (tonic, giá trị lớn nhất của profile) vào SAI vị trí (root' = (12-steps)%12 thay vì
+     // đúng "steps"). Hệ quả: suốt từ đầu, thuật toán so sánh chroma thật với khuôn mẫu của SAI
+@@ -310,6 +325,11 @@ const KeyEngine = (() => {
+         const vector = sourceVector || chromaVector;
+         const maxBassVotes = Math.max(...bassRootVotes, 1e-9);
+ 
++        // === TASK A25 — power-law compress + L2 normalize chroma 1 LẦN trước vòng lặp 12
++        // root (baseline V6) — cosineSimilarity12() bên dưới dùng vector ĐÃ chuẩn hoá này,
++        // KHÔNG dùng `vector` thô nữa (khác Pearson correlation cũ, tự trừ mean bên trong).
++        const chromaNorm = powerLawNormalize(vector);
++
+         let best = { score: -Infinity, root: 0, mode: "Major" };
+ 
+         // === Margin Engine (Phase 1) — CHỈ thu thập song song để tính Top1/Top2/Margin,
+@@ -325,8 +345,10 @@ const KeyEngine = (() => {
+             const bassAgreement = bassRootVotes[root] / maxBassVotes;
+             const bassBoost = bassAgreement * BASS_ROOT_BOOST_WEIGHT;
+ 
+-            const majorScore = pearsonCorrelation(vector, rotateProfile(KS_MAJOR_PROFILE, root)) + bassBoost;
+-            const minorScore = pearsonCorrelation(vector, rotateProfile(KS_MINOR_PROFILE, root)) + bassBoost;
++            // === TASK A25 — cosine similarity [-1,1] map về [0,1] (baseline V6), THAY Pearson
++            // correlation. Vẫn CỘNG bassBoost y hệt kiến trúc cũ (không đổi cách kết hợp).
++            const majorScore = (cosineSimilarity12(chromaNorm, rotateProfile(KS_MAJOR_PROFILE, root)) + 1) / 2 + bassBoost;
++            const minorScore = (cosineSimilarity12(chromaNorm, rotateProfile(KS_MINOR_PROFILE, root)) + 1) / 2 + bassBoost;
+             if (majorScore > best.score) best = { score: majorScore, root, mode: "Major" };
+             if (minorScore > best.score) best = { score: minorScore, root, mode: "Minor" };
+ 
+@@ -334,6 +356,7 @@ const KeyEngine = (() => {
+             allScores.push({ score: minorScore, root, mode: "Minor", bassAgreement });
+         }
+ 
++
+         // Top1/Top2/Margin tính RIÊNG, SAU KHI vòng lặp gốc đã xong — không ảnh hưởng `best`.
+         allScores.sort((a, b) => b.score - a.score);
+         const top1 = allScores[0];
+-- 
+2.43.0
+

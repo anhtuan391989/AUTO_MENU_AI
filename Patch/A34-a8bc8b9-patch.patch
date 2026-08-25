@@ -1,0 +1,195 @@
+From a8bc8b975d3aa87cd67196f33a7563502b72736c Mon Sep 17 00:00:00 2001
+From: Claude A <claude-a@anthropic.local>
+Date: Mon, 24 Aug 2026 03:42:38 +0000
+Subject: [PATCH] Claude A: A34 - Fix Fast Path confidence gate (margin-aware)
+ + recalibrate MARGIN_NORM_RANGE
+
+---
+ tests/unit/KeyEngineFastPath.verify.js | 40 +++++++++++++++-
+ ui/js/engines/keyEngine.js             | 66 +++++++++++++++++++-------
+ 2 files changed, 88 insertions(+), 18 deletions(-)
+
+diff --git a/tests/unit/KeyEngineFastPath.verify.js b/tests/unit/KeyEngineFastPath.verify.js
+index 5f96aa5..45635d4 100644
+--- a/tests/unit/KeyEngineFastPath.verify.js
++++ b/tests/unit/KeyEngineFastPath.verify.js
+@@ -125,12 +125,24 @@ function createSandboxEngine(fakeSpectrumFn) {
+ }
+ 
+ function spectrumFor(freqs) {
++    // Mô phỏng overtone TỰ NHIÊN như nhạc cụ/giọng hát thật (khớp HARMONIC_AMP trong
++    // keyEngine.js: [1.0, 0.60, 0.42, 0.30, 0.20, 0.15, 0.10, 0.07]) — sine đơn thuần (không
++    // harmonic) KHÔNG phải tín hiệu đại diện công bằng cho "audio rõ ràng thật" dưới thuật toán
++    // harmonic-template chroma hiện tại (mỗi phím được so khớp bằng CẢ 8 harmonic, không chỉ 1
++    // tần số đơn — test phải cho input tương ứng, nếu không sẽ đo margin thấp giả tạo do chính
++    // cách dựng test, không phải do thuật toán thật sự yếu).
++    const HARMONIC_AMP = [1.0, 0.60, 0.42, 0.30, 0.20, 0.15, 0.10, 0.07];
+     return () => {
+         const arr = new Float32Array(4096).fill(-100);
+         const binHz = 48000 / 8192;
+         for (const f of freqs) {
+-            const bin = Math.round(f / binHz);
+-            if (bin >= 0 && bin < arr.length) arr[bin] = -10;
++            for (let h = 0; h < HARMONIC_AMP.length; h++) {
++                const bin = Math.round((f * (h + 1)) / binHz);
++                if (bin >= 0 && bin < arr.length) {
++                    const db = -10 + 20 * Math.log10(HARMONIC_AMP[h]); // quy đổi biên độ tương đối -> dB, gốc -10dB cho harmonic 1
++                    arr[bin] = Math.max(arr[bin], db);
++                }
++            }
+         }
+         return arr;
+     };
+@@ -273,6 +285,29 @@ function runTest5_OldPathsStillWorkWhenFastPathBlocked() {
+     stop();
+ }
+ 
++// ================================
++// TEST 6 (A34) — Tái hiện ĐÚNG bug pattern Khói báo: hợp âm THIẾU quãng 3 (chỉ root+5th, không
++// rõ Major hay Minor — margin phải RẤT thấp) -> Fast Path KHÔNG được khoá nhầm dù rawConfidence
++// vẫn cao (đây chính xác là lỗi gốc: rawConfidence cao nhưng margin thấp vẫn từng lọt qua gate cũ)
++// ================================
++function runTest6_AmbiguousChordNoThirdMustNotFastLock() {
++    console.log("\n=== TEST 6 (A34): Hợp âm thiếu quãng 3 (mập mờ Major/Minor thật) -> Fast Path KHÔNG khoá nhầm ===");
++
++    // Chỉ root + quãng 5 (không có quãng 3 major/minor nào) — về mặt nhạc lý, đây là hợp âm
++    // "power chord", THẬT SỰ mập mờ giữa Major/Minor (đúng bản chất vấn đề margin=0.01-0.02 mà
++    // Khói quan sát được trên audio thật, nơi harmonic của quãng 3 không đủ rõ/bị lấn át).
++    const ambiguousPowerChord = spectrumFor([116.5, 233.1, 349.2]); // A#2, A#3, F4 (root + octave + quãng 5, KHÔNG có quãng 3)
++
++    const { KeyEngine, advance, getFakeNow } = createSandboxEngine(ambiguousPowerChord);
++    let winnerAt = null, winnerKey = null;
++    const stop = KeyEngine.detectOnce((result) => { winnerAt = getFakeNow(); winnerKey = result.key; });
++
++    advance(1900); // ngay trước sàn 2000ms — đủ thời gian cho Fast Path THỬ khoá nếu gate còn lỏng như bug cũ
++
++    check(winnerAt === null, `Hợp âm mập mờ (thiếu quãng 3) KHÔNG bị Fast Path khoá nhầm trong 1.9s (thực tế: ${winnerAt === null ? "chưa khoá — ĐÚNG" : `đã khoá "${winnerKey}" lúc ${winnerAt}ms — SAI, tái hiện đúng bug Khói báo`})`);
++    stop();
++}
++
+ // ================================
+ // RUN ALL
+ // ================================
+@@ -281,6 +316,7 @@ runTest2_PhysicalFloorRespected();
+ runTest3_NoFastLockOnFlickeringCandidate();
+ runTest4_NoLockOnSilence();
+ runTest5_OldPathsStillWorkWhenFastPathBlocked();
++runTest6_AmbiguousChordNoThirdMustNotFastLock();
+ 
+ console.log(`\n${failCount === 0 ? "✅ TẤT CẢ" : `❌ ${failCount} kiểm chứng FAIL`} — KeyEngine Fast Path (A32, SYNTHETIC, không phải audio thật).`);
+ process.exit(failCount > 0 ? 1 : 0);
+diff --git a/ui/js/engines/keyEngine.js b/ui/js/engines/keyEngine.js
+index 439e767..cddc327 100644
+--- a/ui/js/engines/keyEngine.js
++++ b/ui/js/engines/keyEngine.js
+@@ -524,16 +524,29 @@ const KeyEngine = (() => {
+         return Math.max(0, Math.min(1, x));
+     }
+ 
+-    // === Confidence V2 (Phase 3) — CHỈ lắp ráp để LOG, KHÔNG gắn vào object trả về cho
+-    // onWinner/renderer.js, KHÔNG tham gia bất kỳ điều kiện khoá nào. `confidence` gốc
+-    // (top-level) giữ nguyên tuyệt đối để đảm bảo tương thích, đúng yêu cầu.
++    // === Confidence V2 (Phase 3) — LẮP RÁP để LOG, VÀ (từ A32/A34) LÀ GATE THẬT cho Fast Path
++    // (runVoteLoop) lẫn Adaptive Lock (dòng ~695, confidenceV2.combined >= ADAPTIVE_LOCK_CONFIDENCE)
++    // — comment "KHÔNG tham gia điều kiện khoá" ở bản gốc đã LỖI THỜI, sửa lại cho đúng thực tế.
++    // `confidence` gốc (top-level, field riêng) vẫn giữ nguyên tuyệt đối để đảm bảo tương thích.
+     //
+     // PEARSON_NORM_MAX = 1.5 = điểm tối đa LÝ THUYẾT (Pearson tối đa 1.0 + BASS_ROOT_BOOST_WEIGHT
+     // tối đa 0.5) — có căn cứ trực tiếp từ code, không phải số đoán.
+-    // MARGIN_NORM_RANGE = 0.5 — hằng số TẠM THỜI (chưa có dữ liệu thực tế để chọn chính xác),
+-    // sẽ điều chỉnh lại khi đã thu thập đủ log thật, đúng tinh thần giai đoạn thu thập dữ liệu.
++    //
++    // === TASK A34 — MARGIN_NORM_RANGE hiệu chỉnh lại bằng DỮ LIỆU THẬT (không còn là số tạm) ===
++    // Bằng chứng: (1) log thật của Khói (audio thật) cho thấy margin của các lần Top1/Top2 GẦN
++    // HOÀ (A# Major/A# Minor mập mờ, hay dao động qua lại) rơi vào khoảng 0.01-0.02; margin của
++    // các lần candidate tương đối RÕ hơn rơi vào khoảng 0.05-0.09. (2) Test synthetic với hợp âm
++    // C Major SẠCH (đủ harmonic tự nhiên, không nhiễu) cho margin=0.074, pearsonNorm=0.94,
++    // stability=1.0, bassAgreement=1.0 — TỨC LÀ GẦN NHƯ LÝ TƯỞNG NHẤT CÓ THỂ ĐẠT ĐƯỢC — nhưng với
++    // MARGIN_NORM_RANGE=0.5 (cũ), marginNorm chỉ = 0.074/0.5 = 0.148, kéo combined xuống còn 0.77,
++    // KHÔNG BAO GIỜ vượt được ngưỡng khoá 0.80 dù tín hiệu đã sạch nhất có thể — chứng minh 0.5 là
++    // hằng số sai/quá rộng so với thang giá trị margin THẬT của thuật toán KS-profile+cosine hiện
++    // tại (Major/Minor cùng gốc vốn RẤT gần nhau về mặt cấu trúc, margin hiếm khi vượt ~0.10).
++    // Đổi sang 0.10 — hiệu chỉnh sao cho margin=0.10 (rõ ràng) -> marginNorm≈1.0, margin=0.02 (mập
++    // mờ) -> marginNorm≈0.2, tạo đủ khoảng cách để combined phân biệt được 2 loại case này (verify
++    // bằng test thật bên dưới), thay vì dồn cả 2 vào cùng 1 vùng thấp như cũ.
+     const PEARSON_NORM_MAX = 1 + BASS_ROOT_BOOST_WEIGHT;
+-    const MARGIN_NORM_RANGE = 0.5;
++    const MARGIN_NORM_RANGE = 0.10;
+ 
+     function buildConfidenceV2(result, stability) {
+         const pearson = result.confidence; // === confidence hiện tại, chỉ đọc lại, không đổi field gốc
+@@ -582,7 +595,17 @@ const KeyEngine = (() => {
+ 
+             const result = estimateKeyFromChroma(chromaVectorFast); // NGUỒN NHANH — hội tụ ~225ms, KHÔNG đụng chromaVector chậm (vote/khoá đường cũ vẫn y hệt)
+ 
+-            if (!hasMusicalContent || result.confidence < FAST_PATH_MIN_CONFIDENCE) {
++            // === TASK A34 — ROOT CAUSE đã xác định bằng log thật của Khói: điều kiện gate CŨ so
++            // sánh `result.confidence` (= best.score = cosine[0,1] + bassBoost, bassBoost tối đa
++            // +0.5 => THỰC TẾ có thể vượt 1.0, và HOÀN TOÀN KHÔNG chứa thông tin margin giữa
++            // Top1/Top2) với FAST_PATH_MIN_CONFIDENCE=0.80 — vì gần như luôn > 0.80 (log thật cho
++            // thấy 1.32-1.43 dù margin chỉ 0.01-0.09, ambiguity tới 0.96), gate này THỰC TẾ luôn
++            // pass, không lọc được gì. Đường Adaptive Lock (chậm, dòng ~695) làm ĐÚNG ngay từ đầu:
++            // so sánh confidenceV2.combined (chuẩn hoá [0,1], CÓ marginNorm) — Fast Path phải làm
++            // giống hệt, không được dùng field khác.
++            if (!hasMusicalContent || result.confidence < MIN_CONFIDENCE) {
++                // Vẫn giữ MIN_CONFIDENCE (ngưỡng cơ bản có sẵn, dùng CHUNG cho mọi nơi trong file
++                // này) để loại sớm frame im lặng/nhiễu hoàn toàn — KHÔNG phải gate quyết định khoá.
+                 fastPathStreak = 0;
+                 fastPathStreakKey = null;
+                 fastPathLastFiredKey = null;
+@@ -598,11 +621,25 @@ const KeyEngine = (() => {
+             }
+ 
+             if (fastPathStreak < FAST_PATH_STREAK_REQUIRED) return;
++
++            // Tính confidenceV2 THẬT (stability theo streak hiện tại, kẹp về FAST_PATH_STREAK_REQUIRED
++            // để không vượt 1.0) — ĐÂY MỚI LÀ GATE THẬT của Fast Path, thay cho result.confidence.
++            const fastStability = computeStability(Math.min(fastPathStreak, FAST_PATH_STREAK_REQUIRED), FAST_PATH_STREAK_REQUIRED);
++            const fastConfidenceV2 = buildConfidenceV2(result, fastStability);
++            if (fastConfidenceV2.combined < FAST_PATH_MIN_CONFIDENCE) {
++                // Streak đủ dài (cùng candidate 3 lần) NHƯNG margin/ambiguity giữa Top1-Top2 chưa
++                // đủ chắc (vd Major/Minor gần hoà) -> KHÔNG khoá qua Fast Path. KHÔNG reset streak
++                // (candidate vẫn đang đúng hướng, chỉ chưa đủ chắc) — để đường chậm (vote-window/
++                // adaptive, có thêm dữ liệu tích luỹ theo thời gian) tự quyết định sau, đúng tinh
++                // thần "chưa chắc chắn thì không lock" mà A34 yêu cầu.
++                return;
++            }
++
+             if (candidateKey === fastPathLastFiredKey) return; // đã báo candidate NÀY rồi -> không lặp lại mỗi tick, chỉ chờ candidate đổi
+             fastPathLastFiredKey = candidateKey;
+ 
+-            // Đủ điều kiện Fast Path: hasMusicalContent + confidence>=0.80 (KHÔNG hạ so với Adaptive
+-            // Lock) + CÙNG candidate liên tục FAST_PATH_STREAK_REQUIRED lần ở nhịp FAST_PATH_INTERVAL_MS.
++            // Đủ điều kiện Fast Path: hasMusicalContent + confidenceV2.combined>=0.80 (margin-aware,
++            // KHÔNG hạ so với Adaptive Lock) + CÙNG candidate liên tục FAST_PATH_STREAK_REQUIRED lần.
+             // KHÔNG dùng cờ "đã bắn 1 lần rồi thì thôi" ở đây — watchContinuous() cần tick tiếp theo
+             // vẫn hoạt động bình thường để phát hiện lần ĐỔI Key kế tiếp (đúng hành vi đường chậm
+             // gốc trước A32: mỗi tick tự do gọi onWinner nếu điều kiện còn đúng, dedup theo Key là
+@@ -611,12 +648,9 @@ const KeyEngine = (() => {
+             // interval sẽ không bao giờ chạy nữa, không cần thêm cờ nào khác.
+ 
+             // Ghi log TEXT nhất quán với đường chậm (logMarginSnapshot) — để mọi công cụ/quan sát
+-            // đang đọc log "Locked: Yes" vẫn thấy đúng, dù khoá qua đường nào. stability=1.0 vì
+-            // định nghĩa của Fast Path CHÍNH LÀ 100% đồng thuận liên tục (không có khái niệm cửa
+-            // sổ trượt như đường chậm) — không suy diễn, tính đúng theo công thức computeStability
+-            // đã có sẵn (fastPathStreak/fastPathStreak = 1.0).
+-            const fastStability = computeStability(fastPathStreak, fastPathStreak);
+-            const fastConfidenceV2 = buildConfidenceV2(result, fastStability);
++            // đang đọc log "Locked: Yes" vẫn thấy đúng, dù khoá qua đường nào. Dùng LẠI
++            // fastStability/fastConfidenceV2 đã tính ở bước gate phía trên (không tính lại lần 2 —
++            // tránh 2 nguồn tính ra 2 giá trị khác nhau cho cùng 1 lần khoá).
+             // top1StableMs ở đây là "candidate ổn định bao lâu THEO GÓC NHÌN Fast Path" (streak x
+             // nhịp đo) — KHÔNG dùng/không đụng updateTop1StabilityTimer() (state DÙNG CHUNG với
+             // slow timer, nếu gọi từ đây sẽ bị 2 nguồn chroma khác nhau tranh nhau ghi đè, làm sai
+@@ -625,7 +659,7 @@ const KeyEngine = (() => {
+ 
+             sendTelemetry({
+                 event: "LOCK", time: parseFloat(formatElapsedSeconds(elapsed)), key: result.key,
+-                decisionScore: result.confidence, reason: "fast-path",
++                decisionScore: fastConfidenceV2.combined, reason: "fast-path", // A34: đồng bộ decisionScore với gate thật (confidenceV2.combined), không dùng result.confidence thô nữa
+                 frame: frameCounter, framesToStable: frameCounter,
+                 firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
+             });
+-- 
+2.43.0
+
