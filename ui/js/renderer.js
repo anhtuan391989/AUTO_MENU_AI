@@ -1189,7 +1189,17 @@ function loadData() {
     const data = typeof appSettings !== "undefined" ? appSettings.autoMenuData : null;
     if (!data) return;
 
-    if (data.currentKey) {
+    // TASK A36 (UI Truth State Audit) — BUG THẬT đã tìm thấy và vá: saveData() lưu THẲNG
+    // textContent hiển thị của #currentKey (dòng ~1171). Nếu người dùng thao tác bất kỳ gì
+    // gọi saveData() (bấm preset, MUSIC/MIC/FX, xoay knob, SEND...) ĐÚNG lúc màn hình đang
+    // hiện "LISTENING" (mới mở app / vừa bấm Auto Detect / đang chờ audio dò lại) thì chuỗi
+    // "LISTENING" bị lưu vào appSettings.autoMenuData.currentKey. Lần load lại sau đó (dòng
+    // dưới) sẽ gán "LISTENING" thẳng vào `originalKey` — biến state nội bộ dùng cho
+    // transposeKey()/Mod delta/startModulationWatcher() — vi phạm đúng yêu cầu "originalKey
+    // KHÔNG BAO GIỜ được là LISTENING". Vá bằng cách coi "LISTENING" đã lưu = "chưa có giá trị
+    // thật nào được lưu", giống hệt như không có data.currentKey — display/originalKey giữ
+    // nguyên mặc định LISTENING/"G# Minor" nội bộ như lúc app mới mở, không đụng gì khác.
+    if (data.currentKey && data.currentKey !== "LISTENING") {
         const el = document.getElementById("currentKey");
         if (el) el.textContent = data.currentKey;
         originalKey = data.currentKey;
