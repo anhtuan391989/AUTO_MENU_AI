@@ -302,10 +302,17 @@ if (window.electronAPI?.onNowPlayingUnavailable) {
 
 /* ==========================================================
    2. INITIAL DATA (Dữ liệu mẫu)
+   -----------------------------------------------------------
+   TASK (Khói xác nhận cho phép sửa, 25/08/2026 — xem TASK_A36 addendum): Key/BPM hiển thị
+   PHẢI là "LISTENING" khi chưa có audio thật, chỉ hiện tone/BPM thật khi ĐÃ dò được từ audio.
+   appState.originalKey/currentKey (bên dưới) GIỮ NGUYÊN "G# Minor" làm giá trị nội bộ an toàn
+   (dùng cho transposeKey()/Mod delta/gửi Plugin) — CHỈ đổi chữ hiển thị ở đây và ở
+   applyActiveKeyToPlugin()/refreshKeySourceDisplay() (xem cờ keyEverDetected), không đổi giá
+   trị nhạc lý nội bộ để tránh vỡ logic Mod/plugin dispatch đang phụ thuộc 1 tên nốt hợp lệ.
    ========================================================== */
-document.getElementById("currentKey").textContent = "G# Minor";
-document.getElementById("currentBpm").textContent = "128";
-document.getElementById("modTime").textContent = "02:15";
+document.getElementById("currentKey").textContent = "LISTENING";
+document.getElementById("currentBpm").textContent = "LISTENING";
+document.getElementById("modTime").textContent = "";
 
 const appState = {
     originalKey: "G# Minor",
@@ -694,6 +701,14 @@ const keySource = {
 let lastPluginKey = appState.originalKey; // giá trị THẬT đã gửi xuống Plugin lần gần nhất (chống gửi trùng)
 let lastNowPlayingKey = null;             // "<title>|<artist>" gần nhất, để tự phát hiện đổi bài (mục IX)
 
+// TASK (Khói xác nhận cho phép sửa, 25/08/2026) — true SAU KHI đã có ít nhất 1 kết quả Key
+// THẬT từ audio (KeyEngine.detectOnce khoá được). CHỈ dùng để quyết định CHỮ hiển thị
+// ("LISTENING" hay giá trị thật) ở applyActiveKeyToPlugin()/refreshKeySourceDisplay() — không
+// đụng gì tới keySource.ai.value/originalKey/lastPluginKey (vẫn giữ nguyên giá trị nhạc lý nội
+// bộ hợp lệ, không có rủi ro gửi chuỗi "LISTENING" xuống Auto-Tune). autoDetectBtn (mục 13B)
+// đặt lại về false để RESET hiển thị mỗi lần bấm Auto Detect.
+let keyEverDetected = false;
+
 function logKeySource(sourceLabel) {
     console.log(`[Key Source] ${sourceLabel}`);
 }
@@ -747,9 +762,13 @@ function refreshKeySourceDisplay() {
         // "đang dò" cho cảm giác tức thì. Giá trị thật dùng để gửi Plugin (keySource.ai.value)
         // KHÔNG đổi ở đây — chỉ đổi hiển thị.
         const showProvisional = keySource.ai.provisional && keySource.ai.provisional !== keySource.ai.value;
-        aiKeyDetectLineEl.textContent = showProvisional
-            ? `AI Detect: ${keySource.ai.provisional} (đang dò...)`
-            : `AI Detect: ${keySource.ai.value}`;
+        // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — chưa có kết quả AI thật nào (kể cả
+        // provisional) -> hiện LISTENING, không hiện giá trị hạt giống nội bộ.
+        aiKeyDetectLineEl.textContent = (!keyEverDetected && !keySource.ai.provisional && getActiveSourceName() === "ai")
+            ? "AI Detect: LISTENING"
+            : showProvisional
+                ? `AI Detect: ${keySource.ai.provisional} (đang dò...)`
+                : `AI Detect: ${keySource.ai.value}`;
 
     }
 
@@ -777,7 +796,11 @@ function applyActiveKeyToPlugin(sourceLabel) {
     const source = getActiveSourceName();
 
     originalKey = value;
-    if (currentKeyEl) currentKeyEl.textContent = value;
+    // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — nguồn AI mà CHƯA có kết quả thật lần nào
+    // -> hiển thị LISTENING, KHÔNG hiện giá trị hạt giống nội bộ (vd "G# Minor"). `value` vẫn
+    // giữ nguyên (không đổi) cho các dòng bên dưới (sendKeyToAutotune/dedupe/originalKey) — CHỈ
+    // chữ hiển thị bị thay, không có rủi ro gửi "LISTENING" xuống Plugin.
+    if (currentKeyEl) currentKeyEl.textContent = (source === "ai" && !keyEverDetected) ? "LISTENING" : value;
     // ===== QUY TẮC KIẾN TRÚC VĨNH VIỄN (đọc kỹ trước khi sửa vùng này) =====
     // AI Key và Manual Key là 2 nguồn điều khiển tách biệt hoàn toàn.
     // Khi AI (hoặc Song Database) đang active:
@@ -953,6 +976,7 @@ function startAiRealtimeLoop() {
         window.__keyDetectStopWatcher = null;
 
         keySource.ai.value = result.key;
+        keyEverDetected = true; // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — có kết quả THẬT từ audio
         window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
         refreshKeySourceDisplay();
 
@@ -1397,6 +1421,27 @@ async function applyModEvent(data) {
 
 document.getElementById("autoDetectBtn")?.addEventListener("click", () => {
     console.log("RESET AI SCAN — chỉ dò lại Key, KHÔNG gửi lệnh Mod nào khác");
+
+    // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — Auto Detect = reset THẬT về chế độ nghe
+    // (LISTENING) cho cả Key/BPM/MOD, không giữ hiển thị giá trị cũ trong lúc chờ kết quả mới.
+    // CHỈ đổi CHỮ hiển thị ở đây — KHÔNG đụng originalKey/keySource.ai.value/lastPluginKey, nên
+    // Auto-Tune vẫn tiếp tục dùng đúng Key thật đang chạy cho tới khi có kết quả THẬT mới (không
+    // im lặng/lệch tiếng giữa chừng bài hát). BPMEngine/ModEngine vẫn chạy nền như cũ, không bị
+    // restart — chỉ hiển thị được xoá tạm để không gây hiểu lầm là giá trị cũ vẫn còn đúng.
+    keyEverDetected = false;
+    if (currentKeyEl) currentKeyEl.textContent = "LISTENING";
+    if (aiKeyDetectLineEl) aiKeyDetectLineEl.textContent = "AI Detect: LISTENING";
+
+    const bpmDisplayEl = document.getElementById("currentBpm");
+    if (bpmDisplayEl) bpmDisplayEl.textContent = "LISTENING";
+
+    const modTimeResetEl = document.getElementById("modTime");
+    const modStatusResetEl = document.getElementById("modStatus");
+    const modTimelineResetEl = document.getElementById("modTimeline");
+    if (modTimeResetEl) modTimeResetEl.textContent = "";
+    if (modStatusResetEl) modStatusResetEl.textContent = "LISTENING";
+    if (modTimelineResetEl) modTimelineResetEl.textContent = "";
+
     triggerAiKeyDetect();
 });
 
@@ -1773,13 +1818,15 @@ document.addEventListener("DOMContentLoaded", () => {
     setStatus("dot-daw", "offline");
     setStatus("dot-autotune", "offline");
     updateOnlineStatus();
-    updateNextModTime();
     updateCacheDot();
     checkAllSystems();
     loadData();
 
-    // Ví dụ minh hoạ mod info ban đầu
-    updateModInfo("02:15", "G# Minor", "C# Minor", 5);
+    // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây
+    // (updateNextModTime() dùng modTimeline giả + updateModInfo("02:15","G# Minor",...) dùng
+    // dữ liệu ví dụ giả). Trước bản vá này, mở app lên là panel MOD lập tức bị ghi đè dữ liệu
+    // demo dù đang KHÔNG có audio thật. Bây giờ panel MOD giữ đúng mặc định "LISTENING" có sẵn
+    // trong index.html cho tới khi có modulation THẬT được ModEngine phát hiện từ audio.
 
     // 1. Khởi tạo Knobs — dùng 1 cặp mousemove/mouseup chung cho toàn bộ knob
     let activeKnob = null;
