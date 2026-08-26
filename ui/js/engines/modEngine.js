@@ -26,6 +26,18 @@
    API CÔNG KHAI GIỮ NGUYÊN 100% so với bản cũ:
      ModEngine.start(originalRootIndex, (data) => { ...applyModEvent... }, isManualOverrideActiveFn);
      ModEngine.stop();
+
+   TASK B16 (MOD API Contract Implementation, theo docs/MOD_API_SPEC.md) — CHỈ thêm 1 tham số
+   TUỲ CHỌN thứ 4, onStateChange(state, payload), để phát ra đúng 3/4 state đã có bằng chứng
+   trong contract: LISTENING, MOD_CANDIDATE, MODULATION_DETECTED (KHÔNG có APPLIED — xem GAP
+   trong B16_RESULT, ModEngine không có cách nào tự biết lệnh có thật sự được gửi/áp dụng hay
+   không, vì nó chỉ phát event chứ không tự gửi lệnh — đúng ranh giới kiến trúc hiện tại).
+   Tham số này HOÀN TOÀN tuỳ chọn — mọi lời gọi start() không truyền tham số thứ 4 (kể cả toàn
+   bộ renderer.js và test hiện có) chạy Y HỆT 100% như trước, KHÔNG có gì đổi về logic/timing/
+   payload của onModulation. onStateChange chỉ là 1 "tap" quan sát thêm vào đúng những điểm
+   chuyển trạng thái đã tồn tại sẵn trong code (chỗ đang gọi sendModTelemetry và chỗ sắp gọi
+   onModulation), không tạo thêm điều kiện/threshold/logic quyết định nào mới. Không tự thêm
+   trường leadTime (OPEN theo MOD_API_SPEC.md — giữ nguyên hệ thống reactive, KHÔNG dự đoán).
    ========================================================== */
 const ModEngine = (() => {
     let pollTimerId = null;
@@ -43,6 +55,9 @@ const ModEngine = (() => {
      * @param {number} originalRootIndex  Chỉ số nốt gốc (0-11) của Key đã chốt lúc đầu bài
      * @param {(data: {semitone: number}) => void} onModulation  gọi khi phát hiện lệch khỏi Key gốc (đã xác nhận sustained)
      * @param {() => boolean} isManualOverrideActiveFn  hàm renderer.js cung cấp để biết có đang bị ghi đè tay không
+     * @param {(state: "LISTENING"|"MOD_CANDIDATE"|"MODULATION_DETECTED", payload: object) => void} [onStateChange]
+     *        TUỲ CHỌN (Task B16) — quan sát state contract theo docs/MOD_API_SPEC.md. KHÔNG bắt
+     *        buộc, KHÔNG ảnh hưởng gì tới onModulation/isManualOverrideActiveFn nếu không truyền.
      */
     /**
      * Key Engine V9/Mod Engine V4 (Mục 10/16) — gửi telemetry NHẸ, an toàn no-op nếu không có
@@ -57,26 +72,41 @@ const ModEngine = (() => {
         }
     }
 
-    function start(originalRootIndex, onModulation, isManualOverrideActiveFn) {
+    function start(originalRootIndex, onModulation, isManualOverrideActiveFn, onStateChange) {
         stop(); // tránh chạy trùng nhiều watcher
+
+        // Task B16 — "tap" tuỳ chọn, không throw ra ngoài poll loop nếu caller lỡ truyền callback lỗi.
+        const emitState = (state, payload) => {
+            if (typeof onStateChange !== "function") return;
+            try { onStateChange(state, payload); } catch (_) { /* không để lỗi ở phía observer làm hỏng vòng lặp poll thật */ }
+        };
 
         lastFiredRoot = null;
         let pendingRoot = null;   // root MỚI đang "chờ xác nhận" (chưa đủ streak để báo thật)
         let pendingStreak = 0;
 
+        emitState("LISTENING", { timestamp: Date.now() }); // trạng thái mặc định lúc bắt đầu theo dõi
+
         pollTimerId = setInterval(() => {
 
-            if (isManualOverrideActiveFn?.()) { pendingRoot = null; pendingStreak = 0; return; } // đang bị ghi đè tay -> không tranh lệnh, reset streak đang chờ
+            if (isManualOverrideActiveFn?.()) {
+                if (pendingRoot !== null) emitState("LISTENING", { timestamp: Date.now(), reason: "manual_override" });
+                pendingRoot = null; pendingStreak = 0; return; // đang bị ghi đè tay -> không tranh lệnh, reset streak đang chờ
+            }
 
             const result = KeyEngine.estimateKeyFromChroma(); // mặc định dùng chromaVector (ổn định), KHÔNG dùng bản "nhanh"/tạm
 
-            if (result.confidence < KeyEngine.MIN_CONFIDENCE) { pendingRoot = null; pendingStreak = 0; return; } // không đủ tin cậy -> không tính vào streak, tránh nhiễu
+            if (result.confidence < KeyEngine.MIN_CONFIDENCE) {
+                if (pendingRoot !== null) emitState("LISTENING", { timestamp: Date.now(), reason: "low_confidence" });
+                pendingRoot = null; pendingStreak = 0; return; // không đủ tin cậy -> không tính vào streak, tránh nhiễu
+            }
 
             const baseline = lastFiredRoot === null ? originalRootIndex : lastFiredRoot; // đã mod trước đó thì so với key ĐANG áp dụng, không so lại key gốc ban đầu
 
             if (result.rootIndex === baseline) {
                 // Về lại đúng key hiện hành (gốc hoặc đã mod trước đó) -> không phải chuyển giọng,
                 // reset hẳn streak đang chờ (tránh cộng dồn qua các lần dao động qua lại).
+                if (pendingRoot !== null) emitState("LISTENING", { timestamp: Date.now(), reason: "returned_to_baseline" });
                 pendingRoot = null;
                 pendingStreak = 0;
                 return;
@@ -92,6 +122,10 @@ const ModEngine = (() => {
                 sendModTelemetry({
                     event: "MOD_CANDIDATE", candidate: `${KeyEngine.NOTE_NAMES[result.rootIndex]} ${result.mode}`,
                     confidence: result.confidence, persistence: pendingStreak, sustainRequired: SUSTAIN_REQUIRED, timestamp: Date.now()
+                });
+                emitState("MOD_CANDIDATE", {
+                    candidateRoot: result.rootIndex, candidateLabel: `${KeyEngine.NOTE_NAMES[result.rootIndex]} ${result.mode}`,
+                    confidence: result.confidence, streakCount: pendingStreak, sustainRequired: SUSTAIN_REQUIRED, timestamp: Date.now()
                 });
             }
 
@@ -117,6 +151,11 @@ const ModEngine = (() => {
             };
 
             sendModTelemetry({ event: "MOD_CONFIRMED", ...modData, persistence: SUSTAIN_REQUIRED });
+            // Task B16 — MODULATION_DETECTED phát NGAY TRƯỚC onModulation, cùng payload modData
+            // (không thêm/bớt field so với những gì onModulation nhận). APPLIED KHÔNG được phát ở
+            // đây — ModEngine chỉ phát event, không biết renderer/downstream có thật sự gửi lệnh
+            // thành công hay không (xem GAP trong B16_RESULT).
+            emitState("MODULATION_DETECTED", modData);
             onModulation(modData);
 
         }, POLL_INTERVAL_MS);
