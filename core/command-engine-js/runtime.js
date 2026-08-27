@@ -526,4 +526,15 @@ module.exports = {
     // cho riêng phần policy — xem tests/unit/PortSelectionPolicy.verify.js.
     resolvePortSelection, resolveInputPortName,
     AUTO_MENU_AI_PORT_NAME,
+    // -- TASK B20 — cùng tinh thần trên: xuất thêm buildMappingIndex()/normalizeMidiMessage()
+    //    (2 hàm THUẦN, không I/O, không đụng easymidi) + ACTION_TO_CAPABILITY (đọc, để test xác
+    //    nhận đúng contract hiện có mà KHÔNG tự mở rộng nó) — để tests/unit/MidiLearnDispatch.verify.js
+    //    kiểm được thật lớp "mapping đã lưu -> có được resolve đúng action/bị loại đúng lý do
+    //    không" (không phụ thuộc easymidi — package này KHÔNG có trong môi trường audit/test hiện
+    //    tại, xem ROOT CAUSE trong TASK_B20_RESULT.md). KHÔNG export dispatchFromMidi() (có side-
+    //    effect trên state module-private engine/lastDispatchAt) — lớp "dispatch thật -> driver
+    //    nào được gọi" được test trực tiếp qua CommandEngine + capabilityRegistry (đã export sẵn,
+    //    không cần đụng gì thêm ở đây), dùng đúng object ACTION_TO_CAPABILITY xuất ra từ đây làm
+    //    input, nên vẫn là test dùng đúng contract thật, không phải viết lại logic riêng.
+    buildMappingIndex, normalizeMidiMessage, ACTION_TO_CAPABILITY,
 };
