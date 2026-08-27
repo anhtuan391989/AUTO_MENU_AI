@@ -76,4 +76,20 @@ module.exports = {
     //    ở bước này). --
     WORKFLOW_READY: "WORKFLOW_READY",
 
+    // -- TASK B19 — Do PluginController phát ra: 1 lệnh Plugin trừu tượng { command, value, ... }
+    //    cho mỗi DecisionAction ở chế độ AI_CONTROL. app/main.js lắng nghe sự kiện này để relay
+    //    qua IPC "plugin-command" sang renderer (Bridge).
+    //
+    //    ROOT CAUSE (audit B18, sửa ở B19): hằng số này đã được PluginController.js publish và
+    //    app/main.js subscribe từ trước (cả 2 cùng require đúng file này, "../../events/Events"
+    //    / "../core/events/Events" — đã xác nhận lại bằng grep toàn repo, 9/9 module require
+    //    Events đều trỏ về đúng file này, không có module nào require file khác), NHƯNG hằng số
+    //    PLUGIN_COMMAND lại KHÔNG tồn tại ở đây — nên cả 2 phía cùng đọc ra `undefined` và publish/
+    //    subscribe vào topic `undefined`, "khớp" nhau chỉ nhờ trùng hợp chứ không nhờ đặt tên
+    //    đúng. Một bản "sửa" TỪNG được viết cho lỗi này, nhưng bị đặt nhầm vào
+    //    core/ai/events/events.js (khác đường dẫn, chữ thường) — file đó xác nhận là dead file,
+    //    không có bất kỳ module nào require (đã grep lại toàn bộ repo, 0 kết quả), nên bản sửa đó
+    //    chưa từng có tác dụng thật. Sửa đúng chỗ duy nhất được require thật: ngay tại đây.
+    PLUGIN_COMMAND: "PLUGIN_COMMAND",
+
 };
