@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  midi-mapping.xml — D1 Specification (Task B23)
+  =================================================
+  Nguồn evidence: audit trực tiếp origin/main SHA b6a8afc (Task B23), đối
+  chiếu:
+    - ui/setup.html            (dropdown #midiLearnAction — 10 option thật)
+    - core/command-engine-js/runtime.js       (ACTION_TO_CAPABILITY — 3 key)
+    - core/command-engine-js/capabilityRegistry.js  (registry.studio_one)
+  Không có capability/binding nào trong file này được suy đoán hay bịa ra
+  để "cho đủ" — mỗi capability đều có bằng chứng cụ thể, xem
+  capability-backend-matrix.md (cột Evidence) để đối chiếu từng dòng.
+
+  8 capability trong bản này — TẤT CẢ đều thuộc đúng 3 namespace hợp lệ
+  (daw:*, menu:*, plugin:*) theo Principle 3. 3 action ID có thật trong
+  ui/setup.html nhưng dùng namespace KHÔNG hợp lệ (fn:autoDetect,
+  preset:load, keymod:doTone) bị CỐ Ý LOẠI khỏi bản D1 này — xem
+  D1-REPORT.md mục "Known limitations" và midi-mapping-rules.md mục
+  "Namespace exceptions" để biết lý do và hướng xử lý đề xuất, KHÔNG tự ý
+  đổi tên chúng trong UI (ngoài phạm vi B23 — chỉ ghi/tạo 5 D1 artifact).
+
+  <bindings> CỐ Ý ĐỂ RỖNG — đúng yêu cầu B21/B23: không tự chọn CC/Note/
+  Channel/Value để "làm XML trông đầy đủ". Bất kỳ binding thật nào sẽ do
+  Setup > MIDI Learn tạo ra lúc runtime (source="midi-learn"), không phải
+  do D1 spec này định trước.
+-->
+<midi-mapping xmlns="urn:auto-menu-ai:midi-mapping:v1"
+              schemaVersion="1.0"
+              mappingVersion="1.0.0">
+
+  <capabilities>
+
+    <!-- ================= Namespace: daw:* ================= -->
+
+    <capability id="daw:play" backend-status="implemented" midi-allowed="true">
+      <description>Gửi lệnh Play cho DAW đang chọn (transport control).</description>
+    </capability>
+
+    <capability id="daw:stop" backend-status="implemented" midi-allowed="true">
+      <description>Gửi lệnh Stop cho DAW đang chọn (transport control).</description>
+    </capability>
+
+    <capability id="daw:record" backend-status="implemented" midi-allowed="true">
+      <description>Gửi lệnh Record cho DAW đang chọn (transport control).</description>
+    </capability>
+
+    <!-- daw:save — mục 11 đề bài B23: capabilityRegistry.js CÓ định nghĩa
+         driver (registry.studio_one.actions.saveSong, hotkey Ctrl+S) nhưng
+         runtime.js:ACTION_TO_CAPABILITY KHÔNG có entry nào trỏ tới đây —
+         chưa có action ID production nào (kể cả trong dropdown Setup) thật
+         sự dispatch được saveSong. Bằng chứng CHỈ ĐỦ cho pending-backend,
+         KHÔNG đủ cho implemented — đúng yêu cầu "không tự đánh dấu implemented
+         nếu backend chưa chứng minh". midi-allowed PHẢI false đi kèm
+         pending-backend (xem Rule B2 trong midi-mapping-rules.md). -->
+    <capability id="daw:save" backend-status="pending-backend" midi-allowed="false">
+      <description>Gửi lệnh Save Song cho DAW đang chọn. Driver (hotkey Ctrl+S) đã có trong capabilityRegistry.js nhưng CHƯA được nối action ID production nào (ACTION_TO_CAPABILITY chưa có entry) — chưa có bằng chứng dispatch được từ MIDI Input.</description>
+    </capability>
+
+    <!-- ================= Namespace: menu:* ================= -->
+
+    <!-- menu:buttonA/buttonB CÓ trong dropdown Setup (ui/setup.html) và
+         Save/Load được (buildMappingIndex chấp nhận cấu trúc), nhưng
+         KHÔNG có capability nào tên "menu" trong capabilityRegistry.js,
+         và ACTION_TO_CAPABILITY cũng không có entry — 0% bằng chứng backend
+         ở bất kỳ đâu trong repo (không phải "đang làm dở", mà là "chưa từng
+         có gì") -> not-supported, không phải pending-backend. -->
+    <capability id="menu:buttonA" backend-status="not-supported" midi-allowed="false">
+      <description>Kích hoạt Menu Button A. Có trong dropdown MIDI Learn (Setup) nhưng KHÔNG có bất kỳ capability/driver nào trong capabilityRegistry.js hay ACTION_TO_CAPABILITY tương ứng — chưa có backend thật ở bất kỳ đâu trong repo.</description>
+    </capability>
+
+    <capability id="menu:buttonB" backend-status="not-supported" midi-allowed="false">
+      <description>Kích hoạt Menu Button B. Cùng tình trạng như menu:buttonA — chưa có backend thật.</description>
+    </capability>
+
+    <!-- ================= Namespace: plugin:* ================= -->
+
+    <!-- plugin:retune/humanize CÓ trong dropdown Setup nhưng KHÔNG khớp bất
+         kỳ target nào trong capabilityRegistry.js ('serum'/'legacy-plugin-x'
+         tự nhận là VÍ DỤ minh hoạ trong comment, không phải cấu hình sản
+         phẩm thật, và tên action không khớp 'retune'/'humanize'). -->
+    <capability id="plugin:retune" backend-status="not-supported" midi-allowed="false">
+      <description>Kích hoạt Retune trên plugin. Có trong dropdown MIDI Learn (Setup) nhưng không có capability/driver thật nào trong capabilityRegistry.js tương ứng.</description>
+    </capability>
+
+    <capability id="plugin:humanize" backend-status="not-supported" midi-allowed="false">
+      <description>Kích hoạt Humanize trên plugin. Cùng tình trạng như plugin:retune — chưa có backend thật.</description>
+    </capability>
+
+  </capabilities>
+
+  <bindings>
+    <!-- CỐ Ý RỖNG — xem ghi chú đầu file. Không có binding factory nào
+         trong bản D1 này; toàn bộ binding thật sẽ do MIDI Learn tạo ra lúc
+         runtime với source="midi-learn". -->
+  </bindings>
+
+</midi-mapping>

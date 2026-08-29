@@ -1,0 +1,338 @@
+From cdee3029f9c86a9d9d585724ba9b222423e00586 Mon Sep 17 00:00:00 2001
+From: Claude A <claude-a@local>
+Date: Sat, 29 Aug 2026 01:21:06 +0000
+Subject: [PATCH] A40: Modal Evidence Floor (0.18) + vote-window marginNorm
+ gate (0.90) + fix isTrueModulation self-saturation; ConfidenceV2 test updated
+ to 5-component contract; new ModalEvidenceFloorA40.verify.js
+
+---
+ tests/unit/ConfidenceV2.verify.js          |   7 +-
+ tests/unit/ModalEvidenceFloorA40.verify.js | 189 +++++++++++++++++++++
+ ui/js/engines/keyEngine.js                 |  68 +++++++-
+ 3 files changed, 255 insertions(+), 9 deletions(-)
+ create mode 100644 tests/unit/ModalEvidenceFloorA40.verify.js
+
+diff --git a/tests/unit/ConfidenceV2.verify.js b/tests/unit/ConfidenceV2.verify.js
+index 80ee1e9..51ff64b 100644
+--- a/tests/unit/ConfidenceV2.verify.js
++++ b/tests/unit/ConfidenceV2.verify.js
+@@ -139,7 +139,7 @@ async function runPartB() {
+ 
+     check(confidenceV2Blocks.length > 0, `Có ít nhất 1 dòng log chứa ConfidenceV2 hợp lệ (JSON parse được), thực tế: ${confidenceV2Blocks.length}`);
+ 
+-    const requiredFields = ["pearson", "pearsonNorm", "margin", "marginNorm", "stability", "stabilityNorm", "bassAgreement", "bassNorm", "combined", "ambiguity"];
++    const requiredFields = ["pearson", "pearsonNorm", "margin", "marginNorm", "stability", "stabilityNorm", "bassAgreement", "bassNorm", "modalNorm", "combined", "ambiguity"];
+     const lastBlock = confidenceV2Blocks[confidenceV2Blocks.length - 1];
+     if (lastBlock) {
+         console.log("  ConfidenceV2 (lúc khoá):", JSON.stringify(lastBlock));
+@@ -148,9 +148,10 @@ async function runPartB() {
+         }
+         check(lastBlock.pearsonNorm >= 0 && lastBlock.pearsonNorm <= 1, "pearsonNorm nằm trong [0,1]");
+         check(lastBlock.marginNorm >= 0 && lastBlock.marginNorm <= 1, "marginNorm nằm trong [0,1]");
++        check(lastBlock.modalNorm >= 0 && lastBlock.modalNorm <= 1, "modalNorm nằm trong [0,1]");
+         check(lastBlock.combined >= 0 && lastBlock.combined <= 1, "combined nằm trong [0,1]");
+-        check(Math.abs(lastBlock.combined - (lastBlock.pearsonNorm + lastBlock.marginNorm + lastBlock.stabilityNorm + lastBlock.bassNorm) / 4) < 1e-9,
+-            "combined = trung bình cộng đúng 4 thành phần đã chuẩn hoá (khớp dữ liệu thật, không chỉ khớp ví dụ)");
++        check(Math.abs(lastBlock.combined - (lastBlock.pearsonNorm + lastBlock.marginNorm + lastBlock.stabilityNorm + lastBlock.bassNorm + lastBlock.modalNorm) / 5) < 1e-9,
++            "combined = trung bình cộng đúng 5 thành phần đã chuẩn hoá (pearson/margin/stability/bass/modal — A35 đã thêm modalNorm, khớp dữ liệu thật production)");
+     }
+ }
+ 
+diff --git a/tests/unit/ModalEvidenceFloorA40.verify.js b/tests/unit/ModalEvidenceFloorA40.verify.js
+new file mode 100644
+index 0000000..7e256fd
+--- /dev/null
++++ b/tests/unit/ModalEvidenceFloorA40.verify.js
+@@ -0,0 +1,189 @@
++/**
++ * ==========================================================
++ * Auto Menu AI — Kiểm chứng A40 (Modal Evidence Floor)
++ * ----------------------------------------------------------
++ * Chạy bằng: node tests/unit/ModalEvidenceFloorA40.verify.js
++ *
++ * SYNTHETIC TEST — sandbox Node (vm), giống hệt phương pháp KeyEngineAccuracyA35.verify.js.
++ *
++ * Bối cảnh: A38 chứng minh computeModalEvidence() (tại ui/js/engines/keyEngine.js) là công thức
++ * TỶ LỆ không có sàn năng lượng tuyệt đối — rò rỉ harmonic cực nhỏ (~1.7e-4, nhỏ hơn root/fifth
++ * ~2000-3000 lần) vẫn cho modalConfidence=1.0 (tối đa), khiến Fast Path khoá sai Major/Minor cho
++ * power chord (root+fifth, không có quãng 3). A39 benchmark 300 mẫu (12 root) xác nhận khoảng
++ * floor an toàn [0.02, 0.15]. A40 đưa MODAL_EVIDENCE_FLOOR=0.05 vào production.
++ *
++ * File này kiểm chứng TRỰC TIẾP hiệu quả của floor đó bằng cách chạy keyEngine.js THẬT (không
++ * mock), đúng nguyên văn case Test B gốc (A37/A38) + case Major/Minor rõ (đảm bảo true-positive
++ * không bị mất) + quét nhanh vài root khác (không chỉ A#, đúng tinh thần "không lấy A# làm đại
++ * diện" của A39).
++ * ==========================================================
++ */
++
++const assert = require("assert");
++const fs = require("fs");
++const path = require("path");
++const vm = require("vm");
++
++let failCount = 0;
++function check(condition, message) {
++    try {
++        assert.ok(condition, message);
++        console.log(`  ✅ ${message}`);
++    } catch (err) {
++        failCount++;
++        console.log(`  ❌ ${message} -- ${err.message}`);
++    }
++}
++
++const keyEngineSource = fs.readFileSync(
++    path.resolve(__dirname, "../../ui/js/engines/keyEngine.js"),
++    "utf-8"
++);
++const HARMONIC_AMP = [1.0, 0.60, 0.42, 0.30, 0.20, 0.15, 0.10, 0.07];
++
++function makeFakeAnalyser(fakeSpectrumFn) {
++    return {
++        fftSize: 8192, smoothingTimeConstant: 0, frequencyBinCount: 4096,
++        getFloatFrequencyData(arr) {
++            const spectrum = fakeSpectrumFn();
++            for (let i = 0; i < arr.length; i++) arr[i] = spectrum[i] ?? -120;
++        }
++    };
++}
++function createSandboxEngine(fakeSpectrumFn) {
++    let capturedRaf = null, capturedIntervals = [], fakeNow = 0, intervalIdSeq = 0;
++    const fakeAudioContext = { sampleRate: 48000, createAnalyser: () => makeFakeAnalyser(fakeSpectrumFn) };
++    const fakeSourceNode = { connect: () => {} };
++    const sandbox = {
++        window: {}, Float32Array, Math, Array, Date: { now: () => fakeNow }, console: { log: () => {} },
++        requestAnimationFrame: (cb) => { capturedRaf = cb; return 1; }, cancelAnimationFrame: () => {},
++        setInterval: (cb, ms) => { const id = ++intervalIdSeq; capturedIntervals.push({ id, cb, ms }); return id; },
++        clearInterval: (id) => { capturedIntervals = capturedIntervals.filter((e) => e.id !== id); }
++    };
++    vm.createContext(sandbox);
++    vm.runInContext(keyEngineSource, sandbox, { filename: "keyEngine.js" });
++    const KeyEngine = sandbox.window.KeyEngine;
++    KeyEngine.init(fakeAudioContext, fakeSourceNode);
++    function stepFrame() { if (capturedRaf) { const cb = capturedRaf; capturedRaf = null; cb(); } }
++    const elapsedSinceRegister = new Map();
++    function advance(ms) {
++        let remaining = ms;
++        while (remaining > 0) {
++            const dt = Math.min(10, remaining);
++            fakeNow += dt; remaining -= dt; stepFrame();
++            capturedIntervals.forEach((entry) => {
++                const acc = (elapsedSinceRegister.get(entry.id) || 0) + dt;
++                if (acc >= entry.ms) { elapsedSinceRegister.set(entry.id, acc - entry.ms); entry.cb(); }
++                else elapsedSinceRegister.set(entry.id, acc);
++            });
++        }
++    }
++    return { KeyEngine, stepFrame, advance, getFakeNow: () => fakeNow };
++}
++function chordSpectrum(freqs, extraFreqs) {
++    return () => {
++        const arr = new Float32Array(4096).fill(-100);
++        const binHz = 48000 / 8192;
++        const addTone = (f, baseDb) => {
++            for (let h = 0; h < HARMONIC_AMP.length; h++) {
++                const bin = Math.round((f * (h + 1)) / binHz);
++                if (bin >= 0 && bin < arr.length) {
++                    const db = baseDb + 20 * Math.log10(HARMONIC_AMP[h]);
++                    arr[bin] = Math.max(arr[bin], db);
++                }
++            }
++        };
++        freqs.forEach((f) => addTone(f, -10));
++        (extraFreqs || []).forEach((f) => addTone(f, -6));
++        return arr;
++    };
++}
++function noteFreq(pc, octave) { return 16.35160 * Math.pow(2, octave + pc / 12); }
++const PC = { C: 0, "C#": 1, D: 2, "D#": 3, E: 4, F: 5, "F#": 6, G: 7, "G#": 8, A: 9, "A#": 10, B: 11 };
++
++console.log("=== TEST 1: Power chord A# (ĐÚNG NGUYÊN VĂN Test B/A37/A38) — KHÔNG được khoá qua bất kỳ đường nào trong 16s ===");
++{
++    const powerChord = chordSpectrum([116.5, 233.1, 349.2]); // A#2, A#3, F4 — root+octave+fifth, KHÔNG quãng 3
++    const { KeyEngine, advance } = createSandboxEngine(powerChord);
++    let locked = false, lockedKey = null, lockedAt = null;
++    KeyEngine.detectOnce((result) => { locked = true; lockedKey = result.key; lockedAt = 0; });
++    advance(16000);
++    check(!locked, `Power chord A# (không quãng 3) KHÔNG bị khoá dù đã chờ 16s (thực tế: ${locked ? "đã khoá " + lockedKey : "chưa khoá — ĐÚNG"})`);
++}
++
++console.log("\n=== TEST 2: Major/Minor RÕ vẫn phải khoá đúng & nhanh (true-positive không bị mất bởi floor) — quét 3 root khác nhau ===");
++{
++    const roots = [
++        { name: "C", pc: PC["C"] },
++        { name: "F#", pc: PC["F#"] },
++        { name: "A#", pc: PC["A#"] },
++    ];
++    roots.forEach(({ name, pc }) => {
++        const rootHz = noteFreq(pc, 2);
++        const fifthHz = rootHz * 3;
++        const majThirdHz = noteFreq((pc + 4) % 12, 4);
++        const minThirdHz = noteFreq((pc + 3) % 12, 4);
++
++        const majorChord = chordSpectrum([rootHz, majThirdHz, fifthHz]);
++        const { KeyEngine: KE1, advance: adv1 } = createSandboxEngine(majorChord);
++        let majorLocked = null;
++        KE1.detectOnce((r) => { majorLocked = r.key; });
++        adv1(4000);
++        check(majorLocked && majorLocked.includes("Major"), `${name} Major rõ khoá ĐÚNG "Major" trong <4s (thực tế: ${majorLocked || "chưa khoá"})`);
++
++        const minorChord = chordSpectrum([rootHz, minThirdHz, fifthHz]);
++        const { KeyEngine: KE2, advance: adv2 } = createSandboxEngine(minorChord);
++        let minorLocked = null;
++        KE2.detectOnce((r) => { minorLocked = r.key; });
++        adv2(4000);
++        check(minorLocked && minorLocked.includes("Minor"), `${name} Minor rõ khoá ĐÚNG "Minor" trong <4s (thực tế: ${minorLocked || "chưa khoá"})`);
++    });
++}
++
++console.log("\n=== TEST 3: Power chord ở TOÀN BỘ 12 root cũng không được khoá sai (không chỉ A# mới an toàn) ===");
++{
++    const ALL_NOTES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
++    ALL_NOTES.forEach((name, pc) => {
++        const rootHz = noteFreq(pc, 2);
++        const fifthHz = rootHz * 3;
++        const powerChord = chordSpectrum([rootHz, fifthHz]);
++        const { KeyEngine, advance } = createSandboxEngine(powerChord);
++        let locked = false, lockedKey = null;
++        KeyEngine.detectOnce((r) => { locked = true; lockedKey = r.key; });
++        advance(16000);
++        check(!locked, `Power chord root=${name} (không quãng 3) KHÔNG bị khoá trong 16s (thực tế: ${locked ? "đã khoá " + lockedKey : "chưa khoá — ĐÚNG"})`);
++    });
++}
++
++console.log("\n=== TEST 4: Major/Minor RÕ ở TOÀN BỘ 12 root vẫn phải khoá đúng (true-positive đầy đủ, không chỉ mẫu) ===");
++{
++    const ALL_NOTES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
++    ALL_NOTES.forEach((name, pc) => {
++        const rootHz = noteFreq(pc, 2);
++        const fifthHz = rootHz * 3;
++        const majThirdHz = noteFreq((pc + 4) % 12, 4);
++        const minThirdHz = noteFreq((pc + 3) % 12, 4);
++
++        const majorChord = chordSpectrum([rootHz, majThirdHz, fifthHz]);
++        const { KeyEngine: KEm, advance: advm } = createSandboxEngine(majorChord);
++        let majLocked = null;
++        KEm.detectOnce((r) => { majLocked = r.key; });
++        advm(4000);
++        check(majLocked && majLocked.includes("Major"), `${name} Major rõ khoá ĐÚNG (thực tế: ${majLocked || "chưa khoá"})`);
++
++        const minorChord = chordSpectrum([rootHz, minThirdHz, fifthHz]);
++        const { KeyEngine: KEn, advance: advn } = createSandboxEngine(minorChord);
++        let minLocked = null;
++        KEn.detectOnce((r) => { minLocked = r.key; });
++        advn(4000);
++        check(minLocked && minLocked.includes("Minor"), `${name} Minor rõ khoá ĐÚNG (thực tế: ${minLocked || "chưa khoá"})`);
++    });
++}
++
++console.log("\n========== TỔNG KẾT ==========");
++if (failCount === 0) {
++    console.log("✅ TẤT CẢ kiểm chứng PASS — MODAL_EVIDENCE_FLOOR (A40) chặn đúng false-positive, giữ đúng true-positive.");
++} else {
++    console.log(`❌ CÓ ${failCount} kiểm chứng FAIL.`);
++    process.exitCode = 1;
++}
+diff --git a/ui/js/engines/keyEngine.js b/ui/js/engines/keyEngine.js
+index cc8865b..ee209d9 100644
+--- a/ui/js/engines/keyEngine.js
++++ b/ui/js/engines/keyEngine.js
+@@ -60,7 +60,30 @@ const KeyEngine = (() => {
+ 
+     // === TASK A35 — Stability Lock & Modulation Detector ===
+     const STABILITY_REQUIRED_TICKS = 2; // candidate mới phải ổn định bao nhiêu tick trước khi đổi Key
+-    const MODULATION_MARGIN_GAIN = 1.5; // margin mới phải lớn hơn cũ bao nhiêu lần để coi là thay đổi thật
++    const MODULATION_MARGIN_GAIN = 1.0; // TASK A40 — hạ từ 1.5 xuống 1.0 (đã đo bằng trace thật: yêu
++    // cầu margin mới PHẢI CAO HƠN margin cũ 50% là quá khắt khe cho 1 modulation thật giữa 2 hợp âm
++    // rõ ràng như nhau — D#m thật có margin=0.143 so với baseline D Minor cũ ~0.12 (chỉ cao hơn ~19%,
++    // không tới 50%) vẫn bị từ chối vĩnh viễn nếu giữ 1.5. Hạ xuống 1.0 nghĩa là chỉ còn yêu cầu margin
++    // mới KHÔNG YẾU HƠN baseline cũ (không còn đòi hỏi phải "vượt trội"), vẫn là 1 sàn thật (không phải
++    // bỏ hẳn kiểm tra). Bảo vệ chống flicker/dao động thoáng qua (Test E phần 2) vốn đã do CÁC CƠ CHẾ
++    // KHÁC đảm nhiệm độc lập (vote count/elapsed/stability streak — flicker quá ngắn không đủ tích luỹ
++    // đủ vote/streak để tới được bước kiểm tra này), không phụ thuộc chính vào hệ số 1.5 này.
++
++    // === TASK A40 — Modal Evidence Floor (hiệu chỉnh bằng dữ liệu thật ở A39, ĐÃ SỬA LẠI cho đúng
++    // đơn vị) ===
++    // A38 chứng minh computeModalEvidence() là công thức TỶ LỆ không sàn tuyệt đối — rò rỉ harmonic
++    // cực nhỏ vẫn cho ra modalConfidence=1.0 (tối đa), y hệt khi có quãng 3 THẬT.
++    // QUAN TRỌNG: A39 hiệu chỉnh floor ban đầu (0.05) dựa trên chromaVector THÔ (trước
++    // powerLawNormalize) — nhưng computeModalEvidence() thực ra nhận `chromaNorm` (đã qua
++    // powerLawNormalize, luỹ thừa 0.67) làm tham số, KHÔNG PHẢI vector thô. Luỹ thừa 0.67 khuếch đại
++    // bất cân xứng các giá trị nhỏ (vd 0.0058³·⁶⁷≈0.057 → sau normalize còn lớn hơn nhiều so với tỷ lệ
++    // gốc) — nên floor 0.05 đo sai đơn vị, KHÔNG đủ cao cho 1 số root (đo thực tế thấy root F vẫn lọt
++    // qua với modalConfidence=0.52 dù chưa hề có quãng 3 thật). Đã đo lại ĐÚNG đơn vị (chromaNorm,
++    // đủ 12 root, cả 2 chroma vector Fast/Slow): No-Third tối đa = 0.0655 (root C); Major/Minor rõ tối
++    // thiểu = 0.4929 (root G#) — khoảng cách ~7.5 lần, vẫn rõ ràng dù hẹp hơn số liệu sai đơn vị trước
++    // đó. Chọn 0.18 — nằm giữa, cách đều cả 2 phía theo tỷ lệ (~2.75× so với No-Third max, ~2.74× dưới
++    // Major/Minor min).
++    const MODAL_EVIDENCE_FLOOR = 0.18;
+ 
+     let running = false;
+     let rafId = null;
+@@ -221,7 +244,13 @@ const KeyEngine = (() => {
+         const minorStrength = chromaNorm[min3rdIdx];
+         const majorStrength = chromaNorm[maj3rdIdx];
+         const total = minorStrength + majorStrength;
+-        if (total === 0) return { minorStrength: 0.5, majorStrength: 0.5, modalConfidence: 0 };
++        // TASK A40 — sàn năng lượng tuyệt đối (A39 calibration). Trước bản vá này, "total" chỉ được
++        // kiểm tra === 0 tuyệt đối (gần như không bao giờ đúng trong thực tế vì rò rỉ harmonic luôn
++        // để lại 1 lượng cực nhỏ) — nên nhánh phòng thủ 0.5/0.5 gần như không bao giờ kích hoạt. Mở
++        // rộng điều kiện sang "total < MODAL_EVIDENCE_FLOOR" để nhánh phòng thủ này hoạt động đúng ý
++        // định ban đầu: khi KHÔNG đủ bằng chứng (total quá nhỏ), coi Major/Minor ngang nhau
++        // (modalConfidence=0) thay vì để tỷ lệ khuếch đại nhiễu thành "tự tin tuyệt đối".
++        if (total === 0 || total < MODAL_EVIDENCE_FLOOR) return { minorStrength: 0.5, majorStrength: 0.5, modalConfidence: 0 };
+         return {
+             minorStrength: minorStrength / total,
+             majorStrength: majorStrength / total,
+@@ -516,9 +545,22 @@ const KeyEngine = (() => {
+                 return;
+             }
+ 
+-            // Lưu lịch sử margin cho A35 Modulation Check
+-            marginHistory.push(result.margin);
+-            if (marginHistory.length > 10) marginHistory.shift();
++            // TASK A40 — sửa lỗi tự-bão-hoà của A37: trước bản vá này, marginHistory nhận margin của
++            // MỌI tick vô điều kiện, kể cả các tick đã thuộc về candidate MỚI (đang chờ xác nhận
++            // modulation). Một khi modulation thật xảy ra và margin mới ổn định đủ lâu, avgMarginHistory
++            // hội tụ về CHÍNH margin mới đó, khiến `newMargin > avgMarginHistory × GAIN` KHÔNG BAO GIỜ
++            // đúng nữa (đã chứng minh bằng đại số ở A37) — modulation thật SAU KHI đã có 1 lần khoá
++            // trước đó sẽ không bao giờ được xác nhận. Sửa: chỉ tích luỹ marginHistory khi tick НÀY
++            // còn khớp với Key ĐANG khoá (`lastLockedKey`) — tức đây vẫn là baseline của Key CŨ, chưa
++            // bị "ô nhiễm" bởi margin của candidate mới. Ngay khi 1 tick cho ra candidate KHÁC
++            // lastLockedKey (bắt đầu nghi ngờ có modulation), việc tích luỹ TẠM DỪNG — giữ nguyên
++            // baseline cũ để so sánh công bằng — cho tới khi modulation được XÁC NHẬN THẬT (lastLockedKey
++            // cập nhật), lúc đó vòng tích luỹ mới bắt đầu lại cho Key mới.
++            const tickFullKey = `${result.rootIndex}-${result.mode}`;
++            if (lastLockedKey === null || tickFullKey === lastLockedKey) {
++                marginHistory.push(result.margin);
++                if (marginHistory.length > 10) marginHistory.shift();
++            }
+ 
+             voteWindow.push({ key: `${result.rootIndex}-${result.mode}`, result });
+             if (voteWindow.length > VOTE_WINDOW) voteWindow.shift();
+@@ -534,7 +576,21 @@ const KeyEngine = (() => {
+             const elapsed = Date.now() - startedAt;
+             const confidenceV2 = buildConfidenceV2(result, stability);
+ 
+-            const willLockByVote = bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS;
++            // === TASK A40 — sàn marginNorm cho vote-window ===
++            // A37 từng chứng minh: gắn thẳng ngưỡng marginNorm (ý tưởng gốc từ patch A35 bị reject,
++            // keyEngine.js.rej) vào đây KHÔNG đủ, vì lúc đó marginNorm bị THỔI PHỒNG giả bởi chính lỗi
++            // computeModalEvidence() (A38) — power chord A# đo được marginNorm=0.741, vượt xa 0.30.
++            // Sau khi MODAL_EVIDENCE_FLOOR (phía trên) sửa gốc rễ, đã ĐO LẠI THẬT trên ĐỦ 12 root
++            // (không chỉ A#, đúng tinh thần A39): margin dư của power chord (root+fifth, không quãng 3,
++            // modal evidence đã trung hoà) dao động 0.0020–0.0568 tuỳ root (root D/F cao nhất ~0.057) —
++            // 0.30 KHÔNG đủ cao để chặn các root này (C đo được marginNorm=0.32, D/F ~0.57, vẫn vượt
++            // 0.30 và khoá sai). Trong khi đó margin của Major/Minor THẬT (đủ 12 root) không bao giờ
++            // thấp hơn 0.1654 (marginNorm=1.0, bị clamp). Ngưỡng 0.90 (marginNorm, tương đương margin
++            // thô ~0.09) nằm giữa 2 vùng này: cách trần power-chord cao nhất (~0.057) ~1.6 lần, cách sàn
++            // Major/Minor thật thấp nhất (~0.165) ~1.8 lần — biên độ an toàn cân bằng ở cả 2 phía, dựa
++            // trên dữ liệu đo thật trên toàn bộ 12 root, không phải suy đoán từ 1 root duy nhất.
++            const VOTE_WINDOW_MIN_MARGIN_NORM = 0.90;
++            const willLockByVote = bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS && confidenceV2.marginNorm >= VOTE_WINDOW_MIN_MARGIN_NORM;
+ 
+             if (bestCount >= VOTE_MIN_AGREE && confidenceV2.combined >= ADAPTIVE_LOCK_CONFIDENCE) {
+                 highConfidenceStreak++;
+-- 
+2.43.0
+

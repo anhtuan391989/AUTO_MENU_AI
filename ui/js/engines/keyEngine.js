@@ -60,7 +60,30 @@ const KeyEngine = (() => {
 
     // === TASK A35 — Stability Lock & Modulation Detector ===
     const STABILITY_REQUIRED_TICKS = 2; // candidate mới phải ổn định bao nhiêu tick trước khi đổi Key
-    const MODULATION_MARGIN_GAIN = 1.5; // margin mới phải lớn hơn cũ bao nhiêu lần để coi là thay đổi thật
+    const MODULATION_MARGIN_GAIN = 1.0; // TASK A40 — hạ từ 1.5 xuống 1.0 (đã đo bằng trace thật: yêu
+    // cầu margin mới PHẢI CAO HƠN margin cũ 50% là quá khắt khe cho 1 modulation thật giữa 2 hợp âm
+    // rõ ràng như nhau — D#m thật có margin=0.143 so với baseline D Minor cũ ~0.12 (chỉ cao hơn ~19%,
+    // không tới 50%) vẫn bị từ chối vĩnh viễn nếu giữ 1.5. Hạ xuống 1.0 nghĩa là chỉ còn yêu cầu margin
+    // mới KHÔNG YẾU HƠN baseline cũ (không còn đòi hỏi phải "vượt trội"), vẫn là 1 sàn thật (không phải
+    // bỏ hẳn kiểm tra). Bảo vệ chống flicker/dao động thoáng qua (Test E phần 2) vốn đã do CÁC CƠ CHẾ
+    // KHÁC đảm nhiệm độc lập (vote count/elapsed/stability streak — flicker quá ngắn không đủ tích luỹ
+    // đủ vote/streak để tới được bước kiểm tra này), không phụ thuộc chính vào hệ số 1.5 này.
+
+    // === TASK A40 — Modal Evidence Floor (hiệu chỉnh bằng dữ liệu thật ở A39, ĐÃ SỬA LẠI cho đúng
+    // đơn vị) ===
+    // A38 chứng minh computeModalEvidence() là công thức TỶ LỆ không sàn tuyệt đối — rò rỉ harmonic
+    // cực nhỏ vẫn cho ra modalConfidence=1.0 (tối đa), y hệt khi có quãng 3 THẬT.
+    // QUAN TRỌNG: A39 hiệu chỉnh floor ban đầu (0.05) dựa trên chromaVector THÔ (trước
+    // powerLawNormalize) — nhưng computeModalEvidence() thực ra nhận `chromaNorm` (đã qua
+    // powerLawNormalize, luỹ thừa 0.67) làm tham số, KHÔNG PHẢI vector thô. Luỹ thừa 0.67 khuếch đại
+    // bất cân xứng các giá trị nhỏ (vd 0.0058³·⁶⁷≈0.057 → sau normalize còn lớn hơn nhiều so với tỷ lệ
+    // gốc) — nên floor 0.05 đo sai đơn vị, KHÔNG đủ cao cho 1 số root (đo thực tế thấy root F vẫn lọt
+    // qua với modalConfidence=0.52 dù chưa hề có quãng 3 thật). Đã đo lại ĐÚNG đơn vị (chromaNorm,
+    // đủ 12 root, cả 2 chroma vector Fast/Slow): No-Third tối đa = 0.0655 (root C); Major/Minor rõ tối
+    // thiểu = 0.4929 (root G#) — khoảng cách ~7.5 lần, vẫn rõ ràng dù hẹp hơn số liệu sai đơn vị trước
+    // đó. Chọn 0.18 — nằm giữa, cách đều cả 2 phía theo tỷ lệ (~2.75× so với No-Third max, ~2.74× dưới
+    // Major/Minor min).
+    const MODAL_EVIDENCE_FLOOR = 0.18;
 
     let running = false;
     let rafId = null;
@@ -221,7 +244,13 @@ const KeyEngine = (() => {
         const minorStrength = chromaNorm[min3rdIdx];
         const majorStrength = chromaNorm[maj3rdIdx];
         const total = minorStrength + majorStrength;
-        if (total === 0) return { minorStrength: 0.5, majorStrength: 0.5, modalConfidence: 0 };
+        // TASK A40 — sàn năng lượng tuyệt đối (A39 calibration). Trước bản vá này, "total" chỉ được
+        // kiểm tra === 0 tuyệt đối (gần như không bao giờ đúng trong thực tế vì rò rỉ harmonic luôn
+        // để lại 1 lượng cực nhỏ) — nên nhánh phòng thủ 0.5/0.5 gần như không bao giờ kích hoạt. Mở
+        // rộng điều kiện sang "total < MODAL_EVIDENCE_FLOOR" để nhánh phòng thủ này hoạt động đúng ý
+        // định ban đầu: khi KHÔNG đủ bằng chứng (total quá nhỏ), coi Major/Minor ngang nhau
+        // (modalConfidence=0) thay vì để tỷ lệ khuếch đại nhiễu thành "tự tin tuyệt đối".
+        if (total === 0 || total < MODAL_EVIDENCE_FLOOR) return { minorStrength: 0.5, majorStrength: 0.5, modalConfidence: 0 };
         return {
             minorStrength: minorStrength / total,
             majorStrength: majorStrength / total,
@@ -516,9 +545,22 @@ const KeyEngine = (() => {
                 return;
             }
 
-            // Lưu lịch sử margin cho A35 Modulation Check
-            marginHistory.push(result.margin);
-            if (marginHistory.length > 10) marginHistory.shift();
+            // TASK A40 — sửa lỗi tự-bão-hoà của A37: trước bản vá này, marginHistory nhận margin của
+            // MỌI tick vô điều kiện, kể cả các tick đã thuộc về candidate MỚI (đang chờ xác nhận
+            // modulation). Một khi modulation thật xảy ra và margin mới ổn định đủ lâu, avgMarginHistory
+            // hội tụ về CHÍNH margin mới đó, khiến `newMargin > avgMarginHistory × GAIN` KHÔNG BAO GIỜ
+            // đúng nữa (đã chứng minh bằng đại số ở A37) — modulation thật SAU KHI đã có 1 lần khoá
+            // trước đó sẽ không bao giờ được xác nhận. Sửa: chỉ tích luỹ marginHistory khi tick НÀY
+            // còn khớp với Key ĐANG khoá (`lastLockedKey`) — tức đây vẫn là baseline của Key CŨ, chưa
+            // bị "ô nhiễm" bởi margin của candidate mới. Ngay khi 1 tick cho ra candidate KHÁC
+            // lastLockedKey (bắt đầu nghi ngờ có modulation), việc tích luỹ TẠM DỪNG — giữ nguyên
+            // baseline cũ để so sánh công bằng — cho tới khi modulation được XÁC NHẬN THẬT (lastLockedKey
+            // cập nhật), lúc đó vòng tích luỹ mới bắt đầu lại cho Key mới.
+            const tickFullKey = `${result.rootIndex}-${result.mode}`;
+            if (lastLockedKey === null || tickFullKey === lastLockedKey) {
+                marginHistory.push(result.margin);
+                if (marginHistory.length > 10) marginHistory.shift();
+            }
 
             voteWindow.push({ key: `${result.rootIndex}-${result.mode}`, result });
             if (voteWindow.length > VOTE_WINDOW) voteWindow.shift();
@@ -534,7 +576,21 @@ const KeyEngine = (() => {
             const elapsed = Date.now() - startedAt;
             const confidenceV2 = buildConfidenceV2(result, stability);
 
-            const willLockByVote = bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS;
+            // === TASK A40 — sàn marginNorm cho vote-window ===
+            // A37 từng chứng minh: gắn thẳng ngưỡng marginNorm (ý tưởng gốc từ patch A35 bị reject,
+            // keyEngine.js.rej) vào đây KHÔNG đủ, vì lúc đó marginNorm bị THỔI PHỒNG giả bởi chính lỗi
+            // computeModalEvidence() (A38) — power chord A# đo được marginNorm=0.741, vượt xa 0.30.
+            // Sau khi MODAL_EVIDENCE_FLOOR (phía trên) sửa gốc rễ, đã ĐO LẠI THẬT trên ĐỦ 12 root
+            // (không chỉ A#, đúng tinh thần A39): margin dư của power chord (root+fifth, không quãng 3,
+            // modal evidence đã trung hoà) dao động 0.0020–0.0568 tuỳ root (root D/F cao nhất ~0.057) —
+            // 0.30 KHÔNG đủ cao để chặn các root này (C đo được marginNorm=0.32, D/F ~0.57, vẫn vượt
+            // 0.30 và khoá sai). Trong khi đó margin của Major/Minor THẬT (đủ 12 root) không bao giờ
+            // thấp hơn 0.1654 (marginNorm=1.0, bị clamp). Ngưỡng 0.90 (marginNorm, tương đương margin
+            // thô ~0.09) nằm giữa 2 vùng này: cách trần power-chord cao nhất (~0.057) ~1.6 lần, cách sàn
+            // Major/Minor thật thấp nhất (~0.165) ~1.8 lần — biên độ an toàn cân bằng ở cả 2 phía, dựa
+            // trên dữ liệu đo thật trên toàn bộ 12 root, không phải suy đoán từ 1 root duy nhất.
+            const VOTE_WINDOW_MIN_MARGIN_NORM = 0.90;
+            const willLockByVote = bestCount >= VOTE_MIN_AGREE && elapsed >= MIN_ELAPSED_BEFORE_LOCK_MS && confidenceV2.marginNorm >= VOTE_WINDOW_MIN_MARGIN_NORM;
 
             if (bestCount >= VOTE_MIN_AGREE && confidenceV2.combined >= ADAPTIVE_LOCK_CONFIDENCE) {
                 highConfidenceStreak++;

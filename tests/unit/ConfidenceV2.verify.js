@@ -139,7 +139,7 @@ async function runPartB() {
 
     check(confidenceV2Blocks.length > 0, `Có ít nhất 1 dòng log chứa ConfidenceV2 hợp lệ (JSON parse được), thực tế: ${confidenceV2Blocks.length}`);
 
-    const requiredFields = ["pearson", "pearsonNorm", "margin", "marginNorm", "stability", "stabilityNorm", "bassAgreement", "bassNorm", "combined", "ambiguity"];
+    const requiredFields = ["pearson", "pearsonNorm", "margin", "marginNorm", "stability", "stabilityNorm", "bassAgreement", "bassNorm", "modalNorm", "combined", "ambiguity"];
     const lastBlock = confidenceV2Blocks[confidenceV2Blocks.length - 1];
     if (lastBlock) {
         console.log("  ConfidenceV2 (lúc khoá):", JSON.stringify(lastBlock));
@@ -148,9 +148,10 @@ async function runPartB() {
         }
         check(lastBlock.pearsonNorm >= 0 && lastBlock.pearsonNorm <= 1, "pearsonNorm nằm trong [0,1]");
         check(lastBlock.marginNorm >= 0 && lastBlock.marginNorm <= 1, "marginNorm nằm trong [0,1]");
+        check(lastBlock.modalNorm >= 0 && lastBlock.modalNorm <= 1, "modalNorm nằm trong [0,1]");
         check(lastBlock.combined >= 0 && lastBlock.combined <= 1, "combined nằm trong [0,1]");
-        check(Math.abs(lastBlock.combined - (lastBlock.pearsonNorm + lastBlock.marginNorm + lastBlock.stabilityNorm + lastBlock.bassNorm) / 4) < 1e-9,
-            "combined = trung bình cộng đúng 4 thành phần đã chuẩn hoá (khớp dữ liệu thật, không chỉ khớp ví dụ)");
+        check(Math.abs(lastBlock.combined - (lastBlock.pearsonNorm + lastBlock.marginNorm + lastBlock.stabilityNorm + lastBlock.bassNorm + lastBlock.modalNorm) / 5) < 1e-9,
+            "combined = trung bình cộng đúng 5 thành phần đã chuẩn hoá (pearson/margin/stability/bass/modal — A35 đã thêm modalNorm, khớp dữ liệu thật production)");
     }
 }
 

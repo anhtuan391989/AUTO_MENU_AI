@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  midi-mapping.xsd — D1 Specification (Task B23)
+  =================================================
+  Cấu trúc bắt buộc: Capability (mô tả HÀNH ĐỘNG, KHÔNG chứa MIDI field nào)
+  tách biệt hoàn toàn khỏi Binding (chỉ chứa dữ liệu MIDI truyền tải, tham
+  chiếu ngược Capability bằng ID qua capability-ref).
+
+  XSD này validate được: cấu trúc tài liệu, kiểu dữ liệu, ràng buộc số
+  (channel 1-16, number/value 0-127), namespace hợp lệ cho action ID (qua
+  pattern), và tính toàn vẹn tham chiếu capability-ref -> capability/@id
+  (qua xs:key/xs:keyref — cơ chế XML Schema chuẩn, không phải tự chế).
+
+  XSD KHÔNG (và về nguyên tắc KHÔNG THỂ) validate được, phải để Semantic
+  Validator xử lý riêng — xem midi-mapping-rules.md mục "Semantic Rules":
+    - backend-status của capability có KHỚP với capability-backend-matrix.md
+      hay không (XSD chỉ biết giá trị nằm trong enum cho phép, không biết
+      "sự thật" nằm ở matrix nào).
+    - binding có bị REJECT vì capability đích có midiAllowed=false hay
+      không (đây là business rule phụ thuộc backend-status, XSD không có
+      khái niệm "nếu X thì Y bị cấm" giữa 2 phần tử khác nhau theo kiểu đó).
+    - duplicate binding theo bộ (type, channel, number) — XSD 1.0 có
+      xs:unique nhưng chỉ áp dụng đúng nghĩa "value giống hệt nhau ở 1
+      field" dễ dàng; ràng buộc tổ hợp 3 field CÓ THỂ khai báo bằng
+      xs:unique nhiều xs:field, nên XSD này CÓ khai báo unique-binding-identity
+      (xem dưới) — nhưng thông báo lỗi/khả năng phát hiện "gần trùng" (vd
+      lệch value nhưng cùng type+channel+number) vẫn nên có thêm Semantic
+      Validator để báo lỗi rõ ràng, dễ đọc hơn lỗi XSD gốc.
+    - Action ID "không chứa MIDI field" theo nghĩa ngữ nghĩa đầy đủ (XSD chỉ
+      chặn được vài từ khoá cụ thể qua pattern phủ định, không chặn được
+      MỌI cách encode MIDI info vào 1 chuỗi tự do).
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="urn:auto-menu-ai:midi-mapping:v1"
+           xmlns:mm="urn:auto-menu-ai:midi-mapping:v1"
+           elementFormDefault="qualified">
+
+  <!-- ============================================================
+       Kiểu dữ liệu dùng chung
+       ============================================================ -->
+
+  <!-- Action ID: bắt buộc thuộc 1 trong 3 namespace production (Principle 3),
+       PHẢI có đúng 1 dấu ":" (Principle 1 — không cho phép thêm segment thứ 2
+       kiểu "daw:play:cc30"), phần sau dấu ":" chỉ chữ+số, không cho phép chứa
+       nguyên văn các từ khoá MIDI/DAW phổ biến nhất (chặn được PHẦN NÀO bằng
+       XSD, không phải toàn bộ — xem ghi chú Semantic Validator ở trên). -->
+  <xs:simpleType name="ActionId">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="(daw|menu|plugin):[A-Za-z][A-Za-z0-9]*"/>
+      <!-- LƯU Ý QUAN TRỌNG (xác nhận bằng thực thi thật, không phải suy đoán):
+           Bản đầu của XSD này từng thêm 1 pattern thứ 2 dùng negative lookahead
+           "(?!...)" để chặn Action ID chứa hậu tố "cc30"/"note60"/"channel1"/tên
+           DAW cụ thể — nhưng XML Schema regex (XSD 1.0/1.1) KHÔNG hỗ trợ
+           lookahead/lookbehind (đây là tập con hạn chế hơn PCRE). Đã xác nhận
+           bằng lệnh `xmllint -noout -schema` thật: lỗi
+           "xmlFAParseAtom: expecting ')'" / "not a valid regular expression".
+           Vì vậy XSD này CHỈ enforce được namespace prefix + hình dạng chung
+           (chữ+số sau đúng 1 dấu ":"), KHÔNG enforce được việc cấm nhét từ khoá
+           MIDI/DAW cụ thể vào Action ID — việc đó BẮT BUỘC chuyển cho Semantic
+           Validator (xem midi-mapping-rules.md, mục Semantic Rules > Action ID
+           không chứa MIDI fields / không chứa DAW name). Ghi rõ giới hạn này
+           thay vì để pattern lỗi âm thầm hoặc giả vờ XSD kiểm được toàn bộ. -->
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="BackendStatus">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="implemented"/>
+      <xs:enumeration value="pending-backend"/>
+      <xs:enumeration value="blocked"/>
+      <xs:enumeration value="not-supported"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="MidiChannel">
+    <xs:restriction base="xs:integer">
+      <xs:minInclusive value="1"/>
+      <xs:maxInclusive value="16"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="MidiSevenBit">
+    <!-- Dùng chung cho note number, CC number, và value/velocity — đều là
+         trường 7-bit chuẩn MIDI 1.0 (0-127). -->
+    <xs:restriction base="xs:integer">
+      <xs:minInclusive value="0"/>
+      <xs:maxInclusive value="127"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="MidiMessageType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="note-on"/>
+      <xs:enumeration value="cc"/>
+      <!-- note-off/program-change/pitch-bend CHƯA có trong runtime dispatch
+           thật (xác nhận bằng code + test tại B20 — normalizeMidiMessage()
+           trả về null cho các loại này) -> KHÔNG khai báo ở đây, tránh XML
+           validate PASS nhưng runtime không hiểu. Nếu muốn hỗ trợ thêm loại
+           message, phải mở rộng XSD này VÀ runtime cùng lúc, có evidence. -->
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="BindingSource">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="factory"/>
+      <!-- binding do D1 định nghĩa sẵn, chưa có trong bản này (bindings rỗng) -->
+      <xs:enumeration value="midi-learn"/>
+      <!-- binding do user tự Capture qua Setup > MIDI Learn lúc runtime -->
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- ============================================================
+       Capability — CHỈ mô tả action, TUYỆT ĐỐI không có field MIDI nào
+       (Principle 4). Không có midi-type/channel/number/value ở đây.
+       ============================================================ -->
+  <xs:complexType name="Capability">
+    <xs:sequence>
+      <xs:element name="description" type="xs:string"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="mm:ActionId" use="required"/>
+    <xs:attribute name="backend-status" type="mm:BackendStatus" use="required"/>
+    <!-- midi-allowed CHỈ được true khi backend-status="implemented" — quan
+         hệ này KHÔNG enforce được bằng XSD thuần (2 attribute độc lập theo
+         XSD 1.0 co-constraint rất hạn chế) -> bắt buộc Semantic Validator
+         kiểm tra lại (xem midi-mapping-rules.md). -->
+    <xs:attribute name="midi-allowed" type="xs:boolean" use="required"/>
+  </xs:complexType>
+
+  <!-- ============================================================
+       Binding — CHỈ chứa dữ liệu MIDI truyền tải + tham chiếu ngược
+       capability bằng ID. KHÔNG copy lại mô tả capability.
+       ============================================================ -->
+  <xs:complexType name="Binding">
+    <xs:attribute name="id" type="xs:ID" use="required"/>
+    <xs:attribute name="capability-ref" type="xs:string" use="required"/>
+    <xs:attribute name="type" type="mm:MidiMessageType" use="required"/>
+    <xs:attribute name="channel" type="mm:MidiChannel" use="required"/>
+    <xs:attribute name="number" type="mm:MidiSevenBit" use="required"/>
+    <xs:attribute name="value" type="mm:MidiSevenBit" use="optional"/>
+    <xs:attribute name="source" type="mm:BindingSource" use="required"/>
+    <xs:attribute name="learned-at" type="xs:dateTime" use="optional"/>
+    <!-- learned-at BẮT BUỘC về mặt nghiệp vụ khi source="midi-learn" (mục 8,
+         đề bài B21) — XSD 1.0 không co-constraint được theo giá trị attribute
+         khác dễ dàng -> Semantic Validator phải kiểm tra thêm. -->
+  </xs:complexType>
+
+  <!-- ============================================================
+       Root
+       ============================================================ -->
+  <xs:element name="midi-mapping">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="capabilities">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="capability" type="mm:Capability" minOccurs="1" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="bindings">
+          <xs:complexType>
+            <xs:sequence>
+              <!-- minOccurs=0 — "NO BINDING" PHẢI hợp lệ (mục 7, đề bài B21;
+                   mục 9, đề bài B23 — không tự bịa MIDI mapping). Bản D1 này
+                   cố ý để bindings RỖNG. -->
+              <xs:element name="binding" type="mm:Binding" minOccurs="0" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <xs:attribute name="schemaVersion" type="xs:string" use="required"/>
+      <xs:attribute name="mappingVersion" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <!-- capability-ref phải trỏ tới đúng 1 capability/@id đã khai báo —
+         toàn vẹn tham chiếu THẬT, dùng cơ chế chuẩn XSD (key/keyref), không
+         phải quy ước tự đặt. -->
+    <xs:key name="capabilityIdKey">
+      <xs:selector xpath="mm:capabilities/mm:capability"/>
+      <xs:field xpath="@id"/>
+    </xs:key>
+    <xs:keyref name="capabilityRefCheck" refer="mm:capabilityIdKey">
+      <xs:selector xpath="mm:bindings/mm:binding"/>
+      <xs:field xpath="@capability-ref"/>
+    </xs:keyref>
+
+    <!-- Duplicate binding identity: cùng bộ (type, channel, number) không
+         được phép trùng — dùng xs:unique nhiều field (cơ chế chuẩn XSD 1.0,
+         không phải tự chế). Đây là phần cấu trúc XSD CÓ THỂ enforce được
+         (đúng ghi chú đầu file) — không cần chờ Semantic Validator riêng
+         cho đúng trường hợp collision cơ bản này. -->
+    <xs:unique name="uniqueBindingIdentity">
+      <xs:selector xpath="mm:bindings/mm:binding"/>
+      <xs:field xpath="@type"/>
+      <xs:field xpath="@channel"/>
+      <xs:field xpath="@number"/>
+    </xs:unique>
+  </xs:element>
+
+</xs:schema>
