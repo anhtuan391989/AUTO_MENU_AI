@@ -1134,11 +1134,22 @@ function initSoundcardSection() {
     if (!select) return;
 
     const savedId = getSetting("selectedSoundcardId");
-    populateSoundcardOptions(select, savedId).then(({ foundInRealList }) => updateSoundcardDisplays(foundInRealList));
+    populateSoundcardOptions(select, savedId).then(({ foundInRealList }) => {
+        // TASK B26.2 — chỉ cập nhật hint khi ĐÃ THỰC SỰ có deviceId đã lưu để so sánh; nếu chưa
+        // từng chọn gì (savedId rỗng) thì để nguyên null, không tự kết luận "unavailable" sai.
+        if (savedId) setSoundcardAvailabilityHint(foundInRealList);
+        updateSoundcardDisplays(foundInRealList);
+        updateSetupProgress();
+    });
 
     // Làm mới danh sách mỗi lần mở modal (thiết bị có thể đã thay đổi)
     document.getElementById("openSoundcardModal")?.addEventListener("click", () => {
-        populateSoundcardOptions(select, getSetting("selectedSoundcardId")).then(({ foundInRealList }) => updateSoundcardDisplays(foundInRealList));
+        const currentSavedId = getSetting("selectedSoundcardId");
+        populateSoundcardOptions(select, currentSavedId).then(({ foundInRealList }) => {
+            if (currentSavedId) setSoundcardAvailabilityHint(foundInRealList);
+            updateSoundcardDisplays(foundInRealList);
+            updateSetupProgress();
+        });
     });
 
     document.getElementById("btnSelectSoundcard")?.addEventListener("click", () => {
@@ -1156,7 +1167,11 @@ function initSoundcardSection() {
         // KHÔNG tạo AudioContext/getUserMedia mới cho pipeline chính. Refresh lại đúng bằng cách
         // liệt kê danh sách thật lần nữa để biết chắc device vừa lưu có thật trong danh sách hay
         // không (an toàn hơn tự suy đoán từ select.value, tránh sai lệch nếu chọn nhầm option fallback).
-        populateSoundcardOptions(select, select.value).then(({ foundInRealList }) => updateSoundcardDisplays(foundInRealList));
+        populateSoundcardOptions(select, select.value).then(({ foundInRealList }) => {
+            setSoundcardAvailabilityHint(foundInRealList); // TASK B26.2
+            updateSoundcardDisplays(foundInRealList);
+            updateSetupProgress();
+        });
         updateSetupStatus();
         updateSetupProgress();
         notifySetupChanged();

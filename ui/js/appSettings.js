@@ -281,16 +281,36 @@ function setCoordinate(key, value) {
     return true;
 }
 
+// TASK B26.2 — trước đây getSetupReadinessChecklist() chỉ kiểm tra CÓ TÊN soundcard đã lưu hay
+// không, KHÔNG biết thiết bị đó còn tồn tại thật trên máy hay không (đã "rút dây"/đổi driver).
+// Kết quả: progress bar/READY có thể báo "đã xong" dù badge Soundcard đang cảnh báo "không khả
+// dụng" — đúng kiểu "cấu hình cũ nhưng device không còn tồn tại" mà B26.2 yêu cầu rà soát.
+//
+// Fix TỐI THIỂU, KHÔNG đổi kiến trúc: chỉ 1 biến hint trong module này, do setup.js cập nhật MỖI
+// khi nó thực sự enumerate lại thiết bị (populateSoundcardOptions() -> foundInRealList — dữ liệu
+// đã có sẵn, không tự thêm getUserMedia/enumerateDevices() nào mới ở đây). Mặc định là null
+// ("chưa biết gì") để giữ NGUYÊN hành vi cũ (trust tên đã lưu) cho tới khi thực sự đã enumerate —
+// không đổi behavior của bất kỳ nơi nào khác đang gọi các hàm này trước khi Setup mở lần đầu.
+let __soundcardAvailabilityHint = null; // null = chưa biết | true/false = đã enumerate xong
+
+function setSoundcardAvailabilityHint(isAvailable) {
+    __soundcardAvailabilityHint = isAvailable === true || isAvailable === false ? isAvailable : null;
+}
+
 /* Danh sách 10 mục bắt buộc để coi Setup là "hoàn tất" — dùng chung cho setup.js và renderer.js.
    Riêng "Browser" phải có ĐỦ 2 thứ: đã chọn trình duyệt VÀ đã có đường dẫn (tự dò hoặc chọn tay),
    thiếu 1 trong 2 vẫn coi là chưa xong. Riêng 5 mục tọa độ được kiểm tra THEO HỒ SƠ CỦA DAW
-   ĐANG CHỌN (getCoordinate), không phải giá trị chung chung nữa. */
+   ĐANG CHỌN (getCoordinate), không phải giá trị chung chung nữa. Riêng "Soundcard" (B26.2): nếu
+   đã biết chắc device đã lưu KHÔNG còn tồn tại thật (__soundcardAvailabilityHint === false) thì
+   KHÔNG coi là ready, dù vẫn còn tên được lưu — tránh báo READY giả. */
 function getSetupReadinessChecklist() {
+    const soundcardConfigured = !!getSetting("selectedSoundcard");
+    const soundcardReady = soundcardConfigured && __soundcardAvailabilityHint !== false;
     return [
         { key: "selectedDAW", ready: !!getSetting("selectedDAW") },
         { key: "selectedAutoKey", ready: !!getSetting("selectedAutoKey") },
         { key: "selectedAutoTune", ready: !!getSetting("selectedAutoTune") },
-        { key: "selectedSoundcard", ready: !!getSetting("selectedSoundcard") },
+        { key: "selectedSoundcard", ready: soundcardReady },
         { key: "selectedBrowser", ready: !!getSetting("selectedBrowser") && !!getSetting("selectedBrowserPath") },
         { key: "autokey1", ready: !!getCoordinate("autokey1") },
         { key: "autokey2", ready: !!getCoordinate("autokey2") },
