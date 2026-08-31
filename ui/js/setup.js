@@ -162,6 +162,21 @@ function initSetupPage() {
     if (browserPathDisplay) {
         const savedPath = getSetting("selectedBrowserPath");
         browserPathDisplay.textContent = savedPath || "❌ Chưa thiết lập";
+
+        // TASK B30.2: re-validate đường dẫn đã lưu CÒN TỒN TẠI THẬT trên đĩa hay không mỗi khi mở
+        // Setup — trước đây chỉ hiển thị lại chuỗi cũ, không biết file đã bị xoá/di chuyển hay chưa.
+        if (savedPath && window.electronAPI?.checkPathExists) {
+            window.electronAPI.checkPathExists(savedPath).then((exists) => {
+                setBrowserPathAvailabilityHint(exists);
+                if (!exists) {
+                    browserPathDisplay.textContent = "⚠ " + savedPath + " (file không còn tồn tại — hãy chọn lại)";
+                }
+                updateSetupStatus();
+                updateSetupProgress();
+            }).catch((err) => {
+                console.error("checkPathExists lỗi:", err);
+            });
+        }
     }
 
     // Tự động dò đường dẫn cài đặt ngay khi tích chọn 1 trình duyệt.
@@ -184,9 +199,11 @@ function initSetupPage() {
 
                 if (found) {
                     saveSetting("selectedBrowserPath", found);
+                    setBrowserPathAvailabilityHint(true); // TASK B30.2: main.js vừa fs.existsSync() xong mới trả về found
                     if (browserPathDisplay) browserPathDisplay.textContent = found;
                 } else {
                     saveSetting("selectedBrowserPath", "");
+                    setBrowserPathAvailabilityHint(null); // TASK B30.2: path rỗng, hint không còn ý nghĩa
                     if (browserPathDisplay) {
                         browserPathDisplay.textContent = '❌ Không tự tìm thấy — hãy bấm "Chọn đường dẫn trình duyệt" bên dưới';
                     }
@@ -214,6 +231,7 @@ function initSetupPage() {
             });
             if (filePath) {
                 saveSetting("selectedBrowserPath", filePath);
+                setBrowserPathAvailabilityHint(true); // TASK B30.2: vừa chọn từ dialog file thật, chắc chắn tồn tại
                 if (browserPathDisplay) browserPathDisplay.textContent = filePath;
                 updateSetupStatus();
                 updateSetupProgress();
@@ -1008,18 +1026,15 @@ function initMidiSection() {
     if (!select) return;
 
     // --- Cập nhật Dashboard MIDI pill theo cấu hình đã lưu ---
+    // TASK B30.1 — logic tính trạng thái pill nay nằm DUY NHẤT ở getMidiDashboardPillState()
+    // (appSettings.js), cả vị trí này và vị trí monkey-patch bên dưới (~dòng 1465) đều gọi hàm
+    // đó, tránh 2 nguồn sự thật khác nhau.
     function updateDashboardMidiPill() {
         if (!dashPill) return;
-        const portName = getSetting("midiOutputPort", "");
-        if (portName) {
-            dashPill.textContent = "Đã cấu hình";
-            dashPill.className = "status-pill status-pill--ok";
-            dashPill.title = "Cổng MIDI: " + portName;
-        } else {
-            dashPill.textContent = "Chưa cấu hình";
-            dashPill.className = "status-pill status-pill--dim";
-            dashPill.title = "";
-        }
+        const state = getMidiDashboardPillState();
+        dashPill.textContent = state.text;
+        dashPill.className = state.className;
+        dashPill.title = state.title;
     }
 
     async function populatePorts() {
@@ -1036,12 +1051,16 @@ function initMidiSection() {
 
         if (saved) {
             const match = [...select.options].find((o) => o.value === saved);
+            // TASK B30.1: cập nhật hint NGAY khi vừa so khớp xong với danh sách MIDI thật —
+            // không thêm bất kỳ lệnh dò MIDI mới nào, chỉ dùng lại kết quả `match` đã có sẵn ở trên.
+            setMidiPortAvailabilityHint(!!match);
             if (match) {
                 select.value = saved;
             } else {
                 const fallbackOpt = document.createElement("option");
                 fallbackOpt.value = saved;
                 fallbackOpt.textContent = "(Đã lưu trước đó) " + saved;
+                fallbackOpt.dataset.stale = "true"; // TASK B30.1: đánh dấu để nơi khác (dòng ~1465) biết mà không cần dò lại MIDI
                 select.appendChild(fallbackOpt);
                 select.value = saved;
             }
@@ -1065,6 +1084,11 @@ function initMidiSection() {
         }
 
         saveSetting("midiOutputPort", select.value);
+        // TASK B30.1: re-tính hint theo đúng option đang được chọn NGAY LÚC LƯU (dữ liệu dataset
+        // đã có sẵn từ populatePorts(), không dò MIDI mới) — phòng trường hợp người dùng đổi
+        // sang cổng khác trước khi bấm Lưu, khác với cổng lúc mở trang.
+        const selectedOpt = select.options[select.selectedIndex];
+        setMidiPortAvailabilityHint(!(selectedOpt && selectedOpt.dataset.stale === "true"));
         updateSetupStatus();
         updateSetupProgress();
         notifySetupChanged();
@@ -1462,18 +1486,19 @@ if (typeof getSetting === "function" && !window._setupMidiPatched) {
     const dashMidiPill = document.getElementById("dashMidiPill");
 
     // Cập nhật Dashboard MIDI pill khi lưu
+    // TASK B30.1 — dùng CHUNG getMidiDashboardPillState() với updateDashboardMidiPill() ở trên
+    // (~dòng 1011), tránh 2 nguồn sự thật khác nhau. Hint đã được set bởi click handler chính
+    // (~dòng 1068) ngay trước khi patch này chạy (setTimeout 50ms sau).
     if (saveBtn && !saveBtn._hasMidiPillPatch) {
       saveBtn._hasMidiPillPatch = true;
       const originalOnClick = saveBtn.onclick;
       saveBtn.addEventListener("click", function() {
         setTimeout(() => {
           if (dashMidiPill) {
-            const savedPort = getSetting("midiOutputPort", "");
-            if (savedPort) {
-              dashMidiPill.textContent = "Đã cấu hình";
-              dashMidiPill.className = "status-pill status-pill--ok";
-              dashMidiPill.title = "Cổng: " + savedPort;
-            }
+            const state = getMidiDashboardPillState();
+            dashMidiPill.textContent = state.text;
+            dashMidiPill.className = state.className;
+            dashMidiPill.title = state.title;
           }
         }, 50);
       });

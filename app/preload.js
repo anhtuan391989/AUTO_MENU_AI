@@ -29,6 +29,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- Trình duyệt ----
     findBrowserPath: (browserName) => ipcRenderer.invoke("find-browser-path", browserName),
 
+    // ---- TASK B30.2: kiểm tra 1 đường dẫn file có còn tồn tại thật trên đĩa không (dùng cho
+    // Setup re-validate selectedBrowserPath sau khi lưu) ----
+    checkPathExists: (filePath) => ipcRenderer.invoke("check-path-exists", filePath),
+
     // ---- Cài đặt lưu trên file (thay localStorage) ----
     loadSettingsSync: () => ipcRenderer.sendSync("load-settings-sync"),
     saveSettingsSync: (data) => ipcRenderer.sendSync("save-settings-sync", data),

@@ -863,6 +863,18 @@ ipcMain.handle("find-browser-path", (event, browserName) => {
     return null;
 });
 
+// TASK B30.2 — re-validate 1 đường dẫn file bất kỳ CÒN TỒN TẠI THẬT trên đĩa hay không, dùng lại
+// đúng fs.existsSync() đã dùng khắp file này (không thêm dependency mới). Trước đây renderer
+// KHÔNG có cách nào tự kiểm tra việc này (chỉ main process có quyền truy cập filesystem), khiến
+// selectedBrowserPath không bao giờ được re-validate sau khi lưu — xem B29/B30.2.
+ipcMain.handle("check-path-exists", (event, filePath) => {
+    try {
+        return !!filePath && fs.existsSync(filePath);
+    } catch {
+        return false;
+    }
+});
+
 // Kênh ĐỒNG BỘ (sendSync) để appSettings.js giữ nguyên API get/set đồng bộ như trước,
 // chỉ đổi nơi lưu trữ thực sự từ localStorage (bị cô lập theo cửa sổ) sang 1 file dùng chung.
 ipcMain.on("load-settings-sync", (event) => {

@@ -297,21 +297,63 @@ function setSoundcardAvailabilityHint(isAvailable) {
     __soundcardAvailabilityHint = isAvailable === true || isAvailable === false ? isAvailable : null;
 }
 
+// TASK B30.2 — CÙNG BẢN CHẤT với __soundcardAvailabilityHint ở trên nhưng cho đường dẫn trình
+// duyệt (selectedBrowserPath): trước đây checklist chỉ kiểm tra 2 chuỗi khác rỗng, không biết file
+// .exe đã lưu có còn tồn tại trên đĩa hay không (đã bị xoá/di chuyển sau khi lưu). setup.js chịu
+// trách nhiệm gọi setBrowserPathAvailabilityHint() SAU khi thực sự kiểm tra bằng
+// window.electronAPI.checkPathExists() (IPC filesystem có sẵn, xem app/main.js) — module này không
+// tự gọi filesystem gì cả. Mặc định null giữ nguyên hành vi cũ.
+let __browserPathAvailabilityHint = null; // null = chưa biết | true/false = đã kiểm tra xong
+
+function setBrowserPathAvailabilityHint(isAvailable) {
+    __browserPathAvailabilityHint = isAvailable === true || isAvailable === false ? isAvailable : null;
+}
+
+// TASK B30.1 — MIDI dashboard pill (2 vị trí trong setup.js) trước đây chỉ kiểm tra
+// midiOutputPort có khác rỗng hay không, không biết cổng đã lưu có còn trong danh sách MIDI thật
+// (`ports` từ listMidiOutputs()) hay không — B29 phát hiện đây cũng là 1 dạng READY giả.
+// setup.js gọi setMidiPortAvailabilityHint() ngay sau khi so khớp `saved` với `ports` thật (dữ
+// liệu đã có sẵn từ populatePorts(), KHÔNG thêm probing/I/O MIDI mới). getMidiDashboardPillState()
+// là NGUỒN DUY NHẤT tính ra trạng thái pill — cả 2 vị trí trong setup.js đều gọi hàm này, tránh 2
+// nguồn sự thật khác nhau như yêu cầu B30.1.
+let __midiPortAvailabilityHint = null; // null = chưa biết | true/false = đã so khớp xong
+
+function setMidiPortAvailabilityHint(isAvailable) {
+    __midiPortAvailabilityHint = isAvailable === true || isAvailable === false ? isAvailable : null;
+}
+
+function getMidiDashboardPillState() {
+    const portName = getSetting("midiOutputPort", "");
+    if (!portName) {
+        return { text: "Chưa cấu hình", className: "status-pill status-pill--dim", title: "" };
+    }
+    if (__midiPortAvailabilityHint === false) {
+        return {
+            text: "⚠ Cổng MIDI không khả dụng",
+            className: "status-pill status-pill--error", // class đã có sẵn trong ui/css/setup.css, không thêm CSS mới
+            title: "Cổng đã lưu (" + portName + ") hiện không có trong danh sách MIDI thật — vào Setup > MIDI để chọn lại."
+        };
+    }
+    return { text: "Đã cấu hình", className: "status-pill status-pill--ok", title: "Cổng MIDI: " + portName };
+}
+
 /* Danh sách 10 mục bắt buộc để coi Setup là "hoàn tất" — dùng chung cho setup.js và renderer.js.
    Riêng "Browser" phải có ĐỦ 2 thứ: đã chọn trình duyệt VÀ đã có đường dẫn (tự dò hoặc chọn tay),
    thiếu 1 trong 2 vẫn coi là chưa xong. Riêng 5 mục tọa độ được kiểm tra THEO HỒ SƠ CỦA DAW
-   ĐANG CHỌN (getCoordinate), không phải giá trị chung chung nữa. Riêng "Soundcard" (B26.2): nếu
-   đã biết chắc device đã lưu KHÔNG còn tồn tại thật (__soundcardAvailabilityHint === false) thì
-   KHÔNG coi là ready, dù vẫn còn tên được lưu — tránh báo READY giả. */
+   ĐANG CHỌN (getCoordinate), không phải giá trị chung chung nữa. Riêng "Soundcard" (B26.2) và
+   "Browser" (B30.2): nếu đã biết chắc thiết bị/file đã lưu KHÔNG còn tồn tại thật thì KHÔNG coi là
+   ready, dù vẫn còn tên/đường dẫn được lưu — tránh báo READY giả. */
 function getSetupReadinessChecklist() {
     const soundcardConfigured = !!getSetting("selectedSoundcard");
     const soundcardReady = soundcardConfigured && __soundcardAvailabilityHint !== false;
+    const browserConfigured = !!getSetting("selectedBrowser") && !!getSetting("selectedBrowserPath");
+    const browserReady = browserConfigured && __browserPathAvailabilityHint !== false;
     return [
         { key: "selectedDAW", ready: !!getSetting("selectedDAW") },
         { key: "selectedAutoKey", ready: !!getSetting("selectedAutoKey") },
         { key: "selectedAutoTune", ready: !!getSetting("selectedAutoTune") },
         { key: "selectedSoundcard", ready: soundcardReady },
-        { key: "selectedBrowser", ready: !!getSetting("selectedBrowser") && !!getSetting("selectedBrowserPath") },
+        { key: "selectedBrowser", ready: browserReady },
         { key: "autokey1", ready: !!getCoordinate("autokey1") },
         { key: "autokey2", ready: !!getCoordinate("autokey2") },
         { key: "autotunekey", ready: !!getCoordinate("autotunekey") },
