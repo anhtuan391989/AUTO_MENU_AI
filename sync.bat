@@ -6,7 +6,7 @@ git pull origin main
 
 :: 2. Thêm và lưu thay đổi vào nhánh main
 git add .
-git commit -m "Auto-sync %date% %time%"
+git commit -m "Up-Date: %date% %time%"
 
 :: 3. Đẩy thẳng lên nhánh main trên GitHub
 git push -u origin main
