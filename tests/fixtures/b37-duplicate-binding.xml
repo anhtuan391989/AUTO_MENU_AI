@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  B37 POC fixture — Case C: 2 binding trùng (type,channel,number) — vi phạm xs:unique.
+  KHÔNG phải production XML.
+-->
+<midi-mapping xmlns="urn:auto-menu-ai:midi-mapping:v1"
+              schemaVersion="1.0"
+              mappingVersion="1.0.0">
+  <capabilities>
+    <capability id="daw:play" backend-status="implemented" midi-allowed="true">
+      <description>test</description>
+    </capability>
+    <capability id="daw:stop" backend-status="implemented" midi-allowed="true">
+      <description>test</description>
+    </capability>
+  </capabilities>
+  <bindings>
+    <binding id="b1" capability-ref="daw:play" type="note-on" channel="1" number="60" source="midi-learn" learned-at="2026-01-01T00:00:00Z"/>
+    <binding id="b2" capability-ref="daw:stop" type="note-on" channel="1" number="60" source="midi-learn" learned-at="2026-01-01T00:00:00Z"/>
+  </bindings>
+</midi-mapping>

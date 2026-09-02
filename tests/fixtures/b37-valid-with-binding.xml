@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  B37 POC fixture — Case E: D1 doc hợp lệ hoàn toàn, có 1 binding chỉ dùng
+  cho test/POC (mô phỏng kết quả 1 lần MIDI Learn thật). Mục đích: chứng
+  minh pipeline đầy đủ XML parse -> XSD PASS -> Semantic PASS.
+  KHÔNG phải production XML — binding này KHÔNG được đưa vào
+  docs/d1/midi-mapping.xml (production vẫn giữ nguyên <bindings/> rỗng).
+-->
+<midi-mapping xmlns="urn:auto-menu-ai:midi-mapping:v1"
+              schemaVersion="1.0"
+              mappingVersion="1.0.0">
+  <capabilities>
+    <capability id="daw:play" backend-status="implemented" midi-allowed="true">
+      <description>test</description>
+    </capability>
+  </capabilities>
+  <bindings>
+    <binding id="b1" capability-ref="daw:play" type="note-on" channel="2" number="64" source="midi-learn" learned-at="2026-01-01T00:00:00Z"/>
+  </bindings>
+</midi-mapping>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  B37 POC fixture — Case D: Action ID "daw:reaperPlay" chứa tên DAW cụ thể
+  ("reaper") — vi phạm Rule A1. XSD KHÔNG bắt được lỗi này (lookahead không
+  hỗ trợ trong XML Schema regex) — chỉ Semantic Validator bắt được.
+  Mục đích: chứng minh ranh giới XSD vs Semantic Validator vẫn tách biệt.
+  KHÔNG phải production XML.
+-->
+<midi-mapping xmlns="urn:auto-menu-ai:midi-mapping:v1"
+              schemaVersion="1.0"
+              mappingVersion="1.0.0">
+  <capabilities>
+    <capability id="daw:reaperPlay" backend-status="implemented" midi-allowed="true">
+      <description>test — vi phạm Rule A1 có chủ đích</description>
+    </capability>
+  </capabilities>
+  <bindings/>
+</midi-mapping>
