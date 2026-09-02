@@ -1,9 +1,11 @@
 /**
- * semanticValidate.js — D1 Specification (Task B23)
+ * semanticValidate.js — D1 Specification (Task B23, hardened B35)
  * ====================================================
  * Validator NGỮ NGHĨA cho midi-mapping.xml — chỉ xử lý đúng những rule mà
  * midi-mapping.xsd KHÔNG enforce được (xem midi-mapping-rules.md mục 6):
  *   - schemaVersion có được runtime hỗ trợ hay không (mục 5)
+ *   - Rule A1: Action ID không chứa từ khoá MIDI/DAW cụ thể (B35 — XSD không
+ *     enforce được lookahead, xem comment trong midi-mapping.xsd)
  *   - Rule B2: midi-allowed phải khớp backend-status
  *   - Rule M4: binding chỉ hợp lệ khi capability đích midi-allowed=true
  *   - Rule M6: source="midi-learn" bắt buộc có learned-at
@@ -21,6 +23,30 @@
 'use strict';
 
 const SUPPORTED_SCHEMA_VERSIONS = ['1.0'];
+
+// TASK B35 — Rule A1 (midi-mapping-rules.md mục 2): Action ID KHÔNG được chứa từ khoá MIDI cụ thể
+// hay tên DAW cụ thể. XSD không enforce được phần này (XML Schema regex không hỗ trợ lookahead —
+// xem comment chi tiết trong midi-mapping.xsd), nên đây BẮT BUỘC là trách nhiệm Semantic Validator
+// (đúng như midi-mapping-rules.md mục 6, dòng 1 liệt kê). Danh sách dưới đây lấy ĐÚNG NGUYÊN VĂN
+// "danh sách từ khoá cần chặn tối thiểu" trong rules.md — KHÔNG tự thêm DAW nào ngoài spec.
+const A1_MIDI_KEYWORD_PATTERNS = [
+    { label: 'cc<số>', re: /cc\d+/i },
+    { label: 'note<số>', re: /note\d+/i },
+    { label: 'channel<số>', re: /channel\d+/i },
+];
+const A1_DAW_NAMES = ['reaper', 'studioone', 'ableton', 'cubase', 'flstudio'];
+
+/** @param {string} actionId @returns {string|null} lý do vi phạm, hoặc null nếu hợp lệ */
+function findRuleA1Violation(actionId) {
+    const lower = String(actionId || '').toLowerCase();
+    for (const { label, re } of A1_MIDI_KEYWORD_PATTERNS) {
+        if (re.test(lower)) return `chứa từ khoá MIDI "${label}"`;
+    }
+    for (const daw of A1_DAW_NAMES) {
+        if (lower.includes(daw)) return `chứa tên DAW cụ thể "${daw}"`;
+    }
+    return null;
+}
 
 function extractAttrs(tag) {
     const attrs = {};
@@ -64,6 +90,16 @@ function validateSemantics(xmlText) {
 
     const capById = new Map(doc.capabilities.map((c) => [c.id, c]));
 
+    // Rule A1 — Action ID độc lập MIDI (midi-mapping-rules.md mục 2). XSD chỉ enforce được
+    // namespace + hình dạng chung (Rule A2); phần "không chứa từ khoá MIDI/DAW cụ thể" là của
+    // Semantic Validator — xem findRuleA1Violation() ở trên.
+    for (const c of doc.capabilities) {
+        const violation = findRuleA1Violation(c.id);
+        if (violation) {
+            errors.push(`Capability "${c.id}": vi phạm Rule A1 — Action ID ${violation}`);
+        }
+    }
+
     // Rule B2 — midi-allowed phải khớp backend-status
     for (const c of doc.capabilities) {
         const shouldAllow = c['backend-status'] === 'implemented';
@@ -103,4 +139,4 @@ function buildBindingIndex(doc) {
     return index;
 }
 
-module.exports = { validateSemantics, parseMidiMapping, buildBindingIndex, SUPPORTED_SCHEMA_VERSIONS };
+module.exports = { validateSemantics, parseMidiMapping, buildBindingIndex, SUPPORTED_SCHEMA_VERSIONS, findRuleA1Violation };

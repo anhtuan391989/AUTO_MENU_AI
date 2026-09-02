@@ -173,6 +173,7 @@ từ chối nạp (REJECT), không cố đọc "best-effort". Bản D1 hiện t�
 Danh sách đầy đủ, không được bỏ sót khi implement Semantic Validator ở B21:
 
 1. Action ID không chứa từ khoá MIDI/DAW cụ thể (Rule A1, phần lookahead).
+   ✅ Đã implement tại `semanticValidate.js:findRuleA1Violation()` (Task B35).
 2. `midi-allowed` khớp đúng `backend-status` (Rule B2).
 3. Binding chỉ hợp lệ khi capability đích cho phép (Rule M4).
 4. Không đánh dấu `implemented` khi thiếu 1 trong 2 bằng chứng bắt buộc

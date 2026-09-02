@@ -44,7 +44,7 @@ const repoRoot = path.join(__dirname, '..', '..');
 const d1Dir = path.join(repoRoot, 'docs', 'd1');
 const xsdPath = path.join(d1Dir, 'midi-mapping.xsd');
 const xmlPath = path.join(d1Dir, 'midi-mapping.xml');
-const { validateSemantics, buildBindingIndex } = require(path.join(d1Dir, 'semanticValidate.js'));
+const { validateSemantics, buildBindingIndex, findRuleA1Violation } = require(path.join(d1Dir, 'semanticValidate.js'));
 
 function xmllintSchemaOk(xmlContentOrPath, isFile) {
     let tmpFile = isFile ? xmlContentOrPath : null;
@@ -199,6 +199,50 @@ console.log('\n== TEST 7: schemaVersion không được hỗ trợ ("2.0") -> RE
     check('XSD vẫn PASS về cấu trúc (schemaVersion chỉ là xs:string tự do ở tầng XSD)', xmllintSchemaOk(xml, false) === true);
     const result = validateSemantics(xml);
     check('Semantic Validator REJECT vì schemaVersion="2.0" không nằm trong SUPPORTED_SCHEMA_VERSIONS', result.ok === false && result.errors.some((e) => e.includes('schemaVersion')), result.errors);
+}
+
+// ---------------------------------------------------------------------------
+// TEST 8 (TASK B35) — Rule A1: Action ID không chứa từ khoá MIDI/DAW cụ thể
+// (XSD không enforce được lookahead — xem comment trong midi-mapping.xsd),
+// Semantic Validator PHẢI tự bắt được (midi-mapping-rules.md mục 2 + mục 6).
+// ---------------------------------------------------------------------------
+console.log('\n== TEST 8: Rule A1 — Action ID chứa từ khoá MIDI/DAW cụ thể -> REJECT ==');
+{
+    // --- 8.1 Negative cases: đủ 4 nhóm pattern tối thiểu theo đúng rules.md ---
+    const negativeCases = [
+        { id: 'daw:playCc30', reason: 'cc<số>' },
+        { id: 'daw:note60Trigger', reason: 'note<số>' },
+        { id: 'menu:channel1Toggle', reason: 'channel<số>' },
+        { id: 'daw:reaperPlay', reason: 'tên DAW "reaper"' },
+        { id: 'plugin:studioOneSync', reason: 'tên DAW "studioone" (không phân biệt hoa/thường)' },
+        { id: 'daw:abletonLaunch', reason: 'tên DAW "ableton"' },
+        { id: 'menu:cubaseA', reason: 'tên DAW "cubase"' },
+        { id: 'plugin:flStudioX', reason: 'tên DAW "flstudio" (không phân biệt hoa/thường)' },
+    ];
+    for (const { id, reason } of negativeCases) {
+        const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<midi-mapping xmlns="urn:auto-menu-ai:midi-mapping:v1" schemaVersion="1.0" mappingVersion="1.0.0">
+  <capabilities>
+    <capability id="${id}" backend-status="not-supported" midi-allowed="false"><description>test</description></capability>
+  </capabilities>
+  <bindings/>
+</midi-mapping>`;
+        const result = validateSemantics(xml);
+        check(`Rule A1 REJECT "${id}" (${reason})`, result.ok === false && result.errors.some((e) => e.includes('Rule A1')), result.errors);
+    }
+    check('findRuleA1Violation() KHÔNG throw với input rác (null/undefined)', (() => {
+        try { findRuleA1Violation(null); findRuleA1Violation(undefined); return true; } catch { return false; }
+    })());
+
+    // --- 8.2 Positive cases: đúng 8 capability production hiện tại vẫn PASS, không bị reject nhầm ---
+    const positiveIds = ['daw:play', 'daw:stop', 'daw:record', 'daw:save', 'menu:buttonA', 'menu:buttonB', 'plugin:retune', 'plugin:humanize'];
+    for (const id of positiveIds) {
+        check(`Rule A1 KHÔNG reject nhầm "${id}" (findRuleA1Violation trả null)`, findRuleA1Violation(id) === null, findRuleA1Violation(id));
+    }
+    // Xác nhận bằng chính XML production thật (không phải fixture) — production PASS toàn bộ
+    const prodXml = fs.readFileSync(xmlPath, 'utf8');
+    const prodResult = validateSemantics(prodXml);
+    check('midi-mapping.xml (production) PASS Rule A1 cho toàn bộ 8 capability thật', prodResult.ok && !prodResult.errors.some((e) => e.includes('Rule A1')), prodResult.errors);
 }
 
 async function main() {
