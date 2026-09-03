@@ -84,14 +84,34 @@ class ResultQueue {
 
     _flush() {
 
-        const finalList = this._reduce(this.buffer);
+        // TASK A49 — DEEP EXCEPTION AUDIT: đây là ranh giới BẤT ĐỒNG BỘ DUY NHẤT trong toàn bộ
+        // chuỗi AnalysisState -> InferenceEngine -> ResultQueue -> DecisionEngine ->
+        // WorkflowManager -> PluginController (đã audit: không còn await/Promise/setTimeout
+        // nào khác trong cả chuỗi). _flush() chạy trong callback setTimeout, tức NGOÀI call
+        // stack gốc của ipcMain.on("ai-result", ...) — try/catch ở app/main.js (đã thêm) KHÔNG
+        // với tới đây được. Nếu DecisionEngine/WorkflowManager/PluginController throw (gọi
+        // đồng bộ qua EventBus.publish(ANALYSIS_READY,...) bên dưới), và không có gì bắt lại,
+        // lỗi sẽ thành uncaughtException ở tiến trình main (KHÔNG có process.on
+        // ("uncaughtException") toàn cục) — có thể crash app. Reset buffer/timer TRƯỚC khi
+        // publish để dù có lỗi, hàng đợi vẫn không bị kẹt ở trạng thái dở dang.
+        const pendingBuffer = this.buffer;
 
         this.buffer = [];
         this.windowTimer = null;
 
-        Logger.info("ResultQueue", `ANALYSIS_READY: [${finalList.map((r) => r.type).join(", ")}]`);
+        try {
 
-        EventBus.publish(Events.ANALYSIS_READY, finalList);
+            const finalList = this._reduce(pendingBuffer);
+
+            Logger.info("ResultQueue", `ANALYSIS_READY: [${finalList.map((r) => r.type).join(", ")}]`);
+
+            EventBus.publish(Events.ANALYSIS_READY, finalList);
+
+        } catch (err) {
+
+            Logger.error("ResultQueue", `Lỗi khi flush/publish ANALYSIS_READY: ${err.message}`);
+
+        }
 
     }
 

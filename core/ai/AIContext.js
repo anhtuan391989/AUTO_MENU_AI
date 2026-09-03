@@ -1,3 +1,6 @@
+// TASK A49 — BPM contract hardening cần Logger để báo lỗi rõ ràng thay vì silent-fail
+const Logger = require("../shared/Logger");
+
 class AIContext {
 
     constructor() {
@@ -124,7 +127,32 @@ class AIContext {
 
     }
 
-    updateBpm({ bpm, confidence } = {}) {
+    updateBpm(payload) {
+
+        // TASK A49 — BPM CONTRACT HARDENING: AIContext.updateBpm() LUÔN kỳ vọng object
+        // { bpm, confidence } (giống hệt updateKey/updateMod). Trước bản vá này, nếu ai đó lỡ
+        // gọi updateBpm(128) (số thô — đúng hình dạng BPMEngine.onUpdate() thật sự phát ra,
+        // xem ui/js/engines/bpmEngine.js) thay vì updateBpm({ bpm: 128 }), việc destructure
+        // { bpm, confidence } từ 1 số nguyên KHÔNG throw — chỉ âm thầm cho ra bpm=undefined,
+        // rồi bị "??"/typeof-guard bên dưới lặng lẽ bỏ qua — BPM sẽ đứng yên vĩnh viễn, không
+        // có bất kỳ dấu hiệu nào để phát hiện (đã xác nhận là silent-fail thật ở A48). Thêm
+        // guard rõ ràng ở đây để lỗi loại này LUÔN LỘ RA NGAY (qua Logger.error), không còn
+        // trôi qua âm thầm — không đổi contract công khai của BPMEngine (vẫn phát số thô cho
+        // UI như cũ, đúng yêu cầu A49 "không tự ý đổi public contract của BPMEngine").
+        if (typeof payload === "number") {
+
+            Logger.error(
+                "AIContext",
+                `updateBpm() nhận SỐ THUẦN (${payload}) thay vì object { bpm, confidence } — ` +
+                "payload bị BỎ QUA để tránh silent-fail. Nơi gọi phải tự bọc lại thành " +
+                `{ bpm: ${payload} } trước khi gọi updateBpm() (xem báo cáo A48/A49).`
+            );
+
+            return;
+
+        }
+
+        const { bpm, confidence } = payload || {};
 
         this.bpm.current = typeof bpm === "number" ? bpm : this.bpm.current;
 

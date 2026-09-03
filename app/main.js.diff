@@ -1,0 +1,211 @@
+diff --git a/app/main.js b/app/main.js
+index fb5c08a..84722f2 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -84,6 +84,8 @@ const ControlSource = require("../core/shared/ControlSource");
+ const ManualState = require("../core/shared/ManualState");
+ const TelemetryLogger = require("../core/shared/TelemetryLogger");
+ const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
++const MpcHcSession = require("../core/integration/MpcHcSession"); // Task C — nguồn thứ 2, xem core/integration/MpcHcSession.js
++const NowPlayingArbitrator = require("../core/integration/NowPlayingArbitrator"); // Task C — quyết định SMTC hay MPC-HC đang active
+ const NowPlayingResolver = require("../core/reference/NowPlayingResolver");
+ const SongMatcher = require("../core/reference/SongMatcher");
+ // MIDI CONTROL CORE v1.0 — wiring MỚI, độc lập hoàn toàn với AIBootstrap/EventBus ở trên.
+@@ -120,52 +122,99 @@ app.whenReady().then(async () => {
+     }
+ 
+     // ================================
+-    // Windows Media Session Integration (SMTC) — Data Acquisition Layer.
++    // Now Playing — Data Acquisition Layer (Task C).
+     // ĐỘC LẬP HOÀN TOÀN với AIBootstrap/AIContext/EventBus/ai-result ở trên:
+     // không publish EventBus, không gọi AIContext, không ảnh hưởng Key/BPM/Mod
+     // Engine hay quyết định Lock trực tiếp — module này chỉ LÀM GIÀU dữ liệu
+     // (tra Song Database) rồi gửi qua IPC; renderer (Key Source Manager, mục
+     // 7B ui/js/renderer.js) mới là nơi quyết định áp dụng Key nào.
+     // Tự an toàn trên máy không phải Windows (start() tự phát hiện, không spawn
+-    // gì, không throw, không crash app — xem core/integration/WindowsMediaSession.js).
++    // gì, không throw, không crash app — xem core/integration/WindowsMediaSession.js
++    // và core/integration/MpcHcSession.js).
++    //
++    // 2 nguồn dữ liệu ĐỘC LẬP, chạy song song:
++    //   - windowsMediaSession (SMTC)  -> trình duyệt (Edge/Chrome/Brave...).
++    //   - mpcHcSession (MPC-HC Web Interface) -> MPC-HC (SMTC không nhận diện
++    //     được MPC-HC, đã kiểm chứng thật — xem báo cáo).
++    // NowPlayingArbitrator.resolveActiveSource() quyết định lúc nào dùng nguồn
++    // nào theo quy tắc CỐ ĐỊNH (xem core/integration/NowPlayingArbitrator.js),
++    // rồi mới gửi 1 payload DUY NHẤT qua kênh IPC "now-playing-change" như cũ —
++    // renderer KHÔNG cần đổi gì (payload vẫn đúng shape {title, artist,
++    // databaseMatch, ...} như trước khi có Task C).
+     // ================================
+     const windowsMediaSession = new WindowsMediaSession();
++    const mpcHcSession = new MpcHcSession({ readSettingsFile });
+ 
+-    windowsMediaSession.on("ready", () => {
+-        console.log("[WindowsMediaSession] READY");
+-    });
++    let latestSmtcSnapshot = null;
++    let latestMpcHcSnapshot = null;
++    let smtcLayerAvailable = false;
++    let mpcHcLayerAvailable = false;
+ 
+-    windowsMediaSession.on("change", (snapshot) => {
+-        console.log("[WindowsMediaSession] SNAPSHOT", snapshot);
++    // Tra Song Database + chuẩn hoá Title/Artist theo ĐÚNG nguồn gốc dữ liệu
++    // (SMTC dùng resolver "smtc"; MPC-HC dùng lại resolver "file" có sẵn —
++    // đọc ID3 tag thật hoặc tách tên file — vì MPC-HC Web Interface cho biết
++    // đường dẫn file thật trên đĩa, không phải chuỗi tiêu đề thô cần regex).
++    function resolveTitleArtist(snapshot, source) {
+ 
+-        // Tra Song Database — KHÔNG gọi AI/EventBus, chỉ đọc dữ liệu tĩnh có sẵn
+-        // (SongDatabase/SongMatcher đã xây từ trước, không sửa API của chúng).
+-        let databaseMatch = null;
++        if (!snapshot) return { title: null, artist: null };
+ 
+-        if (snapshot && snapshot.title) {
++        if (source === "smtc") {
++            return NowPlayingResolver.resolve({ source: "smtc", title: snapshot.title, artist: snapshot.artist });
++        }
+ 
+-            const resolved = NowPlayingResolver.resolve({ source: "smtc", title: snapshot.title, artist: snapshot.artist });
++        if (source === "mpc-hc" && snapshot.filePath) {
++            return NowPlayingResolver.resolve({ source: "file", filePath: snapshot.filePath });
++        }
+ 
+-            if (resolved.title) {
++        return { title: snapshot.title || null, artist: snapshot.artist || null };
+ 
+-                const song = SongMatcher.findReference(resolved.title, resolved.artist);
++    }
+ 
+-                if (song && song.key) {
++    function dispatchUnifiedNowPlaying() {
+ 
+-                    databaseMatch = { key: song.key, bpm: song.bpm || null };
+-                    console.log("[NowPlaying] Database Match");
++        const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
+ 
+-                } else {
++        if (!active) {
+ 
+-                    console.log("[NowPlaying] Database Miss");
++            if (mainWin && !mainWin.isDestroyed()) {
++                mainWin.webContents.send("now-playing-change", null);
++            }
++            return;
+ 
+-                }
++        }
++
++        const { snapshot, source } = active;
++        const resolved = resolveTitleArtist(snapshot, source);
++
++        // Tra Song Database — KHÔNG gọi AI/EventBus, chỉ đọc dữ liệu tĩnh có sẵn
++        // (SongDatabase/SongMatcher đã xây từ trước, không sửa API của chúng).
++        let databaseMatch = null;
++
++        if (resolved.title) {
++
++            const song = SongMatcher.findReference(resolved.title, resolved.artist);
++
++            if (song && song.key) {
++
++                databaseMatch = { key: song.key, bpm: song.bpm || null };
++                console.log(`[NowPlaying] Database Match (source=${source})`);
++
++            } else {
++
++                console.log(`[NowPlaying] Database Miss (source=${source})`);
+ 
+             }
+ 
+         }
+ 
+-        const payload = snapshot ? { ...snapshot, databaseMatch } : null;
++        const payload = {
++            ...snapshot,
++            title: resolved.title || snapshot.title,
++            artist: resolved.artist || snapshot.artist,
++            nowPlayingSource: source, // field MỚI, cộng thêm — renderer hiện tại không đọc field
++                                       // này nên không đổi hành vi cũ, nhưng sẵn có nếu UI sau này cần hiển thị nguồn.
++            databaseMatch
++        };
+ 
+         // Đẩy dữ liệu sang renderer qua IPC — CHỈ khi có event thật (không poll,
+         // không timer). Renderer tự gọi window.AutoMenuAI.updateNowPlaying() +
+@@ -173,14 +222,41 @@ app.whenReady().then(async () => {
+         if (mainWin && !mainWin.isDestroyed()) {
+             mainWin.webContents.send("now-playing-change", payload);
+         }
+-    });
+ 
+-    windowsMediaSession.on("unavailable", (info) => {
+-        console.log("[WindowsMediaSession] UNAVAILABLE", info);
++    }
++
++    // "Unavailable" (mất KHẢ NĂNG cơ chế, vd chạy trên máy không phải Windows)
++    // khác với "không có snapshot" (đã xử lý qua dispatchUnifiedNowPlaying ở
++    // trên, gửi now-playing-change với payload null). Chỉ báo unavailable cho
++    // renderer khi CẢ HAI nguồn đều không khả dụng — nếu 1 trong 2 vẫn chạy
++    // được thì luồng "now-playing-change" vẫn hoạt động bình thường.
++    function maybeBroadcastUnavailable(info) {
++
++        if (smtcLayerAvailable || mpcHcLayerAvailable) return;
+ 
+         if (mainWin && !mainWin.isDestroyed()) {
+             mainWin.webContents.send("now-playing-unavailable", info);
+         }
++
++    }
++
++    windowsMediaSession.on("ready", () => {
++        console.log("[WindowsMediaSession] READY");
++        smtcLayerAvailable = true;
++    });
++
++    windowsMediaSession.on("change", (snapshot) => {
++        console.log("[WindowsMediaSession] SNAPSHOT", snapshot);
++        latestSmtcSnapshot = snapshot;
++        dispatchUnifiedNowPlaying();
++    });
++
++    windowsMediaSession.on("unavailable", (info) => {
++        console.log("[WindowsMediaSession] UNAVAILABLE", info);
++        smtcLayerAvailable = false;
++        latestSmtcSnapshot = null;
++        maybeBroadcastUnavailable(info);
++        dispatchUnifiedNowPlaying();
+     });
+ 
+     windowsMediaSession.on("error", (err) => {
+@@ -191,9 +267,31 @@ app.whenReady().then(async () => {
+         console.log("[WindowsMediaSession] RESTART", info);
+     });
+ 
++    mpcHcSession.on("ready", () => {
++        console.log("[MpcHcSession] READY", { port: mpcHcSession.getPort() });
++        mpcHcLayerAvailable = true;
++    });
++
++    mpcHcSession.on("change", (snapshot) => {
++        console.log("[MpcHcSession] SNAPSHOT", snapshot);
++        latestMpcHcSnapshot = snapshot;
++        dispatchUnifiedNowPlaying();
++    });
++
++    mpcHcSession.on("unavailable", (info) => {
++        console.log("[MpcHcSession] UNAVAILABLE", info);
++        mpcHcLayerAvailable = false;
++        latestMpcHcSnapshot = null;
++        maybeBroadcastUnavailable(info);
++        dispatchUnifiedNowPlaying();
++    });
++
+     console.log("[WindowsMediaSession] START");
+     windowsMediaSession.start();
+ 
++    console.log("[MpcHcSession] START");
++    mpcHcSession.start();
++
+     // === TỰ ĐỘNG KHỞI ĐỘNG loopMIDI + Studio One ===
+ const fs = require("fs");
+ const path = require("path");

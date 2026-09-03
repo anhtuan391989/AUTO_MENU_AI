@@ -83,9 +83,9 @@ const Events = require("../core/events/Events");
 const ControlSource = require("../core/shared/ControlSource");
 const ManualState = require("../core/shared/ManualState");
 const TelemetryLogger = require("../core/shared/TelemetryLogger");
-// TASK A49 — IPC safety boundary cần Logger để log lỗi rõ ràng
-const Logger = require("../core/shared/Logger");
 const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
+const MpcHcSession = require("../core/integration/MpcHcSession"); // Task C — nguồn thứ 2, xem core/integration/MpcHcSession.js
+const NowPlayingArbitrator = require("../core/integration/NowPlayingArbitrator"); // Task C — quyết định SMTC hay MPC-HC đang active
 const NowPlayingResolver = require("../core/reference/NowPlayingResolver");
 const SongMatcher = require("../core/reference/SongMatcher");
 // MIDI CONTROL CORE v1.0 — wiring MỚI, độc lập hoàn toàn với AIBootstrap/EventBus ở trên.
@@ -122,52 +122,99 @@ app.whenReady().then(async () => {
     }
 
     // ================================
-    // Windows Media Session Integration (SMTC) — Data Acquisition Layer.
+    // Now Playing — Data Acquisition Layer (Task C).
     // ĐỘC LẬP HOÀN TOÀN với AIBootstrap/AIContext/EventBus/ai-result ở trên:
     // không publish EventBus, không gọi AIContext, không ảnh hưởng Key/BPM/Mod
     // Engine hay quyết định Lock trực tiếp — module này chỉ LÀM GIÀU dữ liệu
     // (tra Song Database) rồi gửi qua IPC; renderer (Key Source Manager, mục
     // 7B ui/js/renderer.js) mới là nơi quyết định áp dụng Key nào.
     // Tự an toàn trên máy không phải Windows (start() tự phát hiện, không spawn
-    // gì, không throw, không crash app — xem core/integration/WindowsMediaSession.js).
+    // gì, không throw, không crash app — xem core/integration/WindowsMediaSession.js
+    // và core/integration/MpcHcSession.js).
+    //
+    // 2 nguồn dữ liệu ĐỘC LẬP, chạy song song:
+    //   - windowsMediaSession (SMTC)  -> trình duyệt (Edge/Chrome/Brave...).
+    //   - mpcHcSession (MPC-HC Web Interface) -> MPC-HC (SMTC không nhận diện
+    //     được MPC-HC, đã kiểm chứng thật — xem báo cáo).
+    // NowPlayingArbitrator.resolveActiveSource() quyết định lúc nào dùng nguồn
+    // nào theo quy tắc CỐ ĐỊNH (xem core/integration/NowPlayingArbitrator.js),
+    // rồi mới gửi 1 payload DUY NHẤT qua kênh IPC "now-playing-change" như cũ —
+    // renderer KHÔNG cần đổi gì (payload vẫn đúng shape {title, artist,
+    // databaseMatch, ...} như trước khi có Task C).
     // ================================
     const windowsMediaSession = new WindowsMediaSession();
+    const mpcHcSession = new MpcHcSession({ readSettingsFile });
 
-    windowsMediaSession.on("ready", () => {
-        console.log("[WindowsMediaSession] READY");
-    });
+    let latestSmtcSnapshot = null;
+    let latestMpcHcSnapshot = null;
+    let smtcLayerAvailable = false;
+    let mpcHcLayerAvailable = false;
 
-    windowsMediaSession.on("change", (snapshot) => {
-        console.log("[WindowsMediaSession] SNAPSHOT", snapshot);
+    // Tra Song Database + chuẩn hoá Title/Artist theo ĐÚNG nguồn gốc dữ liệu
+    // (SMTC dùng resolver "smtc"; MPC-HC dùng lại resolver "file" có sẵn —
+    // đọc ID3 tag thật hoặc tách tên file — vì MPC-HC Web Interface cho biết
+    // đường dẫn file thật trên đĩa, không phải chuỗi tiêu đề thô cần regex).
+    function resolveTitleArtist(snapshot, source) {
+
+        if (!snapshot) return { title: null, artist: null };
+
+        if (source === "smtc") {
+            return NowPlayingResolver.resolve({ source: "smtc", title: snapshot.title, artist: snapshot.artist });
+        }
+
+        if (source === "mpc-hc" && snapshot.filePath) {
+            return NowPlayingResolver.resolve({ source: "file", filePath: snapshot.filePath });
+        }
+
+        return { title: snapshot.title || null, artist: snapshot.artist || null };
+
+    }
+
+    function dispatchUnifiedNowPlaying() {
+
+        const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
+
+        if (!active) {
+
+            if (mainWin && !mainWin.isDestroyed()) {
+                mainWin.webContents.send("now-playing-change", null);
+            }
+            return;
+
+        }
+
+        const { snapshot, source } = active;
+        const resolved = resolveTitleArtist(snapshot, source);
 
         // Tra Song Database — KHÔNG gọi AI/EventBus, chỉ đọc dữ liệu tĩnh có sẵn
         // (SongDatabase/SongMatcher đã xây từ trước, không sửa API của chúng).
         let databaseMatch = null;
 
-        if (snapshot && snapshot.title) {
+        if (resolved.title) {
 
-            const resolved = NowPlayingResolver.resolve({ source: "smtc", title: snapshot.title, artist: snapshot.artist });
+            const song = SongMatcher.findReference(resolved.title, resolved.artist);
 
-            if (resolved.title) {
+            if (song && song.key) {
 
-                const song = SongMatcher.findReference(resolved.title, resolved.artist);
+                databaseMatch = { key: song.key, bpm: song.bpm || null };
+                console.log(`[NowPlaying] Database Match (source=${source})`);
 
-                if (song && song.key) {
+            } else {
 
-                    databaseMatch = { key: song.key, bpm: song.bpm || null };
-                    console.log("[NowPlaying] Database Match");
-
-                } else {
-
-                    console.log("[NowPlaying] Database Miss");
-
-                }
+                console.log(`[NowPlaying] Database Miss (source=${source})`);
 
             }
 
         }
 
-        const payload = snapshot ? { ...snapshot, databaseMatch } : null;
+        const payload = {
+            ...snapshot,
+            title: resolved.title || snapshot.title,
+            artist: resolved.artist || snapshot.artist,
+            nowPlayingSource: source, // field MỚI, cộng thêm — renderer hiện tại không đọc field
+                                       // này nên không đổi hành vi cũ, nhưng sẵn có nếu UI sau này cần hiển thị nguồn.
+            databaseMatch
+        };
 
         // Đẩy dữ liệu sang renderer qua IPC — CHỈ khi có event thật (không poll,
         // không timer). Renderer tự gọi window.AutoMenuAI.updateNowPlaying() +
@@ -175,14 +222,41 @@ app.whenReady().then(async () => {
         if (mainWin && !mainWin.isDestroyed()) {
             mainWin.webContents.send("now-playing-change", payload);
         }
-    });
 
-    windowsMediaSession.on("unavailable", (info) => {
-        console.log("[WindowsMediaSession] UNAVAILABLE", info);
+    }
+
+    // "Unavailable" (mất KHẢ NĂNG cơ chế, vd chạy trên máy không phải Windows)
+    // khác với "không có snapshot" (đã xử lý qua dispatchUnifiedNowPlaying ở
+    // trên, gửi now-playing-change với payload null). Chỉ báo unavailable cho
+    // renderer khi CẢ HAI nguồn đều không khả dụng — nếu 1 trong 2 vẫn chạy
+    // được thì luồng "now-playing-change" vẫn hoạt động bình thường.
+    function maybeBroadcastUnavailable(info) {
+
+        if (smtcLayerAvailable || mpcHcLayerAvailable) return;
 
         if (mainWin && !mainWin.isDestroyed()) {
             mainWin.webContents.send("now-playing-unavailable", info);
         }
+
+    }
+
+    windowsMediaSession.on("ready", () => {
+        console.log("[WindowsMediaSession] READY");
+        smtcLayerAvailable = true;
+    });
+
+    windowsMediaSession.on("change", (snapshot) => {
+        console.log("[WindowsMediaSession] SNAPSHOT", snapshot);
+        latestSmtcSnapshot = snapshot;
+        dispatchUnifiedNowPlaying();
+    });
+
+    windowsMediaSession.on("unavailable", (info) => {
+        console.log("[WindowsMediaSession] UNAVAILABLE", info);
+        smtcLayerAvailable = false;
+        latestSmtcSnapshot = null;
+        maybeBroadcastUnavailable(info);
+        dispatchUnifiedNowPlaying();
     });
 
     windowsMediaSession.on("error", (err) => {
@@ -193,8 +267,30 @@ app.whenReady().then(async () => {
         console.log("[WindowsMediaSession] RESTART", info);
     });
 
+    mpcHcSession.on("ready", () => {
+        console.log("[MpcHcSession] READY", { port: mpcHcSession.getPort() });
+        mpcHcLayerAvailable = true;
+    });
+
+    mpcHcSession.on("change", (snapshot) => {
+        console.log("[MpcHcSession] SNAPSHOT", snapshot);
+        latestMpcHcSnapshot = snapshot;
+        dispatchUnifiedNowPlaying();
+    });
+
+    mpcHcSession.on("unavailable", (info) => {
+        console.log("[MpcHcSession] UNAVAILABLE", info);
+        mpcHcLayerAvailable = false;
+        latestMpcHcSnapshot = null;
+        maybeBroadcastUnavailable(info);
+        dispatchUnifiedNowPlaying();
+    });
+
     console.log("[WindowsMediaSession] START");
     windowsMediaSession.start();
+
+    console.log("[MpcHcSession] START");
+    mpcHcSession.start();
 
     // === TỰ ĐỘNG KHỞI ĐỘNG loopMIDI + Studio One ===
 const fs = require("fs");
@@ -329,50 +425,25 @@ ipcMain.handle("midi-verify", async () => {
 // ================================
 // NHẬN KẾT QUẢ KEY/BPM/MOD TỪ ui/js/engines/* (renderer) -> cập nhật AIContext -> phát EventBus
 // Không đổi thuật toán, không đổi UI — chỉ chuyển tiếp dữ liệu sang Core.
-//
-// TASK A49 — IPC SAFETY: bọc try/catch quanh TOÀN BỘ handler. Lý do: EventBus.publish() ở
-// đây chỉ là wrapper mỏng quanh EventEmitter.emit() chuẩn (core/events/EventBus.js) — KHÔNG
-// có cách ly giữa các subscriber, và toàn bộ chuỗi phản ứng đồng bộ
-// (AIContext -> AnalysisState -> InferenceEngine -> ResultQueue.push) chạy chung 1 call stack
-// với handler này. Nếu BẤT KỲ đâu trong chuỗi đó throw, trước bản vá này lỗi sẽ lan thẳng lên
-// tiến trình main KHÔNG BỊ CHẶN (app/main.js không có process.on("uncaughtException") toàn
-// cục) — có thể làm crash toàn bộ app. try/catch dưới đây:
-//   - KHÔNG làm crash main process (chặn đúng tại đây).
-//   - KHÔNG đụng AI/Manual Key state (chỉ log, không gọi bất kỳ hàm ghi state nào).
-//   - KHÔNG biến lỗi thành lệnh AI (không publish PLUGIN_COMMAND hay bất kỳ event nào khác
-//     khi lỗi xảy ra — chỉ log rồi dừng).
-//   - CÓ log đủ để debug (Logger.error, kèm type + message lỗi thật).
-//   - GIỮ NGUYÊN contract: tên channel "ai-result", chữ ký callback không đổi.
-// Lưu ý: đây là 1 trong 2 boundary cần thiết — boundary thứ 2 (cho phần BẤT ĐỒNG BỘ của
-// chuỗi, do ResultQueue dùng setTimeout debounce) nằm ở core/ai/aggregation/ResultQueue.js,
-// xem comment tương ứng ở đó.
 // ================================
 ipcMain.on("ai-result", (event, { type, payload } = {}) => {
 
-    try {
+    if (type === "key") {
+        AIContext.updateKey(payload);
+        EventBus.publish(Events.KEY_UPDATED, payload);
+        return;
+    }
 
-        if (type === "key") {
-            AIContext.updateKey(payload);
-            EventBus.publish(Events.KEY_UPDATED, payload);
-            return;
-        }
+    if (type === "bpm") {
+        AIContext.updateBpm(payload);
+        EventBus.publish(Events.BPM_UPDATED, payload);
+        return;
+    }
 
-        if (type === "bpm") {
-            AIContext.updateBpm(payload);
-            EventBus.publish(Events.BPM_UPDATED, payload);
-            return;
-        }
-
-        if (type === "mod") {
-            AIContext.updateMod(payload);
-            EventBus.publish(Events.MOD_UPDATED, payload);
-            return;
-        }
-
-    } catch (err) {
-
-        Logger.error("ai-result", `Lỗi khi xử lý type="${type}": ${err.message}`);
-
+    if (type === "mod") {
+        AIContext.updateMod(payload);
+        EventBus.publish(Events.MOD_UPDATED, payload);
+        return;
     }
 
 });
