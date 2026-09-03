@@ -22,6 +22,9 @@
 const CommandEngine = require("./commandEngine");
 const HotkeyDriver = require("./drivers/hotkeyDriver");
 const MidiDriver = require("./drivers/midiDriver");
+// TASK B38 — D1 Runtime Loader (docs/d1/midi-mapping.xml -> XSD -> Semantic -> mapping thật).
+// Xem ghi chú chi tiết ở khối "TASK B38" bên dưới cho lý do ACTION_TO_CAPABILITY vẫn còn.
+const d1Loader = require("./d1Loader");
 
 // TASK B2 Mục 1 — CONTRACT: tên virtual port chính thức, đúng nguyên văn (dấu cách thường,
 // không gạch dưới/gạch ngang). Không đổi chuỗi này ở bất kỳ đâu khác trong repo.
@@ -29,6 +32,16 @@ const AUTO_MENU_AI_PORT_NAME = "AUTO MENU AI";
 
 // Chỉ nhóm action đã có thật trong capabilityRegistry cho studio_one, đúng thứ tự
 // ưu tiên "Transport trước" — action khác Setup có thể Learn/Save nhưng chưa dispatch.
+//
+// TASK B38 — GIỮ NGUYÊN 100% KHÔNG ĐỔI (kể cả không rename): tests/unit/MidiLearnDispatch.verify.js
+// (SECTION 3/6/7/8, 46 assertion) đọc TRỰC TIẾP object này bằng tham chiếu cứng — kể cả
+// đúng-chính-xác-3-key, đúng-y-nguyên-3-object-value — và gọi buildMappingIndex(settings) một
+// cách ĐỒNG BỘ (không await). B38 yêu cầu "không được sửa test chỉ để che regression" nên 2 hàm/
+// biến này (ACTION_TO_CAPABILITY, buildMappingIndex, mappingIndex bên dưới) được giữ NGUYÊN VẸN,
+// nhưng KHÔNG CÒN là đường dispatch THẬT nữa kể từ B38 — xem dispatchFromMidi() đã đổi sang dùng
+// d1GatedMappingIndex (D1-gated, xây từ core/command-engine-js/d1Loader.js, nguồn xác thực DUY
+// NHẤT của dispatch thật). Coi 3 thứ dưới đây là LEGACY — giữ lại thuần vì lý do backward-compat
+// test, đã ghi rõ trong report B38 (không tự ý xoá test, không tự ý đổi hành vi test).
 const ACTION_TO_CAPABILITY = {
     "daw:play": { targetId: "studio_one", action: "transportPlay" },
     "daw:stop": { targetId: "studio_one", action: "transportStop" },
@@ -38,10 +51,19 @@ const ACTION_TO_CAPABILITY = {
 let engine = null;
 let midiDriverInstance = null;
 let midiInput = null;
-let mappingIndex = new Map(); // key "type:channel:number" -> { action }
+let mappingIndex = new Map(); // LEGACY — xem ghi chú TASK B38 ở ACTION_TO_CAPABILITY. Không còn là nguồn dispatch thật.
 let started = false;
 let deps = null; // { readSettingsFile }
 let lastDispatchAt = new Map(); // key -> timestamp, chống double-fire khi connect() gọi nhiều lần
+
+// TASK B38 — D1-gated mapping index: NGUỒN DISPATCH THẬT DUY NHẤT kể từ B38.
+// Mặc định RỖNG (fail-closed đúng mục 11 "validation failed -> KHÔNG được vẫn dùng mapping") —
+// chỉ được điền khi loadD1AndRebuild() xác nhận D1 XML qua ĐỦ CẢ XSD (xmllint-wasm) lẫn
+// Semantic Validator. Nạp bất đồng bộ (xmllint-wasm dùng worker_threads, không thể sync) —
+// xem loadD1AndRebuild() bên dưới; trong lúc chưa nạp xong hoặc nạp lỗi, dispatchFromMidi()
+// tự động không làm gì (an toàn, không crash, không dispatch nhầm).
+let d1GatedMappingIndex = new Map();
+let d1State = { ok: false, stage: "not-loaded", errors: [], lastLoadedAt: null };
 
 // ---------------------------------------------------------------------------
 // MIDI-MASTER-01 / Phase 1 — MIDI HEALTH (phía main process).
@@ -247,13 +269,37 @@ function normalizeMidiMessage(bytes) {
     return null; // Pitch Bend / Program Change: chưa wire theo đúng thứ tự ưu tiên Mục 4
 }
 
+/**
+ * TASK B38 — loadD1AndRebuild(settings): pipeline THẬT (XSD -> Semantic -> gated mapping).
+ * Bất đồng bộ (không thể sync vì xmllint-wasm dùng worker_threads). Gọi "bắn rồi quên"
+ * (fire-and-forget, có .catch()) từ start()/reloadMappings() — KHÔNG làm start()/reloadMappings()
+ * phải trở thành async (tránh phải sửa app/main.js, ngoài Scope Lock B38 trừ khi chứng minh bắt
+ * buộc — ở đây không bắt buộc vì cách này vẫn đạt fail-closed đúng yêu cầu).
+ *
+ * Trong lúc Promise này chưa resolve (vài chục-vài trăm ms lúc khởi động), d1GatedMappingIndex
+ * vẫn giữ giá trị RỖNG mặc định (hoặc giá trị hợp lệ gần nhất nếu đây là 1 lần reload) — không
+ * có khoảng hở "dùng tạm mapping cũ không qua D1" nào.
+ */
+async function loadD1AndRebuild(settings) {
+    const result = await d1Loader.loadD1FromDisk();
+    if (!result.ok) {
+        log(`[D1] Validate THẤT BẠI (stage=${result.stage}) — mapping D1-gated bị RỖNG (fail-closed, không dispatch qua MIDI cho tới khi D1 hợp lệ trở lại).`, result.errors);
+        d1State = { ok: false, stage: result.stage, errors: result.errors, lastLoadedAt: Date.now() };
+        d1GatedMappingIndex = new Map(); // fail-closed — KHÔNG giữ mapping cũ nếu lần load lại này fail
+        return;
+    }
+    const { mapping, rejected } = d1Loader.buildD1GatedMapping(settings?.midiMappingsV1, result.capabilities);
+    d1GatedMappingIndex = mapping;
+    d1State = { ok: true, stage: "ok", errors: [], lastLoadedAt: Date.now(), capabilityCount: result.capabilities.length, mappingCount: mapping.size, rejectedCount: rejected.length };
+    log(`[D1] Validate PASS — ${result.capabilities.length} capability, ${mapping.size} binding được cài vào mapping thật, ${rejected.length} binding bị loại (xem lý do trong rejected).`, rejected);
+}
+
 async function dispatchFromMidi(msg) {
     const key = `${msg.type}:${msg.channel}:${msg.number}`;
-    const mapping = mappingIndex.get(key);
-    if (!mapping) return;
-
-    const cap = ACTION_TO_CAPABILITY[mapping.action];
-    if (!cap || !engine) return;
+    // TASK B38 — nguồn dispatch thật DUY NHẤT: d1GatedMappingIndex (xây từ D1 XML đã qua
+    // XSD+Semantic). KHÔNG còn đọc mappingIndex/ACTION_TO_CAPABILITY (legacy) ở đây nữa.
+    const target = d1GatedMappingIndex.get(key);
+    if (!target || !engine) return;
 
     // Chống 1 event bắn nhiều lệnh nếu listener bị gắn trùng (Mục 12 — connect() x3).
     const now = Date.now();
@@ -261,8 +307,8 @@ async function dispatchFromMidi(msg) {
     if (now - lastAt < 60) return; // debounce 60ms, không phải business logic — chỉ chống double-listener
     lastDispatchAt.set(key, now);
 
-    const result = await engine.dispatch(cap);
-    log("dispatch", key, "->", cap.action, result);
+    const result = await engine.dispatch({ targetId: target.targetId, action: target.action });
+    log("dispatch", key, "->", target.capabilityId, "(" + target.action + ")", result);
 }
 
 function openMidiInput(portName) {
@@ -340,7 +386,10 @@ function start({ readSettingsFile }) {
             log("Chưa có midiOutputPort đã lưu — driver 'mcu' sẽ không sẵn sàng, capabilityRegistry tự fallback sang 'hotkey'.");
             lastOutputError = "Chưa có midiOutputPort đã lưu.";
         }
-        mappingIndex = buildMappingIndex(settings);
+        mappingIndex = buildMappingIndex(settings); // LEGACY — giữ cho backward-compat test, không dùng để dispatch thật (xem TASK B38)
+        // TASK B38 — nạp D1 THẬT, bất đồng bộ, không chặn start(). Fail-closed mặc định
+        // (d1GatedMappingIndex đã khởi tạo rỗng ở khai báo biến) cho tới khi Promise này resolve.
+        loadD1AndRebuild(settings).catch((err) => log("[D1] loadD1AndRebuild() lỗi không mong đợi:", err.message));
         const inputPortName = resolveInputPortName(settings); // TASK B2 Mục 4 — migration fallback
         configuredInputPortName = inputPortName;
         openMidiInput(inputPortName);
@@ -395,7 +444,8 @@ function reloadMappings() {
     if (!started || !deps) return;
     try {
         const settings = deps.readSettingsFile() || {};
-        mappingIndex = buildMappingIndex(settings);
+        mappingIndex = buildMappingIndex(settings); // LEGACY — xem TASK B38
+        loadD1AndRebuild(settings).catch((err) => log("[D1] loadD1AndRebuild() (reload) lỗi không mong đợi:", err.message)); // TASK B38
         const portName = settings.midiOutputPort;
         // Output: chỉ đóng/mở lại nếu portName THẬT SỰ đổi (so với configuredPortName) — Phase 1.
         reopenOutputDriver(portName);
@@ -487,10 +537,12 @@ function getHealth() {
         inputOpen: !!midiInput,
         lastOutputError,
         lastInputError,
-        mappingCount: mappingIndex.size,
+        mappingCount: mappingIndex.size, // LEGACY (xem TASK B38) — giữ field cũ, không đổi shape health cũ
         driversRegistered: engine ? [...engine.drivers.keys()] : [],
         lastPortResolution, // { portName, source } từ autoConnect() gần nhất, null nếu chưa gọi lần nào
         autoMenuAiPortName: AUTO_MENU_AI_PORT_NAME,
+        // TASK B38 — trạng thái D1 Runtime Loader thật (nguồn dispatch thật kể từ B38).
+        d1: { ...d1State, mappingCount: d1GatedMappingIndex.size },
     };
 }
 
@@ -537,4 +589,10 @@ module.exports = {
     //    không cần đụng gì thêm ở đây), dùng đúng object ACTION_TO_CAPABILITY xuất ra từ đây làm
     //    input, nên vẫn là test dùng đúng contract thật, không phải viết lại logic riêng.
     buildMappingIndex, normalizeMidiMessage, ACTION_TO_CAPABILITY,
+    // TASK B38 — export thêm để test integration có thể chờ D1 nạp xong (async) và đọc lại
+    // d1GatedMappingIndex/d1State mà không cần đợi timer đoán mò. KHÔNG export dispatchFromMidi()
+    // (vẫn giữ nguyên lý do cũ — side-effect trên state module-private).
+    loadD1AndRebuild,
+    getD1GatedMapping: () => d1GatedMappingIndex,
+    getD1State: () => d1State,
 };
