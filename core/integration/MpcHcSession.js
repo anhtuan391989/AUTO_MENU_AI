@@ -18,33 +18,34 @@ const SnapshotCache = require("./SnapshotCache");
  * NGUỒN DỮ LIỆU: MPC-HC Web Interface (tính năng có sẵn của MPC-HC,
  * bật tại Options > Player > Web Interface > "Listen on port"), một
  * server HTTP cục bộ (mặc định cổng 13579) trả về trang
- * `variables.html` — nội dung là các dòng `<p>...</p>` liên tiếp,
- * theo đúng thứ tự cố định mà MPC-HC quy định. Đã XÁC MINH THẬT trên
- * máy Windows của người dùng (xem báo cáo/DECISIONS): thứ tự 18 dòng
- * đầu đúng như bên dưới, và giá trị State=2 khớp đúng với
- * StateString="Đang phát..." (Playing) tại cùng 1 lần chụp — tức là
- * quy ước State: 0=Stopped, 1=Paused, 2=Playing (quy ước công khai đã
- * biết của MPC-HC) đã được xác nhận đúng với dữ liệu thật, không chỉ
- * suy đoán từ tài liệu.
+ * `variables.html` — 1 file HTML đầy đủ, trong đó mỗi giá trị nằm
+ * trong 1 thẻ `<p id="...">giá trị</p>` CÓ thuộc tính id. ĐÃ XÁC MINH
+ * THẬT 2 lần độc lập trên máy Windows của người dùng (lấy bằng
+ * `Invoke-WebRequest` — không phải suy đoán từ ảnh chụp trình duyệt đã
+ * qua render như bản đầu tiên, bản đó từng đoán SAI là `<p>` trơn
+ * không có id và gây lỗi thật khi chạy — đã sửa):
  *
- *   [0] Filename (tên file hiển thị, có phần mở rộng)
- *   [1] FilePath đã encode URL
- *   [2] FilePath thật (đường dẫn tuyệt đối trên đĩa) — dùng để gọi
- *       NowPlayingResolver.resolve({ source: "file", filePath }) ở
- *       app/main.js, TÁI SỬ DỤNG logic đọc ID3 tag / tách tên file đã
- *       có sẵn thay vì viết lại.
- *   [3] FileDir đã encode URL
- *   [4] FileDir thật
- *   [5] State (số)
- *   [6] StateString (chuỗi, PHỤ THUỘC NGÔN NGỮ HỆ THỐNG — vì vậy
- *       KHÔNG dùng chuỗi này để quyết định logic, chỉ dùng để log/hiển
- *       thị; mọi quyết định "đang phát hay không" dùng field [5] số).
- *   [7] Position (ms)
- *   [8] PositionString
- *   [9] Duration (ms)
- *   [10] DurationString
- *   (các field sau: Volume, Muted, PlaybackRate, Size, ... không cần
- *   cho Task C, bỏ qua).
+ *   <p id="file">...</p>          Tên file hiển thị (có phần mở rộng)
+ *   <p id="filepatharg">...</p>   FilePath đã encode URL
+ *   <p id="filepath">...</p>      FilePath thật (đường dẫn tuyệt đối) — dùng để gọi
+ *                                 NowPlayingResolver.resolve({source:"file", filePath}) ở
+ *                                 app/main.js, TÁI SỬ DỤNG logic đọc ID3 tag/tách tên file có sẵn.
+ *   <p id="filedirarg">...</p> / <p id="filedir">...</p>
+ *   <p id="state">...</p>         Số. state=2 ĐÃ XÁC NHẬN THẬT (2 lần) tương ứng "Đang phát...".
+ *                                 state=1 quan sát thật 1 lần tương ứng statestring="Đã dừng"
+ *                                 (KHÁC quy ước "Paused" hay được nhắc trong tài liệu công khai
+ *                                 MPC-HC — vì vậy KHÔNG suy diễn ý nghĩa 0/1 từ tài liệu, chỉ dựa
+ *                                 duy nhất vào bằng chứng thật: 2 = đang phát, còn lại = không
+ *                                 chắc chắn đang phát).
+ *   <p id="statestring">...</p>   PHỤ THUỘC NGÔN NGỮ HỆ THỐNG — CHỈ dùng để log/hiển thị,
+ *                                 KHÔNG BAO GIỜ dùng để quyết định logic play/pause/stop.
+ *   <p id="position">...</p> / <p id="positionstring">...</p>
+ *   <p id="duration">...</p> / <p id="durationstring">...</p>
+ *   (volumelevel, muted, playbackrate, size, reloadtime, version, audiotrack,
+ *   subtitletrack — không cần cho Task C, bỏ qua).
+ *
+ * Đọc theo ID (không đọc theo vị trí/thứ tự) — bền hơn nếu MPC-HC đổi
+ * thứ tự field ở phiên bản khác, và tự bỏ qua field lạ không cần.
  *
  * KHÔNG polling dồn dập: đợi phản hồi (hoặc timeout) của lần poll
  * trước xong mới hẹn lần poll kế tiếp (giống nguyên lý chống spawn
@@ -65,16 +66,10 @@ const SnapshotCache = require("./SnapshotCache");
  */
 
 const DEFAULT_CONFIG = require("./mpchc.config.default.json");
-const VARIABLE_ROW_RE = /<p>([\s\S]*?)<\/p>/gi;
+const VARIABLE_ROW_RE = /<p id="([a-zA-Z0-9_]+)">([\s\S]*?)<\/p>/g;
 
-// Index cần thiết trong mảng field parse được từ variables.html (xem chú thích ở trên).
-const IDX_TITLE = 0;
-const IDX_FILEPATH = 2;
-const IDX_STATE = 5;
-const IDX_STATE_STRING = 6;
-const IDX_POSITION_MS = 7;
-const IDX_DURATION_MS = 9;
-const MIN_FIELDS_REQUIRED = 10; // ít nhất phải đọc được tới Duration (index 9) mới coi là hợp lệ
+// Các key bắt buộc phải đọc được (theo đúng id thật trong variables.html) mới coi là hợp lệ.
+const REQUIRED_KEYS = ["file", "filepath", "state", "position", "duration"];
 
 const STATE_STOPPED = 0;
 const STATE_PAUSED = 1;
@@ -303,11 +298,11 @@ class MpcHcSession extends EventEmitter {
 
         }
 
-        const stateRaw = Number(fields[IDX_STATE]);
+        const stateRaw = Number(fields.state);
 
         if (![STATE_STOPPED, STATE_PAUSED, STATE_PLAYING].includes(stateRaw)) {
 
-            this._logErrorOnce(`MPC-HC trả về mã State không nhận diện được: "${fields[IDX_STATE]}" — bỏ qua nguồn này lần poll này`);
+            this._logErrorOnce(`MPC-HC trả về mã State không nhận diện được: "${fields.state}" — bỏ qua nguồn này lần poll này`);
             this._applySnapshot(null);
             return;
 
@@ -323,7 +318,7 @@ class MpcHcSession extends EventEmitter {
 
         }
 
-        const title = (fields[IDX_TITLE] || "").trim();
+        const title = (fields.file || "").trim();
 
         if (!title) {
 
@@ -337,11 +332,11 @@ class MpcHcSession extends EventEmitter {
             title,
             artist: null, // MPC-HC Web Interface không cung cấp Artist tách riêng — việc tách
                            // Title/Artist từ tên file do NowPlayingResolver({source:"file"}) đảm nhiệm ở main.js.
-            filePath: (fields[IDX_FILEPATH] || "").trim() || null,
+            filePath: (fields.filepath || "").trim() || null,
             state: stateRaw,
-            stateString: fields[IDX_STATE_STRING] || null,
-            positionMs: Number(fields[IDX_POSITION_MS]) || 0,
-            durationMs: Number(fields[IDX_DURATION_MS]) || 0,
+            stateString: fields.statestring || null,
+            positionMs: Number(fields.position) || 0,
+            durationMs: Number(fields.duration) || 0,
             timestamp: Date.now()
         };
 
@@ -353,18 +348,20 @@ class MpcHcSession extends EventEmitter {
 
         if (typeof body !== "string" || !body) return null;
 
-        const matches = [];
+        const fields = {};
         let m;
 
         VARIABLE_ROW_RE.lastIndex = 0; // regex có cờ "g" -> phải reset lastIndex trước mỗi lần dùng lại
 
         while ((m = VARIABLE_ROW_RE.exec(body)) !== null) {
-            matches.push(m[1]);
+            fields[m[1]] = m[2];
         }
 
-        if (matches.length < MIN_FIELDS_REQUIRED) return null;
+        const hasAllRequired = REQUIRED_KEYS.every((key) => Object.prototype.hasOwnProperty.call(fields, key));
 
-        return matches;
+        if (!hasAllRequired) return null;
+
+        return fields;
 
     }
 

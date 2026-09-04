@@ -41,33 +41,44 @@ function sleep(ms) {
 const MpcHcSession = require("../../core/integration/MpcHcSession");
 
 // ================================
-// Helper: dựng body variables.html giống HỆT dữ liệu THẬT đã chụp màn hình
-// (8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4, State=2/"Đang phát...", vv.)
+// Helper: dựng body variables.html giống HỆT dữ liệu THẬT lấy bằng
+// Invoke-WebRequest trên máy Windows thật (2 lần độc lập — xem báo
+// cáo). Bản đầu tiên của test này từng dùng nhầm <p>...</p> KHÔNG có
+// id, gây fail thật khi chạy trên Windows vì MPC-HC luôn trả về
+// <p id="...">...</p> CÓ id — đã sửa cả parser lẫn fixture này.
 // ================================
-function buildRealSampleBody({ title = "8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4", filePath = "F:\\karaoke\\8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4", state = 2, stateString = "Đang phát...", positionMs = 237895, durationMs = 276828 } = {}) {
+function buildRealSampleBody({ title = "8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4", filePath = "F:\\karaoke\\8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4", state = 2, stateString = "Đang phát...", positionMs = 6382, durationMs = 276828 } = {}) {
 
-    const fields = [
-        title,
-        "F:%5ckaraoke%5cencoded.mp4",
-        filePath,
-        "F:%5ckaraoke",
-        "F:\\karaoke",
-        String(state),
-        stateString,
-        String(positionMs),
-        "00:03:58",
-        String(durationMs),
-        "00:04:37",
-        "100",
-        "0",
-        "1.000000",
-        "83,8 MB",
-        "0",
-        "2.7.1.0",
-        "A: ISO Media file produced by Google Inc. (aac he-aac, 44100 Hz, stereo, 48 kb/s)"
-    ];
-
-    return fields.map((v) => `<p>${v}</p>`).join("\n");
+    return `<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>MPC-HC WebServer - Variables</title>
+        <link rel="stylesheet" href="default.css">
+        <link rel="icon" href="favicon.ico">
+    </head>
+    <body class="page-variables">
+        <p id="file">${title}</p>
+        <p id="filepatharg">F:%5ckaraoke%5cencoded.mp4</p>
+        <p id="filepath">${filePath}</p>
+        <p id="filedirarg">F:%5ckaraoke</p>
+        <p id="filedir">F:\\karaoke</p>
+        <p id="state">${state}</p>
+        <p id="statestring">${stateString}</p>
+        <p id="position">${positionMs}</p>
+        <p id="positionstring">00:00:06</p>
+        <p id="duration">${durationMs}</p>
+        <p id="durationstring">00:04:37</p>
+        <p id="volumelevel">100</p>
+        <p id="muted">0</p>
+        <p id="playbackrate">1.000000</p>
+        <p id="size">83,8 MB</p>
+        <p id="reloadtime">0</p>
+        <p id="version">2.7.1.0</p>
+        <p id="audiotrack">A: ISO Media file produced by Google Inc. (aac he-aac, 44100 Hz, stereo, 48 kb/s)</p>
+        <p id="subtitletrack"></p>
+    </body>
+</html>`;
 
 }
 
@@ -170,7 +181,7 @@ async function runPartB_ValidResponseParsing() {
         check(snapshot.filePath === "F:\\karaoke\\8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4", "snapshot.filePath đúng đường dẫn thật trên đĩa");
         check(snapshot.state === 2, "snapshot.state = 2 (số), đúng field [5]");
         check(snapshot.stateString === "Đang phát...", "snapshot.stateString đúng, nhưng CHỈ để hiển thị (logic dùng field số)");
-        check(snapshot.positionMs === 237895, "snapshot.positionMs parse đúng số");
+        check(snapshot.positionMs === 6382, "snapshot.positionMs parse đúng số");
         check(snapshot.durationMs === 276828, "snapshot.durationMs parse đúng số");
         check(session.getLastSnapshot() === snapshot, "getLastSnapshot() trả đúng snapshot gần nhất");
 
@@ -360,6 +371,119 @@ async function runPartG_DedupeOnUnchangedTrack() {
 
 }
 
+async function runPartH_RealCapturedResponses_Regression() {
+
+    console.log("=== PHẦN H: Hồi quy — dùng NGUYÊN VĂN 2 response THẬT lấy bằng Invoke-WebRequest trên Windows (khoá lại bug đã sửa: <p id=\"...\"> có id, không phải <p> trơn) ===");
+
+    // Response thật #1: MPC-HC vừa mở, phát hết bài (position == duration), state=1/"Đã dừng".
+    const REAL_CAPTURE_1 = `<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>MPC-HC WebServer - Variables</title>
+        <link rel="stylesheet" href="default.css">
+        <link rel="icon" href="favicon.ico">
+    </head>
+    <body class="page-variables">
+        <p id="file">8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4</p>
+        <p id="filepatharg">F:%5ckaraoke%5c8%20V%e1%ba%a0N%206%20NG%c3%80N%20TH%c6%af%c6%a0NG%20-%20Ebm.mp4</p>
+        <p id="filepath">F:\\karaoke\\8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4</p>
+        <p id="filedirarg">F:%5ckaraoke</p>
+        <p id="filedir">F:\\karaoke</p>
+        <p id="state">1</p>
+        <p id="statestring">Đã dừng</p>
+        <p id="position">276828</p>
+        <p id="positionstring">00:04:37</p>
+        <p id="duration">276828</p>
+        <p id="durationstring">00:04:37</p>
+        <p id="volumelevel">100</p>
+        <p id="muted">0</p>
+        <p id="playbackrate">1.000000</p>
+        <p id="size">83,8 MB</p>
+        <p id="reloadtime">0</p>
+        <p id="version">2.7.1.0</p>
+                <p id="audiotrack">A: ISO Media file produced by Google Inc. (aac he-aac, 44100 Hz, stereo, 48 kb/s)</p>
+        <p id="subtitletrack"></p>
+    </body>
+</html>`;
+
+    // Response thật #2: user tua lại bài, state=2/"Đang phát...".
+    const REAL_CAPTURE_2 = `<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>MPC-HC WebServer - Variables</title>
+        <link rel="stylesheet" href="default.css">
+        <link rel="icon" href="favicon.ico">
+    </head>
+    <body class="page-variables">
+        <p id="file">8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4</p>
+        <p id="filepatharg">F:%5ckaraoke%5c8%20V%e1%ba%a0N%206%20NG%c3%80N%20TH%c6%af%c6%a0NG%20-%20Ebm.mp4</p>
+        <p id="filepath">F:\\karaoke\\8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4</p>
+        <p id="filedirarg">F:%5ckaraoke</p>
+        <p id="filedir">F:\\karaoke</p>
+        <p id="state">2</p>
+        <p id="statestring">Đang phát...</p>
+        <p id="position">6382</p>
+        <p id="positionstring">00:00:06</p>
+        <p id="duration">276828</p>
+        <p id="durationstring">00:04:37</p>
+        <p id="volumelevel">100</p>
+        <p id="muted">0</p>
+        <p id="playbackrate">1.000000</p>
+        <p id="size">83,8 MB</p>
+        <p id="reloadtime">0</p>
+        <p id="version">2.7.1.0</p>
+                <p id="audiotrack">A: ISO Media file produced by Google Inc. (aac he-aac, 44100 Hz, stereo, 48 kb/s)</p>
+        <p id="subtitletrack"></p>
+    </body>
+</html>`;
+
+    await withPlatform("win32", async () => {
+
+        // Capture 1: state=1 ("Đã dừng") -> KHÔNG coi là Playing, nhưng VẪN parse ra snapshot hợp lệ
+        // (không phải state=0, nên KHÔNG bị coi là "không có gì" — vẫn có file đang mở trong MPC-HC).
+        {
+            const logger = createFakeLogger();
+            const httpGetFn = createScriptedHttpGet([{ body: REAL_CAPTURE_1 }]);
+            const session = new MpcHcSession({ logger, httpGetFn, pollIntervalMs: 100000 });
+
+            let snapshot = null;
+            session.on("change", (s) => { snapshot = s; });
+            session.start();
+            await sleep(20);
+
+            check(logger.calls.warning.length === 0, "Capture #1 (response THẬT) -> KHÔNG log warning nào (parse đúng ngay, không còn bị coi là sai định dạng)");
+            check(snapshot !== null, "Capture #1 -> vẫn tạo được snapshot (state=1, không phải 0)");
+            check(snapshot && snapshot.title === "8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4", "Capture #1 -> title đọc đúng tiếng Việt có dấu");
+            check(snapshot && snapshot.state === 1, "Capture #1 -> state = 1 (số), đúng dữ liệu thật");
+            check(snapshot && snapshot.filePath === "F:\\karaoke\\8 VẠN 6 NGÀN THƯƠNG - Ebm.mp4", "Capture #1 -> filePath đọc đúng");
+
+            session.stop();
+        }
+
+        // Capture 2: state=2 ("Đang phát...") -> ĐÂY LÀ nguồn cần MPC_HC thắng SMTC theo NowPlayingArbitrator.
+        {
+            const logger = createFakeLogger();
+            const httpGetFn = createScriptedHttpGet([{ body: REAL_CAPTURE_2 }]);
+            const session = new MpcHcSession({ logger, httpGetFn, pollIntervalMs: 100000 });
+
+            let snapshot = null;
+            session.on("change", (s) => { snapshot = s; });
+            session.start();
+            await sleep(20);
+
+            check(logger.calls.warning.length === 0, "Capture #2 (response THẬT) -> KHÔNG log warning nào");
+            check(snapshot !== null && snapshot.state === 2, "Capture #2 -> state = 2, đúng dữ liệu thật (Playing)");
+            check(snapshot && snapshot.positionMs === 6382, "Capture #2 -> positionMs đọc đúng (6382ms, khác Capture #1)");
+
+            session.stop();
+        }
+
+    });
+
+}
+
 (async () => {
 
     await runPartA_PlatformGate();
@@ -369,6 +493,7 @@ async function runPartG_DedupeOnUnchangedTrack() {
     await runPartE_MalformedResponse_NoCrash();
     await runPartF_PortResolution();
     await runPartG_DedupeOnUnchangedTrack();
+    await runPartH_RealCapturedResponses_Regression();
 
     console.log("\n" + (failCount === 0 ? "✅ TẤT CẢ TEST PASS" : `❌ CÓ ${failCount} TEST FAIL`));
     process.exit(failCount === 0 ? 0 : 1);

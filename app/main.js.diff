@@ -1,22 +1,22 @@
 diff --git a/app/main.js b/app/main.js
-index fb5c08a..84722f2 100644
+index 8d51dce..5a174ba 100644
 --- a/app/main.js
 +++ b/app/main.js
-@@ -84,6 +84,8 @@ const ControlSource = require("../core/shared/ControlSource");
- const ManualState = require("../core/shared/ManualState");
- const TelemetryLogger = require("../core/shared/TelemetryLogger");
+@@ -86,6 +86,8 @@ const TelemetryLogger = require("../core/shared/TelemetryLogger");
+ // TASK A49 — IPC safety boundary cần Logger để log lỗi rõ ràng
+ const Logger = require("../core/shared/Logger");
  const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
 +const MpcHcSession = require("../core/integration/MpcHcSession"); // Task C — nguồn thứ 2, xem core/integration/MpcHcSession.js
 +const NowPlayingArbitrator = require("../core/integration/NowPlayingArbitrator"); // Task C — quyết định SMTC hay MPC-HC đang active
  const NowPlayingResolver = require("../core/reference/NowPlayingResolver");
  const SongMatcher = require("../core/reference/SongMatcher");
  // MIDI CONTROL CORE v1.0 — wiring MỚI, độc lập hoàn toàn với AIBootstrap/EventBus ở trên.
-@@ -120,52 +122,99 @@ app.whenReady().then(async () => {
+@@ -122,52 +124,105 @@ app.whenReady().then(async () => {
      }
  
      // ================================
 -    // Windows Media Session Integration (SMTC) — Data Acquisition Layer.
-+    // Now Playing — Data Acquisition Layer (Task C).
++    // Now Playing — Data Acquisition Layer (Task C, port lên nền A49 — Task C41).
      // ĐỘC LẬP HOÀN TOÀN với AIBootstrap/AIContext/EventBus/ai-result ở trên:
      // không publish EventBus, không gọi AIContext, không ảnh hưởng Key/BPM/Mod
      // Engine hay quyết định Lock trực tiếp — module này chỉ LÀM GIÀU dữ liệu
@@ -36,6 +36,12 @@ index fb5c08a..84722f2 100644
 +    // rồi mới gửi 1 payload DUY NHẤT qua kênh IPC "now-playing-change" như cũ —
 +    // renderer KHÔNG cần đổi gì (payload vẫn đúng shape {title, artist,
 +    // databaseMatch, ...} như trước khi có Task C).
++    //
++    // GHI CHÚ TASK C41: đoạn này port từ bản Task C trước (đã test thật trên
++    // Windows, đã sửa bug parser MPC-HC theo dữ liệu thật) lên ĐÚNG main.js
++    // hiện tại của A49 — KHÔNG dùng main.js cũ của C để ghi đè. Toàn bộ phần
++    // ai-result IPC/Logger/TelemetryLogger của A49 phía dưới GIỮ NGUYÊN,
++    // không đụng tới.
      // ================================
      const windowsMediaSession = new WindowsMediaSession();
 +    const mpcHcSession = new MpcHcSession({ readSettingsFile });
@@ -132,7 +138,7 @@ index fb5c08a..84722f2 100644
  
          // Đẩy dữ liệu sang renderer qua IPC — CHỈ khi có event thật (không poll,
          // không timer). Renderer tự gọi window.AutoMenuAI.updateNowPlaying() +
-@@ -173,14 +222,41 @@ app.whenReady().then(async () => {
+@@ -175,14 +230,41 @@ app.whenReady().then(async () => {
          if (mainWin && !mainWin.isDestroyed()) {
              mainWin.webContents.send("now-playing-change", payload);
          }
@@ -177,7 +183,7 @@ index fb5c08a..84722f2 100644
      });
  
      windowsMediaSession.on("error", (err) => {
-@@ -191,9 +267,31 @@ app.whenReady().then(async () => {
+@@ -193,9 +275,31 @@ app.whenReady().then(async () => {
          console.log("[WindowsMediaSession] RESTART", info);
      });
  

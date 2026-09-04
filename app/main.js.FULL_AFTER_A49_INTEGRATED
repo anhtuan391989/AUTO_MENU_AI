@@ -83,6 +83,8 @@ const Events = require("../core/events/Events");
 const ControlSource = require("../core/shared/ControlSource");
 const ManualState = require("../core/shared/ManualState");
 const TelemetryLogger = require("../core/shared/TelemetryLogger");
+// TASK A49 — IPC safety boundary cần Logger để log lỗi rõ ràng
+const Logger = require("../core/shared/Logger");
 const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
 const MpcHcSession = require("../core/integration/MpcHcSession"); // Task C — nguồn thứ 2, xem core/integration/MpcHcSession.js
 const NowPlayingArbitrator = require("../core/integration/NowPlayingArbitrator"); // Task C — quyết định SMTC hay MPC-HC đang active
@@ -122,7 +124,7 @@ app.whenReady().then(async () => {
     }
 
     // ================================
-    // Now Playing — Data Acquisition Layer (Task C).
+    // Now Playing — Data Acquisition Layer (Task C, port lên nền A49 — Task C41).
     // ĐỘC LẬP HOÀN TOÀN với AIBootstrap/AIContext/EventBus/ai-result ở trên:
     // không publish EventBus, không gọi AIContext, không ảnh hưởng Key/BPM/Mod
     // Engine hay quyết định Lock trực tiếp — module này chỉ LÀM GIÀU dữ liệu
@@ -141,6 +143,12 @@ app.whenReady().then(async () => {
     // rồi mới gửi 1 payload DUY NHẤT qua kênh IPC "now-playing-change" như cũ —
     // renderer KHÔNG cần đổi gì (payload vẫn đúng shape {title, artist,
     // databaseMatch, ...} như trước khi có Task C).
+    //
+    // GHI CHÚ TASK C41: đoạn này port từ bản Task C trước (đã test thật trên
+    // Windows, đã sửa bug parser MPC-HC theo dữ liệu thật) lên ĐÚNG main.js
+    // hiện tại của A49 — KHÔNG dùng main.js cũ của C để ghi đè. Toàn bộ phần
+    // ai-result IPC/Logger/TelemetryLogger của A49 phía dưới GIỮ NGUYÊN,
+    // không đụng tới.
     // ================================
     const windowsMediaSession = new WindowsMediaSession();
     const mpcHcSession = new MpcHcSession({ readSettingsFile });
@@ -425,25 +433,50 @@ ipcMain.handle("midi-verify", async () => {
 // ================================
 // NHẬN KẾT QUẢ KEY/BPM/MOD TỪ ui/js/engines/* (renderer) -> cập nhật AIContext -> phát EventBus
 // Không đổi thuật toán, không đổi UI — chỉ chuyển tiếp dữ liệu sang Core.
+//
+// TASK A49 — IPC SAFETY: bọc try/catch quanh TOÀN BỘ handler. Lý do: EventBus.publish() ở
+// đây chỉ là wrapper mỏng quanh EventEmitter.emit() chuẩn (core/events/EventBus.js) — KHÔNG
+// có cách ly giữa các subscriber, và toàn bộ chuỗi phản ứng đồng bộ
+// (AIContext -> AnalysisState -> InferenceEngine -> ResultQueue.push) chạy chung 1 call stack
+// với handler này. Nếu BẤT KỲ đâu trong chuỗi đó throw, trước bản vá này lỗi sẽ lan thẳng lên
+// tiến trình main KHÔNG BỊ CHẶN (app/main.js không có process.on("uncaughtException") toàn
+// cục) — có thể làm crash toàn bộ app. try/catch dưới đây:
+//   - KHÔNG làm crash main process (chặn đúng tại đây).
+//   - KHÔNG đụng AI/Manual Key state (chỉ log, không gọi bất kỳ hàm ghi state nào).
+//   - KHÔNG biến lỗi thành lệnh AI (không publish PLUGIN_COMMAND hay bất kỳ event nào khác
+//     khi lỗi xảy ra — chỉ log rồi dừng).
+//   - CÓ log đủ để debug (Logger.error, kèm type + message lỗi thật).
+//   - GIỮ NGUYÊN contract: tên channel "ai-result", chữ ký callback không đổi.
+// Lưu ý: đây là 1 trong 2 boundary cần thiết — boundary thứ 2 (cho phần BẤT ĐỒNG BỘ của
+// chuỗi, do ResultQueue dùng setTimeout debounce) nằm ở core/ai/aggregation/ResultQueue.js,
+// xem comment tương ứng ở đó.
 // ================================
 ipcMain.on("ai-result", (event, { type, payload } = {}) => {
 
-    if (type === "key") {
-        AIContext.updateKey(payload);
-        EventBus.publish(Events.KEY_UPDATED, payload);
-        return;
-    }
+    try {
 
-    if (type === "bpm") {
-        AIContext.updateBpm(payload);
-        EventBus.publish(Events.BPM_UPDATED, payload);
-        return;
-    }
+        if (type === "key") {
+            AIContext.updateKey(payload);
+            EventBus.publish(Events.KEY_UPDATED, payload);
+            return;
+        }
 
-    if (type === "mod") {
-        AIContext.updateMod(payload);
-        EventBus.publish(Events.MOD_UPDATED, payload);
-        return;
+        if (type === "bpm") {
+            AIContext.updateBpm(payload);
+            EventBus.publish(Events.BPM_UPDATED, payload);
+            return;
+        }
+
+        if (type === "mod") {
+            AIContext.updateMod(payload);
+            EventBus.publish(Events.MOD_UPDATED, payload);
+            return;
+        }
+
+    } catch (err) {
+
+        Logger.error("ai-result", `Lỗi khi xử lý type="${type}": ${err.message}`);
+
     }
 
 });
