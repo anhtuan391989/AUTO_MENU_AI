@@ -100,7 +100,7 @@ console.log('\n== TEST 3: binding -> capability pending-backend (daw:save, midiA
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <midi-mapping xmlns="urn:auto-menu-ai:midi-mapping:v1" schemaVersion="1.0" mappingVersion="1.0.0">
   <capabilities>
-    <capability id="daw:save" backend-status="pending-backend" midi-allowed="false"><description>Save Song, chưa wire ACTION_TO_CAPABILITY</description></capability>
+    <capability id="daw:save" backend-status="pending-backend" midi-allowed="false"><description>Save Song, chưa có entry trong CAPABILITY_BACKEND_TARGET</description></capability>
   </capabilities>
   <bindings>
     <binding id="b1" capability-ref="daw:save" type="cc" channel="1" number="30" source="midi-learn" learned-at="2026-01-01T00:00:00Z"/>
@@ -137,7 +137,9 @@ console.log('\n== TEST 4: duplicate binding (cùng type+channel+number) -> REJEC
 async function testDispatch() {
     console.log('\n== TEST 5: Runtime dispatch — mock MIDI event resolve đúng qua CommandEngine thật ==');
     const CommandEngine = require(path.join(repoRoot, 'core', 'command-engine-js', 'commandEngine.js'));
-    const runtime = require(path.join(repoRoot, 'core', 'command-engine-js', 'runtime.js'));
+    // TASK B38-FIX — runtime.js đã XOÁ ACTION_TO_CAPABILITY (bảng hard-code cũ, nguồn mapping thứ
+    // hai). Backend metadata thật (capability id -> {targetId, action}) nay CHỈ còn ở
+    // core/command-engine-js/d1Loader.js:CAPABILITY_BACKEND_TARGET — vẫn là module thật, không mock.
 
     // Binding TEST-ONLY (không phải production — midi-mapping.xml thật có 0 binding,
     // đúng Rule M3). Dùng để chứng minh CƠ CHẾ resolve+dispatch hoạt động đúng khi
@@ -160,8 +162,9 @@ async function testDispatch() {
     const capabilityRef = index.get(`${mockEvent.type}:${mockEvent.channel}:${mockEvent.number}`);
     check('Mock event note-on:2:64 resolve đúng ra capability-ref="daw:play"', capabilityRef === 'daw:play', capabilityRef);
 
-    const cap = runtime.ACTION_TO_CAPABILITY[capabilityRef];
-    check('"daw:play" có entry thật trong runtime.js:ACTION_TO_CAPABILITY (module thật, không mock)', !!cap, cap);
+    const d1Loader = require(path.join(repoRoot, 'core', 'command-engine-js', 'd1Loader.js'));
+    const cap = d1Loader.CAPABILITY_BACKEND_TARGET[capabilityRef];
+    check('"daw:play" có entry thật trong d1Loader.js:CAPABILITY_BACKEND_TARGET (module thật, không mock — B38-FIX: thay ACTION_TO_CAPABILITY đã xoá)', !!cap, cap);
 
     const engine = new CommandEngine();
     const calls = [];
