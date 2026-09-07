@@ -70,15 +70,44 @@ class ResultQueue {
 
     _onAnalysisResult(result) {
 
-        this.buffer.push(result);
+        // TASK A50 — hoàn thiện safety boundary: app/main.js (nơi từng là lưới an toàn gián
+        // tiếp duy nhất bọc quanh lời gọi EventBus.publish(ANALYSIS_RESULT,...) dẫn tới đây)
+        // giờ đã bị KHOÁ (đóng băng cho tới khi xử lý xong phần integration của C) — ResultQueue
+        // không còn được phép trông cậy vào 1 lớp bảo vệ BÊN NGOÀI chính nó nữa. Bọc try/catch
+        // ngay tại đây để module này tự đứng vững một mình (defense-in-depth), không đổi hành
+        // vi khi không có lỗi (buffer.push/setTimeout không bao giờ throw với input hợp lệ —
+        // đây là phòng ngừa cho trường hợp `result` bị hỏng/thiếu field theo cách không lường
+        // trước, không phải vì đã biết có lỗi thật ở đây).
+        try {
 
-        // Chỉ bắt đầu đếm giờ khi đây là phần tử ĐẦU TIÊN của đợt gom hiện tại — nếu đã có
-        // timer đang chạy (tức đợt gom đã bắt đầu), KHÔNG reset lại nó, chỉ thêm vào buffer.
-        if (!this.windowTimer) {
+            this.buffer.push(result);
 
-            this.windowTimer = setTimeout(() => this._flush(), AGGREGATION_WINDOW_MS);
+            // Chỉ bắt đầu đếm giờ khi đây là phần tử ĐẦU TIÊN của đợt gom hiện tại — nếu đã có
+            // timer đang chạy (tức đợt gom đã bắt đầu), KHÔNG reset lại nó, chỉ thêm vào buffer.
+            if (!this.windowTimer) {
+
+                this.windowTimer = setTimeout(() => this._flush(), AGGREGATION_WINDOW_MS);
+
+            }
+
+        } catch (err) {
+
+            Logger.error("ResultQueue", `Lỗi khi nhận ANALYSIS_RESULT: ${this._safeMessage(err)}`);
 
         }
+
+    }
+
+    /**
+     * TASK A50 — trích message an toàn từ 1 giá trị bị throw, KỂ CẢ khi giá trị đó không phải
+     * Error thật (vd throw null / throw undefined / throw "chuỗi") — tránh chính dòng log lỗi
+     * lại throw tiếp (đọc .message trên null/undefined sẽ throw TypeError, thoát khỏi catch).
+     */
+    _safeMessage(err) {
+
+        if (err && typeof err.message === "string") return err.message;
+
+        try { return String(err); } catch (_) { return "(không đọc được nội dung lỗi)"; }
 
     }
 
@@ -109,7 +138,10 @@ class ResultQueue {
 
         } catch (err) {
 
-            Logger.error("ResultQueue", `Lỗi khi flush/publish ANALYSIS_READY: ${err.message}`);
+            // TASK A50 — dùng _safeMessage() thay vì err.message trực tiếp: nếu err không phải
+            // Error thật (throw null/throw "text"...), err.message sẽ tự throw TypeError và
+            // thoát khỏi chính catch block này — mất hết an toàn vừa xây.
+            Logger.error("ResultQueue", `Lỗi khi flush/publish ANALYSIS_READY: ${this._safeMessage(err)}`);
 
         }
 
