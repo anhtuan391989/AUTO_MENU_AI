@@ -460,16 +460,28 @@ SoundEffectEngine.onChange((effectId, isPlaying) => {
 
 /* ==========================================================
    5b. EXPAND / COLLAPSE CONTROL PANEL (UI Final v1.0)
-   Chỉ thao tác DOM/CSS — không gọi IPC, không đổi EventBus,
-   không đụng AI/Key/BPM/Mod Engine.
+   Thao tác DOM/CSS + gọi IPC resize-window có sẵn (preload.js:
+   electronAPI.resizeWindow) để cửa sổ THẬT tự co/giãn theo đúng
+   nội dung — không đổi EventBus, không đụng AI/Key/BPM/Mod Engine.
    ========================================================== */
 (function () {
     const expandBtn = document.getElementById("expandBtn");
     const panel = document.getElementById("controlPanel");
     if (!expandBtn || !panel) return;
 
-    const AUTO_COLLAPSE_MS = 12000; // 12s — trong khoảng 10–15s theo yêu cầu Mục IX
+    const AUTO_COLLAPSE_MS = 20000; // 20s — theo yêu cầu người dùng (Task: auto-collapse timing update)
     let collapseTimer = null;
+
+    // Co/giãn cửa sổ THẬT (Electron BrowserWindow) khớp đúng chiều cao nội dung
+    // thực tế (.app), dùng kênh IPC "resize-window" đã có sẵn ở app/main.js +
+    // app/preload.js (electronAPI.resizeWindow) nhưng trước đây chưa được gọi.
+    function syncWindowHeight() {
+        if (!window.electronAPI || typeof window.electronAPI.resizeWindow !== "function") return;
+        const appEl = document.querySelector(".app");
+        if (!appEl) return;
+        const height = Math.ceil(appEl.getBoundingClientRect().height);
+        if (height > 0) window.electronAPI.resizeWindow(height);
+    }
 
     function setLabel(expanded) {
         const textSpan = expandBtn.querySelector(".text");
@@ -492,6 +504,7 @@ SoundEffectEngine.onChange((effectId, isPlaying) => {
 
     function expandPanel() {
         panel.classList.add("expanded");
+        syncWindowHeight(); // display:grid đã áp dụng ngay, đo được chiều cao mới luôn
         // Thêm class "show" ở frame kế tiếp để CSS transition (opacity/translateY) chạy mượt — chỉ là animation.
         requestAnimationFrame(() => panel.classList.add("show"));
         expandBtn.classList.add("active");
@@ -507,7 +520,10 @@ SoundEffectEngine.onChange((effectId, isPlaying) => {
         setLabel(false);
         clearCollapseTimer();
         // Đợi hiệu ứng mờ dần (200ms, khớp CSS transition — Mục XIV: Collapse ≈200ms) xong mới display:none.
-        setTimeout(() => panel.classList.remove("expanded"), 200);
+        setTimeout(() => {
+            panel.classList.remove("expanded");
+            syncWindowHeight(); // co cửa sổ lại đúng chiều cao thu gọn, hết khoảng trống thừa
+        }, 200);
     }
 
     expandBtn.addEventListener("click", () => {
@@ -524,6 +540,10 @@ SoundEffectEngine.onChange((effectId, isPlaying) => {
             if (panel.classList.contains("expanded")) scheduleAutoCollapse();
         });
     });
+
+    // Đồng bộ chiều cao cửa sổ ngay khi tải trang xong (trạng thái mặc định = thu gọn)
+    // để cửa sổ không còn to hơn nội dung như trước.
+    requestAnimationFrame(syncWindowHeight);
 })();
 
 /* ==========================================================
