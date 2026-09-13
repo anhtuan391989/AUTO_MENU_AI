@@ -1,216 +1,35 @@
 diff --git a/app/main.js b/app/main.js
-index 8d51dce..5a174ba 100644
+index f82ea37..8fdf553 100644
 --- a/app/main.js
 +++ b/app/main.js
-@@ -86,6 +86,8 @@ const TelemetryLogger = require("../core/shared/TelemetryLogger");
- // TASK A49 — IPC safety boundary cần Logger để log lỗi rõ ràng
- const Logger = require("../core/shared/Logger");
- const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
-+const MpcHcSession = require("../core/integration/MpcHcSession"); // Task C — nguồn thứ 2, xem core/integration/MpcHcSession.js
-+const NowPlayingArbitrator = require("../core/integration/NowPlayingArbitrator"); // Task C — quyết định SMTC hay MPC-HC đang active
- const NowPlayingResolver = require("../core/reference/NowPlayingResolver");
- const SongMatcher = require("../core/reference/SongMatcher");
- // MIDI CONTROL CORE v1.0 — wiring MỚI, độc lập hoàn toàn với AIBootstrap/EventBus ở trên.
-@@ -122,52 +124,105 @@ app.whenReady().then(async () => {
-     }
+@@ -298,6 +298,31 @@ app.whenReady().then(async () => {
+     console.log("[MpcHcSession] START");
+     mpcHcSession.start();
  
-     // ================================
--    // Windows Media Session Integration (SMTC) — Data Acquisition Layer.
-+    // Now Playing — Data Acquisition Layer (Task C, port lên nền A49 — Task C41).
-     // ĐỘC LẬP HOÀN TOÀN với AIBootstrap/AIContext/EventBus/ai-result ở trên:
-     // không publish EventBus, không gọi AIContext, không ảnh hưởng Key/BPM/Mod
-     // Engine hay quyết định Lock trực tiếp — module này chỉ LÀM GIÀU dữ liệu
-     // (tra Song Database) rồi gửi qua IPC; renderer (Key Source Manager, mục
-     // 7B ui/js/renderer.js) mới là nơi quyết định áp dụng Key nào.
-     // Tự an toàn trên máy không phải Windows (start() tự phát hiện, không spawn
--    // gì, không throw, không crash app — xem core/integration/WindowsMediaSession.js).
-+    // gì, không throw, không crash app — xem core/integration/WindowsMediaSession.js
-+    // và core/integration/MpcHcSession.js).
-+    //
-+    // 2 nguồn dữ liệu ĐỘC LẬP, chạy song song:
-+    //   - windowsMediaSession (SMTC)  -> trình duyệt (Edge/Chrome/Brave...).
-+    //   - mpcHcSession (MPC-HC Web Interface) -> MPC-HC (SMTC không nhận diện
-+    //     được MPC-HC, đã kiểm chứng thật — xem báo cáo).
-+    // NowPlayingArbitrator.resolveActiveSource() quyết định lúc nào dùng nguồn
-+    // nào theo quy tắc CỐ ĐỊNH (xem core/integration/NowPlayingArbitrator.js),
-+    // rồi mới gửi 1 payload DUY NHẤT qua kênh IPC "now-playing-change" như cũ —
-+    // renderer KHÔNG cần đổi gì (payload vẫn đúng shape {title, artist,
-+    // databaseMatch, ...} như trước khi có Task C).
-+    //
-+    // GHI CHÚ TASK C41: đoạn này port từ bản Task C trước (đã test thật trên
-+    // Windows, đã sửa bug parser MPC-HC theo dữ liệu thật) lên ĐÚNG main.js
-+    // hiện tại của A49 — KHÔNG dùng main.js cũ của C để ghi đè. Toàn bộ phần
-+    // ai-result IPC/Logger/TelemetryLogger của A49 phía dưới GIỮ NGUYÊN,
-+    // không đụng tới.
-     // ================================
-     const windowsMediaSession = new WindowsMediaSession();
-+    const mpcHcSession = new MpcHcSession({ readSettingsFile });
- 
--    windowsMediaSession.on("ready", () => {
--        console.log("[WindowsMediaSession] READY");
--    });
-+    let latestSmtcSnapshot = null;
-+    let latestMpcHcSnapshot = null;
-+    let smtcLayerAvailable = false;
-+    let mpcHcLayerAvailable = false;
- 
--    windowsMediaSession.on("change", (snapshot) => {
--        console.log("[WindowsMediaSession] SNAPSHOT", snapshot);
-+    // Tra Song Database + chuẩn hoá Title/Artist theo ĐÚNG nguồn gốc dữ liệu
-+    // (SMTC dùng resolver "smtc"; MPC-HC dùng lại resolver "file" có sẵn —
-+    // đọc ID3 tag thật hoặc tách tên file — vì MPC-HC Web Interface cho biết
-+    // đường dẫn file thật trên đĩa, không phải chuỗi tiêu đề thô cần regex).
-+    function resolveTitleArtist(snapshot, source) {
- 
--        // Tra Song Database — KHÔNG gọi AI/EventBus, chỉ đọc dữ liệu tĩnh có sẵn
--        // (SongDatabase/SongMatcher đã xây từ trước, không sửa API của chúng).
--        let databaseMatch = null;
-+        if (!snapshot) return { title: null, artist: null };
- 
--        if (snapshot && snapshot.title) {
-+        if (source === "smtc") {
-+            return NowPlayingResolver.resolve({ source: "smtc", title: snapshot.title, artist: snapshot.artist });
-+        }
- 
--            const resolved = NowPlayingResolver.resolve({ source: "smtc", title: snapshot.title, artist: snapshot.artist });
-+        if (source === "mpc-hc" && snapshot.filePath) {
-+            return NowPlayingResolver.resolve({ source: "file", filePath: snapshot.filePath });
-+        }
- 
--            if (resolved.title) {
-+        return { title: snapshot.title || null, artist: snapshot.artist || null };
- 
--                const song = SongMatcher.findReference(resolved.title, resolved.artist);
-+    }
- 
--                if (song && song.key) {
-+    function dispatchUnifiedNowPlaying() {
- 
--                    databaseMatch = { key: song.key, bpm: song.bpm || null };
--                    console.log("[NowPlaying] Database Match");
-+        const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
- 
--                } else {
-+        if (!active) {
- 
--                    console.log("[NowPlaying] Database Miss");
-+            if (mainWin && !mainWin.isDestroyed()) {
-+                mainWin.webContents.send("now-playing-change", null);
-+            }
-+            return;
- 
--                }
++    // TASK A51 — SHUTDOWN SAFETY cho Now Playing: trước đây windowsMediaSession.stop()/
++    // mpcHcSession.stop() KHÔNG BAO GIỜ được gọi lúc tắt app. windowsMediaSession.stop() giết
++    // tiến trình con PowerShell (daemon đọc SMTC, spawn qua spawn("powershell.exe", ...,
++    // {windowsHide:true}) — KHÔNG có {detached:true}) — thiếu bước này, tiến trình PowerShell
++    // có nguy cơ bị BỎ LẠI CHẠY MỒ CÔI sau khi Electron đã thoát, mỗi lần đóng app.
++    // mpcHcSession.stop() dừng đúng timer polling HTTP tới MPC-HC. Đăng ký handler RIÊNG ở
++    // đây (không sửa handler "before-quit" đã có sẵn cho CommandRuntime ở cuối file) vì
++    // windowsMediaSession/mpcHcSession chỉ tồn tại trong scope của closure này — Electron/
++    // Node cho phép nhiều listener cùng 1 event, cả 2 handler đều sẽ chạy khi app tắt. Tự bọc
++    // try/catch riêng (giống pattern CommandRuntime.stop()) — lỗi ở đây KHÔNG được chặn việc
++    // app thoát.
++    app.on("before-quit", () => {
++        try {
++            windowsMediaSession.stop();
++        } catch (err) {
++            console.error("windowsMediaSession.stop() lúc shutdown lỗi (bỏ qua, app vẫn thoát):", err.message);
 +        }
 +
-+        const { snapshot, source } = active;
-+        const resolved = resolveTitleArtist(snapshot, source);
-+
-+        // Tra Song Database — KHÔNG gọi AI/EventBus, chỉ đọc dữ liệu tĩnh có sẵn
-+        // (SongDatabase/SongMatcher đã xây từ trước, không sửa API của chúng).
-+        let databaseMatch = null;
-+
-+        if (resolved.title) {
-+
-+            const song = SongMatcher.findReference(resolved.title, resolved.artist);
-+
-+            if (song && song.key) {
-+
-+                databaseMatch = { key: song.key, bpm: song.bpm || null };
-+                console.log(`[NowPlaying] Database Match (source=${source})`);
-+
-+            } else {
-+
-+                console.log(`[NowPlaying] Database Miss (source=${source})`);
- 
-             }
- 
-         }
- 
--        const payload = snapshot ? { ...snapshot, databaseMatch } : null;
-+        const payload = {
-+            ...snapshot,
-+            title: resolved.title || snapshot.title,
-+            artist: resolved.artist || snapshot.artist,
-+            nowPlayingSource: source, // field MỚI, cộng thêm — renderer hiện tại không đọc field
-+                                       // này nên không đổi hành vi cũ, nhưng sẵn có nếu UI sau này cần hiển thị nguồn.
-+            databaseMatch
-+        };
- 
-         // Đẩy dữ liệu sang renderer qua IPC — CHỈ khi có event thật (không poll,
-         // không timer). Renderer tự gọi window.AutoMenuAI.updateNowPlaying() +
-@@ -175,14 +230,41 @@ app.whenReady().then(async () => {
-         if (mainWin && !mainWin.isDestroyed()) {
-             mainWin.webContents.send("now-playing-change", payload);
-         }
--    });
- 
--    windowsMediaSession.on("unavailable", (info) => {
--        console.log("[WindowsMediaSession] UNAVAILABLE", info);
-+    }
-+
-+    // "Unavailable" (mất KHẢ NĂNG cơ chế, vd chạy trên máy không phải Windows)
-+    // khác với "không có snapshot" (đã xử lý qua dispatchUnifiedNowPlaying ở
-+    // trên, gửi now-playing-change với payload null). Chỉ báo unavailable cho
-+    // renderer khi CẢ HAI nguồn đều không khả dụng — nếu 1 trong 2 vẫn chạy
-+    // được thì luồng "now-playing-change" vẫn hoạt động bình thường.
-+    function maybeBroadcastUnavailable(info) {
-+
-+        if (smtcLayerAvailable || mpcHcLayerAvailable) return;
- 
-         if (mainWin && !mainWin.isDestroyed()) {
-             mainWin.webContents.send("now-playing-unavailable", info);
-         }
-+
-+    }
-+
-+    windowsMediaSession.on("ready", () => {
-+        console.log("[WindowsMediaSession] READY");
-+        smtcLayerAvailable = true;
++        try {
++            mpcHcSession.stop();
++        } catch (err) {
++            console.error("mpcHcSession.stop() lúc shutdown lỗi (bỏ qua, app vẫn thoát):", err.message);
++        }
 +    });
-+
-+    windowsMediaSession.on("change", (snapshot) => {
-+        console.log("[WindowsMediaSession] SNAPSHOT", snapshot);
-+        latestSmtcSnapshot = snapshot;
-+        dispatchUnifiedNowPlaying();
-+    });
-+
-+    windowsMediaSession.on("unavailable", (info) => {
-+        console.log("[WindowsMediaSession] UNAVAILABLE", info);
-+        smtcLayerAvailable = false;
-+        latestSmtcSnapshot = null;
-+        maybeBroadcastUnavailable(info);
-+        dispatchUnifiedNowPlaying();
-     });
- 
-     windowsMediaSession.on("error", (err) => {
-@@ -193,9 +275,31 @@ app.whenReady().then(async () => {
-         console.log("[WindowsMediaSession] RESTART", info);
-     });
- 
-+    mpcHcSession.on("ready", () => {
-+        console.log("[MpcHcSession] READY", { port: mpcHcSession.getPort() });
-+        mpcHcLayerAvailable = true;
-+    });
-+
-+    mpcHcSession.on("change", (snapshot) => {
-+        console.log("[MpcHcSession] SNAPSHOT", snapshot);
-+        latestMpcHcSnapshot = snapshot;
-+        dispatchUnifiedNowPlaying();
-+    });
-+
-+    mpcHcSession.on("unavailable", (info) => {
-+        console.log("[MpcHcSession] UNAVAILABLE", info);
-+        mpcHcLayerAvailable = false;
-+        latestMpcHcSnapshot = null;
-+        maybeBroadcastUnavailable(info);
-+        dispatchUnifiedNowPlaying();
-+    });
-+
-     console.log("[WindowsMediaSession] START");
-     windowsMediaSession.start();
- 
-+    console.log("[MpcHcSession] START");
-+    mpcHcSession.start();
 +
      // === TỰ ĐỘNG KHỞI ĐỘNG loopMIDI + Studio One ===
  const fs = require("fs");

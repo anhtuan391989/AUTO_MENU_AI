@@ -298,6 +298,31 @@ app.whenReady().then(async () => {
     console.log("[MpcHcSession] START");
     mpcHcSession.start();
 
+    // TASK A51 — SHUTDOWN SAFETY cho Now Playing: trước đây windowsMediaSession.stop()/
+    // mpcHcSession.stop() KHÔNG BAO GIỜ được gọi lúc tắt app. windowsMediaSession.stop() giết
+    // tiến trình con PowerShell (daemon đọc SMTC, spawn qua spawn("powershell.exe", ...,
+    // {windowsHide:true}) — KHÔNG có {detached:true}) — thiếu bước này, tiến trình PowerShell
+    // có nguy cơ bị BỎ LẠI CHẠY MỒ CÔI sau khi Electron đã thoát, mỗi lần đóng app.
+    // mpcHcSession.stop() dừng đúng timer polling HTTP tới MPC-HC. Đăng ký handler RIÊNG ở
+    // đây (không sửa handler "before-quit" đã có sẵn cho CommandRuntime ở cuối file) vì
+    // windowsMediaSession/mpcHcSession chỉ tồn tại trong scope của closure này — Electron/
+    // Node cho phép nhiều listener cùng 1 event, cả 2 handler đều sẽ chạy khi app tắt. Tự bọc
+    // try/catch riêng (giống pattern CommandRuntime.stop()) — lỗi ở đây KHÔNG được chặn việc
+    // app thoát.
+    app.on("before-quit", () => {
+        try {
+            windowsMediaSession.stop();
+        } catch (err) {
+            console.error("windowsMediaSession.stop() lúc shutdown lỗi (bỏ qua, app vẫn thoát):", err.message);
+        }
+
+        try {
+            mpcHcSession.stop();
+        } catch (err) {
+            console.error("mpcHcSession.stop() lúc shutdown lỗi (bỏ qua, app vẫn thoát):", err.message);
+        }
+    });
+
     // === TỰ ĐỘNG KHỞI ĐỘNG loopMIDI + Studio One ===
 const fs = require("fs");
 const path = require("path");
