@@ -85,6 +85,9 @@ const ManualState = require("../core/shared/ManualState");
 const TelemetryLogger = require("../core/shared/TelemetryLogger");
 // TASK A49 — IPC safety boundary cần Logger để log lỗi rõ ràng
 const Logger = require("../core/shared/Logger");
+// TASK A52 — Admin Authentication Backend cho khu vực "AI 🔒" trong Setup (SETUP OWNER: Claude A).
+// Toàn bộ logic hash/verify/change password nằm trong module này, main.js chỉ relay qua IPC.
+const AdminAuth = require("../core/shared/AdminAuth");
 const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
 const MpcHcSession = require("../core/integration/MpcHcSession"); // Task C — nguồn thứ 2 (MPC-HC), file có sẵn nhưng trước đây chưa được require/dùng ở đây
 const NowPlayingArbitrator = require("../core/integration/NowPlayingArbitrator"); // Task C — quyết định SMTC hay MPC-HC đang active
@@ -505,6 +508,32 @@ ipcMain.on("ai-result", (event, { type, payload } = {}) => {
 });
 
 // ================================
+// TASK A52 — ADMIN AUTHENTICATION (mở khoá khu vực "AI 🔒" trong Setup, xem
+// core/shared/AdminAuth.js cho toàn bộ logic hash/verify/change password).
+// Handler ở đây CHỈ relay: không tự so sánh password, không trả về salt/hash cho
+// renderer — chỉ trả {ok, reason}. Đúng nguyên tắc "không bypass authentication từ
+// renderer" vì kết quả đúng/sai được QUYẾT ĐỊNH Ở ĐÂY (main process), renderer chỉ
+// hiển thị kết quả.
+// ================================
+ipcMain.handle("admin-auth-verify", async (event, password) => {
+    try {
+        return AdminAuth.verify(password);
+    } catch (err) {
+        console.error("admin-auth-verify lỗi:", err.message);
+        return { ok: false, reason: "Lỗi hệ thống khi xác thực." };
+    }
+});
+
+ipcMain.handle("admin-auth-change-password", async (event, { currentPassword, newPassword } = {}) => {
+    try {
+        return AdminAuth.changePassword(currentPassword, newPassword);
+    } catch (err) {
+        console.error("admin-auth-change-password lỗi:", err.message);
+        return { ok: false, reason: "Lỗi hệ thống khi đổi password." };
+    }
+});
+
+// ================================
 // BRIDGE: CHỈ chuyển tiếp PLUGIN_COMMAND (từ core/ai/plugin/PluginController.js) sang
 // renderer qua IPC — không xử lý, không diễn giải, không tạo logic MIDI/AHK nào ở đây.
 // Nếu Core chưa bao giờ phát PLUGIN_COMMAND (vd BootLoader chưa gắn), đoạn này đơn giản
@@ -551,20 +580,6 @@ ipcMain.on("resize-window", (event, { height } = {}) => {
         mainWin.setContentSize(currentWidth, clampedHeight);
     } catch (err) {
         console.error("resize-window lỗi:", err);
-    }
-});
-
-// ================================
-// TASK B — MENU RUNTIME: nút Minimize (minBtn) trước đây chỉ console.log("MINIMIZE"),
-// không có tác dụng thật. Thêm kênh IPC thật để thu nhỏ cửa sổ chính (mainWin).
-// Không đụng Setup window, không đụng bất kỳ kênh IPC nào khác.
-// ================================
-ipcMain.on("minimize-window", () => {
-    try {
-        if (!mainWin || mainWin.isDestroyed()) return;
-        mainWin.minimize();
-    } catch (err) {
-        console.error("minimize-window lỗi:", err);
     }
 });
 

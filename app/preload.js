@@ -75,9 +75,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- UI FINAL v2.0: "Menu ôm sát nội dung" — CHỈ đổi chiều cao cửa sổ chính ----
     resizeWindow: (height) => ipcRenderer.send("resize-window", { height }),
 
-    // ---- TASK B — MENU RUNTIME: thu nhỏ cửa sổ chính thật (thay console.log("MINIMIZE")) ----
-    minimizeWindow: () => ipcRenderer.send("minimize-window"),
-
     // ---- MIDI-MASTER-01 Phase 1: trạng thái MIDI THẬT phía main process (easymidi) ----
     // Dùng bởi ui/js/midiHealth.js để hợp nhất với trạng thái Web MIDI phía renderer.
     getMainMidiHealth: () => ipcRenderer.invoke("midi-health"),
@@ -85,4 +82,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- TASK B2: Auto Connect (discover + ensure AUTO MENU AI + connect) + Verification thật ----
     autoConnectMidi: (opts) => ipcRenderer.invoke("midi-auto-connect", opts),
     verifyMidiOutput: () => ipcRenderer.invoke("midi-verify"),
+
+    // ---- TASK A52: Admin Authentication (mở khoá khu vực "AI 🔒" trong Setup) ----
+    // Xác thực THẬT xảy ra ở main process (core/shared/AdminAuth.js) — hàm này chỉ relay
+    // qua IPC, không tự so sánh password ở renderer.
+    adminAuthVerify: (password) => ipcRenderer.invoke("admin-auth-verify", password),
+    adminAuthChangePassword: (currentPassword, newPassword) =>
+        ipcRenderer.invoke("admin-auth-change-password", { currentPassword, newPassword }),
 });
