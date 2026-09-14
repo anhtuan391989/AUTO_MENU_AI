@@ -1,0 +1,140 @@
+diff --git a/app/main.js b/app/main.js
+index 8fdf553..35e7007 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -554,6 +554,20 @@ ipcMain.on("resize-window", (event, { height } = {}) => {
+     }
+ });
+ 
++// ================================
++// TASK B — MENU RUNTIME: nút Minimize (minBtn) trước đây chỉ console.log("MINIMIZE"),
++// không có tác dụng thật. Thêm kênh IPC thật để thu nhỏ cửa sổ chính (mainWin).
++// Không đụng Setup window, không đụng bất kỳ kênh IPC nào khác.
++// ================================
++ipcMain.on("minimize-window", () => {
++    try {
++        if (!mainWin || mainWin.isDestroyed()) return;
++        mainWin.minimize();
++    } catch (err) {
++        console.error("minimize-window lỗi:", err);
++    }
++});
++
+ // ================================
+ // LẤY TỌA ĐỘ: dùng AutoHotkey v2 (di chuột thật tới vị trí + nhấn F8)
+ // Không che màn hình, hoạt động đúng trên cả nhiều màn hình vì MouseGetPos
+diff --git a/app/preload.js b/app/preload.js
+index 50cefd2..542b0f1 100644
+--- a/app/preload.js
++++ b/app/preload.js
+@@ -75,6 +75,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
+     // ---- UI FINAL v2.0: "Menu ôm sát nội dung" — CHỈ đổi chiều cao cửa sổ chính ----
+     resizeWindow: (height) => ipcRenderer.send("resize-window", { height }),
+ 
++    // ---- TASK B — MENU RUNTIME: thu nhỏ cửa sổ chính thật (thay console.log("MINIMIZE")) ----
++    minimizeWindow: () => ipcRenderer.send("minimize-window"),
++
+     // ---- MIDI-MASTER-01 Phase 1: trạng thái MIDI THẬT phía main process (easymidi) ----
+     // Dùng bởi ui/js/midiHealth.js để hợp nhất với trạng thái Web MIDI phía renderer.
+     getMainMidiHealth: () => ipcRenderer.invoke("midi-health"),
+diff --git a/tests/unit/MenuMinimizeRuntime.verify.js b/tests/unit/MenuMinimizeRuntime.verify.js
+new file mode 100644
+index 0000000..7ecdeaa
+--- /dev/null
++++ b/tests/unit/MenuMinimizeRuntime.verify.js
+@@ -0,0 +1,74 @@
++/**
++ * MenuMinimizeRuntime.verify.js — TASK B (MENU RUNTIME)
++ * ---------------------------------------------------------------------------
++ * Xác nhận minBtn KHÔNG còn là console.log("MINIMIZE") (UI-only) mà gọi
++ * window.electronAPI.minimizeWindow() thật; xác nhận preload.js expose đúng
++ * kênh "minimize-window"; xác nhận main.js có ipcMain.on("minimize-window")
++ * gọi mainWin.minimize() thật (không phải fake/no-op).
++ *
++ * Chạy: node tests/unit/MenuMinimizeRuntime.verify.js
++ */
++'use strict';
++
++const fs = require('fs');
++const path = require('path');
++const vm = require('vm');
++
++let pass = 0, fail = 0;
++function assert(cond, label) {
++    if (cond) { pass++; console.log('  OK  ', label); }
++    else { fail++; console.error('  FAIL ', label); }
++}
++
++const rendererSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'ui', 'js', 'renderer.js'), 'utf8');
++const preloadSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'app', 'preload.js'), 'utf8');
++const mainSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'app', 'main.js'), 'utf8');
++
++console.log('== renderer.js: minBtn không còn console.log("MINIMIZE") UI-only ==');
++{
++    assert(!/getElementById\("minBtn"\)\?\.addEventListener\("click", \(\) => console\.log\("MINIMIZE"\)\);/.test(rendererSrc),
++        'handler console.log("MINIMIZE") cũ đã bị thay thế');
++
++    const marker = 'document.getElementById("minBtn")?.addEventListener("click"';
++    const start = rendererSrc.indexOf(marker);
++    assert(start !== -1, 'tìm thấy handler #minBtn mới trong renderer.js');
++    const end = rendererSrc.indexOf('});', start) + 3;
++    const block = rendererSrc.slice(start, end);
++
++    class FakeElement {
++        constructor() { this._handlers = {}; }
++        addEventListener(evt, fn) { (this._handlers[evt] = this._handlers[evt] || []).push(fn); }
++        dispatch(evt) { (this._handlers[evt] || []).forEach((fn) => fn({ target: this })); }
++    }
++    const minBtn = new FakeElement();
++    let calledMinimize = 0;
++    const sandbox = {
++        console,
++        document: { getElementById: (id) => (id === 'minBtn' ? minBtn : null) },
++        window: { electronAPI: { minimizeWindow: () => { calledMinimize++; } } },
++    };
++    vm.createContext(sandbox);
++    vm.runInContext(block, sandbox);
++    minBtn.dispatch('click');
++    assert(calledMinimize === 1, `click gọi electronAPI.minimizeWindow() đúng 1 lần (thực tế: ${calledMinimize})`);
++}
++
++console.log('\n== preload.js: expose kênh minimize-window ==');
++{
++    assert(/minimizeWindow:\s*\(\)\s*=>\s*ipcRenderer\.send\("minimize-window"\)/.test(preloadSrc),
++        'preload.js expose minimizeWindow() -> ipcRenderer.send("minimize-window")');
++}
++
++console.log('\n== main.js: ipcMain.on("minimize-window") gọi mainWin.minimize() thật ==');
++{
++    const marker = 'ipcMain.on("minimize-window"';
++    const start = mainSrc.indexOf(marker);
++    assert(start !== -1, 'tìm thấy handler ipcMain.on("minimize-window") trong main.js');
++    const end = mainSrc.indexOf('});', start) + 3;
++    const block = mainSrc.slice(start, end);
++    assert(/mainWin\.minimize\(\)/.test(block), 'handler gọi mainWin.minimize() thật (không phải no-op/log)');
++    assert(/isDestroyed\(\)/.test(block), 'handler tự bảo vệ khi mainWin đã bị destroy (không crash)');
++}
++
++console.log(`\n${pass} PASS, ${fail} FAIL`);
++process.exit(fail > 0 ? 1 : 0);
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 27e2ea5..be23f2f 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -355,7 +355,15 @@ if (setupBtn) {
+ }
+ 
+ document.getElementById("closeBtn")?.addEventListener("click", () => window.close?.());
+-document.getElementById("minBtn")?.addEventListener("click", () => console.log("MINIMIZE"));
++// TASK B — MENU RUNTIME: minBtn trước đây chỉ console.log("MINIMIZE") (UI-only, không tác
++// dụng thật). Nối vào IPC thật (main.js: "minimize-window") để thu nhỏ cửa sổ thật.
++document.getElementById("minBtn")?.addEventListener("click", () => {
++    if (window.electronAPI?.minimizeWindow) {
++        window.electronAPI.minimizeWindow();
++    } else {
++        console.error("[MenuControl] minimizeWindow không khả dụng (electronAPI thiếu).");
++    }
++});
+ 
+ document.getElementById("closeModal")?.addEventListener("click", () => {
+     console.log("Close modal (setup window is separate)");
