@@ -355,7 +355,15 @@ if (setupBtn) {
 }
 
 document.getElementById("closeBtn")?.addEventListener("click", () => window.close?.());
-document.getElementById("minBtn")?.addEventListener("click", () => console.log("MINIMIZE"));
+// TASK B — MENU RUNTIME: minBtn trước đây chỉ console.log("MINIMIZE") (UI-only, không tác
+// dụng thật). Nối vào IPC thật (main.js: "minimize-window") để thu nhỏ cửa sổ thật.
+document.getElementById("minBtn")?.addEventListener("click", () => {
+    if (window.electronAPI?.minimizeWindow) {
+        window.electronAPI.minimizeWindow();
+    } else {
+        console.error("[MenuControl] minimizeWindow không khả dụng (electronAPI thiếu).");
+    }
+});
 
 document.getElementById("closeModal")?.addEventListener("click", () => {
     console.log("Close modal (setup window is separate)");

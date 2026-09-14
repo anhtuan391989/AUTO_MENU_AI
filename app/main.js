@@ -555,6 +555,20 @@ ipcMain.on("resize-window", (event, { height } = {}) => {
 });
 
 // ================================
+// TASK B — MENU RUNTIME: nút Minimize (minBtn) trước đây chỉ console.log("MINIMIZE"),
+// không có tác dụng thật. Thêm kênh IPC thật để thu nhỏ cửa sổ chính (mainWin).
+// Không đụng Setup window, không đụng bất kỳ kênh IPC nào khác.
+// ================================
+ipcMain.on("minimize-window", () => {
+    try {
+        if (!mainWin || mainWin.isDestroyed()) return;
+        mainWin.minimize();
+    } catch (err) {
+        console.error("minimize-window lỗi:", err);
+    }
+});
+
+// ================================
 // LẤY TỌA ĐỘ: dùng AutoHotkey v2 (di chuột thật tới vị trí + nhấn F8)
 // Không che màn hình, hoạt động đúng trên cả nhiều màn hình vì MouseGetPos
 // của AHK tự tính theo toàn bộ desktop ảo (ghép tất cả các màn hình).
