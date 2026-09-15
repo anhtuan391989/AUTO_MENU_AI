@@ -102,6 +102,107 @@
 
             <!-- ===================== AI ===================== -->
             <section class="setup-panel" id="panel-ai" data-title="AI">
+                <!-- ===== TASK A54 — Hidden DAW / Startup & Paths / AI Configuration & Readiness =====
+                     Toàn bộ 3 khối dưới đây là UI/CONFIG SCHEMA THUẦN. Chưa có backend (process
+                     check thật, tray/background thật, file-picker thật, AI readiness thật) nên MỌI
+                     control đều disabled và MỌI trạng thái đều ghi rõ "Pending backend" / "Not
+                     configured" — không có control nào giả lập là đã hoạt động, không có nút
+                     Save/Apply/Verify/Launch/Show/Hide nào (đúng yêu cầu A54: không tạo nút khi
+                     chưa có implementation tương ứng). Khi backend thật được nối (task sau), chỉ
+                     cần bỏ "disabled" + gắn IPC, không cần sửa lại UI này. -->
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🎛 Hidden DAW
+                        <span class="badge badge-unwired" id="hiddenDawStatusBadge">Pending backend</span>
+                    </div>
+                    <p class="hint-text">Hidden <strong>không đồng nghĩa</strong> với minimize xuống Taskbar. DAW phải
+                        là process thật, tiếp tục mở đúng project/session, tiếp tục nhận MIDI và xử lý audio/plugin
+                        khi ở trạng thái hidden. Backend kiểm tra process thật, System Tray/Notification Area, và
+                        Show/Hide DAW thật <strong>chưa tồn tại</strong> trong repo — khối dưới đây chỉ là khung cấu
+                        hình đúng khái niệm, chưa có hành vi runtime nào.</p>
+                    <div class="placeholder-grid">
+                        <label class="ph-field">Enable Hidden DAW
+                            <label class="setup-checkbox"><input type="checkbox" id="hiddenDawEnable" disabled> Bật</label>
+                        </label>
+                        <label class="ph-field">DAW Application
+                            <select id="hiddenDawApp" class="ph-select" disabled>
+                                <option value="">Chưa chọn</option>
+                            </select>
+                        </label>
+                        <label class="ph-field">DAW Executable Path
+                            <input type="text" id="hiddenDawExePath" placeholder="Ví dụ: C:\Program Files\DAW\daw.exe" disabled>
+                        </label>
+                        <label class="ph-field">Project/Session Path
+                            <input type="text" id="hiddenDawProjectPath" placeholder="Đường dẫn file project/session" disabled>
+                        </label>
+                        <label class="ph-field">Auto Launch on Startup
+                            <label class="setup-checkbox"><input type="checkbox" id="hiddenDawAutoLaunch" disabled> Bật</label>
+                        </label>
+                        <label class="ph-field">Start Hidden
+                            <label class="setup-checkbox"><input type="checkbox" id="hiddenDawStartHidden" disabled> Bật</label>
+                        </label>
+                        <label class="ph-field">DAW Lifecycle Policy
+                            <select id="hiddenDawLifecyclePolicy" class="ph-select" disabled>
+                                <option value="leave_running">Leave DAW running when Menu closes</option>
+                                <option value="close_on_request">Close DAW only when explicitly requested</option>
+                            </select>
+                        </label>
+                    </div>
+                    <p class="hint-text">Show DAW / Hide DAW chưa được tạo ở đây vì chưa có backend Tray/Background
+                        hỗ trợ (đúng nguyên tắc A54 — không tạo control khi chưa có implementation tương ứng).</p>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">📁 Startup &amp; Paths
+                        <span class="badge badge-unwired" id="spStatusBadge">Not configured</span>
+                    </div>
+                    <p class="hint-text">Chưa có file-picker backend và chưa có cơ chế persistence riêng cho nhóm
+                        này trong repo — các trường dưới đây chỉ là schema/UI tạm thời trong phiên (mất khi reload),
+                        <strong>không</strong> tự lưu, <strong>không</strong> tự ghi đè giá trị đã có, <strong>không</strong>
+                        hard-code đường dẫn của bất kỳ máy nào, và <strong>không</strong> chứa password.</p>
+                    <div class="placeholder-grid">
+                        <label class="ph-field">Auto Start AUTO MENU AI cùng Windows
+                            <label class="setup-checkbox"><input type="checkbox" id="spAutoStart" disabled> Bật</label>
+                        </label>
+                        <label class="ph-field">DAW Executable Path
+                            <input type="text" id="spDawExePath" placeholder="Path selection backend pending" disabled>
+                        </label>
+                        <label class="ph-field">DAW Project/Session Path
+                            <input type="text" id="spDawProjectPath" placeholder="Path selection backend pending" disabled>
+                        </label>
+                        <label class="ph-field">Plugin Paths (mỗi dòng 1 đường dẫn)
+                            <textarea id="spPluginPaths" rows="3" placeholder="Path selection backend pending" disabled></textarea>
+                        </label>
+                        <label class="ph-field">MIDI Configuration Path
+                            <input type="text" id="spMidiConfigPath" placeholder="Path selection backend pending" disabled>
+                        </label>
+                        <label class="ph-field">Audio Configuration Path
+                            <input type="text" id="spAudioConfigPath" placeholder="Path selection backend pending" disabled>
+                        </label>
+                        <label class="ph-field">Logs / Diagnostics Path
+                            <input type="text" id="spLogsPath" placeholder="Path selection backend pending" disabled>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🧠 AI Configuration / Readiness
+                        <span class="badge badge-unwired" id="aiReadyStatusBadge">Pending backend verification</span>
+                    </div>
+                    <p class="hint-text">Key / BPM / Mod được lấy từ <strong>System Audio (WASAPI Loopback)</strong>,
+                        <strong>không phải Microphone</strong>. <strong>AI Key</strong> và <strong>Manual Key</strong>
+                        là hai state độc lập — AI không bao giờ ghi vào Manual Key. Khu vực này chỉ hiển thị trạng
+                        thái, không có dropdown hay nút SEND nào cho Manual Key.</p>
+                    <div class="status-grid">
+                        <div class="status-card"><span class="status-label">AI Key Detection</span><span class="status-pill status-pill--soon" id="aiReadyKeyPill">Pending backend verification</span></div>
+                        <div class="status-card"><span class="status-label">BPM Detection</span><span class="status-pill status-pill--soon" id="aiReadyBpmPill">Pending backend verification</span></div>
+                        <div class="status-card"><span class="status-label">Mod Detection</span><span class="status-pill status-pill--soon" id="aiReadyModPill">Pending backend verification</span></div>
+                        <div class="status-card"><span class="status-label">Audio Source</span><span class="status-pill status-pill--dim" id="aiReadyAudioSourcePill">Not configured</span></div>
+                        <div class="status-card"><span class="status-label">System Audio / WASAPI Loopback</span><span class="status-pill status-pill--soon" id="aiReadyWasapiPill">Pending backend verification</span></div>
+                        <div class="status-card"><span class="status-label">AI Readiness (overall)</span><span class="status-pill status-pill--soon" id="aiReadyOverallPill">Readiness: Pending backend verification</span></div>
+                    </div>
+                </div>
+
                 <div class="panel-card">
                     <div class="panel-card-title">🤖 AI Core
                         <span class="badge badge-unwired">Chưa có kênh IPC — không xoá, chỉ disable</span>
