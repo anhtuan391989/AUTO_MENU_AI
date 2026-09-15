@@ -107,9 +107,41 @@
         }
     }
 
+    // ================================
+    // TASK A53 — AI TAB ADMIN LOCK.
+    // Cờ phiên đăng nhập CHỈ tồn tại trong biến JS này (đóng cửa sổ Setup / tắt app /
+    // reload trang là mất) — KHÔNG lưu localStorage/sessionStorage/file, nên không có
+    // cách nào tạo persistent bypass qua các cơ chế lưu trữ đó (đúng yêu cầu A53 mục 10).
+    // Xác thực THẬT nằm ở main process (core/shared/AdminAuth.js, qua
+    // window.electronAPI.adminAuthVerify — xem ui/js/adminAuthUI.js của A52); file này
+    // KHÔNG tự so sánh password, chỉ đọc kết quả callback onSuccess từ AdminAuthUI.
+    // panel-ai giữ nguyên display:none (css/setup.css: ".setup-panel { display:none }",
+    // chỉ ".setup-panel.active" mới hiện) cho tới khi activatePanel("panel-ai") được gọi
+    // — tức là KHÔNG có cách nào (chuột, Tab, Enter, Space) chạm được nội dung panel-ai
+    // trước khi authenticate thành công, vì nó chưa từng được activatePanel() render active.
+    // ================================
+    let aiTabUnlockedThisSession = false;
+
     document.getElementById("sidebarNav")?.addEventListener("click", (e) => {
         const btn = e.target.closest(".nav-item");
         if (!btn) return;
+
+        if (btn.dataset.panel === "panel-ai" && !aiTabUnlockedThisSession) {
+            if (window.AdminAuthUI && typeof window.AdminAuthUI.requestLogin === "function") {
+                window.AdminAuthUI.requestLogin(() => {
+                    // Chỉ callback onSuccess THẬT (từ AdminAuth.verify() ở main process trả
+                    // ok=true) mới tới được đây — sai password/Cancel không bao giờ gọi hàm
+                    // này (xem ui/js/adminAuthUI.js), nên aiTabUnlockedThisSession không thể
+                    // bị set true bởi bất kỳ đường nào khác.
+                    aiTabUnlockedThisSession = true;
+                    activatePanel("panel-ai");
+                });
+            } else {
+                console.error("AdminAuthUI chưa sẵn sàng — không thể mở khoá tab AI.");
+            }
+            return;
+        }
+
         activatePanel(btn.dataset.panel);
     });
 
