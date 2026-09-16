@@ -33,6 +33,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // Setup re-validate selectedBrowserPath sau khi lưu) ----
     checkPathExists: (filePath) => ipcRenderer.invoke("check-path-exists", filePath),
 
+    // ---- TASK A55: phân biệt path là FILE thật (không phải thư mục) — dùng để validate DAW
+    // Executable Path trong nhóm Startup & Paths ----
+    checkPathIsFile: (filePath) => ipcRenderer.invoke("check-path-is-file", filePath),
+
     // ---- Cài đặt lưu trên file (thay localStorage) ----
     loadSettingsSync: () => ipcRenderer.sendSync("load-settings-sync"),
     saveSettingsSync: (data) => ipcRenderer.sendSync("save-settings-sync", data),

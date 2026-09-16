@@ -67,26 +67,47 @@ console.log('\n== PHẦN 2: Mỗi field có label + id ổn định, không trù
     });
 }
 
-console.log('\n== PHẦN 3: Không có control giả dạng trạng thái runtime / không có nút Save-Apply-Verify-Launch chưa có backend ==');
+console.log('\n== PHẦN 3: Hidden DAW / AI Readiness vẫn "chưa có backend" (không đổi từ A54); Startup & Paths ĐÃ có backend thật từ A55 (thay đổi có chủ đích, không phải regression) ==');
 {
-    assert(!/>Show DAW</.test(panelAiSection) && !/>Hide DAW</.test(panelAiSection),
-        'Không có nút "Show DAW"/"Hide DAW" (chưa có backend Tray/Background — đúng yêu cầu A54)');
-    assert(!/>Save</.test(panelAiSection) && !/>Apply</.test(panelAiSection) &&
-        !/>Verify</.test(panelAiSection) && !/>Launch</.test(panelAiSection),
-        'Không có nút Save/Apply/Verify/Launch nào trong 3 nhóm mới (chưa có implementation tương ứng)');
+    // Cắt riêng từng card để không lẫn giữa "vẫn pending" (Hidden DAW, AI Readiness) và
+    // "đã có backend thật" (Startup & Paths, TASK A55).
+    const hiddenDawSection = panelAiSection.slice(panelAiSection.indexOf('🎛 Hidden DAW'), panelAiSection.indexOf('📁 Startup'));
+    const startupPathsSection = panelAiSection.slice(panelAiSection.indexOf('📁 Startup'), panelAiSection.indexOf('🧠 AI Configuration'));
+    const aiReadySection = panelAiSection.slice(panelAiSection.indexOf('🧠 AI Configuration'));
 
-    // Toàn bộ input/select/textarea mới đều disabled (chưa có backend thật)
-    const newFieldTagsRegex = /<(input|select|textarea)\b[^>]*id="(hiddenDaw|sp[A-Z])[^"]*"[^>]*>/g;
-    let m; let checked = 0;
-    while ((m = newFieldTagsRegex.exec(panelAiSection))) {
-        checked++;
-        assert(/disabled/.test(m[0]), `Control mới "${m[0].slice(0, 60)}..." có thuộc tính disabled (chưa có backend thật)`);
+    assert(!/>Show DAW</.test(hiddenDawSection) && !/>Hide DAW</.test(hiddenDawSection),
+        'Hidden DAW: vẫn không có nút "Show DAW"/"Hide DAW" (chưa có backend Tray/Background)');
+    assert(!/>Apply</.test(hiddenDawSection) && !/>Verify</.test(hiddenDawSection) && !/>Launch</.test(hiddenDawSection) && !/>Save</.test(hiddenDawSection),
+        'Hidden DAW: vẫn không có nút Save/Apply/Verify/Launch nào (chưa có implementation tương ứng)');
+    assert(!/>Apply</.test(aiReadySection) && !/>Verify</.test(aiReadySection) && !/>Launch</.test(aiReadySection) && !/>Save</.test(aiReadySection),
+        'AI Readiness: vẫn không có nút Save/Apply/Verify/Launch nào (chỉ là dashboard trạng thái)');
+
+    // Hidden DAW: toàn bộ input/select vẫn disabled (KHÔNG đổi so với A54 — A55 không đụng nhóm này)
+    const hiddenDawFieldsRegex = /<(input|select|textarea)\b[^>]*id="hiddenDaw[^"]*"[^>]*>/g;
+    let m; let checkedHiddenDaw = 0;
+    while ((m = hiddenDawFieldsRegex.exec(hiddenDawSection))) {
+        checkedHiddenDaw++;
+        assert(/disabled/.test(m[0]), `Hidden DAW control "${m[0].slice(0, 60)}..." vẫn disabled (A55 không đụng nhóm này)`);
     }
-    assert(checked >= 13, `Đã kiểm tra ${checked} control mới đều disabled (kỳ vọng >= 13)`);
+    assert(checkedHiddenDaw === 7, `Đã kiểm tra ${checkedHiddenDaw} control Hidden DAW đều còn disabled (kỳ vọng 7, không đổi từ A54)`);
 
-    assert(!/\d{1,3}\s*%/.test(panelAiSection.match(/AI Readiness[\s\S]{0,300}/)?.[0] || ''),
+    // Startup & Paths (TASK A55): NGƯỢC LẠI — các field PHẢI không còn disabled (có backend
+    // thật), và PHẢI có đúng 1 nút Save (Apply/Verify/Launch vẫn không được thêm — A55 chỉ cần
+    // Save, không cam kết các hành vi Apply/Verify/Launch riêng).
+    const spFieldsRegex = /<(input|textarea)\b[^>]*id="sp[A-Z][^"]*"[^>]*>/g;
+    let checkedSp = 0;
+    while ((m = spFieldsRegex.exec(startupPathsSection))) {
+        checkedSp++;
+        assert(!/disabled/.test(m[0]), `Startup & Paths control "${m[0].slice(0, 60)}..." KHÔNG còn disabled (A55: đã có backend thật)`);
+    }
+    assert(checkedSp === 7, `Đã kiểm tra ${checkedSp} control Startup & Paths đều đã bật (kỳ vọng 7)`);
+    assert(/id="spSaveBtn"/.test(startupPathsSection), 'Startup & Paths có nút Save thật (id="spSaveBtn") — đúng vì A55 đã nối backend');
+    assert(!/>Apply</.test(startupPathsSection) && !/>Verify</.test(startupPathsSection) && !/>Launch</.test(startupPathsSection),
+        'Startup & Paths: không có nút Apply/Verify/Launch nào được thêm ngoài Save (đúng phạm vi A55)');
+
+    assert(!/\d{1,3}\s*%/.test(aiReadySection.slice(0, 400)),
         'AI Readiness overall KHÔNG dùng số phần trăm giả');
-    assert(/Pending backend verification/.test(panelAiSection), 'AI Readiness ghi đúng "Pending backend verification", không giả lập READY');
+    assert(/Pending backend verification/.test(aiReadySection), 'AI Readiness ghi đúng "Pending backend verification", không giả lập READY (không đổi từ A54)');
 }
 
 console.log('\n== PHẦN 4: Key/BPM/Mod ghi đúng nguồn System Audio/WASAPI, AI Key tách biệt Manual Key ==');

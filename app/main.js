@@ -27,11 +27,23 @@ function readSettingsFile() {
 }
 
 function writeSettingsFile(data) {
+    // TASK A55 — Atomic/Safe Write: ghi ra file tạm cùng thư mục rồi rename đè lên file
+    // chính. rename trên cùng ổ đĩa là thao tác gần như nguyên tử ở cấp hệ điều hành — nếu
+    // tiến trình bị crash/mất điện giữa chừng, file admin SETTINGS_FILE cũ vẫn nguyên vẹn
+    // (không bao giờ bị half-written/rỗng). Áp dụng cho MỌI lần ghi settings (không riêng
+    // Startup & Paths của A55) vì đây là hàm ghi DUY NHẤT của toàn bộ app-settings.json —
+    // chữ ký hàm và giá trị trả về (true/false) giữ nguyên 100%, không phá caller nào có sẵn.
+    // Lưu ý: hàm này được test bằng cách trích riêng source rồi chạy trong vm sandbox chỉ có
+    // {console, fs, SETTINGS_FILE} (xem tests/unit/SettingsFileIO.verify.js) — KHÔNG có
+    // `process`/`require` trong sandbox đó, nên chỉ dùng fs + JS built-in thuần (Date/Math).
+    const tmpFile = SETTINGS_FILE + ".tmp-" + Date.now() + "-" + Math.floor(Math.random() * 1e9);
     try {
-        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), "utf-8");
+        fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), "utf-8");
+        fs.renameSync(tmpFile, SETTINGS_FILE);
         return true;
     } catch (err) {
         console.error("writeSettingsFile lỗi:", err);
+        try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch { /* dọn rác best-effort */ }
         return false;
     }
 }
@@ -1053,6 +1065,20 @@ ipcMain.handle("find-browser-path", (event, browserName) => {
 ipcMain.handle("check-path-exists", (event, filePath) => {
     try {
         return !!filePath && fs.existsSync(filePath);
+    } catch {
+        return false;
+    }
+});
+
+// TASK A55 — Startup & Paths: phân biệt "path tồn tại nhưng là thư mục" với "path tồn tại và
+// là file thật" — checkPathExists (trên) không phân biệt được 2 trường hợp này, mà đặc tả A55
+// yêu cầu DAW Executable Path PHẢI là file, không được là thư mục. Không launch/execute file
+// trong handler này — chỉ fs.statSync() để đọc metadata.
+ipcMain.handle("check-path-is-file", (event, filePath) => {
+    try {
+        if (!filePath) return null; // rỗng -> không phải lỗi, để renderer tự hiểu là "chưa cấu hình"
+        if (!fs.existsSync(filePath)) return false;
+        return fs.statSync(filePath).isFile();
     } catch {
         return false;
     }

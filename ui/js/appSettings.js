@@ -41,7 +41,21 @@ const DEFAULT_APP_SETTINGS = {
     // (Mục X: "Không dùng một mapping chung cho tất cả DAW"). CHƯA có giá trị mặc định nào
     // (không tự bịa CC/note — Mục III/V). Cấu trúc:
     // { [dawName]: { DAW_PLAY: {kind:"cc"|"note", number, channel} | null, ... } }
-    dawMidiOutMappings: {}
+    dawMidiOutMappings: {},
+
+    // ===== TASK A55 — Startup & Paths (nhóm cấu hình trong AI Setup, sau lớp khoá A52/A53) =====
+    // CHỈ là cấu hình (đọc/ghi/hiển thị) — KHÔNG launch/kill DAW, KHÔNG quản lý process nào ở
+    // đây (đúng phạm vi A55, việc thật thuộc A56). pluginPaths GIỮ NGUYÊN THỨ TỰ người dùng
+    // nhập, không sort/dedupe tự động.
+    startupPaths: {
+        autoStart: false,
+        dawExecutable: "",
+        dawProject: "",
+        pluginPaths: [],
+        midiConfig: "",
+        audioConfig: "",
+        logs: ""
+    }
 };
 
 const LEGACY_STORAGE_KEYS = [
@@ -131,21 +145,30 @@ function loadSetup() {
     return appSettings;
 }
 
+// TASK A55: trước đây hàm này không trả về gì (fire-and-forget), khiến không nơi nào trong
+// renderer biết được 1 lần lưu có THẬT SỰ thành công hay không (ipcRenderer.sendSync trả về
+// đúng giá trị writeSettingsFile() ở main process — true/false — nhưng bị bỏ qua ở đây). Giữ
+// NGUYÊN 100% hành vi cũ (early-return ngay khi có electronAPI, không rơi xuống localStorage
+// dự phòng) — chỉ thêm việc TRẢ VỀ kết quả thật. Các caller cũ (không đọc giá trị trả về) hoàn
+// toàn không bị ảnh hưởng.
 function saveSetup() {
     try {
         if (window.electronAPI?.saveSettingsSync) {
-            window.electronAPI.saveSettingsSync(appSettings);
-            return;
+            const ok = window.electronAPI.saveSettingsSync(appSettings);
+            return ok !== false; // sendSync qua kênh lỗi hiếm khi trả undefined -> chỉ coi là fail khi rõ ràng false
         }
     } catch (err) {
         console.error("saveSetup (file dùng chung) lỗi:", err);
+        return false;
     }
 
     // Dự phòng localStorage (chỉ dùng khi không chạy trong Electron)
     try {
         localStorage.setItem(APP_SETTINGS_STORAGE_KEY, JSON.stringify(appSettings));
+        return true;
     } catch (err) {
         console.error("saveSetup (localStorage dự phòng) lỗi:", err);
+        return false;
     }
 }
 
@@ -154,9 +177,48 @@ function getSetting(key, fallback = "") {
     return value != null && value !== "" ? value : fallback;
 }
 
+// TASK A55: cũng trả về kết quả saveSetup() thật (trước đây bỏ qua) — giữ nguyên chữ ký/hành
+// vi ghi appSettings[key], chỉ thêm return.
 function setSetting(key, value) {
     appSettings[key] = value;
-    saveSetup();
+    return saveSetup();
+}
+
+// ===== TASK A55 — Startup & Paths: getter/setter dùng CHUNG cơ chế getSetting/setSetting đã
+// có sẵn ở trên (KHÔNG tạo configuration system thứ 2). getStartupPaths() tự phục hồi an toàn
+// khi config thiếu field hoặc pluginPaths không phải mảng (config cũ/hỏng) — không bao giờ trả
+// về giá trị làm crash UI gọi nó. =====
+const DEFAULT_STARTUP_PATHS = {
+    autoStart: false,
+    dawExecutable: "",
+    dawProject: "",
+    pluginPaths: [],
+    midiConfig: "",
+    audioConfig: "",
+    logs: ""
+};
+
+function getStartupPaths() {
+    const stored = getSetting("startupPaths", null);
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+        return { ...DEFAULT_STARTUP_PATHS };
+    }
+    return {
+        ...DEFAULT_STARTUP_PATHS,
+        ...stored,
+        autoStart: stored.autoStart === true,
+        pluginPaths: Array.isArray(stored.pluginPaths) ? stored.pluginPaths.slice() : []
+    };
+}
+
+// Merge một phần thay đổi vào cấu hình hiện tại rồi lưu qua đúng 1 đường setSetting() ->
+// saveSetup() -> saveSettingsSync (IPC) -> writeSettingsFile() (main process, atomic — xem
+// app/main.js). Trả về {ok, value} để UI (setupStartupPaths.js) biết chính xác lưu có thành
+// công hay không, KHÔNG bao giờ tự báo "Saved" nếu ok !== true.
+function setStartupPaths(partial) {
+    const merged = { ...getStartupPaths(), ...partial };
+    const ok = setSetting("startupPaths", merged);
+    return { ok: ok === true, value: merged };
 }
 
 // TASK B6 (Beat/Master) — accessor SEMANTIC riêng cho từng control, KHÔNG dùng tên chung

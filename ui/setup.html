@@ -156,31 +156,43 @@
                     <div class="panel-card-title">📁 Startup &amp; Paths
                         <span class="badge badge-unwired" id="spStatusBadge">Not configured</span>
                     </div>
-                    <p class="hint-text">Chưa có file-picker backend và chưa có cơ chế persistence riêng cho nhóm
-                        này trong repo — các trường dưới đây chỉ là schema/UI tạm thời trong phiên (mất khi reload),
-                        <strong>không</strong> tự lưu, <strong>không</strong> tự ghi đè giá trị đã có, <strong>không</strong>
-                        hard-code đường dẫn của bất kỳ máy nào, và <strong>không</strong> chứa password.</p>
+                    <p class="hint-text">TASK A55: cấu hình bên dưới đã có backend thật (lưu qua file dùng chung
+                        <code>app-settings.json</code>, ghi an toàn ở main process — xem app/main.js). Giá trị
+                        <strong>không</strong> tự ghi đè cho tới khi bấm Save, <strong>không</strong> hard-code đường
+                        dẫn của bất kỳ máy nào, và <strong>không</strong> chứa password. A55 chỉ LƯU cấu hình —
+                        <strong>không tự khởi chạy DAW</strong> dù bạn bật "Auto Start" hay điền path (việc khởi
+                        chạy thật thuộc task sau).</p>
                     <div class="placeholder-grid">
                         <label class="ph-field">Auto Start AUTO MENU AI cùng Windows
-                            <label class="setup-checkbox"><input type="checkbox" id="spAutoStart" disabled> Bật</label>
+                            <label class="setup-checkbox"><input type="checkbox" id="spAutoStart"> Bật</label>
                         </label>
                         <label class="ph-field">DAW Executable Path
-                            <input type="text" id="spDawExePath" placeholder="Path selection backend pending" disabled>
+                            <input type="text" id="spDawExePath" placeholder="Ví dụ: C:\Program Files\DAW\daw.exe">
+                            <span class="hint-text" id="spDawExePathStatus"></span>
                         </label>
                         <label class="ph-field">DAW Project/Session Path
-                            <input type="text" id="spDawProjectPath" placeholder="Path selection backend pending" disabled>
+                            <input type="text" id="spDawProjectPath" placeholder="Đường dẫn file project/session">
+                            <span class="hint-text" id="spDawProjectPathStatus"></span>
                         </label>
                         <label class="ph-field">Plugin Paths (mỗi dòng 1 đường dẫn)
-                            <textarea id="spPluginPaths" rows="3" placeholder="Path selection backend pending" disabled></textarea>
+                            <textarea id="spPluginPaths" rows="3" placeholder="Mỗi dòng 1 đường dẫn plugin"></textarea>
+                            <span class="hint-text" id="spPluginPathsStatus"></span>
                         </label>
                         <label class="ph-field">MIDI Configuration Path
-                            <input type="text" id="spMidiConfigPath" placeholder="Path selection backend pending" disabled>
+                            <input type="text" id="spMidiConfigPath" placeholder="Đường dẫn file cấu hình MIDI">
+                            <span class="hint-text" id="spMidiConfigPathStatus"></span>
                         </label>
                         <label class="ph-field">Audio Configuration Path
-                            <input type="text" id="spAudioConfigPath" placeholder="Path selection backend pending" disabled>
+                            <input type="text" id="spAudioConfigPath" placeholder="Đường dẫn file cấu hình Audio">
+                            <span class="hint-text" id="spAudioConfigPathStatus"></span>
                         </label>
                         <label class="ph-field">Logs / Diagnostics Path
-                            <input type="text" id="spLogsPath" placeholder="Path selection backend pending" disabled>
+                            <input type="text" id="spLogsPath" placeholder="Đường dẫn thư mục logs/diagnostics">
+                            <span class="hint-text" id="spLogsPathStatus"></span>
+                        </label>
+                        <label class="ph-field">
+                            <button type="button" id="spSaveBtn" class="setup-btn">Save</button>
+                            <span class="hint-text" id="spSaveMessage"></span>
                         </label>
                     </div>
                 </div>
@@ -833,6 +845,9 @@
     <script src="js/midiHealth.js"></script>
     <script src="js/setupMidiMonitor.js"></script>
     <script src="js/setupMidiInput.js"></script>
+    <!-- TASK A55 — load/validate/save thật cho nhóm Startup & Paths (dựa vào
+         window.getStartupPaths/setStartupPaths ở js/appSettings.js, phải nạp SAU file đó). -->
+    <script src="js/setupStartupPaths.js"></script>
     <!-- TASK A52 — dựng sẵn popup Admin Login + form Đổi Password (window.AdminAuthUI).
          Chưa được gắn vào bất kỳ tab/nút nào ở đây — việc gắn vào tab "AI 🔒" thuộc A53. -->
     <script src="js/adminAuthUI.js"></script>
