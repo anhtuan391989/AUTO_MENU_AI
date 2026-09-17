@@ -1576,83 +1576,100 @@ function __debugLogKeyConfidence() {
     console.log(`[DEBUG bassVotes] ${fmt(snap.bassRootVotes)}`);
 }
 
+// TASK B58 — Mic VU và Master VU là 2 AudioSource ĐỘC LẬP với SYSTEM_AUDIO, khởi động
+// song song ở updateVuMetersOnly(), KHÔNG chờ/không phụ thuộc startAudioMonitor() (SYSTEM_AUDIO)
+// bên dưới. Giữ biến ở scope module để không tạo trùng nếu hàm được gọi lại.
+let __micSource = null;
+let __dawMasterSource = null;
+
+function startMicAndMasterVu() {
+    // Mic VU — nguồn HOÀN TOÀN riêng, KHÔNG bao giờ nối onFrame/BPMEngine/KeyEngine.
+    if (!__micSource && typeof AudioSource !== "undefined") {
+        __micSource = AudioSource.createMicSource();
+        __micSource.onLevel(({ vuPercent }) => {
+            const meter = document.getElementById("vu-mic-fill");
+            if (meter) meter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
+        });
+        __micSource.onDeviceLost((reason) => {
+            console.warn("[Audio][MIC] Mất thiết bị mic:", reason);
+            const meter = document.getElementById("vu-mic-fill");
+            if (meter) { meter.style.width = "0%"; meter.classList.add("vu-bar--nodata"); }
+        });
+        __micSource.start().catch((err) => console.warn("[Audio][MIC] Không mở được mic (Mic VU sẽ trống):", err));
+    }
+
+    // Master VU — DAW_MASTER chưa có native capture trong B58 (xem B58-REPORT.md). Gọi
+    // start() vẫn an toàn (no-op có log), UI phản ánh đúng trạng thái NO_DEVICE, KHÔNG
+    // lấy số liệu từ SYSTEM_AUDIO để giả lập.
+    if (!__dawMasterSource && typeof AudioSource !== "undefined") {
+        __dawMasterSource = AudioSource.createDawMasterSource();
+        const masterMeter = document.getElementById("vu-master-fill");
+        if (masterMeter) masterMeter.classList.add("vu-bar--nodata");
+        __dawMasterSource.onLevel(() => {
+            // luôn 0%, giữ nguyên class vu-bar--nodata — không animate giả.
+            if (masterMeter) masterMeter.style.width = "0%";
+        });
+        __dawMasterSource.start();
+    }
+}
+
 async function startAudioMonitor() {
     if (audioMonitorStarted) return; // tránh khởi tạo lặp / mở nhiều stream mic
     audioMonitorStarted = true;
     setStatus("dot-bpm", "pending"); // cam: bắt đầu nghe/phân tích
 
-    // QUAN TRỌNG: phải dùng ĐÚNG soundcard đã chọn ở Setup (selectedSoundcardId),
-    // không được để trình duyệt tự chọn mic mặc định. Mục đích của app là dò Key/BPM
-    // từ NHẠC NỀN (qua soundcard/loopback), không phải giọng hát qua mic.
-    const soundcardId = getSetting?.("selectedSoundcardId", "");
+    // TASK B58 — Mic VU / Master VU khởi động độc lập, không chờ SYSTEM_AUDIO.
+    startMicAndMasterVu();
 
-    // HARD AUDIO ROUTING RULE: Key/BPM/MOD chỉ được init trên ĐÚNG thiết bị input mà người
-    // dùng đã chọn ở Setup (selectedSoundcardId) — deviceId khớp chính xác, không rơi về mặc định.
-    //
-    // GIỚI HẠN THẬT (không được nói quá): getUserMedia({deviceId: exact}) CHỈ chứng minh "đúng
-    // thiết bị đã chọn", KHÔNG chứng minh thiết bị đó là desktop loopback thật. Nếu người dùng
-    // chọn nhầm mic vật lý làm "soundcard" ở Setup, code này KHÔNG có cách nào phát hiện ra —
-    // nó vẫn coi đó là nguồn hợp lệ vì đúng deviceId đã chọn. "System Audio" ở đây phụ thuộc
-    // 100% vào việc Setup đã cấu hình đúng kênh loopback/virtual-cable, không phải điều renderer.js
-    // tự xác minh được. Không tuyên bố "đã cách ly khỏi mic" — chỉ đúng là "đã cách ly khỏi việc
-    // rơi về input KHÔNG DO NGƯỜI DÙNG CHỌN".
-    if (!soundcardId) {
+    // TASK B58 — SYSTEM_AUDIO giờ đi qua AudioSource.createSystemAudioSource() (ui/js/audioSource.js).
+    // Hành vi audio KHÔNG đổi so với trước (vẫn đúng 1 device do Setup chọn, vẫn tắt echoCancellation/
+    // noiseSuppression/autoGainControl, vẫn không rơi về mic mặc định nếu chưa chọn) — chỉ đổi CHỖ
+    // các bước này được thực hiện (audioSource.js), để tách rõ semantic SYSTEM_AUDIO khỏi MIC/DAW_MASTER.
+    if (typeof AudioSource === "undefined") {
+        console.error("[Audio] audioSource.js chưa được nạp — không thể khởi tạo SYSTEM_AUDIO.");
+        audioMonitorStarted = false;
+        setStatus("dot-bpm", "offline");
+        return;
+    }
+
+    const systemAudio = AudioSource.createSystemAudioSource();
+    window.__systemAudioSource = systemAudio; // giữ tham chiếu cho debug/dừng sau này, không bắt buộc dùng
+
+    systemAudio.onDeviceLost((reason) => {
+        console.error("[Audio][SYSTEM_AUDIO] Mất thiết bị hoặc lỗi khởi tạo:", reason);
+        audioMonitorStarted = false;
+        setStatus("dot-bpm", "offline");
+    });
+
+    await systemAudio.start();
+
+    if (systemAudio.getState() !== AudioSourceState.RUNNING) {
+        // NO_DEVICE (chưa chọn Soundcard) hoặc ERROR (device cũ không còn khả dụng) —
+        // giữ đúng 2 thông điệp cũ, không rơi về mic mặc định.
         console.error(
-            "[Audio] Chưa chọn Soundcard ở Setup -> KHÔNG khởi tạo Key/BPM/MOD (để tránh phân tích nhầm mic). " +
-            "Vào Setup > Soundcard để chọn đúng kênh loopback/audio interface đang phát nhạc."
+            systemAudio.getState() === AudioSourceState.NO_DEVICE
+                ? "[Audio] Chưa chọn Soundcard ở Setup -> KHÔNG khởi tạo Key/BPM/MOD (để tránh phân tích nhầm mic). " +
+                  "Vào Setup > Soundcard để chọn đúng kênh loopback/audio interface đang phát nhạc."
+                : "[Audio] Soundcard đã chọn ở Setup không còn khả dụng hoặc lỗi khởi tạo. Vào Setup > Soundcard để chọn lại thiết bị."
         );
         audioMonitorStarted = false;
         setStatus("dot-bpm", "offline");
         const bpmEl2 = document.getElementById("bpmValue");
-        if (bpmEl2) bpmEl2.textContent = "Chưa chọn Soundcard (Setup)";
-        return;
-    }
-
-    const audioConstraints = {
-        deviceId: { exact: soundcardId },
-        // Tắt hết các bộ lọc dành cho giọng nói: chúng được thiết kế để "làm sạch" tiếng người,
-        // nên sẽ bóp méo/triệt tiêu nhạc cụ và làm sai lệch kết quả phân tích BPM/Key.
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-    };
-
-    let stream;
-    try {
-        console.log("Đang khởi tạo Audio từ thiết bị (soundcard đã chọn):", soundcardId);
-        stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
-    } catch (err) {
-        // deviceId đã lưu có thể không còn tồn tại (rút dây, cài lại driver, đổi tên cổng...)
-        // -> báo rõ cho người dùng thay vì âm thầm rơi về mic mặc định (dễ gây hiểu lầm như lần trước).
-        if (soundcardId && err.name === "OverconstrainedError") {
-            console.error(
-                "[Audio] Soundcard đã chọn ở Setup không còn khả dụng (deviceId cũ: " + soundcardId + "). " +
-                "Vào Setup > Soundcard để chọn lại thiết bị."
-            );
-        } else {
-            console.error("Lỗi khởi tạo Audio:", err);
+        if (bpmEl2 && systemAudio.getState() === AudioSourceState.NO_DEVICE) {
+            bpmEl2.textContent = "Chưa chọn Soundcard (Setup)";
         }
-        audioMonitorStarted = false;
-        setStatus("dot-bpm", "offline");
         return;
     }
 
     try {
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const source = audioContext.createMediaStreamSource(stream);
+        // ADAPTER BOUNDARY (Mục 7/16 B58): audioContext + raw MediaStreamAudioSourceNode lấy
+        // ĐÚNG từ AudioSource(SYSTEM_AUDIO) — KHÔNG tự tạo getUserMedia/AudioContext thứ hai ở
+        // đây nữa. BPMEngine.init()/KeyEngine.init() được gọi Y NGUYÊN như trước, KHÔNG đổi 1
+        // dòng thuật toán AI của Claude A.
+        const audioContext = systemAudio.getAudioContextForAdapter();
+        const source = systemAudio.getRawSourceNodeForAdapter();
 
-        // CHẨN ĐOÁN: AudioContext có thể bị tạo ra ở trạng thái "suspended" (chính sách
-        // autoplay của Chromium) vì nó được tạo SAU 1 lệnh await, không còn nằm ngay trong
-        // chuỗi gọi đồng bộ của cú click chuột nữa -> analyser đọc toàn số 0 dù stream có
-        // tín hiệu thật. resume() để đảm bảo nó thật sự chạy.
-        console.log("[DEBUG audio] audioContext.state TRƯỚC resume:", audioContext.state);
-        if (audioContext.state !== "running") {
-            await audioContext.resume();
-        }
-        console.log("[DEBUG audio] audioContext.state SAU resume:", audioContext.state);
-
-        const track = stream.getAudioTracks()[0];
-        console.log("[DEBUG audio] audio track:", track?.label, "| readyState:", track?.readyState, "| muted:", track?.muted, "| enabled:", track?.enabled);
+        console.log("[DEBUG audio] SYSTEM_AUDIO RUNNING — audioContext.state:", audioContext.state);
 
         // Từ đây, mỗi engine tự tạo analyser riêng + tự chạy vòng lặp riêng của nó.
         BPMEngine.init(audioContext, source);
@@ -1670,12 +1687,24 @@ async function startAudioMonitor() {
         });
 
         BPMEngine.onLevel(({ bassEnergy, localAvg, maxByte, vuPercent, rms, dbfs, peak }) => {
-            // VU METER V2 — dùng vuPercent (RMS/dBFS, metric RIÊNG cho level meter), KHÔNG dùng
-            // bassEnergy nữa (đó là spectral flux, metric của BPM/beat detection — vẫn giữ nguyên
-            // cho BPMEngine, chỉ không còn dùng để vẽ VU). VU là READ-ONLY consumer: chỉ đọc field
-            // đã tính sẵn từ callback, không gọi ngược lại bất kỳ hàm nào của BPMEngine/KeyEngine.
-            const meter = document.getElementById("vu-fill");
-            if (meter) meter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
+            // TASK B58 — Music VU: RMS/dBFS toàn dải của SYSTEM_AUDIO (vuPercent, KHÔNG đổi
+            // nguồn số liệu so với #vu-fill cũ — chỉ đổi element đích sang #vu-music-fill).
+            const musicMeter = document.getElementById("vu-music-fill");
+            if (musicMeter) musicMeter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
+
+            // TASK B58 — Beat VU: "beat/bass/flux signal từ BPM processing" (bassEnergy = spectral
+            // flux, đã có sẵn trong BPMEngine từ trước, KHÔNG phải AudioSource thứ 2). Đây là
+            // metric TƯƠNG ĐỐI (so với trung bình cục bộ localAvg), KHÔNG phải RMS/dBFS chuẩn hoá
+            // như Music VU — vì bản chất bassEnergy không có thang dBFS cố định. Distinction này
+            // được ghi rõ để không nhầm 2 con số là cùng 1 phép đo (đúng yêu cầu B58 Mục 10).
+            const beatMeter = document.getElementById("vu-beat-fill");
+            if (beatMeter) {
+                const beatPercent = localAvg > 0
+                    ? Math.max(0, Math.min(100, (bassEnergy / (localAvg * 2.5)) * 100))
+                    : 0;
+                beatMeter.style.width = beatPercent + "%";
+            }
+
             __debugLogAudioLevel(bassEnergy, localAvg, maxByte); // <-- DEBUG TẠM THỜI (vẫn log flux/BPM như cũ)
             __debugLogVuLevel(rms, dbfs, vuPercent, peak);       // <-- DEBUG TẠM THỜI (log RMS/dBFS/peak để calibrate)
         });

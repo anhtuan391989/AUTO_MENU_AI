@@ -224,6 +224,17 @@ không đọc kích thước phần tử, nên đổi số đo ở đây không 
 @keyframes blink { 50% { opacity: 0.3; } }
 .audio-monitor-bar{ width:100%; height:4px; background:rgba(255,255,255,.08); border-radius:10px; overflow:hidden; margin-bottom:8px;}
 #vu-fill{ width:0%; height:100%; border-radius:10px; background:linear-gradient( 90deg, #00ff88, #00bfff);transition:width .05s linear;}
+/* TASK B58 — 4 VU riêng biệt (Mic/Music/Beat/Master). Additive only. */
+.vu-group{ margin-bottom:8px; }
+.vu-row{ display:flex; align-items:center; gap:6px; margin-bottom:2px; }
+.vu-label{ width:44px; flex-shrink:0; font-size:9px; font-weight:700; opacity:.6; letter-spacing:.5px; }
+.vu-row .audio-monitor-bar{ margin-bottom:0; flex:1; }
+.vu-bar{ width:0%; height:100%; border-radius:10px; transition:width .05s linear; }
+.vu-bar--mic{ background:linear-gradient(90deg, #ff8a00, #ffcf5c); }
+.vu-bar--music{ background:linear-gradient(90deg, #00ff88, #00bfff); }
+.vu-bar--beat{ background:linear-gradient(90deg, #ff4d9d, #ff9ecf); }
+.vu-bar--master{ background:linear-gradient(90deg, #b06bff, #6bc9ff); }
+.vu-bar--nodata{ background:repeating-linear-gradient(45deg, rgba(255,255,255,.12) 0 4px, rgba(255,255,255,.02) 4px 8px) !important; }
 .status-bar{ display:flex; gap:12px; margin-top:8px; padding:6px 10px; background:rgba(255,255,255,.05); border-radius:8px; font-size:12px; font-weight:600;}
 /* Cho phép định vị chấm trạng thái (dot-key/dot-bpm/dot-mod) vào góc trên-phải của card */
 .analyzer-card { position: relative; }

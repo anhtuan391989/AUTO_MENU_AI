@@ -153,70 +153,79 @@ function makeDiskFile(initial) {
         assert(reloaded.selectedSoundcard === 'Focusrite 2i2', 'selectedSoundcard (tên hiển thị) khôi phục đúng sau reload');
     }
 
-    console.log('\n== Case 5 (runtime, renderer.js) — Chưa chọn soundcard -> KHÔNG gọi getUserMedia, KHÔNG khởi tạo Key/BPM/MOD ==');
+    console.log('\n== Case 5 (runtime, renderer.js) — TASK B58: SYSTEM_AUDIO NO_DEVICE -> KHÔNG đi tiếp tới BPMEngine/KeyEngine ==');
     {
-        // Trích đúng đoạn guard đầu startAudioMonitor(), CẮT trước khi tạo AudioContext/BPMEngine/KeyEngine
-        // (phần đó thuộc vùng cấm A — không đụng, không cần cho test này).
+        // TASK B58: startAudioMonitor() không còn tự gọi getUserMedia trực tiếp — việc đó
+        // chuyển vào AudioSource.createSystemAudioSource() (ui/js/audioSource.js), đã có test
+        // riêng (tests/unit/AudioSourceB58.verify.js Test 2/6: "không rơi về mặc định khi chưa
+        // chọn device", "device lost không throw"). Test này xác nhận ĐÚNG phần renderer.js còn
+        // giữ: khi AudioSource báo NO_DEVICE, startAudioMonitor() phải DỪNG trước khi gọi
+        // BPMEngine.init()/KeyEngine.init() — không đi tiếp với source rỗng.
         const fullFn = extractFn(rendererSrc, 'startAudioMonitor');
-        const cutMarker = 'try {\n        const audioContext = new';
+        const cutMarker = '\n    try {\n        // ADAPTER BOUNDARY';
         const idx = fullFn.indexOf(cutMarker);
-        if (idx === -1) throw new Error('Không tìm thấy điểm cắt an toàn trong startAudioMonitor()');
-        const guardOnly = fullFn.slice(0, idx) + '\n    return "REACHED_AUDIOCONTEXT";\n}';
+        if (idx === -1) throw new Error('Không tìm thấy điểm cắt an toàn (trước try{} adapter) trong startAudioMonitor() — code đã đổi cấu trúc, cần cập nhật lại test này.');
+        const guardOnly = fullFn.slice(0, idx) + '\n    return "REACHED_ADAPTER";\n}';
 
-        let getUserMediaCalls = 0;
+        let startCalls = 0;
         const sandbox = {
             console,
             audioMonitorStarted: false,
             setStatus: () => {},
+            startMicAndMasterVu: () => {}, // đã có test riêng (AudioSourceB58.verify.js) cho Mic/Master — stub ở đây để cô lập đúng invariant SYSTEM_AUDIO
             document: { getElementById: () => ({ textContent: '' }) },
-            getSetting: () => '', // chưa chọn soundcard
-            navigator: {
-                mediaDevices: {
-                    getUserMedia: async () => { getUserMediaCalls++; return {}; },
-                },
+            AudioSourceState: { NO_DEVICE: 'NO_DEVICE', STARTING: 'STARTING', RUNNING: 'RUNNING', STOPPING: 'STOPPING', ERROR: 'ERROR' },
+            AudioSource: {
+                createSystemAudioSource: () => ({
+                    getState: () => 'NO_DEVICE', // mô phỏng: chưa chọn Soundcard ở Setup
+                    start: async () => { startCalls++; },
+                    onDeviceLost: () => {},
+                }),
             },
-        };
-        vm.createContext(sandbox);
-        vm.runInContext(guardOnly, sandbox);
-        await sandbox.startAudioMonitor();
-
-        assert(getUserMediaCalls === 0, 'getUserMedia() KHÔNG được gọi khi chưa chọn Soundcard (không rơi về mic mặc định)');
-        assert(sandbox.audioMonitorStarted === false, 'audioMonitorStarted reset về false khi bị chặn ở guard');
-    }
-
-    console.log('\n== Case 6 (runtime, renderer.js) — Device đã lưu KHÔNG còn tồn tại -> báo lỗi rõ, KHÔNG thử lại với constraint khác (không fallback âm thầm) ==');
-    {
-        const fullFn = extractFn(rendererSrc, 'startAudioMonitor');
-        const cutMarker = 'try {\n        const audioContext = new';
-        const idx = fullFn.indexOf(cutMarker);
-        const guardOnly = fullFn.slice(0, idx) + '\n    return "REACHED_AUDIOCONTEXT";\n}';
-
-        const getUserMediaCallArgs = [];
-        const sandbox = {
-            console,
-            audioMonitorStarted: false,
-            setStatus: () => {},
-            document: { getElementById: () => ({ textContent: '' }) },
-            getSetting: () => 'dev-OLD-GONE',
-            navigator: {
-                mediaDevices: {
-                    getUserMedia: async (constraints) => {
-                        getUserMediaCallArgs.push(constraints);
-                        const err = new Error('Overconstrained');
-                        err.name = 'OverconstrainedError';
-                        throw err;
-                    },
-                },
-            },
+            window: {},
         };
         vm.createContext(sandbox);
         vm.runInContext(guardOnly, sandbox);
         const result = await sandbox.startAudioMonitor();
 
-        assert(getUserMediaCallArgs.length === 1, `getUserMedia() chỉ được gọi ĐÚNG 1 LẦN — không tự thử lại với constraint khác/không exact deviceId (thực tế gọi ${getUserMediaCallArgs.length} lần)`);
-        assert(getUserMediaCallArgs[0]?.audio?.deviceId?.exact === 'dev-OLD-GONE', 'lần gọi duy nhất vẫn dùng đúng exact deviceId đã chọn ở Setup, không rơi về mic mặc định');
-        assert(result !== 'REACHED_AUDIOCONTEXT', 'hàm KHÔNG đi tiếp tới AudioContext/KeyEngine/BPMEngine khi getUserMedia lỗi');
-        assert(sandbox.audioMonitorStarted === false, 'audioMonitorStarted reset về false sau lỗi, không giữ trạng thái "đã start" giả');
+        assert(startCalls === 1, 'AudioSource.createSystemAudioSource().start() được gọi đúng 1 lần');
+        assert(result !== 'REACHED_ADAPTER', 'startAudioMonitor() KHÔNG đi tiếp tới BPMEngine/KeyEngine khi SYSTEM_AUDIO = NO_DEVICE');
+        assert(sandbox.audioMonitorStarted === false, 'audioMonitorStarted reset về false khi bị chặn (NO_DEVICE)');
+    }
+
+    console.log('\n== Case 6 (runtime, renderer.js) — TASK B58: SYSTEM_AUDIO ERROR (device đã lưu không còn tồn tại) -> KHÔNG đi tiếp, không fallback ==');
+    {
+        const fullFn = extractFn(rendererSrc, 'startAudioMonitor');
+        const cutMarker = '\n    try {\n        // ADAPTER BOUNDARY';
+        const idx = fullFn.indexOf(cutMarker);
+        const guardOnly = fullFn.slice(0, idx) + '\n    return "REACHED_ADAPTER";\n}';
+
+        let startCalls = 0;
+        let deviceLostHandlerRegistered = false;
+        const sandbox = {
+            console,
+            audioMonitorStarted: false,
+            setStatus: () => {},
+            startMicAndMasterVu: () => {},
+            document: { getElementById: () => ({ textContent: '' }) },
+            AudioSourceState: { NO_DEVICE: 'NO_DEVICE', STARTING: 'STARTING', RUNNING: 'RUNNING', STOPPING: 'STOPPING', ERROR: 'ERROR' },
+            AudioSource: {
+                createSystemAudioSource: () => ({
+                    getState: () => 'ERROR', // mô phỏng: deviceId cũ (dev-OLD-GONE) không còn khả dụng
+                    start: async () => { startCalls++; },
+                    onDeviceLost: (cb) => { deviceLostHandlerRegistered = true; },
+                }),
+            },
+            window: {},
+        };
+        vm.createContext(sandbox);
+        vm.runInContext(guardOnly, sandbox);
+        const result = await sandbox.startAudioMonitor();
+
+        assert(startCalls === 1, 'AudioSource.createSystemAudioSource().start() được gọi đúng 1 lần (không tự thử lại)');
+        assert(deviceLostHandlerRegistered === true, 'onDeviceLost() được đăng ký để bắt lỗi mất thiết bị giữa chừng');
+        assert(result !== 'REACHED_ADAPTER', 'startAudioMonitor() KHÔNG đi tiếp tới BPMEngine/KeyEngine khi SYSTEM_AUDIO = ERROR');
+        assert(sandbox.audioMonitorStarted === false, 'audioMonitorStarted reset về false sau ERROR, không giữ trạng thái "đã start" giả');
     }
 
     console.log(`\n${pass} PASS, ${fail} FAIL`);
