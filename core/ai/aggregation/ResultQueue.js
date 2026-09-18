@@ -70,6 +70,28 @@ class ResultQueue {
 
     _onAnalysisResult(result) {
 
+        // TASK A58 — CONTRACT HARDENING (bug thật, đã tái hiện được bằng test): trước bản vá
+        // này, _onAnalysisResult() push THẲNG mọi giá trị nhận được vào this.buffer mà không
+        // kiểm tra hình dạng — nếu 1 trong số đó là null/không phải object/thiếu "type" (ví dụ
+        // do 1 module nào đó publish nhầm ANALYSIS_RESULT sai payload), _reduce() (chạy sau,
+        // trong _flush()) sẽ throw ngay tại result.key?.to (result null thì `result.key` tự nó
+        // throw TypeError — optional chaining ?. chỉ bảo vệ PHÍA SAU dấu chấm, không bảo vệ
+        // chính "result" là null). _flush() bọc try/catch nên KHÔNG crash app, nhưng hệ quả là
+        // TOÀN BỘ danh sách kết quả trong cùng cửa sổ gom 400ms bị huỷ — kể cả các AnalysisResult
+        // HOÀN TOÀN HỢP LỆ tình cờ đến cùng lúc với entry lỗi đó (silent loss của dữ liệu đúng,
+        // không phải chỉ riêng entry sai). Chặn NGAY TẠI ĐÂY — trước khi vào buffer — để 1 entry
+        // hỏng không bao giờ ảnh hưởng tới các entry khác trong cùng đợt gom.
+        if (!result || typeof result !== "object" || typeof result.type !== "string") {
+
+            Logger.error(
+                "ResultQueue",
+                `Bỏ qua ANALYSIS_RESULT không hợp lệ (không phải object hoặc thiếu "type") — KHÔNG đưa vào buffer để không ảnh hưởng các kết quả hợp lệ khác trong cùng cửa sổ gom: ${this._safeMessage(result)}`
+            );
+
+            return;
+
+        }
+
         // TASK A50 — hoàn thiện safety boundary: app/main.js (nơi từng là lưới an toàn gián
         // tiếp duy nhất bọc quanh lời gọi EventBus.publish(ANALYSIS_RESULT,...) dẫn tới đây)
         // giờ đã bị KHOÁ (đóng băng cho tới khi xử lý xong phần integration của C) — ResultQueue
