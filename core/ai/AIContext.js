@@ -1,6 +1,20 @@
 // TASK A49 — BPM contract hardening cần Logger để báo lỗi rõ ràng thay vì silent-fail
 const Logger = require("../shared/Logger");
 
+// TASK A59 — Confidence/BPM validation helpers dùng chung cho updateKey/updateBpm bên dưới,
+// và cho AnalysisResult.js/DecisionAction.js (2 bản sao GIỐNG HỆT ở đó — nếu sửa ngưỡng ở đây
+// phải sửa đồng bộ cả 2 nơi kia; không gộp thành module dùng chung để tránh thêm phụ thuộc mới
+// cho 1 hàm thuần rất nhỏ, đúng tinh thần "không refactor lớn" của A59).
+// confidence ∈ [0,1], phải là số hữu hạn (chặn NaN/Infinity/-Infinity/ngoài khoảng).
+function isValidConfidence(value) {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+// bpm > 0, phải là số hữu hạn (chặn NaN/Infinity/0/âm — KHÔNG áp đặt khoảng nhạc lý 60-200,
+// đó là quyết định của bpmEngine.js, ngoài thẩm quyền AIContext).
+function isValidBpm(value) {
+    return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
 class AIContext {
 
     constructor() {
@@ -121,7 +135,24 @@ class AIContext {
 
         this.key.current = key ?? this.key.current;
 
-        this.key.confidence = typeof confidence === "number" ? confidence : this.key.confidence;
+        // TASK A59.1 — CONFIDENCE CONTRACT: confidence phải là số hữu hạn trong [0,1] (định
+        // nghĩa chính thức, xem A59-REPORT.md). Trước bản vá, guard chỉ kiểm tra
+        // typeof === "number" — NaN/Infinity/-1/2 đều có typeof "number" nên lọt qua ÂM THẦM
+        // (đã xác nhận bằng test ở A58). Khi invalid: GIỮ NGUYÊN giá trị cũ (nhất quán với hành
+        // vi đã có sẵn cho trường hợp sai kiểu, ví dụ string) — không tự clamp vì chưa có bằng
+        // chứng đó là semantics mong muốn — nhưng giờ LUÔN log rõ để không còn trôi qua âm thầm
+        // (chỉ log khi field THỰC SỰ được cung cấp — field vắng mặt là bình thường, không log để
+        // tránh spam).
+        if (confidence !== undefined && confidence !== null) {
+            if (isValidConfidence(confidence)) {
+                this.key.confidence = confidence;
+            } else {
+                Logger.error(
+                    "AIContext",
+                    `updateKey() nhận confidence không hợp lệ (${String(confidence)}) — phải là số hữu hạn trong [0,1]. Giữ nguyên confidence cũ (${this.key.confidence}).`
+                );
+            }
+        }
 
         this.key.stable = true;
 
@@ -154,9 +185,31 @@ class AIContext {
 
         const { bpm, confidence } = payload || {};
 
-        this.bpm.current = typeof bpm === "number" ? bpm : this.bpm.current;
+        // TASK A59.2 — BPM CONTRACT: bpm phải là số hữu hạn > 0 (0/âm không có ý nghĩa vật lý).
+        // Trước bản vá, NaN/Infinity/-5 đều có typeof "number" nên lọt qua âm thầm (đã xác nhận
+        // bằng test A58). Khi invalid: giữ nguyên bpm.current cũ + log rõ ràng, không tự clamp.
+        if (bpm !== undefined && bpm !== null) {
+            if (isValidBpm(bpm)) {
+                this.bpm.current = bpm;
+            } else {
+                Logger.error(
+                    "AIContext",
+                    `updateBpm() nhận bpm không hợp lệ (${String(bpm)}) — phải là số hữu hạn > 0. Giữ nguyên bpm.current cũ (${this.bpm.current}).`
+                );
+            }
+        }
 
-        this.bpm.confidence = typeof confidence === "number" ? confidence : this.bpm.confidence;
+        // TASK A59.1 — cùng contract confidence [0,1] áp dụng nhất quán cho BPM.
+        if (confidence !== undefined && confidence !== null) {
+            if (isValidConfidence(confidence)) {
+                this.bpm.confidence = confidence;
+            } else {
+                Logger.error(
+                    "AIContext",
+                    `updateBpm() nhận confidence không hợp lệ (${String(confidence)}) — phải là số hữu hạn trong [0,1]. Giữ nguyên confidence cũ (${this.bpm.confidence}).`
+                );
+            }
+        }
 
         this.bpm.stable = true;
 

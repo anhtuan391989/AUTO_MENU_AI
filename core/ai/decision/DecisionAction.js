@@ -18,6 +18,11 @@ const BaseModel = require("../../shared/BaseModel");
 
 const VALID_ACTIONS = ["LOAD_NEW_SONG", "SET_KEY", "SHIFT_KEY", "UPDATE_BPM"];
 
+// TASK A59.1 — bản sao GIỐNG HỆT helper trong core/ai/AIContext.js (xem comment ở đó).
+function isValidConfidence(value) {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
 class DecisionAction extends BaseModel {
 
     constructor(fields = {}) {
@@ -30,13 +35,16 @@ class DecisionAction extends BaseModel {
 
         this.value = fields.value ?? null;
 
-        this.confidence = typeof fields.confidence === "number" ? fields.confidence : 0;
+        this.confidence = isValidConfidence(fields.confidence) ? fields.confidence : 0;
 
         this.reason = fields.reason || "";
 
         this.priority = typeof fields.priority === "number" ? fields.priority : 0;
 
-        this.timestamp = fields.timestamp || Date.now();
+        // TASK A59.3 — cùng lý do đã ghi ở AnalysisResult.js: nhất quán kiểu-kiểm-tra với các
+        // field anh em (confidence/priority) ngay phía trên, không thêm ordering/staleness
+        // logic nào (UNKNOWN/NEEDS SPEC, xem A59-REPORT.md).
+        this.timestamp = typeof fields.timestamp === "number" ? fields.timestamp : Date.now();
 
     }
 

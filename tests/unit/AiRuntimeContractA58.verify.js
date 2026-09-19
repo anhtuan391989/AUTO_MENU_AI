@@ -114,20 +114,26 @@ console.log('\n== A58.1/4 — Malformed/invalid payload cho Key/BPM/Mod: không 
     try { AIContext.updateKey(null); } catch { threw = true; }
     assert(threw === true, 'updateKey(null) THẬT SỰ throw (destructuring {key,confidence}={} không áp dụng cho null, chỉ áp dụng cho undefined) — ĐÃ được chặn an toàn ở lớp ngoài (ipcMain.on("ai-result") try/catch, xem test IPC bên dưới), nhưng bản thân AIContext.updateKey() không tự vệ với null.');
 
-    // --- Confidence: NaN/Infinity/negative/out-of-range/string — TẤT CẢ đều lọt qua "typeof === number" ---
+    // --- Confidence: NaN/Infinity/negative/out-of-range/string ---
+    // TASK A59 UPDATE: khi A58 viết các test này, contract CHỈ kiểm tra typeof === "number" nên
+    // NaN/Infinity/-1/2 đều lọt qua âm thầm — ghi nhận là FINDING (không sửa trong A58, đúng
+    // phạm vi lúc đó). A59.1 đã ĐÓNG gap này (xem A59-REPORT.md) — cập nhật lại các assertion
+    // dưới đây để phản ánh ĐÚNG hành vi MỚI, không phải vì A58 sai mà vì A59 đã hoàn thiện đúng
+    // finding mà A58 để lại.
     AIContext.reset();
+    AIContext.updateKey({ key: 'C Major', confidence: 0.6 }); // baseline hợp lệ để so sánh "giữ nguyên"
     AIContext.updateKey({ key: 'C Major', confidence: NaN });
-    assert(Number.isNaN(AIContext.key.confidence),
-        'FINDING (không sửa trong A58): confidence=NaN được CHẤP NHẬN ÂM THẦM (typeof NaN === "number" nên qua được guard hiện tại) — contract hiện tại KHÔNG có range/NaN validation cho confidence.');
+    assert(AIContext.key.confidence === 0.6,
+        'FIXED bởi A59.1: confidence=NaN giờ bị TỪ CHỐI đúng (trước đây lọt qua âm thầm) — giữ nguyên giá trị hợp lệ trước đó.');
 
     AIContext.updateKey({ key: 'C Major', confidence: Infinity });
-    assert(AIContext.key.confidence === Infinity, 'FINDING: confidence=Infinity cũng được chấp nhận âm thầm (cùng lỗ hổng)');
+    assert(AIContext.key.confidence === 0.6, 'FIXED bởi A59.1: confidence=Infinity bị từ chối, giữ nguyên 0.6');
 
     AIContext.updateKey({ key: 'C Major', confidence: -1 });
-    assert(AIContext.key.confidence === -1, 'FINDING: confidence=-1 (ngoài khoảng [0,1] hợp lý) được chấp nhận âm thầm — không có range check');
+    assert(AIContext.key.confidence === 0.6, 'FIXED bởi A59.1: confidence=-1 (ngoài [0,1]) bị từ chối, giữ nguyên 0.6');
 
     AIContext.updateKey({ key: 'C Major', confidence: 2 });
-    assert(AIContext.key.confidence === 2, 'FINDING: confidence=2 (>1) được chấp nhận âm thầm');
+    assert(AIContext.key.confidence === 0.6, 'FIXED bởi A59.1: confidence=2 (>1) bị từ chối, giữ nguyên 0.6');
 
     const beforeStringConfidence = AIContext.key.confidence;
     AIContext.updateKey({ key: 'C Major', confidence: '0.9' });
@@ -139,8 +145,10 @@ console.log('\n== A58.1/4 — Malformed/invalid payload cho Key/BPM/Mod: không 
     AIContext.updateBpm(128); // ĐÚNG hình dạng lỗi cũ đã sửa ở A49
     assert(AIContext.bpm.current === 0, 'REGRESSION GUARD (A49): updateBpm(128) — số thô — vẫn bị TỪ CHỐI đúng như thiết kế A49, không âm thầm set bpm.current');
 
+    AIContext.updateBpm({ bpm: 140, confidence: 0.5 }); // baseline hợp lệ
     AIContext.updateBpm({ bpm: NaN, confidence: 0.5 });
-    assert(Number.isNaN(AIContext.bpm.current), 'FINDING: bpm=NaN trong object cũng lọt qua (cùng lỗ hổng typeof-only validation như confidence)');
+    assert(AIContext.bpm.current === 140,
+        'FIXED bởi A59.2: bpm=NaN trong object giờ bị TỪ CHỐI đúng (trước đây lọt qua âm thầm) — giữ nguyên 140.');
 }
 
 console.log('\n== A58.3 — Timestamp/ordering: chưa có formal timestamp trong AIContext.key/bpm; AnalysisResult/DecisionAction có default Date.now() an toàn ==');
@@ -149,9 +157,14 @@ console.log('\n== A58.3 — Timestamp/ordering: chưa có formal timestamp trong
     const r1 = AnalysisResult.create({ type: 'KEY_CHANGE', source: 'KEY' }); // không truyền timestamp
     assert(typeof r1.timestamp === 'number' && r1.timestamp > 0, 'AnalysisResult: thiếu timestamp -> tự điền Date.now(), không phải undefined/NaN');
 
+    // TASK A59 UPDATE: A58 ghi nhận đây là UNKNOWN/NEEDS SPEC (không phải throw/crash, chỉ là
+    // thiếu type-check). A59.3 đã sửa để NHẤT QUÁN với confidence/magnitude trong cùng
+    // constructor (cùng dùng typeof-check) — không phải vì đã xác định được "ordering rule"
+    // nào (vẫn UNKNOWN với ordering thật sự — xem A59-REPORT.md), chỉ vì type-consistency là
+    // 1 fix hẹp, an toàn, không cần spec nghiệp vụ nào thêm.
     const r2 = AnalysisResult.create({ type: 'KEY_CHANGE', source: 'KEY', timestamp: 'invalid' });
-    assert(r2.timestamp === 'invalid',
-        'FINDING (UNKNOWN mức độ nghiêm trọng, không đủ evidence để kết luận BUG THẬT — xem A58-REPORT.md mục Timestamp/Ordering): AnalysisResult không validate KIỂU của timestamp truyền vào — "invalid" (string) được giữ nguyên thay vì fallback Date.now(), vì code chỉ check `fields.timestamp || Date.now()` (falsy-check, không phải type-check). Trong thực tế, timestamp luôn do chính Core tạo ra (Date.now() ở InferenceEngine/DecisionRules), KHÔNG bao giờ nhận trực tiếp từ input bên ngoài chưa qua xử lý — nên đường khai thác thực tế của gap này chưa xác định được, ghi UNKNOWN thay vì PASS/FAIL.');
+    assert(typeof r2.timestamp === 'number' && r2.timestamp > 0,
+        'FIXED bởi A59.3: timestamp kiểu sai (string "invalid") giờ fallback Date.now() đúng, nhất quán với confidence/magnitude — không còn giữ nguyên giá trị sai kiểu như trước.');
 
     // Không có cơ chế reorder/reject cho thứ tự t1/t3/t2 ở bất kỳ đâu trong pipeline — xác nhận
     // bằng audit tĩnh (không tìm thấy so sánh timestamp nào để quyết định chấp nhận/từ chối 1

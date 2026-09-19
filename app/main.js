@@ -489,6 +489,10 @@ ipcMain.handle("midi-verify", async () => {
 // chuỗi, do ResultQueue dùng setTimeout debounce) nằm ở core/ai/aggregation/ResultQueue.js,
 // xem comment tương ứng ở đó.
 // ================================
+// TASK A59.6 — theo dõi các type lạ đã log rồi, để chỉ log 1 lần/type/phiên (tránh spam log
+// nếu có nguồn lỗi liên tục gửi cùng 1 type sai) — xem chi tiết trong handler bên dưới.
+const seenUnknownAiResultTypes = new Set();
+
 ipcMain.on("ai-result", (event, { type, payload } = {}) => {
 
     try {
@@ -509,6 +513,22 @@ ipcMain.on("ai-result", (event, { type, payload } = {}) => {
             AIContext.updateMod(payload);
             EventBus.publish(Events.MOD_UPDATED, payload);
             return;
+        }
+
+        // TASK A59.6 — UNKNOWN ai-result OBSERVABILITY: A58 xác nhận type lạ/thiếu KHÔNG throw
+        // (an toàn) nhưng cũng KHÔNG để lại log nào — khác biệt so với các nhánh malformed khác
+        // trong cùng file (vd updateBpm(số thô) đã có Logger.error rõ ràng từ A49). Thêm đúng 1
+        // dòng log ở đây để nhất quán — KHÔNG đổi protocol IPC (không thêm field, không đổi
+        // hành vi 3 nhánh key/bpm/mod ở trên). Rate-limit đơn giản để không spam log nếu 1
+        // nguồn lỗi liên tục gửi type sai (vd renderer bị bug lặp) — chỉ log 1 lần mỗi loại
+        // type-lạ, không log lại type-lạ giống hệt đã thấy trước đó trong cùng phiên.
+        const unknownKey = typeof type === "string" ? type : `<${typeof type}>`;
+        if (!seenUnknownAiResultTypes.has(unknownKey)) {
+            seenUnknownAiResultTypes.add(unknownKey);
+            Logger.error(
+                "ai-result",
+                `Nhận type không xác định (${unknownKey}) — bỏ qua, không cập nhật AIContext. (Log này chỉ xuất hiện 1 lần cho mỗi type lạ trong phiên chạy hiện tại.)`
+            );
         }
 
     } catch (err) {
