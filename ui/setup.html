@@ -64,22 +64,9 @@
                     </div>
                 </div>
 
-                <div class="panel-card">
-                    <div class="panel-card-title">🚀 Mở kèm Project / Youtube</div>
-                    <div class="row-buttons" style="margin-bottom:10px;">
-                        <label class="setup-checkbox"><input type="checkbox" id="checkOpenPj"> Mở Project</label>
-                        <label class="setup-checkbox"><input type="checkbox" id="checkCopyPj"> Tạo bản COPY</label>
-                        <label class="setup-checkbox"><input type="checkbox" id="checkOpenYt"> Mở Youtube</label>
-                    </div>
-                    <textarea id="pjPathDisplay" readonly class="ph-textarea">Chưa chọn project</textarea>
-                    <div class="row-buttons" style="margin-top:8px;">
-                        <button id="btnSelectPj" class="setup-btn">Chọn PJ</button>
-                        <button id="btnSaveCurrentPj" class="setup-btn">Lưu PJ đang mở</button>
-                        <button id="btnOpenProjectBundle" class="setup-btn">🚀 Mở kèm ngay</button>
-                    </div>
-                    <!-- nút ẩn giữ để không phá initModal(..., "btnClosePj") của setup.js -->
-                    <button id="btnClosePj" style="display:none;"></button>
-                </div>
+                <!-- TASK C60: "🚀 Mở kèm Project / Youtube" đã CHUYỂN sang panel-ai (AI > Project/Youtube
+                     Management) — cùng id, cùng handler (initProjectSection() trong setup.js), chỉ đổi vị
+                     trí DOM. Không còn bản duplicate ở đây. -->
 
                 <div class="panel-card">
                     <div class="panel-card-title">⌨ Phím tắt điều khiển</div>
@@ -236,6 +223,49 @@
                         <label class="ph-field">Calibration<button class="setup-btn" disabled>Chạy Calibration AI</button></label>
                         <label class="ph-field">Debug<label class="setup-checkbox"><input type="checkbox" disabled> Bật log debug</label></label>
                     </div>
+                </div>
+
+                <!-- TASK C60 — CHUYỂN nguyên khối từ panel-dashboard (Setup > Dashboard) sang đây.
+                     Cùng id, cùng handler thật (initProjectSection() trong setup.js, dùng
+                     getSetting/saveSetting + window.electronAPI.selectFile/openProjectBundle) — KHÔNG
+                     đổi backend/IPC/persistence, chỉ đổi vị trí DOM. Đây là MOVE, không phải LOCK: các
+                     control bên dưới KHÔNG bị thêm disabled/readonly nào so với trước. -->
+                <div class="panel-card">
+                    <div class="panel-card-title">🚀 Mở kèm Project / Youtube</div>
+                    <div class="row-buttons" style="margin-bottom:10px;">
+                        <label class="setup-checkbox"><input type="checkbox" id="checkOpenPj"> Mở Project</label>
+                        <label class="setup-checkbox"><input type="checkbox" id="checkCopyPj"> Tạo bản COPY</label>
+                        <label class="setup-checkbox"><input type="checkbox" id="checkOpenYt"> Mở Youtube</label>
+                    </div>
+                    <textarea id="pjPathDisplay" readonly class="ph-textarea">Chưa chọn project</textarea>
+                    <div class="row-buttons" style="margin-top:8px;">
+                        <button id="btnSelectPj" class="setup-btn">Chọn PJ</button>
+                        <button id="btnSaveCurrentPj" class="setup-btn">Lưu PJ đang mở</button>
+                        <button id="btnOpenProjectBundle" class="setup-btn">🚀 Mở kèm ngay</button>
+                    </div>
+                    <!-- nút ẩn giữ để không phá initModal(..., "btnClosePj") của setup.js -->
+                    <button id="btnClosePj" style="display:none;"></button>
+                </div>
+
+                <!-- TASK C60 — CHUYỂN nguyên khối từ panel-daw (Setup > DAW) sang đây. Cùng id, cùng
+                     handler thật (trong initSetupPage() của setup.js, dùng getSetting/setSetting +
+                     window.electronAPI.selectFile) — KHÔNG đổi backend/IPC/persistence, chỉ đổi vị trí
+                     DOM. LƯU Ý (ghi trong C60-REPORT.md): khối này dùng key riêng
+                     "selectedDAWPath"/"launchDAW" (getSetting/setSetting, lưu cục bộ renderer) — KHÁC
+                     với "Startup & Paths" (spDawExePath/spAutoStart, TASK A55, lưu qua
+                     app-settings.json + DawLauncher thật, xem card phía trên) — C60 chỉ MOVE, không
+                     gộp/sửa 2 cơ chế này vì đó là thay đổi kiến trúc ngoài phạm vi task. -->
+                <div class="panel-card">
+                    <div class="panel-card-title">📁 Đường dẫn &amp; khởi động</div>
+                    <div class="setting-row">
+                        <label>📁 Đường dẫn DAW</label>
+                        <div id="currentDawPath" class="status-text">❌ Chưa thiết lập</div>
+                        <button id="browseDawBtn" class="setup-btn">📂 Chọn đường dẫn DAW</button>
+                    </div>
+                    <label class="setup-checkbox">
+                        <input type="checkbox" id="launchDawOnStartup">
+                        🚀 Mở DAW cùng Menu
+                    </label>
                 </div>
             </section>
 
@@ -543,7 +573,8 @@
 
                 <div class="panel-banner">
                     🎹 Điều khiển DAW theo thời gian thực (Transport/Mixer/Automation...) nên cấu hình ở mục
-                    <b>MIDI → Mapping</b>. Các mục dưới đây chỉ là lựa chọn DAW đang dùng + đường dẫn khởi động.
+                    <b>MIDI → Mapping</b>. Các mục dưới đây chỉ là lựa chọn DAW đang dùng. (Đường dẫn DAW &amp;
+                    khởi động cùng Menu đã chuyển sang mục <b>AI</b> — TASK C60.)
                 </div>
 
                 <div class="panel-card">
@@ -592,18 +623,9 @@
                     <button id="closeDawBtn" style="display:none;"></button>
                 </div>
 
-                <div class="panel-card">
-                    <div class="panel-card-title">📁 Đường dẫn &amp; khởi động</div>
-                    <div class="setting-row">
-                        <label>📁 Đường dẫn DAW</label>
-                        <div id="currentDawPath" class="status-text">❌ Chưa thiết lập</div>
-                        <button id="browseDawBtn" class="setup-btn">📂 Chọn đường dẫn DAW</button>
-                    </div>
-                    <label class="setup-checkbox">
-                        <input type="checkbox" id="launchDawOnStartup">
-                        🚀 Mở DAW cùng Menu
-                    </label>
-                </div>
+                <!-- TASK C60: "📁 Đường dẫn & khởi động" (currentDawPath / browseDawBtn / launchDawOnStartup)
+                     đã CHUYỂN sang panel-ai (AI > DAW Path/Startup Management) — cùng id, cùng handler
+                     (trong initSetupPage() của setup.js), chỉ đổi vị trí DOM. Không còn bản duplicate ở đây. -->
 
                 <div class="panel-card">
                     <div class="panel-card-title">⌨ Auto-Key</div>
