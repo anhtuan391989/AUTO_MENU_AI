@@ -55,3 +55,21 @@ khi có **cả 2** bằng chứng:
 
 Thiếu 1 trong 2 điều kiện trên → giữ nguyên `pending-backend`/`not-supported`,
 không tự nâng cấp dù trông "có vẻ đã sẵn sàng".
+
+---
+
+## Ghi chú B61 — con trỏ evidence đã đổi (KHÔNG đổi status/midi-allowed nào ở trên)
+
+Các cột **Evidence** và mục "Nguyên tắc cập nhật" phía trên nhắc tới
+`runtime.js:ACTION_TO_CAPABILITY`. Bảng đó **đã bị xoá ở Task B38-FIX** (D1 XML thành nguồn
+mapping duy nhất, nạp thật bởi `core/command-engine-js/d1Loader.js`). Khi đọc lại các dòng trên,
+hiểu "entry trong `ACTION_TO_CAPABILITY`" là:
+
+```
+core/command-engine-js/d1Loader.js : CAPABILITY_BACKEND_TARGET[<capability-id>]
+```
+
+(metadata backend `capability -> {targetId, action}`, không trùng D1 — D1 quyết định capability
+có được dispatch qua MIDI hay không; bảng này quyết định gọi driver/action nào). Test đối chiếu chéo
+D1 XML <-> bảng này <-> `capabilityRegistry.js` <-> file matrix này:
+`tests/unit/MidiD1RuntimeB61.verify.js` (B61.2).

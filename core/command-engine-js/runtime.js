@@ -345,11 +345,21 @@ function start({ readSettingsFile }) {
         const portName = settings.midiOutputPort;
         configuredPortName = portName || null;
         if (portName) {
-            midiDriverInstance = new MidiDriver(portName, false);
-            engine.registerDriver(midiDriverInstance); // đăng ký dưới tên 'midi'
-            engine.drivers.set("mcu", midiDriverInstance); // ALIAS — studio_one dùng tên 'mcu', không phải 'midi'
-            log(`MidiDriver (mở lại cổng có sẵn "${portName}") sẵn sàng, alias 'mcu'.`);
-            lastOutputError = null;
+            // TASK B61.5 — lỗi mở OUTPUT (vd cổng loopMIDI chưa chạy lúc app khởi động) chỉ được
+            // ảnh hưởng driver 'mcu'; KHÔNG được nuốt luôn bước nạp D1 + mở MIDI Input ở dưới
+            // (2 việc đó không phụ thuộc Output). Trước bản vá này, MidiDriver() throw làm nhảy
+            // thẳng xuống catch bên dưới -> d1State kẹt "not-loaded", Input không bao giờ mở.
+            try {
+                midiDriverInstance = new MidiDriver(portName, false);
+                engine.registerDriver(midiDriverInstance); // đăng ký dưới tên 'midi'
+                engine.drivers.set("mcu", midiDriverInstance); // ALIAS — studio_one dùng tên 'mcu', không phải 'midi'
+                log(`MidiDriver (mở lại cổng có sẵn "${portName}") sẵn sàng, alias 'mcu'.`);
+                lastOutputError = null;
+            } catch (err) {
+                log("Không mở được MidiDriver OUTPUT lúc start() — driver 'mcu' tạm không sẵn sàng, tự fallback 'hotkey'. Lỗi:", err.message);
+                lastOutputError = err.message;
+                midiDriverInstance = null;
+            }
         } else {
             log("Chưa có midiOutputPort đã lưu — driver 'mcu' sẽ không sẵn sàng, capabilityRegistry tự fallback sang 'hotkey'.");
             lastOutputError = "Chưa có midiOutputPort đã lưu.";
@@ -377,7 +387,12 @@ function start({ readSettingsFile }) {
  * độc lập") — vá tại đây, không đổi bất kỳ CC/Note/action mapping nào (đúng Mục 2.1).
  */
 function reopenOutputDriver(portName) {
-    if (portName === configuredPortName) return; // không đổi cổng -> không đóng/mở lại, tránh nhấp nháy port thật
+    // TASK B61.5 — chỉ bỏ qua khi cổng KHÔNG đổi VÀ driver đang thật sự sống (hoặc đã bỏ chọn cổng).
+    // Trước bản vá này điều kiện chỉ là `portName === configuredPortName` -> nếu lần mở đầu thất bại
+    // (cổng chưa tồn tại lúc start()/lần reload trước), configuredPortName vẫn đã bị gán => mọi lần
+    // reloadMappings()/autoConnect() sau đó (cùng tên cổng) đều return sớm, không bao giờ thử mở lại
+    // dù cổng đã xuất hiện — chỉ thoát được bằng cách restart app hoặc đổi sang cổng khác.
+    if (portName === configuredPortName && (midiDriverInstance || !portName)) return; // cổng không đổi + driver còn sống -> không đóng/mở lại, tránh nhấp nháy port thật
     configuredPortName = portName || null;
 
     if (midiDriverInstance) {
