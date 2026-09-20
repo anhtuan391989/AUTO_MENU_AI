@@ -1536,6 +1536,7 @@ setInterval(updateSongPosition, 1000);
    kết quả 1 chiều từ KeyEngine.
    ========================================================== */
 let audioMonitorStarted = false;
+let __lastKnownSystemAudioDeviceId = null; // TASK C62 — theo dõi đổi Soundcard từ Setup khi app đang chạy
 
 // ---- DEBUG TẠM THỜI: in ra Console mỗi ~1 giây để kiểm tra mức tín hiệu thật ----
 // Xoá 2 hàm này sau khi đã xác định app chạy ổn định lâu dài.
@@ -1613,6 +1614,101 @@ function startMicAndMasterVu() {
     }
 }
 
+// TASK C62 — đảm bảo BPMEngine.onUpdate()/onLevel()/KeyEngine.onProvisionalEstimate() chỉ được
+// đăng ký ĐÚNG 1 LẦN cho toàn bộ vòng đời trang, dù bindAiEnginesToSystemAudio() được gọi lại
+// nhiều lần (mỗi lần reconnect) — các hàm onXxx() này là "push vào mảng listener", gọi lại sẽ
+// cộng dồn callback trùng lặp (mỗi BPM tick sẽ update DOM/gửi IPC nhiều lần) nếu không có cờ này.
+let __systemAudioListenersRegistered = false;
+
+// TASK C62 — (Re)bind BPMEngine/KeyEngine vào audioContext/source hiện tại của systemAudio. Được
+// gọi qua systemAudio.onStateChange("RUNNING") — DÙNG CHUNG cho cả lần start() đầu tiên lẫn mọi
+// lần audioSource.js tự reconnect sau khi mất thiết bị (1 code path duy nhất, không rẽ nhánh
+// riêng cho "lần đầu" và "reconnect" để tránh 2 chỗ code dễ lệch nhau).
+function bindAiEnginesToSystemAudio(systemAudio) {
+    try {
+        // BPMEngine.init()/KeyEngine.init() tự tạo AnalyserNode MỚI mỗi lần gọi nhưng KHÔNG tự
+        // huỷ vòng lặp requestAnimationFrame cũ nếu có — phải stop() trước để tránh 2 vòng lặp
+        // song song sau mỗi lần reconnect (đúng yêu cầu "không duplicate analyser/loop" mục 7 C62).
+        // An toàn khi gọi trước lần init() đầu tiên (stop() tự no-op nếu chưa từng chạy).
+        BPMEngine.stop();
+        KeyEngine.stop();
+
+        // ADAPTER BOUNDARY (Mục 7/16 B58): audioContext + raw MediaStreamAudioSourceNode lấy
+        // ĐÚNG từ AudioSource(SYSTEM_AUDIO) — KHÔNG tự tạo getUserMedia/AudioContext thứ hai ở
+        // đây nữa. BPMEngine.init()/KeyEngine.init() được gọi Y NGUYÊN như trước, KHÔNG đổi 1
+        // dòng thuật toán AI của Claude A.
+        const audioContext = systemAudio.getAudioContextForAdapter();
+        const source = systemAudio.getRawSourceNodeForAdapter();
+
+        console.log("[DEBUG audio] SYSTEM_AUDIO RUNNING — audioContext.state:", audioContext.state);
+
+        // Từ đây, mỗi engine tự tạo analyser riêng + tự chạy vòng lặp riêng của nó.
+        BPMEngine.init(audioContext, source);
+        KeyEngine.init(audioContext, source);
+
+        if (!__systemAudioListenersRegistered) {
+            __systemAudioListenersRegistered = true;
+
+            BPMEngine.onUpdate((bpm) => {
+                const bpmEl1 = document.getElementById("currentBpm");
+                const bpmEl2 = document.getElementById("bpmValue");
+                if (bpmEl1) bpmEl1.textContent = bpm;
+                if (bpmEl2) bpmEl2.textContent = bpm + " BPM";
+                setStatus("dot-bpm", "online"); // xanh: đã dò được BPM ổn định, đủ phiếu đồng thuận
+
+                // Gửi kết quả sang Core (AIContext) qua IPC — không ảnh hưởng logic hiển thị phía trên
+                window.electronAPI?.reportAiResult("bpm", { bpm });
+            });
+
+            BPMEngine.onLevel(({ bassEnergy, localAvg, maxByte, vuPercent, rms, dbfs, peak }) => {
+                // TASK B58 — Music VU: RMS/dBFS toàn dải của SYSTEM_AUDIO (vuPercent, KHÔNG đổi
+                // nguồn số liệu so với #vu-fill cũ — chỉ đổi element đích sang #vu-music-fill).
+                const musicMeter = document.getElementById("vu-music-fill");
+                if (musicMeter) musicMeter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
+
+                // TASK B58 — Beat VU: "beat/bass/flux signal từ BPM processing" (bassEnergy = spectral
+                // flux, đã có sẵn trong BPMEngine từ trước, KHÔNG phải AudioSource thứ 2). Đây là
+                // metric TƯƠNG ĐỐI (so với trung bình cục bộ localAvg), KHÔNG phải RMS/dBFS chuẩn hoá
+                // như Music VU — vì bản chất bassEnergy không có thang dBFS cố định. Distinction này
+                // được ghi rõ để không nhầm 2 con số là cùng 1 phép đo (đúng yêu cầu B58 Mục 10).
+                const beatMeter = document.getElementById("vu-beat-fill");
+                if (beatMeter) {
+                    const beatPercent = localAvg > 0
+                        ? Math.max(0, Math.min(100, (bassEnergy / (localAvg * 2.5)) * 100))
+                        : 0;
+                    beatMeter.style.width = beatPercent + "%";
+                }
+
+                __debugLogAudioLevel(bassEnergy, localAvg, maxByte); // <-- DEBUG TẠM THỜI (vẫn log flux/BPM như cũ)
+                __debugLogVuLevel(rms, dbfs, vuPercent, peak);       // <-- DEBUG TẠM THỜI (log RMS/dBFS/peak để calibrate)
+            });
+
+            KeyEngine.onLevel(() => {
+                __debugLogKeyConfidence(); // <-- DEBUG TẠM THỜI (tự throttle 1 lần/giây bên trong)
+            });
+
+            // Mục A ("Key tạm" — cải thiện tốc độ cảm nhận): CHỈ cập nhật hiển thị, KHÔNG đụng
+            // keySource.ai.value/lock/gửi Plugin — những việc đó vẫn 100% qua startAiRealtimeLoop()
+            // (mục 7B) như cũ.
+            KeyEngine.onProvisionalEstimate((estimate) => {
+                keySource.ai.provisional = estimate.key;
+                refreshKeySourceDisplay();
+            });
+        }
+
+        console.log("Audio Engine đã sẵn sàng! (BPMEngine + KeyEngine tự chạy độc lập)");
+
+        // Chroma cần vài giây tích lũy dữ liệu mới đủ tin cậy — đợi 1 nhịp ngắn trước khi
+        // bắt đầu dò, tránh dò ngay lúc chromaVector còn gần như rỗng. triggerAiKeyDetect() đã tự
+        // huỷ watcher cũ (window.__keyDetectStopWatcher) trước khi tạo watcher mới, nên an toàn
+        // khi gọi lại nhiều lần qua các lần reconnect khác nhau — không tạo vòng dò trùng lặp.
+        setTimeout(() => triggerAiKeyDetect(), 2000);
+    } catch (err) {
+        console.error("Lỗi khởi tạo Audio:", err);
+        setStatus("dot-bpm", "offline"); // đỏ: chưa dò được (lỗi mic/quyền truy cập)
+    }
+}
+
 async function startAudioMonitor() {
     if (audioMonitorStarted) return; // tránh khởi tạo lặp / mở nhiều stream mic
     audioMonitorStarted = true;
@@ -1634,11 +1730,24 @@ async function startAudioMonitor() {
 
     const systemAudio = AudioSource.createSystemAudioSource();
     window.__systemAudioSource = systemAudio; // giữ tham chiếu cho debug/dừng sau này, không bắt buộc dùng
+    __lastKnownSystemAudioDeviceId = AudioSource.getSystemAudioDeviceId(); // TASK C62 — mốc so sánh khi Setup đổi thiết bị
 
     systemAudio.onDeviceLost((reason) => {
         console.error("[Audio][SYSTEM_AUDIO] Mất thiết bị hoặc lỗi khởi tạo:", reason);
-        audioMonitorStarted = false;
         setStatus("dot-bpm", "offline");
+        // TASK C62 — KHÔNG đặt lại audioMonitorStarted=false ở đây nữa: startAudioMonitor() chỉ
+        // được gọi ĐÚNG 1 LẦN (click đầu tiên, xem listener {once:true} bên dưới file), nên đặt
+        // lại cờ này không còn tạo ra đường "gọi lại" nào — audioSource.js (autoReconnect:true)
+        // giờ tự lo việc thử lại, và systemAudio.onStateChange() bên dưới sẽ tự nối lại Key/BPM
+        // khi thiết bị quay lại, KHÔNG cần reload app, KHÔNG cần click lại (đúng mục tiêu C62).
+    });
+
+    // TASK C62 — (Re)bind Key/BPM mỗi khi SYSTEM_AUDIO chuyển sang RUNNING: bao gồm CẢ lần start()
+    // đầu tiên (fire ngay trong lúc await bên dưới, vì setState(RUNNING) chạy đồng bộ trước khi
+    // start() trả về) LẪN mọi lần audioSource.js tự reconnect thành công sau này.
+    systemAudio.onStateChange((state) => {
+        if (state !== AudioSourceState.RUNNING) return;
+        bindAiEnginesToSystemAudio(systemAudio);
     });
 
     await systemAudio.start();
@@ -1650,87 +1759,19 @@ async function startAudioMonitor() {
             systemAudio.getState() === AudioSourceState.NO_DEVICE
                 ? "[Audio] Chưa chọn Soundcard ở Setup -> KHÔNG khởi tạo Key/BPM/MOD (để tránh phân tích nhầm mic). " +
                   "Vào Setup > Soundcard để chọn đúng kênh loopback/audio interface đang phát nhạc."
-                : "[Audio] Soundcard đã chọn ở Setup không còn khả dụng hoặc lỗi khởi tạo. Vào Setup > Soundcard để chọn lại thiết bị."
+                : "[Audio] Soundcard đã chọn ở Setup không còn khả dụng hoặc lỗi khởi tạo -- sẽ tự thử lại " +
+                  "ngầm khi thiết bị quay lại (không cần reload). Vào Setup > Soundcard để chọn lại thiết bị nếu cần đổi."
         );
-        audioMonitorStarted = false;
         setStatus("dot-bpm", "offline");
         const bpmEl2 = document.getElementById("bpmValue");
         if (bpmEl2 && systemAudio.getState() === AudioSourceState.NO_DEVICE) {
             bpmEl2.textContent = "Chưa chọn Soundcard (Setup)";
         }
+        // TASK C62 — không đặt lại audioMonitorStarted=false: nếu là ERROR (không phải NO_DEVICE),
+        // audioSource.js đã tự lên lịch retry — onStateChange ở trên tự lo phần còn lại.
         return;
     }
-
-    try {
-        // ADAPTER BOUNDARY (Mục 7/16 B58): audioContext + raw MediaStreamAudioSourceNode lấy
-        // ĐÚNG từ AudioSource(SYSTEM_AUDIO) — KHÔNG tự tạo getUserMedia/AudioContext thứ hai ở
-        // đây nữa. BPMEngine.init()/KeyEngine.init() được gọi Y NGUYÊN như trước, KHÔNG đổi 1
-        // dòng thuật toán AI của Claude A.
-        const audioContext = systemAudio.getAudioContextForAdapter();
-        const source = systemAudio.getRawSourceNodeForAdapter();
-
-        console.log("[DEBUG audio] SYSTEM_AUDIO RUNNING — audioContext.state:", audioContext.state);
-
-        // Từ đây, mỗi engine tự tạo analyser riêng + tự chạy vòng lặp riêng của nó.
-        BPMEngine.init(audioContext, source);
-        KeyEngine.init(audioContext, source);
-
-        BPMEngine.onUpdate((bpm) => {
-            const bpmEl1 = document.getElementById("currentBpm");
-            const bpmEl2 = document.getElementById("bpmValue");
-            if (bpmEl1) bpmEl1.textContent = bpm;
-            if (bpmEl2) bpmEl2.textContent = bpm + " BPM";
-            setStatus("dot-bpm", "online"); // xanh: đã dò được BPM ổn định, đủ phiếu đồng thuận
-
-            // Gửi kết quả sang Core (AIContext) qua IPC — không ảnh hưởng logic hiển thị phía trên
-            window.electronAPI?.reportAiResult("bpm", { bpm });
-        });
-
-        BPMEngine.onLevel(({ bassEnergy, localAvg, maxByte, vuPercent, rms, dbfs, peak }) => {
-            // TASK B58 — Music VU: RMS/dBFS toàn dải của SYSTEM_AUDIO (vuPercent, KHÔNG đổi
-            // nguồn số liệu so với #vu-fill cũ — chỉ đổi element đích sang #vu-music-fill).
-            const musicMeter = document.getElementById("vu-music-fill");
-            if (musicMeter) musicMeter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
-
-            // TASK B58 — Beat VU: "beat/bass/flux signal từ BPM processing" (bassEnergy = spectral
-            // flux, đã có sẵn trong BPMEngine từ trước, KHÔNG phải AudioSource thứ 2). Đây là
-            // metric TƯƠNG ĐỐI (so với trung bình cục bộ localAvg), KHÔNG phải RMS/dBFS chuẩn hoá
-            // như Music VU — vì bản chất bassEnergy không có thang dBFS cố định. Distinction này
-            // được ghi rõ để không nhầm 2 con số là cùng 1 phép đo (đúng yêu cầu B58 Mục 10).
-            const beatMeter = document.getElementById("vu-beat-fill");
-            if (beatMeter) {
-                const beatPercent = localAvg > 0
-                    ? Math.max(0, Math.min(100, (bassEnergy / (localAvg * 2.5)) * 100))
-                    : 0;
-                beatMeter.style.width = beatPercent + "%";
-            }
-
-            __debugLogAudioLevel(bassEnergy, localAvg, maxByte); // <-- DEBUG TẠM THỜI (vẫn log flux/BPM như cũ)
-            __debugLogVuLevel(rms, dbfs, vuPercent, peak);       // <-- DEBUG TẠM THỜI (log RMS/dBFS/peak để calibrate)
-        });
-
-        KeyEngine.onLevel(() => {
-            __debugLogKeyConfidence(); // <-- DEBUG TẠM THỜI (tự throttle 1 lần/giây bên trong)
-        });
-
-        // Mục A ("Key tạm" — cải thiện tốc độ cảm nhận): CHỈ cập nhật hiển thị, KHÔNG đụng
-        // keySource.ai.value/lock/gửi Plugin — những việc đó vẫn 100% qua startAiRealtimeLoop()
-        // (mục 7B) như cũ.
-        KeyEngine.onProvisionalEstimate((estimate) => {
-            keySource.ai.provisional = estimate.key;
-            refreshKeySourceDisplay();
-        });
-
-        console.log("Audio Engine đã sẵn sàng! (BPMEngine + KeyEngine tự chạy độc lập)");
-
-        // Chroma cần vài giây tích lũy dữ liệu mới đủ tin cậy — đợi 1 nhịp ngắn trước khi
-        // bắt đầu dò, tránh dò ngay lúc chromaVector còn gần như rỗng.
-        setTimeout(() => triggerAiKeyDetect(), 2000);
-    } catch (err) {
-        console.error("Lỗi khởi tạo Audio:", err);
-        audioMonitorStarted = false;
-        setStatus("dot-bpm", "offline"); // đỏ: chưa dò được (lỗi mic/quyền truy cập)
-    }
+    // Không cần làm gì thêm ở đây — bindAiEnginesToSystemAudio() đã chạy qua onStateChange() ở trên.
 }
 
 async function listAudioInputDevices() {
@@ -1821,6 +1862,20 @@ window.electronAPI?.onSetupChanged?.(() => {
     // localStorage ở tiến trình của NÓ, nên phải load lại thì mới thấy dữ liệu mới.
     loadSetup?.();
     updateMainStatus();
+
+    // TASK C62 (Test L) — nếu user vừa đổi Soundcard (System Audio) ở Setup trong lúc Menu
+    // đang chạy, tự stop() + start() lại SYSTEM_AUDIO với deviceId MỚI — không cần reload cả
+    // app. systemAudio.stop() huỷ mọi retry timer cũ (nếu đang chờ reconnect với ID cũ) trước
+    // khi start() lại với ID mới, nên không có 2 nguồn/2 retry loop nào cùng tồn tại.
+    if (window.__systemAudioSource && typeof AudioSource !== "undefined") {
+        const newDeviceId = AudioSource.getSystemAudioDeviceId();
+        if (newDeviceId !== __lastKnownSystemAudioDeviceId) {
+            console.log("[Audio][SYSTEM_AUDIO] Soundcard vừa đổi ở Setup -> ngắt thiết bị cũ, kết nối lại với thiết bị mới.");
+            __lastKnownSystemAudioDeviceId = newDeviceId;
+            window.__systemAudioSource.stop();
+            window.__systemAudioSource.start();
+        }
+    }
 });
 
 // Đã bỏ cơ chế "khoá menu chính khi Setup chưa xong 10/10" — checklist đó dựa trên

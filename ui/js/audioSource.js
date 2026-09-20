@@ -106,12 +106,43 @@
         let timeData = null;
         let freqData = null;
 
+        // TASK C62 — auto-reconnect (chỉ hoạt động khi options.autoReconnect === true, hiện tại
+        // CHỈ bật cho SYSTEM_AUDIO — xem createSystemAudioSource()). Mục tiêu: khi mất thiết bị
+        // giữa chừng, tự thử lại theo backoff tăng dần thay vì chờ user reload cả app (bug C61
+        // đã ghi nhận: startAudioMonitor() ở renderer.js chỉ được gọi 1 lần qua listener
+        // {once:true}, không có đường nào tự gọi lại).
+        let retryTimerId = null;
+        let retryDelayMs = 0;
+        const RETRY_BASE_MS = 2000;
+        const RETRY_MAX_MS = 15000;
+
         const levelListeners = [];
         const frameListeners = [];
         const deviceLostListeners = [];
+        const stateChangeListeners = []; // TASK C62 — renderer.js dùng để biết CHÍNH XÁC lúc nào
+
+        // cần (re)bind Key/BPM vào audioContext/source MỚI — dùng chung 1 sự kiện cho cả lần
+        // start() đầu tiên lẫn mọi lần tự reconnect sau này (1 code path, không rẽ nhánh riêng).
+
+        function clearRetryTimer() {
+            if (retryTimerId) { clearTimeout(retryTimerId); retryTimerId = null; }
+        }
+
+        function scheduleRetry() {
+            if (!options.autoReconnect) return;
+            if (retryTimerId) return; // đã có 1 lịch retry đang chờ — KHÔNG tạo thêm (chống duplicate retry loop, mục 7/10 đề bài C62)
+            retryDelayMs = retryDelayMs ? Math.min(retryDelayMs * 2, RETRY_MAX_MS) : RETRY_BASE_MS;
+            console.log(`[AudioSource:${sourceType}] Sẽ tự thử kết nối lại sau ${retryDelayMs}ms...`);
+            retryTimerId = setTimeout(() => {
+                retryTimerId = null;
+                if (state === AudioSourceState.STOPPING || state === AudioSourceState.RUNNING) return; // đã stop() hoặc đã có nguồn khác start() lại trong lúc chờ
+                start();
+            }, retryDelayMs);
+        }
 
         function setState(next) {
             state = next;
+            emitStateChange(next);
         }
 
         function emitLevel(level) {
@@ -127,6 +158,11 @@
         function emitDeviceLost(reason) {
             for (const cb of deviceLostListeners) {
                 try { cb(reason); } catch (e) { console.error(`[AudioSource:${sourceType}] onDeviceLost listener lỗi:`, e); }
+            }
+        }
+        function emitStateChange(next) {
+            for (const cb of stateChangeListeners) {
+                try { cb(next); } catch (e) { console.error(`[AudioSource:${sourceType}] onStateChange listener lỗi:`, e); }
             }
         }
 
@@ -182,10 +218,15 @@
                             setState(AudioSourceState.ERROR);
                             teardown();
                             emitDeviceLost("TRACK_ENDED");
+                            scheduleRetry(); // TASK C62 — thiết bị rút giữa chừng: tự thử lại thay vì treo vĩnh viễn
                         }
                     });
                 }
 
+                // TASK C62 — start() thành công (kể cả sau khi retry) -> reset backoff về 0 và
+                // huỷ mọi lịch retry còn sót (không nên còn, nhưng phòng hờ tránh 2 nguồn cùng gọi start()).
+                retryDelayMs = 0;
+                clearRetryTimer();
                 setState(AudioSourceState.RUNNING);
 
                 function loop() {
@@ -216,10 +257,16 @@
                 setState(deviceId ? AudioSourceState.ERROR : AudioSourceState.NO_DEVICE);
                 teardown();
                 emitDeviceLost(err && err.name ? err.name : "UNKNOWN_ERROR");
+                // TASK C62 — chỉ retry khi ĐÃ có deviceId cấu hình nhưng lỗi (thiết bị mất/không mở
+                // được) — KHÔNG retry khi state là NO_DEVICE do requireExplicitDevice chưa cấu hình
+                // (đó không phải "mất thiết bị", là "chưa chọn" — không có gì để thử lại).
+                if (deviceId) scheduleRetry();
             }
         }
 
         function stop() {
+            clearRetryTimer(); // TASK C62 mục 10 — 0 retry timer còn sống sau khi stop()
+            retryDelayMs = 0;
             if (state === AudioSourceState.NO_DEVICE) return;
             setState(AudioSourceState.STOPPING);
             teardown();
@@ -234,6 +281,7 @@
             onLevel: (cb) => levelListeners.push(cb),
             onFrame: (cb) => frameListeners.push(cb),
             onDeviceLost: (cb) => deviceLostListeners.push(cb),
+            onStateChange: (cb) => stateChangeListeners.push(cb), // TASK C62
         };
 
         // TASK B58 Mục 7/16 — adapter boundary CHO PHÉP DUY NHẤT với SYSTEM_AUDIO:
@@ -297,6 +345,9 @@
             fftSize: 2048,
             requireExplicitDevice: true,
             exposeRawNodeForAdapter: true, // DUY NHẤT SYSTEM_AUDIO được phép — xem ghi chú ở trên
+            autoReconnect: true, // TASK C62 — CHỈ SYSTEM_AUDIO tự reconnect (đúng phạm vi bug đã audit
+                                  // ở C61: Key/BPM/Mod không được treo vĩnh viễn sau khi mất thiết bị).
+                                  // MIC/DAW_MASTER KHÔNG bật cờ này — ngoài phạm vi C62, không đổi hành vi cũ.
         });
     }
 

@@ -72,6 +72,19 @@ function loadAudioSourceModule({ getUserMediaImpl, getSettingImpl }) {
         performance: { now: () => Date.now() },
         requestAnimationFrame: () => 1, // không cần loop thật chạy nhiều lần cho unit test này
         cancelAnimationFrame: () => {},
+        // TASK C62 — audioSource.js giờ dùng setTimeout/clearTimeout cho auto-reconnect
+        // (SYSTEM_AUDIO). Đây là API chuẩn của MỌI môi trường JS thật (browser/Electron), không
+        // cần fake riêng như AudioContext/getUserMedia — dùng thẳng bản thật của Node là đủ,
+        // không ảnh hưởng gì tới các assertion B58 vốn có (test này không cần điều khiển thời
+        // gian, khác với tests/unit/AudioReconnectC62.verify.js).
+        // QUAN TRỌNG: dùng bản NO-OP (không tự bắn callback) — không phải setTimeout thật của
+        // Node — vì nếu dùng thật, retry backoff (2s/4s/8s.../15s) sẽ khiến tiến trình Node của
+        // CHÍNH file test này treo hàng chục giây chờ timer trong lúc chạy Test 6 (getUserMedia
+        // luôn reject) — vượt quá thời gian cho phép. File test này không cần retry THẬT SỰ bắn
+        // ra (không kiểm tra hành vi reconnect ở đây, xem AudioReconnectC62.verify.js), chỉ cần
+        // start() không throw ra ngoài khi có setTimeout/clearTimeout tồn tại như 1 global thật.
+        setTimeout: () => 0,
+        clearTimeout: () => {},
         console,
         getSetting: getSettingImpl || (() => ''),
     };

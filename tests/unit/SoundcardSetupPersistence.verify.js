@@ -153,7 +153,7 @@ function makeDiskFile(initial) {
         assert(reloaded.selectedSoundcard === 'Focusrite 2i2', 'selectedSoundcard (tên hiển thị) khôi phục đúng sau reload');
     }
 
-    console.log('\n== Case 5 (runtime, renderer.js) — TASK B58: SYSTEM_AUDIO NO_DEVICE -> KHÔNG đi tiếp tới BPMEngine/KeyEngine ==');
+    console.log('\n== Case 5 (runtime, renderer.js) — TASK B58/C62: SYSTEM_AUDIO NO_DEVICE -> KHÔNG đi tiếp tới BPMEngine/KeyEngine ==');
     {
         // TASK B58: startAudioMonitor() không còn tự gọi getUserMedia trực tiếp — việc đó
         // chuyển vào AudioSource.createSystemAudioSource() (ui/js/audioSource.js), đã có test
@@ -161,11 +161,15 @@ function makeDiskFile(initial) {
         // chọn device", "device lost không throw"). Test này xác nhận ĐÚNG phần renderer.js còn
         // giữ: khi AudioSource báo NO_DEVICE, startAudioMonitor() phải DỪNG trước khi gọi
         // BPMEngine.init()/KeyEngine.init() — không đi tiếp với source rỗng.
+        //
+        // TASK C62 — CẬP NHẬT: startAudioMonitor() không còn gọi trực tiếp BPMEngine.init()/
+        // KeyEngine.init() inline nữa (đã tách ra bindAiEnginesToSystemAudio(), chỉ được gọi qua
+        // sự kiện systemAudio.onStateChange("RUNNING") — xem C62-CLOSE-VERIFY.md). Vì vậy không
+        // cần "cắt" source text ở 1 điểm đánh dấu (// ADAPTER BOUNDARY) như trước nữa — lấy
+        // NGUYÊN VẸN cả hàm là đủ để test đúng: miễn là mock AudioSource.createSystemAudioSource()
+        // không tự bắn sự kiện onStateChange("RUNNING"), bindAiEnginesToSystemAudio() (không được
+        // nạp vào sandbox — xem bên dưới) chắc chắn không có cách nào được gọi.
         const fullFn = extractFn(rendererSrc, 'startAudioMonitor');
-        const cutMarker = '\n    try {\n        // ADAPTER BOUNDARY';
-        const idx = fullFn.indexOf(cutMarker);
-        if (idx === -1) throw new Error('Không tìm thấy điểm cắt an toàn (trước try{} adapter) trong startAudioMonitor() — code đã đổi cấu trúc, cần cập nhật lại test này.');
-        const guardOnly = fullFn.slice(0, idx) + '\n    return "REACHED_ADAPTER";\n}';
 
         let startCalls = 0;
         const sandbox = {
@@ -176,32 +180,35 @@ function makeDiskFile(initial) {
             document: { getElementById: () => ({ textContent: '' }) },
             AudioSourceState: { NO_DEVICE: 'NO_DEVICE', STARTING: 'STARTING', RUNNING: 'RUNNING', STOPPING: 'STOPPING', ERROR: 'ERROR' },
             AudioSource: {
+                getSystemAudioDeviceId: () => '', // TASK C62 — startAudioMonitor() đọc giá trị này để lưu mốc so sánh (Test L)
                 createSystemAudioSource: () => ({
                     getState: () => 'NO_DEVICE', // mô phỏng: chưa chọn Soundcard ở Setup
                     start: async () => { startCalls++; },
                     onDeviceLost: () => {},
+                    onStateChange: () => {}, // TASK C62 — nhận & bỏ qua callback; KHÔNG BAO GIỜ tự bắn RUNNING (đúng NO_DEVICE)
                 }),
             },
+            // TASK C62 — KHÔNG nạp source thật của bindAiEnginesToSystemAudio() vào sandbox này —
+            // nếu code (do lỗi) lỡ gọi tới nó, ReferenceError sẽ tự làm test FAIL rõ ràng, thay vì
+            // cần 1 marker "REACHED_ADAPTER" giả để phát hiện như cách làm cũ.
             window: {},
         };
         vm.createContext(sandbox);
-        vm.runInContext(guardOnly, sandbox);
-        const result = await sandbox.startAudioMonitor();
+        vm.runInContext(fullFn, sandbox);
+        let threw = null;
+        try { await sandbox.startAudioMonitor(); } catch (e) { threw = e; }
 
         assert(startCalls === 1, 'AudioSource.createSystemAudioSource().start() được gọi đúng 1 lần');
-        assert(result !== 'REACHED_ADAPTER', 'startAudioMonitor() KHÔNG đi tiếp tới BPMEngine/KeyEngine khi SYSTEM_AUDIO = NO_DEVICE');
-        assert(sandbox.audioMonitorStarted === false, 'audioMonitorStarted reset về false khi bị chặn (NO_DEVICE)');
+        assert(threw === null, 'startAudioMonitor() không throw (nếu code lỡ gọi bindAiEnginesToSystemAudio() — hàm KHÔNG được nạp vào sandbox này — sẽ ném ReferenceError ở đây, tức là code ĐÃ đi tiếp sai khi NO_DEVICE)' + (threw ? ` (lỗi thực tế: ${threw.message})` : ''));
     }
 
-    console.log('\n== Case 6 (runtime, renderer.js) — TASK B58: SYSTEM_AUDIO ERROR (device đã lưu không còn tồn tại) -> KHÔNG đi tiếp, không fallback ==');
+    console.log('\n== Case 6 (runtime, renderer.js) — TASK B58/C62: SYSTEM_AUDIO ERROR (device đã lưu không còn tồn tại) -> KHÔNG đi tiếp, không fallback ==');
     {
         const fullFn = extractFn(rendererSrc, 'startAudioMonitor');
-        const cutMarker = '\n    try {\n        // ADAPTER BOUNDARY';
-        const idx = fullFn.indexOf(cutMarker);
-        const guardOnly = fullFn.slice(0, idx) + '\n    return "REACHED_ADAPTER";\n}';
 
         let startCalls = 0;
         let deviceLostHandlerRegistered = false;
+        let stateChangeHandlerRegistered = false;
         const sandbox = {
             console,
             audioMonitorStarted: false,
@@ -210,22 +217,32 @@ function makeDiskFile(initial) {
             document: { getElementById: () => ({ textContent: '' }) },
             AudioSourceState: { NO_DEVICE: 'NO_DEVICE', STARTING: 'STARTING', RUNNING: 'RUNNING', STOPPING: 'STOPPING', ERROR: 'ERROR' },
             AudioSource: {
+                getSystemAudioDeviceId: () => 'dev-OLD-GONE', // TASK C62 — startAudioMonitor() đọc giá trị này để lưu mốc so sánh (Test L)
                 createSystemAudioSource: () => ({
                     getState: () => 'ERROR', // mô phỏng: deviceId cũ (dev-OLD-GONE) không còn khả dụng
                     start: async () => { startCalls++; },
                     onDeviceLost: (cb) => { deviceLostHandlerRegistered = true; },
+                    onStateChange: (cb) => { stateChangeHandlerRegistered = true; }, // TASK C62 — không tự bắn RUNNING (đúng ERROR)
                 }),
             },
             window: {},
         };
         vm.createContext(sandbox);
-        vm.runInContext(guardOnly, sandbox);
-        const result = await sandbox.startAudioMonitor();
+        vm.runInContext(fullFn, sandbox);
+        let threw = null;
+        try { await sandbox.startAudioMonitor(); } catch (e) { threw = e; }
+        assert(threw === null, 'startAudioMonitor() không throw khi SYSTEM_AUDIO = ERROR' + (threw ? ` (lỗi thực tế: ${threw.message})` : ''));
 
-        assert(startCalls === 1, 'AudioSource.createSystemAudioSource().start() được gọi đúng 1 lần (không tự thử lại)');
+        assert(startCalls === 1, 'AudioSource.createSystemAudioSource().start() được gọi đúng 1 lần (không tự thử lại TỪ renderer.js — retry thật giờ nằm trong audioSource.js, xem AudioReconnectC62.verify.js)');
         assert(deviceLostHandlerRegistered === true, 'onDeviceLost() được đăng ký để bắt lỗi mất thiết bị giữa chừng');
-        assert(result !== 'REACHED_ADAPTER', 'startAudioMonitor() KHÔNG đi tiếp tới BPMEngine/KeyEngine khi SYSTEM_AUDIO = ERROR');
-        assert(sandbox.audioMonitorStarted === false, 'audioMonitorStarted reset về false sau ERROR, không giữ trạng thái "đã start" giả');
+        assert(stateChangeHandlerRegistered === true, 'TASK C62 — onStateChange() được đăng ký (để tự rebind Key/BPM khi audioSource.js tự reconnect thành công sau này)');
+        // TASK C62 — audioMonitorStarted KHÔNG còn bị đặt lại về false trong nhánh NO_DEVICE/ERROR
+        // nữa (khác hành vi CŨ trước C62): biến này giờ chỉ còn ý nghĩa "startAudioMonitor() đã
+        // được bootstrap" — không còn được dùng để quyết định có cho gọi lại startAudioMonitor()
+        // hay không (hàm này vốn chỉ được gọi ĐÚNG 1 LẦN qua listener {once:true}; việc thử lại
+        // thật giờ hoàn toàn nằm trong audioSource.js, độc lập với cờ này). Xem C62-CLOSE-VERIFY.md
+        // mục ROOT CAUSE/IMPLEMENTATION.
+        assert(sandbox.audioMonitorStarted === true, 'audioMonitorStarted giữ nguyên true sau ERROR (TASK C62 — không còn ý nghĩa "cho phép gọi lại", chỉ còn là cờ "đã bootstrap")');
     }
 
     console.log(`\n${pass} PASS, ${fail} FAIL`);
