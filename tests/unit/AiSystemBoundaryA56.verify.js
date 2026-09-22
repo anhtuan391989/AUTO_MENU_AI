@@ -32,6 +32,11 @@ const controlSourceSrc = read('core/shared/ControlSource.js');
 const pluginControllerSrc = read('core/ai/plugin/PluginController.js');
 const manualPriorityGuardSrc = read('core/shared/ManualPriorityGuard.js');
 const vocalRouterSrc = read('ui/js/vocalCommandRouter.js');
+// TASK A62 — TASK B58/C62 đã chuyển phần khởi tạo SYSTEM_AUDIO (deviceId/constraints/gate
+// "không rơi về mic mặc định") từ renderer.js sang file MỚI ui/js/audioSource.js. A56.4/5 dưới
+// đây kiểm tra ĐÚNG vị trí production hiện tại thay vì tìm logic cũ đã dời đi (xem
+// A62-CLOSE-VERIFY.md mục "Production location mới" cho bằng chứng đối chiếu đầy đủ).
+const audioSourceSrc = read('ui/js/audioSource.js');
 
 console.log('== A56.1 — Runtime entry duy nhất cho Key/BPM/Mod: 1 interface, không có đường tắt ==');
 {
@@ -72,18 +77,43 @@ console.log('\n== A56.3 — Manual/AI Key isolation ở renderer.js (đã có t�
 
 console.log('\n== A56.4/5 — Audio input cho Key/BPM/Mod: bắt buộc chọn thiết bị ở Setup, KHÔNG fallback mic mặc định ==');
 {
-    assert(/selectedSoundcardId/.test(rendererSrc), 'renderer.js dùng getSetting("selectedSoundcardId") làm nguồn audio duy nhất cho Key/BPM/Mod');
-    assert(/deviceId:\s*\{\s*exact:\s*soundcardId\s*\}/.test(rendererSrc),
-        'getUserMedia dùng deviceId: {exact: soundcardId} — KHÔNG dùng "ideal" (thứ có thể âm thầm rơi về thiết bị khác)');
-    assert(/if \(!soundcardId\)/.test(rendererSrc) && /KHÔNG khởi tạo Key\/BPM\/MOD/.test(rendererSrc),
-        'Nếu chưa chọn Soundcard ở Setup -> renderer.js CHỦ ĐỘNG DỪNG (không init Key/BPM/MOD), không fallback mic mặc định của trình duyệt');
-    assert(/echoCancellation:\s*false/.test(rendererSrc) && /noiseSuppression:\s*false/.test(rendererSrc) && /autoGainControl:\s*false/.test(rendererSrc),
-        'Tắt các bộ lọc tối ưu cho giọng nói (echo/noise/AGC) — xác nhận luồng audio này được thiết kế cho NHẠC, không phải MIC/voice');
+    // TASK A62 — 4 assertion dưới đây trước kia tìm logic trong renderer.js (kiến trúc trước
+    // B58). B58/C62 đã tách phần chọn/khởi tạo SYSTEM_AUDIO ra ui/js/audioSource.js — sửa lại
+    // ĐÚNG vị trí production hiện tại, KHÔNG đổi ý nghĩa/độ chặt của assertion, KHÔNG yêu cầu
+    // production quay lại kiến trúc cũ (đúng chỉ dẫn A62).
+    assert(/selectedSoundcardId/.test(audioSourceSrc),
+        'ui/js/audioSource.js (getSystemAudioDeviceId, B58/C62) vẫn đọc "selectedSoundcardId" làm fallback migration cho nguồn audio duy nhất của Key/BPM/Mod — đúng vị trí mới, cùng key setting cũ, không đổi hành vi');
+    assert(/deviceId:\s*\{\s*exact:\s*deviceId\s*\}/.test(audioSourceSrc),
+        'ui/js/audioSource.js: getUserMedia dùng deviceId: {exact: deviceId} — KHÔNG dùng "ideal" (thứ có thể âm thầm rơi về thiết bị khác) — biến đổi tên từ "soundcardId" -> "deviceId" khi B58 tổng quát hoá hàm này dùng chung cho cả MIC/SYSTEM_AUDIO, hành vi exact-match không đổi');
+
+    // Gate "không rơi về mic mặc định" giờ nằm ở 2 lớp, phải xác nhận CẢ 2:
+    //   (a) audioSource.js: start() không gọi getUserMedia nếu thiếu deviceId VÀ
+    //       requireExplicitDevice=true (chỉ SYSTEM_AUDIO bật cờ này — xem assertion riêng bên dưới)
+    //   (b) renderer.js: KeyEngine.init()/BPMEngine.init() CHỈ được gọi bên trong
+    //       bindAiEnginesToSystemAudio(), hàm này CHỈ được onStateChange gọi khi state === RUNNING
+    //       — không có đường nào khác gọi trực tiếp KeyEngine.init() nữa.
+    assert(/if \(!deviceId && options\.requireExplicitDevice\)/.test(audioSourceSrc) &&
+        /setState\(AudioSourceState\.NO_DEVICE\)/.test(audioSourceSrc),
+        'ui/js/audioSource.js: start() chủ động dừng ở NO_DEVICE (không gọi getUserMedia) khi thiếu deviceId và requireExplicitDevice=true — không rơi về mic mặc định của trình duyệt');
+    assert(/requireExplicitDevice:\s*true/.test(audioSourceSrc.slice(audioSourceSrc.indexOf('function createSystemAudioSource'))),
+        'createSystemAudioSource() (không phải createMicSource()) truyền requireExplicitDevice:true — đúng CHỈ SYSTEM_AUDIO bắt buộc chọn thiết bị tường minh, MIC thì không (đúng bản chất khác nhau của 2 loại nguồn)');
+    const bindFnBody = (rendererSrc.match(/function bindAiEnginesToSystemAudio\([\s\S]*?\n\}/) || [''])[0];
+    assert(/KeyEngine\.init\(audioContext, source\)/.test(bindFnBody) && /BPMEngine\.init\(audioContext, source\)/.test(bindFnBody),
+        'renderer.js: KeyEngine.init()/BPMEngine.init() nằm bên trong bindAiEnginesToSystemAudio() — hàm DUY NHẤT gọi 2 init này (đã xác nhận ở A56.1 kiểu test đếm số lần xuất hiện tương tự)');
+    assert(/systemAudio\.onStateChange\(\(state\) => \{\s*if \(state !== AudioSourceState\.RUNNING\) return;\s*bindAiEnginesToSystemAudio\(systemAudio\);/.test(rendererSrc),
+        'renderer.js: bindAiEnginesToSystemAudio() CHỈ được gọi khi onStateChange báo state===RUNNING — không có đường nào gọi KeyEngine.init() khi audioSource chưa RUNNING (tức chưa có device hợp lệ), giữ đúng bất biến "không init khi chưa chọn Soundcard" dù cơ chế đã đổi từ if-inline sang event-driven (đúng kiến trúc C62 auto-reconnect)');
+    assert(/KHÔNG khởi tạo Key\/BPM\/MOD/.test(rendererSrc),
+        'renderer.js vẫn còn nguyên thông điệp "KHÔNG khởi tạo Key/BPM/MOD" khi systemAudio không đạt RUNNING (NO_DEVICE) — cùng ý nghĩa cũ, chỉ khác vị trí code (nay nằm trong nhánh xử lý sau await systemAudio.start(), không phải if-inline ngay sau getUserMedia)');
+
+    assert(/echoCancellation:\s*false/.test(audioSourceSrc) && /noiseSuppression:\s*false/.test(audioSourceSrc) && /autoGainControl:\s*false/.test(audioSourceSrc),
+        'ui/js/audioSource.js: tắt các bộ lọc tối ưu cho giọng nói (echo/noise/AGC) — xác nhận luồng audio này được thiết kế cho NHẠC, không phải MIC/voice (đúng vị trí mới)');
+
     // Có ĐÚNG 1 chỗ khác trong renderer.js gọi getUserMedia({audio:true}) không ràng buộc thiết
     // bị: listAudioInputDevices() — chỉ xin quyền tạm để enumerateDevices() lấy device LABEL
     // (giới hạn của trình duyệt: label rỗng nếu chưa có permission), rồi DỪNG stream ngay,
     // KHÔNG truyền vào BPMEngine/KeyEngine.init() nào. Audit riêng hàm này để không nhầm với
     // luồng audio thật của Key/BPM/Mod (đã xác nhận ở các assert phía trên dùng deviceId: exact).
+    // KHÔNG đổi phần này — listAudioInputDevices() vẫn ở renderer.js, không bị B58/C62 di dời.
     const listDevicesMatch = rendererSrc.match(/async function listAudioInputDevices\(\)[\s\S]*?\n\}/);
     assert(!!listDevicesMatch, 'Tìm thấy hàm listAudioInputDevices() (nơi DUY NHẤT còn lại gọi getUserMedia không ràng buộc thiết bị)');
     const listDevicesBody = listDevicesMatch ? listDevicesMatch[0] : '';
