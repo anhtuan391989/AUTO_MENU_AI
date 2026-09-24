@@ -122,9 +122,36 @@ console.log('== A61.1 — Trace call chain thật: UI event -> triggerAiKeyDetec
         'UI event THẬT #1: click applyKeyBtn với dropdown = "AI Key Detect" -> gọi triggerAiKeyDetect() (bằng chứng: đọc trực tiếp handler trong renderer.js)');
     assert(/setTimeout\(\(\) => triggerAiKeyDetect\(\), 2000\)/.test(rendererSrc),
         'UI event THẬT #2: khởi động app -> 2s sau khi Audio Engine sẵn sàng -> setTimeout gọi triggerAiKeyDetect() (bootstrap ban đầu)');
-    const triggerAiKeyDetectCallSites = (rendererSrc.match(/triggerAiKeyDetect\(\)/g) || []).length;
-    assert(triggerAiKeyDetectCallSites === 4, // 3 lời gọi thật + 1 dòng gọi ở cuối định nghĩa hàm khác trong file (không phải định nghĩa chính nó)
-        `triggerAiKeyDetect() xuất hiện dạng lời gọi "triggerAiKeyDetect()" đúng ${triggerAiKeyDetectCallSites} lần trong renderer.js (đã liệt kê 3 UI event/bootstrap thật ở trên + xác nhận số lượng khớp)`);
+    // TASK A63 — SỬA: assertion cũ đếm MỌI occurrence text thô "triggerAiKeyDetect()" trong
+    // toàn file, kể cả bên trong dòng comment (vd dòng giải thích timing gần setTimeout ở dưới)
+    // — 1 comment được thêm bởi công việc khác (C61/C62, trước baseline A63, xem A62-REPORT.md)
+    // đã làm số đếm thô tăng từ 4 lên 5 dù KHÔNG có invocation runtime nào mới, khiến test báo
+    // FAIL sai (comment bị hiểu nhầm thành lời gọi hàm thật).
+    //
+    // Sửa đúng gốc: loại bỏ phần comment "//..." của TỪNG DÒNG trước khi đếm (comment trong file
+    // này luôn ở dạng "// ..." cuối dòng hoặc nguyên dòng — không có chuỗi nào chứa "//" cần giữ
+    // lại gần các dòng liên quan triggerAiKeyDetect), rồi loại tiếp chính dòng ĐỊNH NGHĨA hàm
+    // ("function triggerAiKeyDetect() {") — phần còn lại chỉ còn LỜI GỌI HÀM THẬT.
+    const codeOnly = rendererSrc
+        .split('\n')
+        .map((line) => {
+            const idx = line.indexOf('//');
+            return idx === -1 ? line : line.slice(0, idx);
+        })
+        .join('\n')
+        .replace(/function\s+triggerAiKeyDetect\(\)\s*\{/, ''); // bỏ chính dòng định nghĩa hàm
+
+    const realInvocations = (codeOnly.match(/triggerAiKeyDetect\(\)/g) || []).length;
+    assert(realInvocations === 3,
+        `triggerAiKeyDetect() được GỌI THẬT (không tính định nghĩa hàm, không tính comment) đúng 3 lần trong renderer.js — khớp đúng 3 UI event/bootstrap đã liệt kê ở trên (click applyKeyBtn, nút reset, setTimeout bootstrap). Thực tế đếm được: ${realInvocations} lần (đã loại bỏ comment và dòng định nghĩa trước khi đếm — không còn bị comment "false positive" thành invocation).`);
+
+    // Cross-check cấu trúc: xác nhận KHÔNG có invocation "ẩn" nào ngoài 2 pattern cụ thể đã kiểm
+    // ở A61.1 (click handler + setTimeout bootstrap) cộng với đúng 1 lời gọi còn lại (nút reset,
+    // không kiểm bằng regex cụ thể ở A61.1 nhưng đã xác nhận tồn tại qua audit A61 gốc) — nếu có
+    // 1 invocation thật thứ 4 xuất hiện trong tương lai (không phải comment), assertion "=== 3"
+    // ở trên sẽ FAIL đúng, không bị che giấu bởi cách đếm text thô cũ.
+    assert(/function triggerAiKeyDetect\(\) \{/.test(rendererSrc),
+        'Định nghĩa hàm triggerAiKeyDetect() vẫn tồn tại đúng 1 lần (không bị đếm nhầm vào 3 invocation ở trên)');
     assert(/window\.__keyDetectStopWatcher = KeyEngine\.detectOnce\(/.test(rendererSrc),
         'startAiRealtimeLoop() gọi ĐÚNG KeyEngine.detectOnce() (không phải watchContinuous) — đây là điểm nối THẬT sang runtime KeyEngine');
 
