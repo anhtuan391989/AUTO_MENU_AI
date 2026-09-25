@@ -13,7 +13,11 @@
  *            MIC lọt vào Key/BPM/Mod qua file này.
  *   Test 2 — SYSTEM_AUDIO: requireExplicitDevice=true -> không rơi về mic mặc
  *            định khi chưa chọn device (giữ đúng hành vi cũ đã audit ở B56/B57).
- *   Test 3 — SYSTEM_AUDIO có adapter getter (exposeRawNodeForAdapter=true).
+ *   Test 2b (TASK A65) — "selectedSoundcardId" (dropdown Setup chung, = Mix 01/MIC
+ *            trên máy thật, xem A64-REPORT.md GAP-1) KHÔNG còn là fallback hợp lệ
+ *            cho SYSTEM_AUDIO — vẫn phải NO_DEVICE dù key này có giá trị.
+ *   Test 3 — SYSTEM_AUDIO có adapter getter (exposeRawNodeForAdapter=true) khi
+ *            đã cấu hình đúng key RIÊNG "selectedSystemAudioDeviceId" (TASK A65).
  *   Test 4 — DAW_MASTER: luôn NO_DEVICE, onLevel luôn trả vuPercent=0/noDevice,
  *            KHÔNG bao giờ lấy số liệu khác 0 (không giả lập bằng SYSTEM_AUDIO).
  *   Test 5 — AudioLevel contract: có đủ rms/dbfs/peak/vuPercent/timestamp/sourceType.
@@ -106,20 +110,38 @@ async function run() {
 
     console.log('\n== Test 2: SYSTEM_AUDIO không rơi về mặc định khi chưa chọn device ==');
     {
-        const AudioSource = loadAudioSourceModule({ getSettingImpl: () => '' }); // không có systemAudioDeviceId lẫn selectedSoundcardId
+        const AudioSource = loadAudioSourceModule({ getSettingImpl: () => '' }); // không có selectedSystemAudioDeviceId
         const sys = AudioSource.createSystemAudioSource();
         await sys.start();
         assert(sys.getState() === 'NO_DEVICE', `SYSTEM_AUDIO state = NO_DEVICE khi chưa chọn (thực tế: ${sys.getState()})`);
     }
 
-    console.log('\n== Test 3: SYSTEM_AUDIO có adapter getter khi đã chọn device + RUNNING ==');
+    console.log('\n== Test 2b (TASK A65): "selectedSoundcardId" (dropdown Setup chung, trên máy thật = Mix 01/MIC) '
+        + 'KHÔNG còn được dùng làm fallback cho SYSTEM_AUDIO — đóng GAP-1 của A64-REPORT.md ==');
     {
+        // Giả lập ĐÚNG tình huống thật trên máy Khói: user đã chọn Soundcard ở Setup (selectedSoundcardId
+        // có giá trị, ví dụ Mix 01), nhưng CHƯA cấu hình selectedSystemAudioDeviceId (chưa có UI riêng).
         const AudioSource = loadAudioSourceModule({
-            getSettingImpl: (k) => (k === 'selectedSoundcardId' ? 'dev-XYZ' : ''), // MIGRATION FALLBACK path
+            getSettingImpl: (k) => (k === 'selectedSoundcardId' ? 'mix-01-device-id' : ''),
         });
         const sys = AudioSource.createSystemAudioSource();
         await sys.start();
-        assert(sys.getState() === 'RUNNING', `SYSTEM_AUDIO RUNNING sau khi có deviceId qua fallback selectedSoundcardId (thực tế: ${sys.getState()})`);
+        assert(sys.getState() === 'NO_DEVICE',
+            `TASK A65 AC-1: selectedSoundcardId='mix-01-device-id' (Mix 01/MIC) KHÔNG được khiến SYSTEM_AUDIO chạy — phải vẫn là NO_DEVICE (thực tế: ${sys.getState()})`);
+        assert(typeof sys.getAudioContextForAdapter !== 'function' || !sys.getAudioContextForAdapter(),
+            'TASK A65: khi NO_DEVICE do chỉ có selectedSoundcardId, không có audioContext thật nào bị lộ ra cho BPM/Key');
+    }
+
+    console.log('\n== Test 3: SYSTEM_AUDIO có adapter getter khi đã chọn device qua "selectedSystemAudioDeviceId" (TASK A65) + RUNNING ==');
+    {
+        const AudioSource = loadAudioSourceModule({
+            // TASK A65 — key RIÊNG của SYSTEM_AUDIO, KHÔNG còn chia sẻ với dropdown Setup chung
+            // "selectedSoundcardId" (xem Test 2b ở trên và A65-REPORT.md).
+            getSettingImpl: (k) => (k === 'selectedSystemAudioDeviceId' ? 'dev-XYZ' : ''),
+        });
+        const sys = AudioSource.createSystemAudioSource();
+        await sys.start();
+        assert(sys.getState() === 'RUNNING', `SYSTEM_AUDIO RUNNING sau khi có deviceId qua "selectedSystemAudioDeviceId" (thực tế: ${sys.getState()})`);
         assert(typeof sys.getAudioContextForAdapter === 'function' && !!sys.getAudioContextForAdapter(), 'SYSTEM_AUDIO có getAudioContextForAdapter() trả về AudioContext thật');
         assert(typeof sys.getRawSourceNodeForAdapter === 'function' && !!sys.getRawSourceNodeForAdapter(), 'SYSTEM_AUDIO có getRawSourceNodeForAdapter() trả về source node thật');
         sys.stop();
@@ -175,6 +197,37 @@ async function run() {
         assert(!threw, 'start() không throw ra ngoài khi getUserMedia reject (bắt lỗi nội bộ)');
         assert(sys.getState() === 'ERROR', `state = ERROR sau khi device reject (thực tế: ${sys.getState()})`);
         assert(lostReason === 'NotFoundError', `onDeviceLost nhận đúng lý do (thực tế: ${lostReason})`);
+    }
+
+    console.log('\n== Test 7 (TASK A65) — Configuration isolation: MIC dùng "selectedMicDeviceId", SYSTEM_AUDIO '
+        + 'dùng "selectedSystemAudioDeviceId" — 2 key KHÁC NHAU, không lẫn lộn/dùng chung 1 giá trị ==');
+    {
+        const seenDeviceIds = [];
+        const AudioSource = loadAudioSourceModule({
+            getSettingImpl: (k) => {
+                if (k === 'selectedMicDeviceId') return 'mic-device-111';
+                if (k === 'selectedSystemAudioDeviceId') return 'sysaudio-device-222';
+                return ''; // bao gồm cả "selectedSoundcardId" — KHÔNG được dùng nữa (xem Test 2b)
+            },
+            getUserMediaImpl: (constraints) => {
+                seenDeviceIds.push(constraints?.audio?.deviceId?.exact ?? null);
+                return Promise.resolve({
+                    getAudioTracks() { return [{ addEventListener() {}, getSettings() { return { channelCount: 2 }; } }]; },
+                    getTracks() { return [{ stop() {} }]; },
+                });
+            },
+        });
+
+        const mic = AudioSource.createMicSource();
+        await mic.start();
+        const sys = AudioSource.createSystemAudioSource();
+        await sys.start();
+
+        assert(seenDeviceIds.includes('mic-device-111'), `MIC source gọi getUserMedia với đúng deviceId riêng của nó (thực tế: ${JSON.stringify(seenDeviceIds)})`);
+        assert(seenDeviceIds.includes('sysaudio-device-222'), `SYSTEM_AUDIO source gọi getUserMedia với đúng deviceId riêng của nó (thực tế: ${JSON.stringify(seenDeviceIds)})`);
+        assert(seenDeviceIds[0] !== seenDeviceIds[1], 'TASK A65 AC-10: MIC và SYSTEM_AUDIO KHÔNG dùng chung 1 deviceId — tách biệt hoàn toàn ở tầng configuration, không chỉ ở tầng routing');
+        mic.stop();
+        sys.stop();
     }
 
     console.log(`\n== KẾT QUẢ: ${pass} PASS, ${fail} FAIL ==`);

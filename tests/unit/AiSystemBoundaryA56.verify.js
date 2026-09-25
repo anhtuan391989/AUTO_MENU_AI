@@ -81,8 +81,20 @@ console.log('\n== A56.4/5 — Audio input cho Key/BPM/Mod: bắt buộc chọn t
     // B58). B58/C62 đã tách phần chọn/khởi tạo SYSTEM_AUDIO ra ui/js/audioSource.js — sửa lại
     // ĐÚNG vị trí production hiện tại, KHÔNG đổi ý nghĩa/độ chặt của assertion, KHÔNG yêu cầu
     // production quay lại kiến trúc cũ (đúng chỉ dẫn A62).
-    assert(/selectedSoundcardId/.test(audioSourceSrc),
-        'ui/js/audioSource.js (getSystemAudioDeviceId, B58/C62) vẫn đọc "selectedSoundcardId" làm fallback migration cho nguồn audio duy nhất của Key/BPM/Mod — đúng vị trí mới, cùng key setting cũ, không đổi hành vi');
+    // TASK A65 — GAP-1 audit trong A64-REPORT.md: "selectedSoundcardId" là dropdown Setup CHUNG
+    // (mọi audioinput, không lọc loopback) và trên máy thật giá trị đó là Mix 01/MIC — coi nó là
+    // SYSTEM_AUDIO chính là root cause khiến BPM/Key/Mod phân tích MIC. A65 xoá fallback này:
+    // SYSTEM_AUDIO giờ đọc RIÊNG "selectedSystemAudioDeviceId" (xem A65-REPORT.md). Assertion cũ
+    // (kiểm tra CÒN fallback selectedSoundcardId) SIẾT LẠI ngược lại — kiểm tra ĐÚNG THÂN HÀM
+    // getSystemAudioDeviceId() (không phải toàn file, vì comment giải thích lịch sử vẫn hợp lệ
+    // nhắc tới chuỗi "selectedSoundcardId").
+    const getSystemAudioDeviceIdFnMatch = audioSourceSrc.match(/function getSystemAudioDeviceId\(\) \{[\s\S]*?\n    \}/);
+    assert(!!getSystemAudioDeviceIdFnMatch, 'Tìm thấy thân hàm getSystemAudioDeviceId() trong audioSource.js để kiểm tra');
+    const getSystemAudioDeviceIdFnBody = getSystemAudioDeviceIdFnMatch ? getSystemAudioDeviceIdFnMatch[0] : '';
+    assert(!/selectedSoundcardId/.test(getSystemAudioDeviceIdFnBody),
+        'TASK A65: getSystemAudioDeviceId() KHÔNG còn fallback đọc "selectedSoundcardId" (GAP-1 A64 đã đóng — SYSTEM_AUDIO không còn ngầm định = Mix 01/MIC)');
+    assert(/getSetting\(\s*["']selectedSystemAudioDeviceId["']/.test(getSystemAudioDeviceIdFnBody),
+        'TASK A65: getSystemAudioDeviceId() đọc đúng key RIÊNG "selectedSystemAudioDeviceId" — tách biệt khỏi dropdown Setup chung selectedSoundcardId');
     assert(/deviceId:\s*\{\s*exact:\s*deviceId\s*\}/.test(audioSourceSrc),
         'ui/js/audioSource.js: getUserMedia dùng deviceId: {exact: deviceId} — KHÔNG dùng "ideal" (thứ có thể âm thầm rơi về thiết bị khác) — biến đổi tên từ "soundcardId" -> "deviceId" khi B58 tổng quát hoá hàm này dùng chung cho cả MIC/SYSTEM_AUDIO, hành vi exact-match không đổi');
 

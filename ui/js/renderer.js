@@ -1753,14 +1753,21 @@ async function startAudioMonitor() {
     await systemAudio.start();
 
     if (systemAudio.getState() !== AudioSourceState.RUNNING) {
-        // NO_DEVICE (chưa chọn Soundcard) hoặc ERROR (device cũ không còn khả dụng) —
-        // giữ đúng 2 thông điệp cũ, không rơi về mic mặc định.
+        // NO_DEVICE hoặc ERROR — không rơi về mic mặc định (KHÔNG đổi hành vi này).
+        // TASK A65 — cập nhật lại NỘI DUNG thông điệp (chỉ console.error, KHÔNG phải text hiển
+        // thị trên UI — xem A65-REPORT.md mục 5): kể từ A65, "Setup > Soundcard" (selectedSoundcardId)
+        // KHÔNG còn cấp device cho SYSTEM_AUDIO nữa (xem GAP-1 trong A64-REPORT.md — dropdown đó trên
+        // máy thật là Mix 01/MIC). SYSTEM_AUDIO giờ đọc riêng "selectedSystemAudioDeviceId", hiện CHƯA
+        // có UI ghi key này -> NO_DEVICE là trạng thái mặc định, đúng chủ ý, cho tới khi có Setup UI
+        // hoặc cấu hình thủ công qua AudioSource.setSystemAudioDeviceId(deviceId) trong DevTools.
         console.error(
             systemAudio.getState() === AudioSourceState.NO_DEVICE
-                ? "[Audio] Chưa chọn Soundcard ở Setup -> KHÔNG khởi tạo Key/BPM/MOD (để tránh phân tích nhầm mic). " +
-                  "Vào Setup > Soundcard để chọn đúng kênh loopback/audio interface đang phát nhạc."
-                : "[Audio] Soundcard đã chọn ở Setup không còn khả dụng hoặc lỗi khởi tạo -- sẽ tự thử lại " +
-                  "ngầm khi thiết bị quay lại (không cần reload). Vào Setup > Soundcard để chọn lại thiết bị nếu cần đổi."
+                ? "[Audio][A65] SYSTEM_AUDIO chưa được cấu hình (selectedSystemAudioDeviceId rỗng) -> " +
+                  "KHÔNG khởi tạo Key/BPM/MOD (không còn dùng selectedSoundcardId/Mix 01 làm SYSTEM_AUDIO nữa). " +
+                  "Cấu hình thủ công: AudioSource.setSystemAudioDeviceId(deviceId) trong DevTools console, " +
+                  "hoặc chờ Setup UI riêng cho SYSTEM_AUDIO (xem A65-REPORT.md)."
+                : "[Audio] Thiết bị SYSTEM_AUDIO đã cấu hình không còn khả dụng hoặc lỗi khởi tạo -- sẽ tự thử lại " +
+                  "ngầm khi thiết bị quay lại (không cần reload)."
         );
         setStatus("dot-bpm", "offline");
         const bpmEl2 = document.getElementById("bpmValue");

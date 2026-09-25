@@ -32,18 +32,42 @@
     });
 
     // ---------------------------------------------------------
-    // MIGRATION (Mục 6 đề bài B58): "selectedSoundcardId" (setting cũ, vẫn do
-    // Setup/appSettings.js — phạm vi Claude C — sở hữu việc lưu/đọc gốc) đang
-    // mang nghĩa SYSTEM_AUDIO. B58 KHÔNG đổi tên key cũ trong appSettings.js/
-    // setup.js (tránh mở rộng scope vào Setup persistence của Claude C) — chỉ
-    // thêm 1 lớp đọc tương thích ở đây: ưu tiên key mới "systemAudioDeviceId"
-    // (nếu tương lai Setup lưu theo tên mới), fallback về key cũ nếu chưa có.
+    // TASK A65 — SYSTEM_AUDIO / MIC source contract separation.
+    //
+    // A64 (audit) đã chứng minh: "selectedSoundcardId" là 1 dropdown DUY NHẤT
+    // trong Setup liệt kê MỌI thiết bị audioinput (không lọc/gợi ý loopback),
+    // và trên máy chạy thực tế giá trị đó là "Mix 01" — tức là MIC (theo baseline
+    // topology: MIC -> ASIO Link Pro -> ASIOVADPRO MIX OUT -> Mix 01). Bản B58 cũ
+    // (migration shim phía trên, đã XOÁ ở A65) coi thẳng "selectedSoundcardId" là
+    // SYSTEM_AUDIO -> nghĩa là BPM/Key/Mod thực chất đang phân tích MIC, dù code
+    // gọi nó là "SYSTEM_AUDIO". Đây LÀ root cause được A64-REPORT.md ghi nhận là
+    // GAP-1 (architecture gap).
+    //
+    // A65 XOÁ HẲN fallback "systemAudioDeviceId" (key không ai từng ghi) VÀ
+    // fallback "selectedSoundcardId" (key mang semantic MIC/Mix 01 trên máy thật).
+    // SYSTEM_AUDIO giờ có key cấu hình RIÊNG, KHÔNG chia sẻ với bất kỳ dropdown
+    // chung nào: "selectedSystemAudioDeviceId" (mặc định trong appSettings.js).
+    //
+    // Setup UI hiện KHÔNG có ô chọn riêng cho SYSTEM_AUDIO (việc thêm UI/HTML mới
+    // ngoài phạm vi A65 — xem A65-REPORT.md mục "Device/configuration contract" +
+    // "Remaining hardware dependency"). Do đó cho tới khi có UI hoặc endpoint thật:
+    //     selectedSystemAudioDeviceId luôn rỗng -> SYSTEM_AUDIO luôn NO_DEVICE
+    //     -> BPM/Key/Mod KHÔNG chạy.
+    // Đây là hành vi DÙNG ĐÚNG CHỦ Ý (AC-1/AC-4/AC-5 của A65), KHÔNG phải bug và
+    // KHÔNG được "vá tạm" bằng cách quay lại đọc selectedSoundcardId/Mix 01.
+    //
+    // setSystemAudioDeviceId() bên dưới là lối cấu hình THỦ CÔNG duy nhất hiện có
+    // (gọi tay qua DevTools console, hoặc 1 Setup UI trong tương lai) — KHÔNG tự
+    // suy đoán/gán 1 device nào mặc định.
     // ---------------------------------------------------------
     function getSystemAudioDeviceId() {
         if (typeof getSetting !== "function") return "";
-        const next = getSetting("systemAudioDeviceId", "");
-        if (next) return next;
-        return getSetting("selectedSoundcardId", ""); // MIGRATION FALLBACK
+        return getSetting("selectedSystemAudioDeviceId", "");
+    }
+
+    function setSystemAudioDeviceId(deviceId) {
+        if (typeof setSetting !== "function") return false;
+        return setSetting("selectedSystemAudioDeviceId", deviceId || "");
     }
 
     // Mic device: KHÔNG có setting riêng trong repo hiện tại (chưa có UI chọn mic
@@ -358,5 +382,6 @@
         createSystemAudioSource,
         createDawMasterSource,
         getSystemAudioDeviceId, // export để renderer.js dùng lại đúng 1 nguồn sự thật
+        setSystemAudioDeviceId, // TASK A65 — cấu hình thủ công (DevTools) cho tới khi có Setup UI riêng
     };
 })(window);

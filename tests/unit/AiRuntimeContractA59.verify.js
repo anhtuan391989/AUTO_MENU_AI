@@ -262,16 +262,24 @@ console.log('\n== A59.9 — Regression suite bắt buộc ==');
             console.log(`  INFO  ${file}: ${m ? `${m[1]} PASS, ${m[2]} FAIL` : 'chạy lỗi'} — ${note}`);
         }
     }
-    // A56 hiện 32/36 (không phải 36/36) — ĐÃ XÁC NHẬN bằng git diff + git stash: 4 assertion
-    // fail vì renderer.js đã được B58 (task khác, ngoài phạm vi A59) viết lại phần audio init
+    // A56 hiện 32/36 tại thời điểm A59 (không phải 36/36) — ĐÃ XÁC NHẬN bằng git diff + git stash: 4
+    // assertion fail vì renderer.js đã được B58 (task khác, ngoài phạm vi A59) viết lại phần audio init
     // (startAudioMonitor -> AudioSource abstraction mới) SAU thời điểm A58 viết các assertion
     // đó — xác nhận lỗi này tồn tại NGAY CẢ KHI stash hết thay đổi của A59 (tức 100% pre-existing,
     // không phải do A59 gây ra). Không sửa A56 (đụng vào nghĩa là phải hiểu kiến trúc AudioSource
     // mới của B58 — ngoài phạm vi A59). Báo cáo thông tin thay vì hard-assert 36, để không che
     // giấu cũng không gán sai trách nhiệm. Xem A59-REPORT.md mục Remaining Issues.
-    runSuiteInfo('AiSystemBoundaryA56.verify.js', 'kỳ vọng gốc 36/36, THỰC TẾ 32/36 — PRE-EXISTING do B58 đổi renderer.js, đã xác nhận KHÔNG liên quan A59 (xem A59-REPORT.md)');
+    // TASK A65 — A56 đã sửa lại đúng 3 assertion liên quan GAP-1 (selectedSoundcardId không còn là
+    // SYSTEM_AUDIO) + thêm assertion mới -> giờ 42/42 PASS (đã đóng, không còn pre-existing gap cũ).
+    // Xem A65-REPORT.md.
+    runSuiteInfo('AiSystemBoundaryA56.verify.js', 'kỳ vọng gốc 36/36; sau B58 giảm còn 32/36 (pre-existing, ngoài phạm vi A59); sau A65: 42/42 (đã đóng GAP-1)');
     runSuite('AiRuntimeContractA58.verify.js', 74);
-    runSuite('AudioSourceB58.verify.js', 24);
+    // TASK A65 — AudioSourceB58.verify.js từ 24 -> 29 PASS: THÊM 5 assertion MỚI hợp lệ (không sửa/xoá
+    // assertion cũ nào), do A65 đóng GAP-1 của A64-REPORT.md (SYSTEM_AUDIO không còn fallback đọc
+    // "selectedSoundcardId" nữa). Test 2b (+2): xác nhận selectedSoundcardId một mình KHÔNG làm
+    // SYSTEM_AUDIO chạy. Test 7 (+3): xác nhận MIC và SYSTEM_AUDIO dùng 2 config key khác nhau
+    // (selectedMicDeviceId vs selectedSystemAudioDeviceId). Xem A65-REPORT.md mục Tests.
+    runSuite('AudioSourceB58.verify.js', 29);
     runSuite('SoundcardSetupPersistence.verify.js', 20);
 }
 

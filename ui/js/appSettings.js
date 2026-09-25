@@ -6,6 +6,13 @@ const DEFAULT_APP_SETTINGS = {
     selectedAutoTune: "",
     selectedSoundcard: "",
     selectedSoundcardId: "",
+    // TASK A65 — key RIÊNG cho SYSTEM_AUDIO (BPM/Key/Mod), TÁCH BIỆT hoàn toàn khỏi
+    // "selectedSoundcardId" ở trên (dropdown Setup chung, trên máy thật đang là Mix 01/MIC —
+    // xem A64-REPORT.md GAP-1 + A65-REPORT.md). KHÔNG có UI ghi key này trong A65 (chưa thêm
+    // UI mới, xem A65-REPORT.md mục Device/configuration contract) — chỉ ghi được qua
+    // AudioSource.setSystemAudioDeviceId() (DevTools/thủ công) hoặc 1 Setup UI tương lai.
+    // Mặc định rỗng => SYSTEM_AUDIO = NO_DEVICE (đúng chủ ý, không phải thiếu sót).
+    selectedSystemAudioDeviceId: "",
     selectedBrowser: "",
     selectedBrowserPath: "",
     ahkExePath: "",
