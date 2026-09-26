@@ -177,6 +177,7 @@ function makeDiskFile(initial) {
             audioMonitorStarted: false,
             setStatus: () => {},
             startMicAndMasterVu: () => {}, // đã có test riêng (AudioSourceB58.verify.js) cho Mic/Master — stub ở đây để cô lập đúng invariant SYSTEM_AUDIO
+            setSystemAudioVuNoData: () => {}, // TASK A68/A69 — hiển thị thuần (hatch VU), stub ở đây để cô lập đúng invariant SYSTEM_AUDIO
             document: { getElementById: () => ({ textContent: '' }) },
             AudioSourceState: { NO_DEVICE: 'NO_DEVICE', STARTING: 'STARTING', RUNNING: 'RUNNING', STOPPING: 'STOPPING', ERROR: 'ERROR' },
             AudioSource: {
@@ -214,6 +215,7 @@ function makeDiskFile(initial) {
             audioMonitorStarted: false,
             setStatus: () => {},
             startMicAndMasterVu: () => {},
+            setSystemAudioVuNoData: () => {}, // TASK A68/A69 — hiển thị thuần (hatch VU), stub ở đây để cô lập đúng invariant SYSTEM_AUDIO
             document: { getElementById: () => ({ textContent: '' }) },
             AudioSourceState: { NO_DEVICE: 'NO_DEVICE', STARTING: 'STARTING', RUNNING: 'RUNNING', STOPPING: 'STOPPING', ERROR: 'ERROR' },
             AudioSource: {

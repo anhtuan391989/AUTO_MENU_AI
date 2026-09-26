@@ -1666,18 +1666,10 @@ function bindAiEnginesToSystemAudio(systemAudio) {
                 const musicMeter = document.getElementById("vu-music-fill");
                 if (musicMeter) musicMeter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
 
-                // TASK B58 — Beat VU: "beat/bass/flux signal từ BPM processing" (bassEnergy = spectral
-                // flux, đã có sẵn trong BPMEngine từ trước, KHÔNG phải AudioSource thứ 2). Đây là
-                // metric TƯƠNG ĐỐI (so với trung bình cục bộ localAvg), KHÔNG phải RMS/dBFS chuẩn hoá
-                // như Music VU — vì bản chất bassEnergy không có thang dBFS cố định. Distinction này
-                // được ghi rõ để không nhầm 2 con số là cùng 1 phép đo (đúng yêu cầu B58 Mục 10).
-                const beatMeter = document.getElementById("vu-beat-fill");
-                if (beatMeter) {
-                    const beatPercent = localAvg > 0
-                        ? Math.max(0, Math.min(100, (bassEnergy / (localAvg * 2.5)) * 100))
-                        : 0;
-                    beatMeter.style.width = beatPercent + "%";
-                }
+                // TASK A69 — Bỏ hiển thị Beat VU riêng (gộp VU còn MUSIC/MIC/MASTER). KHÔNG đụng
+                // BPMEngine: bassEnergy/localAvg vẫn được tính y nguyên bên trong BPMEngine và vẫn
+                // được truyền ra đây (dùng cho __debugLogAudioLevel), chỉ bỏ đoạn ghi ra DOM
+                // "vu-beat-fill" vì phần tử đó không còn tồn tại trong HTML.
 
                 __debugLogAudioLevel(bassEnergy, localAvg, maxByte); // <-- DEBUG TẠM THỜI (vẫn log flux/BPM như cũ)
                 __debugLogVuLevel(rms, dbfs, vuPercent, peak);       // <-- DEBUG TẠM THỜI (log RMS/dBFS/peak để calibrate)
@@ -1709,6 +1701,25 @@ function bindAiEnginesToSystemAudio(systemAudio) {
     }
 }
 
+// TASK A68 — chỉ hiển thị: đánh dấu Music/Beat VU (SYSTEM_AUDIO) là "chưa có dữ liệu thật"
+// TASK A68/A69 — chỉ hiển thị: đánh dấu MUSIC VU (SYSTEM_AUDIO) là "chưa có dữ liệu thật"
+// (hatch pattern dùng lại đúng class .vu-bar--nodata đã có sẵn từ B58 cho Master VU) khi
+// SYSTEM_AUDIO không ở trạng thái RUNNING, để không lẫn với "im lặng/vẫn chạy nhưng 0%".
+// KHÔNG đổi audioSource.js/BPMEngine, KHÔNG tạo state machine mới — chỉ đọc lại state đã có.
+// A69: bỏ "vu-beat-fill" khỏi danh sách (Beat VU đã bị gộp/xoá khỏi HTML — xem A69-REPORT.md).
+function setSystemAudioVuNoData(isNoData) {
+    ["vu-music-fill"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (isNoData) {
+            el.style.width = "0%";
+            el.classList.add("vu-bar--nodata");
+        } else {
+            el.classList.remove("vu-bar--nodata");
+        }
+    });
+}
+
 async function startAudioMonitor() {
     if (audioMonitorStarted) return; // tránh khởi tạo lặp / mở nhiều stream mic
     audioMonitorStarted = true;
@@ -1735,6 +1746,7 @@ async function startAudioMonitor() {
     systemAudio.onDeviceLost((reason) => {
         console.error("[Audio][SYSTEM_AUDIO] Mất thiết bị hoặc lỗi khởi tạo:", reason);
         setStatus("dot-bpm", "offline");
+        setSystemAudioVuNoData(true); // TASK A68 — hiển thị lại đúng trạng thái "chưa có dữ liệu" khi mất thiết bị
         // TASK C62 — KHÔNG đặt lại audioMonitorStarted=false ở đây nữa: startAudioMonitor() chỉ
         // được gọi ĐÚNG 1 LẦN (click đầu tiên, xem listener {once:true} bên dưới file), nên đặt
         // lại cờ này không còn tạo ra đường "gọi lại" nào — audioSource.js (autoReconnect:true)
@@ -1747,8 +1759,11 @@ async function startAudioMonitor() {
     // start() trả về) LẪN mọi lần audioSource.js tự reconnect thành công sau này.
     systemAudio.onStateChange((state) => {
         if (state !== AudioSourceState.RUNNING) return;
+        setSystemAudioVuNoData(false); // TASK A68 — có dữ liệu thật trở lại, bỏ hatch "nodata"
         bindAiEnginesToSystemAudio(systemAudio);
     });
+
+    setSystemAudioVuNoData(true); // TASK A68 — mặc định "chưa có dữ liệu" cho tới khi RUNNING lần đầu
 
     await systemAudio.start();
 

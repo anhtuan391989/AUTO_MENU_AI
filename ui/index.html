@@ -41,10 +41,13 @@
         <!-- TASK B58 — 4 VU riêng biệt (Mic/Music/Beat/Master), thay cho #vu-fill dùng chung
              trước đây. Mỗi bar chỉ đọc từ đúng AudioSource của nó (xem ui/js/audioSource.js) —
              không có label nào đại diện cho nguồn khác. -->
+        <!-- TASK A69 — Thu gọn còn 3 VU: MUSIC / MIC / MASTER (bỏ BEAT). Thứ tự MUSIC-MIC-MASTER
+             theo đúng tên task "MUSIC / MIC / MASTER VU CONSOLIDATION" + Mục 1.A đề bài A69.
+             BPMEngine/KeyEngine/ModEngine KHÔNG bị đụng — chỉ bỏ chỗ HIỂN THỊ bassEnergy ra
+             DOM riêng (xem renderer.js), thuật toán bassEnergy trong BPMEngine vẫn giữ nguyên. -->
         <div class="vu-group" id="vuGroup">
-            <div class="vu-row"><span class="vu-label">MIC</span><div class="audio-monitor-bar"><div id="vu-mic-fill" class="vu-bar vu-bar--mic"></div></div></div>
             <div class="vu-row"><span class="vu-label">MUSIC</span><div class="audio-monitor-bar"><div id="vu-music-fill" class="vu-bar vu-bar--music"></div></div></div>
-            <div class="vu-row"><span class="vu-label">BEAT</span><div class="audio-monitor-bar"><div id="vu-beat-fill" class="vu-bar vu-bar--beat"></div></div></div>
+            <div class="vu-row"><span class="vu-label">MIC</span><div class="audio-monitor-bar"><div id="vu-mic-fill" class="vu-bar vu-bar--mic"></div></div></div>
             <div class="vu-row"><span class="vu-label">MASTER</span><div class="audio-monitor-bar"><div id="vu-master-fill" class="vu-bar vu-bar--master"></div></div></div>
         </div>
         <div id="songPosition" style="display:none;">00:00</div>
