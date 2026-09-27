@@ -273,6 +273,8 @@ function initSetupPage() {
     initProjectSection();
     initModal("openSoundcardModal", "soundcardModal", "closeSoundcardBtn");
     initSoundcardSection();
+    initMicInputSection(); // TASK B71 — MIC Input độc lập (selectedMicDeviceId)
+    initSystemAudioInputSection(); // TASK B71 — SYSTEM_AUDIO Input độc lập (selectedSystemAudioDeviceId)
     initModal("openMidiModal", "midiModal", "closeMidiBtn");
     initMidiSection();
     initLinkProSection();
@@ -1017,6 +1019,138 @@ function updateSoundcardDisplays(foundInRealList = false) {
         badge.textContent = "⚠ Audio Interface không khả dụng";
         badge.className = "badge badge-warn";
     }
+}
+
+/* ================= TASK B71 — MIC Input / SYSTEM_AUDIO Input (ĐỘC LẬP với card
+   "Audio Interface" cũ ở trên — không đổi, không đụng populateSoundcardOptions()/
+   updateSoundcardDisplays() ở trên, chỉ thêm hàm MỚI riêng cho 2 mục mới). ================= */
+
+// Liệt kê audioinput riêng cho B71: khác populateSoundcardOptions() ở chỗ option đầu tiên
+// LUÔN là "None" tường minh (không phải placeholder "chưa chọn"), vì với 2 mục MỚI này,
+// "None" là 1 lựa chọn HỢP LỆ (MIC: dùng mic mặc định hệ thống; SYSTEM_AUDIO: NO_DEVICE cố ý),
+// không phải trạng thái "quên chưa chọn" như dropdown "Audio Interface" cũ.
+async function populateDeviceSelectB71(selectEl, selectedValue, noneLabel) {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+        return { foundInRealList: false };
+    }
+    try {
+        try {
+            const tmpStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            tmpStream.getTracks().forEach(track => track.stop());
+        } catch (permErr) {
+            console.warn("Không có quyền mic, danh sách thiết bị (B71) có thể thiếu tên:", permErr);
+        }
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const inputs = devices.filter(d => d.kind === "audioinput");
+
+        selectEl.innerHTML = "";
+        const noneOpt = document.createElement("option");
+        noneOpt.value = "";
+        noneOpt.textContent = noneLabel;
+        selectEl.appendChild(noneOpt);
+
+        inputs.forEach((device, idx) => {
+            const opt = document.createElement("option");
+            opt.value = device.deviceId;
+            opt.textContent = device.label || `Thiết bị ${idx + 1}`;
+            selectEl.appendChild(opt);
+        });
+
+        // "" (None) LUÔN coi là hợp lệ — khác selectedValue rỗng của dropdown cũ (nơi rỗng
+        // nghĩa là "chưa chọn gì", 1 khái niệm khác với "None" tường minh ở đây).
+        const foundInRealList = !selectedValue ? true : inputs.some((d) => d.deviceId === selectedValue);
+
+        if (selectedValue) {
+            const match = [...selectEl.options].find(o => o.value === selectedValue);
+            if (match) {
+                selectEl.value = selectedValue;
+            } else {
+                // Thiết bị đã lưu không còn trong danh sách hiện tại — giữ lại lựa chọn cũ
+                // (không tự xoá setting), thêm option fallback chỉ để UI có gì hiển thị.
+                const fallbackOpt = document.createElement("option");
+                fallbackOpt.value = selectedValue;
+                fallbackOpt.textContent = `(Đã lưu trước đó, hiện không thấy) ${selectedValue}`;
+                selectEl.appendChild(fallbackOpt);
+                selectEl.value = selectedValue;
+            }
+        } else {
+            selectEl.value = "";
+        }
+
+        return { foundInRealList };
+    } catch (err) {
+        console.error("Không thể liệt kê thiết bị audio (B71):", err);
+        return { foundInRealList: false };
+    }
+}
+
+function initMicInputSection() {
+    const select = document.getElementById("micInputSelect");
+    const badge = document.getElementById("micInputStatusBadge");
+    if (!select || !badge) return;
+
+    function refreshBadge(foundInRealList) {
+        const savedId = getSetting("selectedMicDeviceId", "");
+        if (!savedId) {
+            badge.textContent = "⚠ Dùng mic mặc định hệ thống";
+            badge.className = "badge badge-warn";
+        } else if (foundInRealList) {
+            badge.textContent = "● Đã chọn: " + (select.selectedOptions[0]?.textContent || savedId);
+            badge.className = "badge badge-live";
+        } else {
+            badge.textContent = "⚠ Thiết bị MIC đã lưu không còn khả dụng";
+            badge.className = "badge badge-warn";
+        }
+    }
+
+    const savedId = getSetting("selectedMicDeviceId", "");
+    populateDeviceSelectB71(select, savedId, "— Không dùng thiết bị cụ thể (mic mặc định hệ thống) —")
+        .then(({ foundInRealList }) => refreshBadge(foundInRealList));
+
+    document.getElementById("btnSelectMicInput")?.addEventListener("click", () => {
+        // select.value === "" là lựa chọn None HỢP LỆ (Mục B đề bài B71: giữ hành vi mic mặc
+        // định hệ thống khi chưa chọn thiết bị cụ thể) — KHÔNG alert bắt buộc chọn như dropdown
+        // "Audio Interface" cũ.
+        saveSetting("selectedMicDeviceId", select.value || "");
+        populateDeviceSelectB71(select, select.value, "— Không dùng thiết bị cụ thể (mic mặc định hệ thống) —")
+            .then(({ foundInRealList }) => refreshBadge(foundInRealList));
+        notifySetupChanged(); // để Menu (nếu đang mở) tự reconnect MIC theo thiết bị mới — xem renderer.js
+    });
+}
+
+function initSystemAudioInputSection() {
+    const select = document.getElementById("systemAudioInputSelect");
+    const badge = document.getElementById("systemAudioInputStatusBadge");
+    if (!select || !badge) return;
+
+    function refreshBadge(foundInRealList) {
+        const savedId = getSetting("selectedSystemAudioDeviceId", "");
+        if (!savedId) {
+            badge.textContent = "⚠ Chưa chọn SYSTEM_AUDIO (BPM/Key/Mod = NO_DEVICE)";
+            badge.className = "badge badge-warn";
+        } else if (foundInRealList) {
+            badge.textContent = "● Đã chọn: " + (select.selectedOptions[0]?.textContent || savedId);
+            badge.className = "badge badge-live";
+        } else {
+            badge.textContent = "⚠ Thiết bị SYSTEM_AUDIO đã lưu không còn khả dụng";
+            badge.className = "badge badge-warn";
+        }
+    }
+
+    const savedId = getSetting("selectedSystemAudioDeviceId", "");
+    populateDeviceSelectB71(select, savedId, "— Không dùng thiết bị (NO_DEVICE) —")
+        .then(({ foundInRealList }) => refreshBadge(foundInRealList));
+
+    document.getElementById("btnSelectSystemAudioInput")?.addEventListener("click", () => {
+        // select.value === "" -> NO_DEVICE tường minh (Mục C đề bài B71: "Khi chọn None, dừng
+        // nguồn và chuyển về NO_DEVICE" — audioSource.js đã sẵn hành vi này khi deviceId rỗng
+        // + requireExplicitDevice:true, không cần đổi audioSource.js).
+        saveSetting("selectedSystemAudioDeviceId", select.value || "");
+        populateDeviceSelectB71(select, select.value, "— Không dùng thiết bị (NO_DEVICE) —")
+            .then(({ foundInRealList }) => refreshBadge(foundInRealList));
+        notifySetupChanged(); // renderer.js (C62) đã có sẵn cơ chế tự stop()/start() lại SYSTEM_AUDIO khi nghe sự kiện này
+    });
 }
 
 function initMidiSection() {

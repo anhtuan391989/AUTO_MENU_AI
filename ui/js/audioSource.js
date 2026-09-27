@@ -70,11 +70,12 @@
         return setSetting("selectedSystemAudioDeviceId", deviceId || "");
     }
 
-    // Mic device: KHÔNG có setting riêng trong repo hiện tại (chưa có UI chọn mic
-    // cho mục đích Mic VU — đó là UI/Setup work ngoài scope B58, xem B58-REPORT.md
-    // mục "Known limitations"). MIC source dùng thiết bị mic mặc định của hệ điều
-    // hành/trình duyệt một cách TƯỜNG MINH (không phải fallback ngầm của SYSTEM_AUDIO
-    // — đây là hành vi ĐÚNG cho chính MIC source, không phải fallback lỗi).
+    // Mic device: TASK B71 — nay ĐÃ có Setup UI riêng (mục "MIC Input" trong panel Audio, xem
+    // setup.js initMicInputSection()) ghi "selectedMicDeviceId". Trước B71, key này không có UI
+    // nào ghi (xem B58-REPORT.md "Known limitations" + B70-REPORT.md phát hiện #2). Hàm này
+    // KHÔNG đổi — vẫn trả "" khi chưa chọn, MIC source vẫn dùng thiết bị mic mặc định của hệ
+    // điều hành/trình duyệt một cách TƯỜNG MINH trong trường hợp đó (không phải fallback ngầm
+    // của SYSTEM_AUDIO — đây là hành vi ĐÚNG cho chính MIC source, giữ nguyên từ B58).
     function getMicDeviceId() {
         if (typeof getSetting !== "function") return "";
         return getSetting("selectedMicDeviceId", ""); // "" => dùng mic mặc định hệ thống
@@ -383,5 +384,12 @@
         createDawMasterSource,
         getSystemAudioDeviceId, // export để renderer.js dùng lại đúng 1 nguồn sự thật
         setSystemAudioDeviceId, // TASK A65 — cấu hình thủ công (DevTools) cho tới khi có Setup UI riêng
+        getMicDeviceId, // TASK B71 — export để renderer.js (onSetupChanged) biết deviceId MIC mới nhất
+                        // khi Setup lưu "selectedMicDeviceId", dùng để quyết định có cần
+                        // stop()/start() lại __micSource hay không (giống hệt cơ chế C62 đã có
+                        // cho SYSTEM_AUDIO). KHÔNG thêm setMicDeviceId — Setup ghi thẳng qua
+                        // saveSetting("selectedMicDeviceId", ...) như mọi setting khác, không
+                        // cần setter riêng (khác SYSTEM_AUDIO, nơi setSystemAudioDeviceId() còn
+                        // được dùng cho DevTools thủ công trước khi B71 có UI).
     };
 })(window);

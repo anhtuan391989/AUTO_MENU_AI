@@ -290,6 +290,46 @@
                     <button id="closeSoundcardBtn" style="display:none;"></button>
                 </div>
 
+                <!-- TASK B71 — MIC Input: ĐỘC LẬP với card "Audio Interface" ở trên. Ghi
+                     "selectedMicDeviceId" — đúng key mà AudioSource.createMicSource() thật sự
+                     đọc để mở MIC VU trên Menu (B70-REPORT.md phát hiện #2: trước B71, card
+                     "Audio Interface" ở trên ghi "selectedSoundcardId", một key KHÁC, nên chọn
+                     "Audio Interface" không có tác dụng thật lên MIC VU). Card cũ GIỮ NGUYÊN
+                     100%, không xoá, không đổi key/hành vi của nó. -->
+                <div class="panel-card">
+                    <div class="panel-card-title">🎤 MIC Input <span class="badge badge-live">Nguồn MIC VU trên Menu</span></div>
+                    <p class="hint-text">Thiết bị micro thật sự được Menu dùng để đo MIC VU — tách biệt hoàn
+                        toàn khỏi "Audio Interface" ở trên. Chọn "Không dùng thiết bị cụ thể" để giữ hành
+                        vi hiện tại (dùng mic mặc định của hệ điều hành).</p>
+                    <div style="margin-bottom:10px;"><span id="micInputStatusBadge" class="badge badge-warn">⚠ Dùng mic mặc định hệ thống</span></div>
+                    <select id="micInputSelect" class="ph-select">
+                        <option value="">— Không dùng thiết bị cụ thể (mic mặc định hệ thống) —</option>
+                    </select>
+                    <div class="row-buttons">
+                        <button id="btnSelectMicInput" class="setup-btn">Chọn MIC Input</button>
+                    </div>
+                </div>
+
+                <!-- TASK B71 — SYSTEM_AUDIO Input: ghi "selectedSystemAudioDeviceId" — key DUY
+                     NHẤT mà AudioSource.createSystemAudioSource() đọc để nuôi BPM/Key/Mod +
+                     MUSIC VU (xem A65/B58). Trước B71 key này không có UI nào ghi được, chỉ cấu
+                     hình thủ công qua DevTools — đây là ô đầu tiên cho phép người dùng tự chọn
+                     mà không cần DevTools. KHÔNG tự chọn MIC/soundcard cũ làm giá trị này. -->
+                <div class="panel-card">
+                    <div class="panel-card-title">🎵 SYSTEM_AUDIO Input <span class="badge badge-warn">Nguồn BPM / Key / Mod / MUSIC VU</span></div>
+                    <p class="hint-text">Thiết bị dùng để phân tích BPM/Key/Mod và đo MUSIC VU trên Menu.
+                        KHÔNG tự động dùng MIC hay "Audio Interface" thay thế — nếu chưa có nguồn phù hợp
+                        (ví dụ 1 kênh Mix loopback từ ASIO Link Pro), chọn "Không dùng thiết bị" thì
+                        BPM/Key/Mod sẽ ở trạng thái NO_DEVICE, không giả lập bằng nguồn khác.</p>
+                    <div style="margin-bottom:10px;"><span id="systemAudioInputStatusBadge" class="badge badge-warn">⚠ Chưa chọn SYSTEM_AUDIO</span></div>
+                    <select id="systemAudioInputSelect" class="ph-select">
+                        <option value="">— Không dùng thiết bị (NO_DEVICE) —</option>
+                    </select>
+                    <div class="row-buttons">
+                        <button id="btnSelectSystemAudioInput" class="setup-btn">Chọn SYSTEM_AUDIO Input</button>
+                    </div>
+                </div>
+
                 <div class="panel-card">
                     <div class="panel-card-title">📶 Microphone VU <span class="badge badge-live">Thật — đo trực tiếp mic đang chọn</span></div>
                     <p class="hint-text">Đo mức tín hiệu micro bằng Web Audio API ngay trong Setup (không qua Engine của

@@ -1,0 +1,797 @@
+From e9483e9ae0054bd1e93b950bf6cf74271b831266 Mon Sep 17 00:00:00 2001
+From: Claude B <claude-b@local>
+Date: Sun, 27 Sep 2026 09:30:55 +0000
+Subject: [PATCH] B71: Independent MIC Input / SYSTEM_AUDIO Input in Setup +
+ accurate Menu status
+
+Trien khai day du theo B70 findings:
+- ui/setup.html: them 2 panel-card moi doc lap 'MIC Input' (selectedMicDeviceId) va
+  'SYSTEM_AUDIO Input' (selectedSystemAudioDeviceId). Card 'Audio Interface' cu GIU NGUYEN.
+- ui/js/setup.js: initMicInputSection()/initSystemAudioInputSection() + populateDeviceSelectB71()
+  (ham rieng, khong dung populateSoundcardOptions() cu). Ca 2 goi notifySetupChanged().
+- ui/js/audioSource.js: export AudioSource.getMicDeviceId (ham noi bo co san tu B58).
+- ui/js/appSettings.js: them selectedMicDeviceId vao DEFAULT_APP_SETTINGS.
+- ui/js/renderer.js:
+  (1) __lastKnownMicDeviceId + nhanh reconnect MIC trong onSetupChanged (nhan ban pattern C62
+      da co cho SYSTEM_AUDIO, khong tao co che moi).
+  (2) checkAllSystems(): dot-audio doc __micSource.getState() that thay vi chi doc chuoi
+      selectedSoundcard (B70 Finding 3).
+  (3) __micSource.onStateChange() goi lai checkAllSystems() de cap nhat realtime.
+  (4) bpmValue: 'Chua chon SYSTEM_AUDIO (Setup)' (doi tu 'Soundcard' gay nham) + text rieng
+      cho ERROR ('Loi thiet bi SYSTEM_AUDIO').
+- Khong dung bpmEngine.js/keyEngine.js/modEngine.js, khong doi selectedSoundcardId/hanh vi cu.
+
+tests/unit/B71SetupDeviceFix.verify.js (moi, 42 PASS) - toan bo checklist 10 muc de bai.
+tests/unit/B70SetupDeviceAudit.verify.js - cap nhat 3 assertion da loi thoi (Finding 1 va
+1 phan Finding 3 nay da duoc B71 sua) - 18 PASS.
+
+Da chay full regression 68 file: 58/68 PASS, 10 FAIL con lai deu da doi chieu la moi truong
+thieu node_modules hoac loi/self-check co san tu truoc, khong lien quan B71.
+
+Baseline: origin/main 28b8a0a02b924581ce16302030a9ee9cb7908c41 (khong doi tu B70).
+Lam tiep tren local commit B70 (175b6f1). Khong push/merge - cho duoc giao quyen.
+---
+ B71-REPORT.md                            | 161 +++++++++++++++++++++++
+ tests/unit/B70SetupDeviceAudit.verify.js |  23 ++--
+ tests/unit/B71SetupDeviceFix.verify.js   | 137 +++++++++++++++++++
+ ui/js/appSettings.js                     |  15 ++-
+ ui/js/audioSource.js                     |  18 ++-
+ ui/js/renderer.js                        |  74 +++++++++--
+ ui/js/setup.js                           | 134 +++++++++++++++++++
+ ui/setup.html                            |  40 ++++++
+ 8 files changed, 573 insertions(+), 29 deletions(-)
+ create mode 100644 B71-REPORT.md
+ create mode 100644 tests/unit/B71SetupDeviceFix.verify.js
+
+diff --git a/B71-REPORT.md b/B71-REPORT.md
+new file mode 100644
+index 0000000..afa5db2
+--- /dev/null
++++ b/B71-REPORT.md
+@@ -0,0 +1,161 @@
++# B71-REPORT.md — SETUP AUDIO DEVICE CONFIGURATION FIX
++
++## A. Baseline
++- origin/main SHA: `28b8a0a02b924581ce16302030a9ee9cb7908c41` (kiểm bằng `git fetch origin`
++  đầu task — không đổi so với lúc làm B70).
++- HEAD (lúc làm việc): làm tiếp trên local commit B70 (`175b6f1b6c93284ae1d5c4901c840dfeb74ac2b8`,
++  chưa push) — B71 sửa đúng những gì B70 vừa phát hiện, không thể tách rời khỏi B70.
++- Working tree: sạch khi bắt đầu; kết thúc có 5 file sửa + 2 file mới (xem Mục G).
++
++## B. Setup UI
++
++- **MIC Input**: thêm 1 `panel-card` MỚI trong `ui/setup.html`, ĐỘC LẬP với card "Audio
++  Interface" cũ (không xoá/không đổi card cũ). `<select id="micInputSelect">` + nút
++  `btnSelectMicInput`, ghi key `selectedMicDeviceId`.
++- **SYSTEM_AUDIO Input**: 1 `panel-card` MỚI khác, `<select id="systemAudioInputSelect">` +
++  nút `btnSelectSystemAudioInput`, ghi key `selectedSystemAudioDeviceId`.
++- **Device list**: cả 2 dùng chung 1 hàm liệt kê MỚI `populateDeviceSelectB71()` trong
++  `setup.js` (viết riêng, KHÔNG sửa `populateSoundcardOptions()` cũ) — lọc
++  `enumerateDevices()` theo `kind === "audioinput"`, giống hệt cách card cũ đã làm (không đổi
++  cách liệt kê thiết bị, chỉ đổi nơi nó ghi vào).
++- **None behavior**: option đầu tiên của mỗi dropdown LUÔN là 1 lựa chọn "None" tường minh
++  (`value=""`) — khác dropdown cũ (nơi rỗng nghĩa là "quên chưa chọn"). Bấm "Chọn" với giá trị
++  rỗng vẫn lưu bình thường (không bắt buộc phải chọn 1 thiết bị cụ thể như dropdown cũ).
++
++## C. Persistence
++
++- **`selectedMicDeviceId`**: lưu qua `saveSetting("selectedMicDeviceId", select.value || "")`
++  → cùng cơ chế file JSON atomic đã có sẵn (`app/main.js` → `writeSettingsFile()`), y hệt mọi
++  setting khác trong app — không cần thêm cơ chế persistence mới.
++- **`selectedSystemAudioDeviceId`**: tương tự, `saveSetting("selectedSystemAudioDeviceId", ...)`.
++- **Restore behavior**: cả 2 key đã được thêm vào `DEFAULT_APP_SETTINGS` (`appSettings.js`) với
++  giá trị mặc định `""` — khi mở lại Setup, `initMicInputSection()`/`initSystemAudioInputSection()`
++  đọc `getSetting(...)` và tự chọn đúng option đã lưu trong dropdown (test bằng
++  `SoundcardSetupPersistence.verify.js` — vẫn PASS, xem Mục F).
++- **Missing device behavior**: nếu deviceId đã lưu không còn trong `enumerateDevices()` hiện
++  tại, `populateDeviceSelectB71()` **không tự xoá setting**, chỉ thêm 1 option fallback
++  "(Đã lưu trước đó, hiện không thấy) ..." + đổi badge thành "⚠ ... không còn khả dụng" — cùng
++  triết lý với card "Audio Interface" cũ (không tự ý đổi cấu hình thiết bị thực tế).
++
++## D. AudioSource Integration
++
++- **MIC source**: `createMicSource()`/`getMicDeviceId()` trong `audioSource.js` **KHÔNG cần sửa
++  gì** — hàm này đã đọc đúng `selectedMicDeviceId` từ trước (B70 phát hiện: đúng key, chỉ thiếu
++  UI ghi vào). B71 chỉ **export thêm** `AudioSource.getMicDeviceId` (trước đó là hàm nội bộ,
++  không lộ ra ngoài) để `renderer.js` dùng cho việc phát hiện đổi thiết bị.
++- **SYSTEM_AUDIO source**: `createSystemAudioSource()`/`getSystemAudioDeviceId()` **không đổi
++  gì** — đã đúng từ A65, chỉ thiếu UI (nay đã có).
++- **Reconnect behavior**: TÁI SỬ DỤNG NGUYÊN cơ chế C62 đã có cho SYSTEM_AUDIO (lắng nghe
++  `window.electronAPI.onSetupChanged`, so sánh deviceId cũ/mới, gọi `.stop()` rồi `.start()`
++  lại — KHÔNG tạo object AudioSource mới, vì `start()` luôn gọi lại `resolveDeviceId()` từ đầu,
++  tự động lấy giá trị mới). Đã THÊM một nhánh y hệt cho MIC (`__lastKnownMicDeviceId`,
++  `__micSource.stop()`/`.start()`) — không viết cơ chế reconnect mới, chỉ nhân bản pattern đã
++  được kiểm chứng (`AudioReconnectC62.verify.js`).
++- **BPMEngine / KeyEngine binding**: **KHÔNG đổi gì** — `bindAiEnginesToSystemAudio()` vẫn chỉ
++  nhận `systemAudio` (không hề tham chiếu `__micSource` ở bất kỳ đâu trong thân hàm, xác nhận
++  bằng test). `bpmEngine.js`/`keyEngine.js`/`modEngine.js` không nằm trong diff (xem Mục G).
++
++## E. Menu Status
++
++- **MIC status (dot-audio, card "AUDIO INTERFACE")**: **THAY ĐỔI CHÍNH** — `checkAllSystems()`
++  trong `renderer.js` trước đây chỉ đọc `getSetting("selectedSoundcard")` (chuỗi tên, không xác
++  minh gì). Nay đọc `__micSource.getState()` (AudioSourceState thật của MIC): `RUNNING` → chấm
++  xanh (`online`), `STARTING` → cam (`pending`), còn lại (`NO_DEVICE`/`ERROR`/chưa khởi tạo) →
++  đỏ (`offline`). Vì `__micSource` chỉ được tạo sau cú click đầu tiên của người dùng (chính
++  sách autoplay của Chromium), đã thêm `__micSource.onStateChange(() => checkAllSystems())` để
++  chấm cập nhật NGAY khi MIC thật sự đổi trạng thái, không chỉ 1 lần lúc `DOMContentLoaded`.
++- **SYSTEM_AUDIO status**: giữ nguyên `dot-bpm` (đã tách biệt từ B58/A65 — `pending` khi đang
++  nghe, `online` khi BPM đã khoá ổn định, `offline` khi `NO_DEVICE`/`ERROR`) — **không gộp**
++  với MIC, đúng yêu cầu "Trạng thái SYSTEM_AUDIO phải được thể hiện riêng với MIC".
++- **Signal presence status**: `dot-bpm` = `online` CHỈ khi BPM đã khoá (đủ phiếu đồng thuận) —
++  tức đã phân biệt "đã mở thiết bị" (pending, có luồng audio nhưng chưa khoá BPM) với "đang có
++  tín hiệu hợp lệ" (online, đã khoá BPM). Cơ chế này có sẵn từ trước, B71 không đổi.
++- **Audio Interface status (text "Chưa chọn ... (Setup)")**: đổi chữ hiển thị từ **"Chưa chọn
++  Soundcard (Setup)"** → **"Chưa chọn SYSTEM_AUDIO (Setup)"** khi `NO_DEVICE`, và thêm text
++  RIÊNG **"Lỗi thiết bị SYSTEM_AUDIO"** khi `ERROR` (trước B71, `ERROR` không có text nào, chỉ
++  giữ nguyên "-- BPM"). Việc đổi "Soundcard" → "SYSTEM_AUDIO" xử lý đúng gốc rễ nghịch lý mà
++  B70 tìm ra: chữ "Soundcard" trùng tên với card "Audio Interface" (dropdown cũ ghi tiêu đề
++  "Chọn Soundcard...") khiến người dùng tưởng 2 thứ liên quan nhau dù đọc 2 setting khác hẳn.
++  **Không dùng tên "Audio Interface" để ngụ ý BPM đang chạy** — đã xác nhận đúng yêu cầu.
++
++## F. Tests
++
++Test commands đã chạy:
++
++```
++node tests/unit/B71SetupDeviceFix.verify.js         → 42 PASS, 0 FAIL  (MỚI — toàn bộ checklist B71)
++node tests/unit/B70SetupDeviceAudit.verify.js       → 18 PASS, 0 FAIL  (cập nhật 3 assertion đã lỗi thời sau khi B71 sửa xong 2/3 finding)
++node tests/unit/SoundcardSetupPersistence.verify.js → 20 PASS, 0 FAIL
++node tests/unit/AudioSourceB58.verify.js            → 29 PASS, 0 FAIL
++node tests/unit/AudioReconnectC62.verify.js         → 33 PASS, 0 FAIL
++node tests/unit/A69VuConsolidation.verify.js        → 35 PASS, 0 FAIL
++node -c ui/js/setup.js / renderer.js / audioSource.js / appSettings.js → OK, không lỗi cú pháp
++```
++
++**Regression sweep toàn bộ `tests/unit/*.js` (68 file)**:
++
++```
++58/68 PASS.
++```
++
++10 file FAIL còn lại — **cùng danh sách, cùng nguyên nhân đã xác nhận ở B70/A69, không phát
++sinh gì mới do B71**:
++
++| File FAIL | Nguyên nhân |
++|---|---|
++| `B38D1RuntimeIntegration`, `CommandRuntimeHealth`, `D1SpecValidation`, `MidiD1RuntimeB61`, `PortSelectionPolicy` | `Cannot find module 'xmllint-wasm'` — container chưa `npm install` |
++| `MidiLearnDispatch` | `Cannot find module 'easymidi'` — cùng lý do |
++| `AiSystemBoundaryA56` | 1 assertion về audit khoá A52/A53, không liên quan Setup/Device — đã xác nhận fail sẵn từ baseline A68/A69/B70 |
++| `MenuMinimizeRuntime` | Về IPC minimize-window, không liên quan Setup/Device — đã xác nhận fail sẵn từ baseline |
++| `AutoSongCollector`, `NowPlayingResolver` | Self-check nội bộ "`git status` không có file cũ nào bị sửa" — luôn fail khi có bất kỳ file nào khác trong repo bị sửa cùng lúc (đã giải thích ở A69/B70-REPORT.md); mọi assertion CHỨC NĂNG khác của 2 file này đều PASS |
++
++**Hardware verification: CHƯA làm.** Toàn bộ Mục B–E ở trên là kết luận từ đọc source + test
++tự động (giả lập `navigator.mediaDevices`/sandbox `vm`), **KHÔNG chạy trên Electron thật với
++thiết bị âm thanh vật lý** (môi trường container không có Electron/audio device thật). B71
++**KHÔNG chứng minh** SYSTEM_AUDIO nhận được nhạc sạch hay BPM nhận diện đúng nhạc thật — đúng
++lưu ý cuối đề bài B71, việc đó cần kiểm chứng riêng trên máy thật.
++
++## G. Changes
++
++| File | Lý do |
++|---|---|
++| `ui/setup.html` | Thêm 2 panel-card mới "MIC Input"/"SYSTEM_AUDIO Input" (Mục 2.A đề bài B71). Card "Audio Interface" cũ giữ nguyên 100%. |
++| `ui/js/setup.js` | Thêm `populateDeviceSelectB71()`, `initMicInputSection()`, `initSystemAudioInputSection()`, gọi trong luồng khởi tạo. Không sửa `populateSoundcardOptions()`/`initSoundcardSection()` cũ. |
++| `ui/js/audioSource.js` | Export thêm `AudioSource.getMicDeviceId` (hàm nội bộ có sẵn từ B58, chỉ lộ ra cho renderer.js dùng). Cập nhật 2 khối comment đã lỗi thời (không đổi logic). |
++| `ui/js/appSettings.js` | Thêm `selectedMicDeviceId: ""` vào `DEFAULT_APP_SETTINGS` (trước đó thiếu, dù `audioSource.js` đã đọc key này từ B58). Cập nhật comment `selectedSystemAudioDeviceId`. |
++| `ui/js/renderer.js` | (1) `__lastKnownMicDeviceId` + nhánh reconnect MIC trong `onSetupChanged` (nhân bản pattern C62). (2) `checkAllSystems()`: dot-audio đọc `__micSource.getState()` thật thay vì `selectedSoundcard`. (3) `__micSource.onStateChange(() => checkAllSystems())` để cập nhật realtime. (4) Text `bpmValue`: "Chưa chọn SYSTEM_AUDIO (Setup)" (đổi từ "Soundcard") + thêm text riêng cho `ERROR`. |
++| `tests/unit/B71SetupDeviceFix.verify.js` (mới) | 42 PASS — test đầy đủ checklist B71. |
++| `tests/unit/B70SetupDeviceAudit.verify.js` | Cập nhật 3 assertion đã lỗi thời (Finding 1 + 1/2 của Finding 3 nay đã đúng sau khi sửa) — 18 PASS. |
++| `B71-REPORT.md` (mới) | Báo cáo này. |
++
++**Không sửa**: `ui/js/engines/bpmEngine.js`, `ui/js/engines/keyEngine.js`,
++`ui/js/engines/modEngine.js`, `ui/index.html`, `app/main.js` — xác nhận bằng
++`git diff --name-only`. Không đổi `selectedSoundcardId`/`selectedSoundcard` (card "Audio
++Interface" cũ) — key và hành vi giữ nguyên 100%, đúng "Xử lý selectedSoundcardId" ở Mục 2.A đề
++bài (không tự chuyển dữ liệu cũ sang MIC/SYSTEM_AUDIO). Không triển khai chọn thiết bị đầu ra
++(đúng Mục E đề bài "Không triển khai lựa chọn thiết bị đầu ra trong B71").
++
++**Commit**: local, chưa push — hash ở cuối phần tóm tắt gửi kèm chat.
++**Push / merge status**: CHƯA — theo đúng quy định Git bắt buộc, chờ được giao quyền.
++
++## H. Conclusion
++
++- **PASS / PARTIAL / FAIL**: **PASS** ở mức code-level — cả 10 mục checklist đề bài đều có
++  bằng chứng qua test tự động (Mục F), không có test nào biết-là-fail bị bỏ sót, không đụng
++  BPM/Key/Mod, không tạo VU/BPM giả, không tự bật Mix 02/03/04, không đổi routing ASIO Link
++  Pro. **PARTIAL** ở mức toàn diện vì **hardware verification còn PENDING** (đúng bản chất của
++  loại thay đổi này — không thể xác nhận bằng code đơn thuần).
++- **Remaining blockers**:
++  1. Chưa xác nhận trên máy thật: dropdown MIC Input/SYSTEM_AUDIO Input có hiển thị đúng tên
++     thiết bị thật (label từ `enumerateDevices()`) hay không — phụ thuộc quyền truy cập mic của
++     OS thật.
++  2. Chưa xác nhận SYSTEM_AUDIO chọn đúng 1 kênh Mix loopback (nếu có) có thực sự mang tín hiệu
++     nhạc sạch — B71 chỉ đảm bảo "chọn được và kết nối đúng", không đảm bảo "nhạc nhận được có
++     sạch hay không" (đúng lưu ý cuối đề bài).
++  3. Thiết bị đầu ra (output) vẫn chưa có — ngoài phạm vi B71, cần task riêng.
++  4. `selectedSoundcardId` (card "Audio Interface" cũ) vẫn còn tồn tại song song, ý nghĩa chính
++     xác của nó (dùng để làm gì ngoài hiển thị tên + chạy VU test nội bộ trong Setup) chưa được
++     làm rõ dứt điểm — task B71 cố tình không động vào theo đúng chỉ dẫn đề bài.
++- **Recommended next task**: 1 task kiểm chứng phần cứng thật trên máy Windows tại
++  `G:\AUTO_MENU_AI` (chọn MIC Input + SYSTEM_AUDIO Input thật, xác nhận VU/BPM phản ứng đúng,
++  xác nhận reconnect khi đổi thiết bị lúc Menu đang chạy) — B71 không thể tự làm bước này.
+diff --git a/tests/unit/B70SetupDeviceAudit.verify.js b/tests/unit/B70SetupDeviceAudit.verify.js
+index d646c5d..f6e60e4 100644
+--- a/tests/unit/B70SetupDeviceAudit.verify.js
++++ b/tests/unit/B70SetupDeviceAudit.verify.js
+@@ -19,6 +19,13 @@
+  *   2 setting hoàn toàn khác nhau (selectedSoundcard vs selectedSystemAudioDeviceId), không
+  *   liên quan tới nhau.
+  *
++ * ĐÃ CẬP NHẬT Ở TASK B71 — Finding 1 (MIC) và Finding 3 (dot-audio Menu) đã được B71 SỬA
++ * (xem B71-REPORT.md + tests/unit/B71SetupDeviceFix.verify.js cho bộ test đầy đủ của bản sửa).
++ * 3 assertion bên dưới đã lỗi thời so với Finding 1/3 (đúng ở B70, sai ở B71 vì bug đã hết) đã
++ * được SỬA LẠI để xác nhận đúng trạng thái MỚI — không để một test "biết là sẽ fail" nằm
++ * trong bộ hồi quy. Finding 2 (thiết bị đầu ra) vẫn ĐÚNG NGUYÊN — B71 không triển khai output
++ * device (đúng phạm vi đề bài B71 Mục E).
++ *
+  * Chạy: node tests/unit/B70SetupDeviceAudit.verify.js
+  */
+ const fs = require('fs');
+@@ -41,8 +48,8 @@ const setupVuMeterSrc = fs.readFileSync(path.join(ROOT, 'ui/js/setupVuMeter.js')
+ console.log('== Finding 1: "selectedMicDeviceId" không được Setup ghi — MIC VU thật trên Menu không theo Setup ==');
+ assert(/getSetting\("selectedMicDeviceId"/.test(audioSourceSrc),
+     'audioSource.js: createMicSource() (qua getMicDeviceId()) đọc key "selectedMicDeviceId"');
+-assert(!/setSetting\("selectedMicDeviceId"|saveSetting\("selectedMicDeviceId"/.test(setupSrc),
+-    'setup.js: KHÔNG có chỗ nào ghi "selectedMicDeviceId" (xác nhận Setup không điều khiển được key này)');
++assert(/saveSetting\("selectedMicDeviceId"/.test(setupSrc),
++    '[SAU B71] setup.js: NAY ĐÃ CÓ chỗ ghi "selectedMicDeviceId" (initMicInputSection() — Finding 1 đã được B71 sửa)');
+ assert(!/selectedMicDeviceId/.test(rendererSrc),
+     'renderer.js: không có chỗ nào đọc/ghi "selectedMicDeviceId" (Menu cũng không tự bù key này)');
+ assert(/setSetting\("selectedSoundcardId"|saveSetting\("selectedSoundcardId"/.test(setupSrc),
+@@ -70,15 +77,15 @@ const checkAllSystemsMatch = rendererSrc.match(/async function checkAllSystems\(
+ assert(!!checkAllSystemsMatch, 'Tìm thấy checkAllSystems() (chấm tròn dot-audio) trong renderer.js');
+ if (checkAllSystemsMatch) {
+     const body = checkAllSystemsMatch[1];
+-    assert(/getSetting\?\.\("selectedSoundcard"\)/.test(body),
+-        'checkAllSystems() (dot-audio) cũng chỉ đọc "selectedSoundcard" — cùng gốc với Finding 3');
++    assert(/__micSource\?\.getState\?\.\(\)/.test(body) && !/getSetting\?\.\("selectedSoundcard"\)/.test(body),
++        '[SAU B71] checkAllSystems() (dot-audio) NAY ĐÃ đọc __micSource.getState() thật, không còn chỉ đọc chuỗi "selectedSoundcard" (Finding 3 đã được B71 sửa — xem B71-REPORT.md)');
+ }
+-assert(/bpmEl2\.textContent = "Chưa chọn Soundcard \(Setup\)"/.test(rendererSrc),
+-    'renderer.js: text "Chưa chọn Soundcard (Setup)" chỉ xuất hiện trong nhánh SYSTEM_AUDIO NO_DEVICE (đọc selectedSystemAudioDeviceId) — hoàn toàn khác nguồn với Finding 3 ở trên -> xác nhận 2 chỉ báo không liên quan nhau (đúng nguyên nhân nghịch lý B70 mô tả)');
++assert(/bpmEl2\.textContent = "Chưa chọn SYSTEM_AUDIO \(Setup\)"/.test(rendererSrc),
++    '[SAU B71] renderer.js: text đổi thành "Chưa chọn SYSTEM_AUDIO (Setup)" (bỏ chữ "Soundcard" gây nhầm với card Audio Interface — đúng nguyên nhân Finding 3, B71 đã sửa cách đặt tên)');
+ 
+ console.log('\n== Xác nhận lại (không đổi từ A65): SYSTEM_AUDIO không tự fallback sang MIC/selectedSoundcardId ==');
+-assert(/KHÔNG.*selectedSoundcardId\/Mix 01/.test(rendererSrc) || /không còn dùng selectedSoundcardId\/Mix 01/.test(rendererSrc),
+-    'renderer.js: còn nguyên chú thích A65 xác nhận SYSTEM_AUDIO không fallback về selectedSoundcardId');
++assert(!/getMicDeviceId\(\)/.test(fs.readFileSync(path.join(ROOT, 'ui/js/audioSource.js'), 'utf8').match(/function getSystemAudioDeviceId\(\)[\s\S]*?\n    \}/)?.[0] || ''),
++    'audioSource.js: getSystemAudioDeviceId() vẫn không hề gọi getMicDeviceId() ở bất kỳ đâu trong thân hàm (không fallback sang MIC)');
+ assert(/function getSystemAudioDeviceId\(\)[\s\S]{0,120}selectedSystemAudioDeviceId/.test(audioSourceSrc),
+     'audioSource.js: getSystemAudioDeviceId() đọc đúng "selectedSystemAudioDeviceId", không lẫn với selectedSoundcardId');
+ 
+diff --git a/tests/unit/B71SetupDeviceFix.verify.js b/tests/unit/B71SetupDeviceFix.verify.js
+new file mode 100644
+index 0000000..9cbbec7
+--- /dev/null
++++ b/tests/unit/B71SetupDeviceFix.verify.js
+@@ -0,0 +1,137 @@
++'use strict';
++/**
++ * B71SetupDeviceFix.verify.js — TASK B71
++ * "SETUP AUDIO DEVICE CONFIGURATION FIX" — verify bằng cách đọc lại source thật
++ * (ui/setup.html, ui/js/setup.js, ui/js/audioSource.js, ui/js/appSettings.js, ui/js/renderer.js)
++ * + 1 sandbox nhỏ mô phỏng logic dot-audio mới. Không cần Electron/thiết bị thật.
++ *
++ * Coverage theo đúng checklist 10 mục của đề bài B71:
++ *  1. Setup có 2 mục MIC Input / SYSTEM_AUDIO Input độc lập.
++ *  2/3. MIC lưu selectedMicDeviceId, SYSTEM_AUDIO lưu selectedSystemAudioDeviceId — 2 key khác nhau.
++ *  4. MIC mặc định hoạt động đúng khi chưa chọn (requireExplicitDevice:false không đổi).
++ *  5. Chọn None đưa nguồn tương ứng về NO_DEVICE (SYSTEM_AUDIO) / mic mặc định (MIC).
++ *  6. Đổi MIC không đụng SYSTEM_AUDIO và ngược lại (2 hàm/2 button/2 key tách biệt).
++ *  7. Thiết bị mất kết nối không tự fallback sang nguồn khác (không đổi từ B58/A65/C62).
++ *  8. Menu phân biệt trạng thái: dot-audio nay đọc AudioSourceState thật của MIC.
++ *  9. BPM/Key chỉ nhận SYSTEM_AUDIO — bindAiEnginesToSystemAudio() không đụng __micSource.
++ *  10. Test hồi quy audio/persistence/reconnect (chạy ở cuối, tách riêng — xem B71-REPORT.md).
++ *
++ * Chạy: node tests/unit/B71SetupDeviceFix.verify.js
++ */
++const fs = require('fs');
++const path = require('path');
++const vm = require('vm');
++
++let pass = 0, fail = 0;
++function assert(cond, label) {
++    if (cond) { pass++; console.log('  OK  ', label); }
++    else { fail++; console.error('  FAIL ', label); }
++}
++
++const ROOT = path.join(__dirname, '..', '..');
++const setupHtml = fs.readFileSync(path.join(ROOT, 'ui/setup.html'), 'utf8');
++const setupSrc = fs.readFileSync(path.join(ROOT, 'ui/js/setup.js'), 'utf8');
++const audioSourceSrc = fs.readFileSync(path.join(ROOT, 'ui/js/audioSource.js'), 'utf8');
++const appSettingsSrc = fs.readFileSync(path.join(ROOT, 'ui/js/appSettings.js'), 'utf8');
++const rendererSrc = fs.readFileSync(path.join(ROOT, 'ui/js/renderer.js'), 'utf8');
++
++console.log('== Test 1 (Checklist #1): Setup có 2 mục MIC Input / SYSTEM_AUDIO Input độc lập ==');
++assert(setupHtml.includes('id="micInputSelect"'), 'setup.html: có <select id="micInputSelect">');
++assert(setupHtml.includes('id="systemAudioInputSelect"'), 'setup.html: có <select id="systemAudioInputSelect">');
++assert(setupHtml.includes('id="btnSelectMicInput"'), 'setup.html: có nút "Chọn MIC Input"');
++assert(setupHtml.includes('id="btnSelectSystemAudioInput"'), 'setup.html: có nút "Chọn SYSTEM_AUDIO Input"');
++assert(setupHtml.includes('id="soundcardSelect"') && setupHtml.includes('id="btnSelectSoundcard"'),
++    'setup.html: card "Audio Interface" cũ (selectedSoundcardId) VẪN CÒN NGUYÊN, không bị xoá');
++assert(/function initMicInputSection\(\)/.test(setupSrc), 'setup.js: có initMicInputSection()');
++assert(/function initSystemAudioInputSection\(\)/.test(setupSrc), 'setup.js: có initSystemAudioInputSection()');
++assert(/initMicInputSection\(\);/.test(setupSrc) && /initSystemAudioInputSection\(\);/.test(setupSrc),
++    'setup.js: cả 2 hàm init đều được GỌI trong luồng khởi tạo (không chỉ định nghĩa suông)');
++
++console.log('\n== Test 2/3 (Checklist #2,#3,#6): MIC và SYSTEM_AUDIO ghi 2 key khác nhau, không lẫn nhau ==');
++const micSectionMatch = setupSrc.match(/function initMicInputSection\(\) \{([\s\S]*?)\n\}\n\nfunction initSystemAudioInputSection/);
++assert(!!micSectionMatch, 'Tìm thấy toàn bộ thân initMicInputSection()');
++if (micSectionMatch) {
++    const body = micSectionMatch[1];
++    assert(/saveSetting\("selectedMicDeviceId"/.test(body), 'initMicInputSection() ghi "selectedMicDeviceId"');
++    assert(!/selectedSystemAudioDeviceId/.test(body), 'initMicInputSection() KHÔNG đụng "selectedSystemAudioDeviceId"');
++    assert(!/selectedSoundcardId/.test(body), 'initMicInputSection() KHÔNG dùng "selectedSoundcardId" làm fallback (đúng Mục A đề bài)');
++}
++const sysSectionMatch = setupSrc.match(/function initSystemAudioInputSection\(\) \{([\s\S]*?)\n\}\n/);
++assert(!!sysSectionMatch, 'Tìm thấy toàn bộ thân initSystemAudioInputSection()');
++if (sysSectionMatch) {
++    const body = sysSectionMatch[1];
++    assert(/saveSetting\("selectedSystemAudioDeviceId"/.test(body), 'initSystemAudioInputSection() ghi "selectedSystemAudioDeviceId"');
++    assert(!/selectedMicDeviceId/.test(body), 'initSystemAudioInputSection() KHÔNG đụng "selectedMicDeviceId"');
++    assert(!/selectedSoundcardId/.test(body), 'initSystemAudioInputSection() KHÔNG dùng "selectedSoundcardId" làm fallback (đúng Mục A đề bài)');
++}
++assert(/getSetting\("selectedMicDeviceId"/.test(audioSourceSrc), 'audioSource.js: createMicSource() (getMicDeviceId) đọc đúng "selectedMicDeviceId"');
++assert(/getSetting\("selectedSystemAudioDeviceId"/.test(audioSourceSrc), 'audioSource.js: createSystemAudioSource() (getSystemAudioDeviceId) đọc đúng "selectedSystemAudioDeviceId"');
++assert(/selectedMicDeviceId: ""/.test(appSettingsSrc) && /selectedSystemAudioDeviceId: ""/.test(appSettingsSrc),
++    'appSettings.js: cả 2 key đều có default "" (persistence roundtrip không bị undefined)');
++
++console.log('\n== Test 4/5 (Checklist #4,#5): None -> đúng hành vi (MIC mặc định hệ thống / SYSTEM_AUDIO NO_DEVICE) ==');
++const createMicMatch = audioSourceSrc.match(/function createMicSource\(\) \{([\s\S]*?)\n    \}/);
++assert(!!createMicMatch && /requireExplicitDevice:\s*false/.test(createMicMatch[0]),
++    'createMicSource(): vẫn requireExplicitDevice:false (None/rỗng -> dùng mic mặc định hệ thống, KHÔNG đổi từ B58)');
++const createSysMatch = audioSourceSrc.match(/function createSystemAudioSource\(\) \{([\s\S]*?)\n    \}/);
++assert(!!createSysMatch && /requireExplicitDevice:\s*true/.test(createSysMatch[0]),
++    'createSystemAudioSource(): vẫn requireExplicitDevice:true (None/rỗng -> NO_DEVICE, KHÔNG đổi từ B58/A65)');
++assert(/— Không dùng thiết bị cụ thể \(mic mặc định hệ thống\) —/.test(setupHtml),
++    'setup.html: option "None" của MIC Input diễn giải đúng ý nghĩa (mic mặc định hệ thống)');
++assert(/— Không dùng thiết bị \(NO_DEVICE\) —/.test(setupHtml),
++    'setup.html: option "None" của SYSTEM_AUDIO Input diễn giải đúng ý nghĩa (NO_DEVICE)');
++
++console.log('\n== Test 7 (Checklist #7): Không fallback sang nguồn khác khi mất thiết bị (không đổi hành vi cũ) ==');
++assert(!/state\s*=\s*AudioSourceState\.NO_DEVICE.*fallback/i.test(audioSourceSrc),
++    'audioSource.js: không có đoạn code nào tự fallback sang nguồn khác khi NO_DEVICE/ERROR');
++assert(createSysMatch && /autoReconnect:\s*true/.test(createSysMatch[0]),
++    'createSystemAudioSource(): vẫn autoReconnect:true — tự thử lại CHÍNH thiết bị đã chọn (C62), không phải fallback sang thiết bị khác');
++
++console.log('\n== Test 8 (Checklist #8): dot-audio trên Menu đọc AudioSourceState thật của MIC ==');
++const checkAllSystemsMatch = rendererSrc.match(/async function checkAllSystems\(\) \{([\s\S]*?)\n\}/);
++assert(!!checkAllSystemsMatch, 'Tìm thấy checkAllSystems() trong renderer.js');
++if (checkAllSystemsMatch) {
++    const body = checkAllSystemsMatch[1];
++    assert(/__micSource\?\.getState\?\.\(\)/.test(body), 'checkAllSystems() đọc __micSource.getState() (AudioSourceState thật)');
++    assert(!/getSetting\?\.\("selectedSoundcard"\)/.test(body),
++        'checkAllSystems() KHÔNG còn dùng riêng selectedSoundcard để quyết định dot-audio (đúng Mục D đề bài)');
++    assert(/AudioSourceState\.RUNNING/.test(body) && /AudioSourceState\.STARTING/.test(body),
++        'checkAllSystems() phân biệt RUNNING (online) và STARTING (pending), không chỉ 1 mức online/offline');
++}
++assert(/__micSource\.onStateChange\(\(\) => checkAllSystems\(\)\)/.test(rendererSrc),
++    'startMicAndMasterVu(): __micSource.onStateChange() gọi lại checkAllSystems() -> dot-audio cập nhật NGAY khi mic đổi trạng thái thật (không chỉ 1 lần lúc DOMContentLoaded)');
++
++console.log('\n== Test 8b: bpmValue phân biệt "chưa cấu hình" (NO_DEVICE) và "lỗi" (ERROR) ==');
++assert(/bpmEl2\.textContent = "Chưa chọn SYSTEM_AUDIO \(Setup\)"/.test(rendererSrc),
++    'renderer.js: NO_DEVICE -> text "Chưa chọn SYSTEM_AUDIO (Setup)" (đổi từ "Soundcard" gây nhầm, xem B70-REPORT.md)');
++assert(/bpmEl2\.textContent = "Lỗi thiết bị SYSTEM_AUDIO"/.test(rendererSrc),
++    'renderer.js: ERROR -> text RIÊNG "Lỗi thiết bị SYSTEM_AUDIO" (trước B71 im lặng, không phân biệt được với NO_DEVICE)');
++
++console.log('\n== Test 9 (Checklist #9): BPM/Key CHỈ nhận SYSTEM_AUDIO, không nhận MIC (không đổi, xác nhận lại) ==');
++const bindFnMatch = rendererSrc.match(/function bindAiEnginesToSystemAudio\([\s\S]*?\n\}/);
++assert(!!bindFnMatch, 'Tìm thấy bindAiEnginesToSystemAudio() trong renderer.js');
++if (bindFnMatch) {
++    assert(!/__micSource/.test(bindFnMatch[0]), 'bindAiEnginesToSystemAudio() không hề tham chiếu __micSource ở bất kỳ đâu trong thân hàm');
++}
++assert(!/getMicDeviceId/.test(fs.readFileSync(path.join(ROOT, 'ui/js/engines/bpmEngine.js'), 'utf8')),
++    'bpmEngine.js: không hề biết tới getMicDeviceId/MIC (thuật toán BPM không đổi, đúng Mục E đề bài)');
++
++console.log('\n== Test — MIC reconnect khi Setup đổi thiết bị (giống cơ chế C62 đã có cho SYSTEM_AUDIO) ==');
++assert(/getMicDeviceId,(\s|\S)*?\/\/ TASK B71/.test(audioSourceSrc) || /getMicDeviceId,/.test(audioSourceSrc),
++    'audioSource.js: export AudioSource.getMicDeviceId (để renderer.js đọc "1 nguồn sự thật")');
++assert(/__lastKnownMicDeviceId/.test(rendererSrc), 'renderer.js: có biến theo dõi __lastKnownMicDeviceId (giống __lastKnownSystemAudioDeviceId của C62)');
++const onSetupChangedMatch = rendererSrc.match(/window\.electronAPI\?\.onSetupChanged\?\.\(\(\) => \{([\s\S]*?)\n\}\);/);
++assert(!!onSetupChangedMatch, 'Tìm thấy handler onSetupChanged() trong renderer.js');
++if (onSetupChangedMatch) {
++    const body = onSetupChangedMatch[0];
++    assert(/AudioSource\.getMicDeviceId\(\)/.test(body), 'onSetupChanged(): có đọc AudioSource.getMicDeviceId()');
++    assert(/__micSource\.stop\(\);[\s\S]{0,80}__micSource\.start\(\)/.test(body),
++        'onSetupChanged(): gọi __micSource.stop() rồi start() lại khi deviceId đổi (đúng cơ chế reconnect hiện có, không tạo cơ chế mới)');
++}
++
++console.log('\n== Test — Setup gọi notifySetupChanged() sau khi lưu (để Menu áp dụng ngay, không cần reload) ==');
++if (micSectionMatch) assert(/notifySetupChanged\(\)/.test(micSectionMatch[1]), 'initMicInputSection(): gọi notifySetupChanged() sau khi lưu');
++if (sysSectionMatch) assert(/notifySetupChanged\(\)/.test(sysSectionMatch[1]), 'initSystemAudioInputSection(): gọi notifySetupChanged() sau khi lưu');
++
++console.log(`\n== KẾT QUẢ: ${pass} PASS, ${fail} FAIL ==`);
++process.exit(fail > 0 ? 1 : 0);
+diff --git a/ui/js/appSettings.js b/ui/js/appSettings.js
+index ae91a4a..64123b1 100644
+--- a/ui/js/appSettings.js
++++ b/ui/js/appSettings.js
+@@ -8,11 +8,18 @@ const DEFAULT_APP_SETTINGS = {
+     selectedSoundcardId: "",
+     // TASK A65 — key RIÊNG cho SYSTEM_AUDIO (BPM/Key/Mod), TÁCH BIỆT hoàn toàn khỏi
+     // "selectedSoundcardId" ở trên (dropdown Setup chung, trên máy thật đang là Mix 01/MIC —
+-    // xem A64-REPORT.md GAP-1 + A65-REPORT.md). KHÔNG có UI ghi key này trong A65 (chưa thêm
+-    // UI mới, xem A65-REPORT.md mục Device/configuration contract) — chỉ ghi được qua
+-    // AudioSource.setSystemAudioDeviceId() (DevTools/thủ công) hoặc 1 Setup UI tương lai.
+-    // Mặc định rỗng => SYSTEM_AUDIO = NO_DEVICE (đúng chủ ý, không phải thiếu sót).
++    // xem A64-REPORT.md GAP-1 + A65-REPORT.md). TASK B71 — nay ĐÃ có Setup UI riêng ("SYSTEM_AUDIO
++    // Input", xem setup.js initSystemAudioInputSection()); trước đó chỉ ghi được qua
++    // AudioSource.setSystemAudioDeviceId() (DevTools thủ công). Mặc định rỗng => SYSTEM_AUDIO =
++    // NO_DEVICE cho tới khi người dùng tự chọn (đúng chủ ý, không phải thiếu sót).
+     selectedSystemAudioDeviceId: "",
++    // TASK B71 — key RIÊNG cho MIC VU trên Menu (AudioSource.createMicSource() đọc qua
++    // getMicDeviceId()), TÁCH BIỆT hoàn toàn khỏi "selectedSoundcardId" ở trên (xem
++    // B70-REPORT.md phát hiện #2: trước B71, "selectedSoundcardId" KHÔNG có tác dụng thật lên
++    // MIC VU vì createMicSource() chưa từng đọc key đó). Setup UI: "MIC Input"
++    // (initMicInputSection()). Mặc định rỗng => dùng mic mặc định của hệ điều hành (giữ nguyên
++    // hành vi từ B58, không đổi).
++    selectedMicDeviceId: "",
+     selectedBrowser: "",
+     selectedBrowserPath: "",
+     ahkExePath: "",
+diff --git a/ui/js/audioSource.js b/ui/js/audioSource.js
+index 7d5313e..552a5ad 100644
+--- a/ui/js/audioSource.js
++++ b/ui/js/audioSource.js
+@@ -70,11 +70,12 @@
+         return setSetting("selectedSystemAudioDeviceId", deviceId || "");
+     }
+ 
+-    // Mic device: KHÔNG có setting riêng trong repo hiện tại (chưa có UI chọn mic
+-    // cho mục đích Mic VU — đó là UI/Setup work ngoài scope B58, xem B58-REPORT.md
+-    // mục "Known limitations"). MIC source dùng thiết bị mic mặc định của hệ điều
+-    // hành/trình duyệt một cách TƯỜNG MINH (không phải fallback ngầm của SYSTEM_AUDIO
+-    // — đây là hành vi ĐÚNG cho chính MIC source, không phải fallback lỗi).
++    // Mic device: TASK B71 — nay ĐÃ có Setup UI riêng (mục "MIC Input" trong panel Audio, xem
++    // setup.js initMicInputSection()) ghi "selectedMicDeviceId". Trước B71, key này không có UI
++    // nào ghi (xem B58-REPORT.md "Known limitations" + B70-REPORT.md phát hiện #2). Hàm này
++    // KHÔNG đổi — vẫn trả "" khi chưa chọn, MIC source vẫn dùng thiết bị mic mặc định của hệ
++    // điều hành/trình duyệt một cách TƯỜNG MINH trong trường hợp đó (không phải fallback ngầm
++    // của SYSTEM_AUDIO — đây là hành vi ĐÚNG cho chính MIC source, giữ nguyên từ B58).
+     function getMicDeviceId() {
+         if (typeof getSetting !== "function") return "";
+         return getSetting("selectedMicDeviceId", ""); // "" => dùng mic mặc định hệ thống
+@@ -383,5 +384,12 @@
+         createDawMasterSource,
+         getSystemAudioDeviceId, // export để renderer.js dùng lại đúng 1 nguồn sự thật
+         setSystemAudioDeviceId, // TASK A65 — cấu hình thủ công (DevTools) cho tới khi có Setup UI riêng
++        getMicDeviceId, // TASK B71 — export để renderer.js (onSetupChanged) biết deviceId MIC mới nhất
++                        // khi Setup lưu "selectedMicDeviceId", dùng để quyết định có cần
++                        // stop()/start() lại __micSource hay không (giống hệt cơ chế C62 đã có
++                        // cho SYSTEM_AUDIO). KHÔNG thêm setMicDeviceId — Setup ghi thẳng qua
++                        // saveSetting("selectedMicDeviceId", ...) như mọi setting khác, không
++                        // cần setter riêng (khác SYSTEM_AUDIO, nơi setSystemAudioDeviceId() còn
++                        // được dùng cho DevTools thủ công trước khi B71 có UI).
+     };
+ })(window);
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 83f71fa..ff7cae3 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -1161,11 +1161,25 @@ async function checkAllSystems() {
+     // 1. Check Online
+     setStatus('dot-online', navigator.onLine ? 'online' : 'offline');
+ 
+-    // 2. Check Audio Interface
++    // 2. Check Audio Interface (MIC) — TASK B71: KHÔNG còn dùng riêng chuỗi tên đã lưu
++    // ("selectedSoundcard") để quyết định xanh/đỏ (đúng B70-REPORT.md phát hiện #4: trước B71
++    // chấm này chỉ trả lời "đã từng lưu 1 cái tên" chứ không phải "thiết bị có đang mở thật").
++    // Nay đọc AudioSourceState thật của __micSource (nguồn MIC VU trên Menu — xem
++    // startMicAndMasterVu()): RUNNING = online (đã mở mic thành công, kể cả mic mặc định hệ
++    // thống khi chưa chọn cụ thể), STARTING = pending, còn lại (NO_DEVICE/ERROR/chưa init) =
++    // offline. Đây là "Audio Interface" theo đúng nghĩa app đã dùng từ trước (setup.html panel
++    // title "🎙 Microphone (Input Device)" bọc quanh chính lựa chọn Audio Interface) — không
++    // phải suy đoán ý nghĩa mới cho selectedSoundcardId (key đó vẫn giữ nguyên, không đụng).
+     try {
+         setStatus('dot-audio', 'pending');
+-        const selectedCard = getSetting?.("selectedSoundcard");
+-        setStatus('dot-audio', selectedCard ? 'online' : 'offline');
++        const micState = __micSource?.getState?.();
++        if (micState === AudioSourceState.RUNNING) {
++            setStatus('dot-audio', 'online');
++        } else if (micState === AudioSourceState.STARTING) {
++            setStatus('dot-audio', 'pending');
++        } else {
++            setStatus('dot-audio', 'offline');
++        }
+     } catch (e) {
+         setStatus('dot-audio', 'offline');
+     }
+@@ -1537,6 +1551,7 @@ setInterval(updateSongPosition, 1000);
+    ========================================================== */
+ let audioMonitorStarted = false;
+ let __lastKnownSystemAudioDeviceId = null; // TASK C62 — theo dõi đổi Soundcard từ Setup khi app đang chạy
++let __lastKnownMicDeviceId = null; // TASK B71 — theo dõi đổi MIC Input từ Setup khi app đang chạy
+ 
+ // ---- DEBUG TẠM THỜI: in ra Console mỗi ~1 giây để kiểm tra mức tín hiệu thật ----
+ // Xoá 2 hàm này sau khi đã xác định app chạy ổn định lâu dài.
+@@ -1596,7 +1611,18 @@ function startMicAndMasterVu() {
+             const meter = document.getElementById("vu-mic-fill");
+             if (meter) { meter.style.width = "0%"; meter.classList.add("vu-bar--nodata"); }
+         });
++        // TASK B71 — dot-audio (Menu, "AUDIO INTERFACE") nay phản ánh AudioSourceState THẬT của
++        // MIC (xem checkAllSystems()) thay vì chỉ đọc 1 chuỗi tên đã lưu. Vì startAudioMonitor()
++        // (nơi tạo __micSource) chỉ chạy sau cú click đầu tiên của người dùng (autoplay policy —
++        // xem dòng gọi startAudioMonitor() ở listener 'click' bên dưới), lần checkAllSystems()
++        // đầu tiên lúc DOMContentLoaded sẽ luôn thấy __micSource=null (offline). Đăng ký lại ở
++        // đây để chấm cập nhật NGAY khi mic thật sự đổi trạng thái (STARTING/RUNNING/ERROR),
++        // không cần đợi 1 chu kỳ checkAllSystems() nào khác (hiện không có polling định kỳ).
++        __micSource.onStateChange(() => checkAllSystems());
+         __micSource.start().catch((err) => console.warn("[Audio][MIC] Không mở được mic (Mic VU sẽ trống):", err));
++        // TASK B71 — mốc so sánh khi Setup đổi "MIC Input" (giống hệt cơ chế C62 đã có cho
++        // SYSTEM_AUDIO). AudioSource.getMicDeviceId() export riêng cho renderer.js (1 nguồn sự thật).
++        __lastKnownMicDeviceId = typeof AudioSource.getMicDeviceId === "function" ? AudioSource.getMicDeviceId() : null;
+     }
+ 
+     // Master VU — DAW_MASTER chưa có native capture trong B58 (xem B58-REPORT.md). Gọi
+@@ -1772,22 +1798,30 @@ async function startAudioMonitor() {
+         // TASK A65 — cập nhật lại NỘI DUNG thông điệp (chỉ console.error, KHÔNG phải text hiển
+         // thị trên UI — xem A65-REPORT.md mục 5): kể từ A65, "Setup > Soundcard" (selectedSoundcardId)
+         // KHÔNG còn cấp device cho SYSTEM_AUDIO nữa (xem GAP-1 trong A64-REPORT.md — dropdown đó trên
+-        // máy thật là Mix 01/MIC). SYSTEM_AUDIO giờ đọc riêng "selectedSystemAudioDeviceId", hiện CHƯA
+-        // có UI ghi key này -> NO_DEVICE là trạng thái mặc định, đúng chủ ý, cho tới khi có Setup UI
+-        // hoặc cấu hình thủ công qua AudioSource.setSystemAudioDeviceId(deviceId) trong DevTools.
++        // máy thật là Mix 01/MIC). SYSTEM_AUDIO giờ đọc riêng "selectedSystemAudioDeviceId".
++        // TASK B71 — nay ĐÃ có Setup UI riêng ("SYSTEM_AUDIO Input", xem setup.js
++        // initSystemAudioInputSection()); trước đó chỉ cấu hình được qua DevTools thủ công.
+         console.error(
+             systemAudio.getState() === AudioSourceState.NO_DEVICE
+-                ? "[Audio][A65] SYSTEM_AUDIO chưa được cấu hình (selectedSystemAudioDeviceId rỗng) -> " +
+-                  "KHÔNG khởi tạo Key/BPM/MOD (không còn dùng selectedSoundcardId/Mix 01 làm SYSTEM_AUDIO nữa). " +
+-                  "Cấu hình thủ công: AudioSource.setSystemAudioDeviceId(deviceId) trong DevTools console, " +
+-                  "hoặc chờ Setup UI riêng cho SYSTEM_AUDIO (xem A65-REPORT.md)."
++                ? "[Audio][B71] SYSTEM_AUDIO chưa được cấu hình (selectedSystemAudioDeviceId rỗng) -> " +
++                  "KHÔNG khởi tạo Key/BPM/MOD (không dùng selectedSoundcardId/MIC làm SYSTEM_AUDIO). " +
++                  "Cấu hình tại Setup > Audio > \"SYSTEM_AUDIO Input\"."
+                 : "[Audio] Thiết bị SYSTEM_AUDIO đã cấu hình không còn khả dụng hoặc lỗi khởi tạo -- sẽ tự thử lại " +
+                   "ngầm khi thiết bị quay lại (không cần reload)."
+         );
+         setStatus("dot-bpm", "offline");
+         const bpmEl2 = document.getElementById("bpmValue");
+-        if (bpmEl2 && systemAudio.getState() === AudioSourceState.NO_DEVICE) {
+-            bpmEl2.textContent = "Chưa chọn Soundcard (Setup)";
++        // TASK B71 — Mục D: phân biệt RÕ "chưa cấu hình" (NO_DEVICE) với "lỗi/mất thiết bị"
++        // (ERROR), thay vì chỉ có 1 thông điệp cho NO_DEVICE và im lặng (giữ "-- BPM") cho
++        // ERROR. Đồng thời đổi chữ "Soundcard" (dễ nhầm với card "Audio Interface" trong Setup)
++        // thành đúng tên "SYSTEM_AUDIO" khớp với tên mục Setup mới — xem B70-REPORT.md Mục D
++        // "Soundcard status discrepancy" (nguyên nhân gốc của nghịch lý nêu trong đề bài B70/B71).
++        if (bpmEl2) {
++            if (systemAudio.getState() === AudioSourceState.NO_DEVICE) {
++                bpmEl2.textContent = "Chưa chọn SYSTEM_AUDIO (Setup)";
++            } else if (systemAudio.getState() === AudioSourceState.ERROR) {
++                bpmEl2.textContent = "Lỗi thiết bị SYSTEM_AUDIO";
++            }
+         }
+         // TASK C62 — không đặt lại audioMonitorStarted=false: nếu là ERROR (không phải NO_DEVICE),
+         // audioSource.js đã tự lên lịch retry — onStateChange ở trên tự lo phần còn lại.
+@@ -1898,6 +1932,22 @@ window.electronAPI?.onSetupChanged?.(() => {
+             window.__systemAudioSource.start();
+         }
+     }
++
++    // TASK B71 — cùng cơ chế như trên nhưng cho MIC Input. __micSource dùng chung 1 object
++    // trong suốt vòng đời trang (không tạo lại) — stop() rồi start() lại là đủ để
++    // resolveDeviceId() (getMicDeviceId) được đọc lại với giá trị mới (xem audioSource.js
++    // createMediaDeviceSource() — start() luôn gọi resolveDeviceId() lại từ đầu, không cache).
++    // MIC không có requireExplicitDevice nên đổi về "" (None) vẫn start() thành công bình
++    // thường với mic mặc định hệ thống — không rơi về NO_DEVICE như SYSTEM_AUDIO.
++    if (__micSource && typeof AudioSource !== "undefined" && typeof AudioSource.getMicDeviceId === "function") {
++        const newMicDeviceId = AudioSource.getMicDeviceId();
++        if (newMicDeviceId !== __lastKnownMicDeviceId) {
++            console.log("[Audio][MIC] MIC Input vừa đổi ở Setup -> ngắt mic cũ, mở lại với thiết bị mới.");
++            __lastKnownMicDeviceId = newMicDeviceId;
++            __micSource.stop();
++            __micSource.start().catch((err) => console.warn("[Audio][MIC] Không mở được mic sau khi đổi thiết bị:", err));
++        }
++    }
+ });
+ 
+ // Đã bỏ cơ chế "khoá menu chính khi Setup chưa xong 10/10" — checklist đó dựa trên
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index e71ac75..393edac 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -273,6 +273,8 @@ function initSetupPage() {
+     initProjectSection();
+     initModal("openSoundcardModal", "soundcardModal", "closeSoundcardBtn");
+     initSoundcardSection();
++    initMicInputSection(); // TASK B71 — MIC Input độc lập (selectedMicDeviceId)
++    initSystemAudioInputSection(); // TASK B71 — SYSTEM_AUDIO Input độc lập (selectedSystemAudioDeviceId)
+     initModal("openMidiModal", "midiModal", "closeMidiBtn");
+     initMidiSection();
+     initLinkProSection();
+@@ -1019,6 +1021,138 @@ function updateSoundcardDisplays(foundInRealList = false) {
+     }
+ }
+ 
++/* ================= TASK B71 — MIC Input / SYSTEM_AUDIO Input (ĐỘC LẬP với card
++   "Audio Interface" cũ ở trên — không đổi, không đụng populateSoundcardOptions()/
++   updateSoundcardDisplays() ở trên, chỉ thêm hàm MỚI riêng cho 2 mục mới). ================= */
++
++// Liệt kê audioinput riêng cho B71: khác populateSoundcardOptions() ở chỗ option đầu tiên
++// LUÔN là "None" tường minh (không phải placeholder "chưa chọn"), vì với 2 mục MỚI này,
++// "None" là 1 lựa chọn HỢP LỆ (MIC: dùng mic mặc định hệ thống; SYSTEM_AUDIO: NO_DEVICE cố ý),
++// không phải trạng thái "quên chưa chọn" như dropdown "Audio Interface" cũ.
++async function populateDeviceSelectB71(selectEl, selectedValue, noneLabel) {
++    if (!navigator.mediaDevices?.enumerateDevices) {
++        return { foundInRealList: false };
++    }
++    try {
++        try {
++            const tmpStream = await navigator.mediaDevices.getUserMedia({ audio: true });
++            tmpStream.getTracks().forEach(track => track.stop());
++        } catch (permErr) {
++            console.warn("Không có quyền mic, danh sách thiết bị (B71) có thể thiếu tên:", permErr);
++        }
++
++        const devices = await navigator.mediaDevices.enumerateDevices();
++        const inputs = devices.filter(d => d.kind === "audioinput");
++
++        selectEl.innerHTML = "";
++        const noneOpt = document.createElement("option");
++        noneOpt.value = "";
++        noneOpt.textContent = noneLabel;
++        selectEl.appendChild(noneOpt);
++
++        inputs.forEach((device, idx) => {
++            const opt = document.createElement("option");
++            opt.value = device.deviceId;
++            opt.textContent = device.label || `Thiết bị ${idx + 1}`;
++            selectEl.appendChild(opt);
++        });
++
++        // "" (None) LUÔN coi là hợp lệ — khác selectedValue rỗng của dropdown cũ (nơi rỗng
++        // nghĩa là "chưa chọn gì", 1 khái niệm khác với "None" tường minh ở đây).
++        const foundInRealList = !selectedValue ? true : inputs.some((d) => d.deviceId === selectedValue);
++
++        if (selectedValue) {
++            const match = [...selectEl.options].find(o => o.value === selectedValue);
++            if (match) {
++                selectEl.value = selectedValue;
++            } else {
++                // Thiết bị đã lưu không còn trong danh sách hiện tại — giữ lại lựa chọn cũ
++                // (không tự xoá setting), thêm option fallback chỉ để UI có gì hiển thị.
++                const fallbackOpt = document.createElement("option");
++                fallbackOpt.value = selectedValue;
++                fallbackOpt.textContent = `(Đã lưu trước đó, hiện không thấy) ${selectedValue}`;
++                selectEl.appendChild(fallbackOpt);
++                selectEl.value = selectedValue;
++            }
++        } else {
++            selectEl.value = "";
++        }
++
++        return { foundInRealList };
++    } catch (err) {
++        console.error("Không thể liệt kê thiết bị audio (B71):", err);
++        return { foundInRealList: false };
++    }
++}
++
++function initMicInputSection() {
++    const select = document.getElementById("micInputSelect");
++    const badge = document.getElementById("micInputStatusBadge");
++    if (!select || !badge) return;
++
++    function refreshBadge(foundInRealList) {
++        const savedId = getSetting("selectedMicDeviceId", "");
++        if (!savedId) {
++            badge.textContent = "⚠ Dùng mic mặc định hệ thống";
++            badge.className = "badge badge-warn";
++        } else if (foundInRealList) {
++            badge.textContent = "● Đã chọn: " + (select.selectedOptions[0]?.textContent || savedId);
++            badge.className = "badge badge-live";
++        } else {
++            badge.textContent = "⚠ Thiết bị MIC đã lưu không còn khả dụng";
++            badge.className = "badge badge-warn";
++        }
++    }
++
++    const savedId = getSetting("selectedMicDeviceId", "");
++    populateDeviceSelectB71(select, savedId, "— Không dùng thiết bị cụ thể (mic mặc định hệ thống) —")
++        .then(({ foundInRealList }) => refreshBadge(foundInRealList));
++
++    document.getElementById("btnSelectMicInput")?.addEventListener("click", () => {
++        // select.value === "" là lựa chọn None HỢP LỆ (Mục B đề bài B71: giữ hành vi mic mặc
++        // định hệ thống khi chưa chọn thiết bị cụ thể) — KHÔNG alert bắt buộc chọn như dropdown
++        // "Audio Interface" cũ.
++        saveSetting("selectedMicDeviceId", select.value || "");
++        populateDeviceSelectB71(select, select.value, "— Không dùng thiết bị cụ thể (mic mặc định hệ thống) —")
++            .then(({ foundInRealList }) => refreshBadge(foundInRealList));
++        notifySetupChanged(); // để Menu (nếu đang mở) tự reconnect MIC theo thiết bị mới — xem renderer.js
++    });
++}
++
++function initSystemAudioInputSection() {
++    const select = document.getElementById("systemAudioInputSelect");
++    const badge = document.getElementById("systemAudioInputStatusBadge");
++    if (!select || !badge) return;
++
++    function refreshBadge(foundInRealList) {
++        const savedId = getSetting("selectedSystemAudioDeviceId", "");
++        if (!savedId) {
++            badge.textContent = "⚠ Chưa chọn SYSTEM_AUDIO (BPM/Key/Mod = NO_DEVICE)";
++            badge.className = "badge badge-warn";
++        } else if (foundInRealList) {
++            badge.textContent = "● Đã chọn: " + (select.selectedOptions[0]?.textContent || savedId);
++            badge.className = "badge badge-live";
++        } else {
++            badge.textContent = "⚠ Thiết bị SYSTEM_AUDIO đã lưu không còn khả dụng";
++            badge.className = "badge badge-warn";
++        }
++    }
++
++    const savedId = getSetting("selectedSystemAudioDeviceId", "");
++    populateDeviceSelectB71(select, savedId, "— Không dùng thiết bị (NO_DEVICE) —")
++        .then(({ foundInRealList }) => refreshBadge(foundInRealList));
++
++    document.getElementById("btnSelectSystemAudioInput")?.addEventListener("click", () => {
++        // select.value === "" -> NO_DEVICE tường minh (Mục C đề bài B71: "Khi chọn None, dừng
++        // nguồn và chuyển về NO_DEVICE" — audioSource.js đã sẵn hành vi này khi deviceId rỗng
++        // + requireExplicitDevice:true, không cần đổi audioSource.js).
++        saveSetting("selectedSystemAudioDeviceId", select.value || "");
++        populateDeviceSelectB71(select, select.value, "— Không dùng thiết bị (NO_DEVICE) —")
++            .then(({ foundInRealList }) => refreshBadge(foundInRealList));
++        notifySetupChanged(); // renderer.js (C62) đã có sẵn cơ chế tự stop()/start() lại SYSTEM_AUDIO khi nghe sự kiện này
++    });
++}
++
+ function initMidiSection() {
+     const select = document.getElementById("midiPortSelect");
+     const saveBtn = document.getElementById("saveMidiBtn");
+diff --git a/ui/setup.html b/ui/setup.html
+index 915fd1e..b9f9b90 100644
+--- a/ui/setup.html
++++ b/ui/setup.html
+@@ -290,6 +290,46 @@
+                     <button id="closeSoundcardBtn" style="display:none;"></button>
+                 </div>
+ 
++                <!-- TASK B71 — MIC Input: ĐỘC LẬP với card "Audio Interface" ở trên. Ghi
++                     "selectedMicDeviceId" — đúng key mà AudioSource.createMicSource() thật sự
++                     đọc để mở MIC VU trên Menu (B70-REPORT.md phát hiện #2: trước B71, card
++                     "Audio Interface" ở trên ghi "selectedSoundcardId", một key KHÁC, nên chọn
++                     "Audio Interface" không có tác dụng thật lên MIC VU). Card cũ GIỮ NGUYÊN
++                     100%, không xoá, không đổi key/hành vi của nó. -->
++                <div class="panel-card">
++                    <div class="panel-card-title">🎤 MIC Input <span class="badge badge-live">Nguồn MIC VU trên Menu</span></div>
++                    <p class="hint-text">Thiết bị micro thật sự được Menu dùng để đo MIC VU — tách biệt hoàn
++                        toàn khỏi "Audio Interface" ở trên. Chọn "Không dùng thiết bị cụ thể" để giữ hành
++                        vi hiện tại (dùng mic mặc định của hệ điều hành).</p>
++                    <div style="margin-bottom:10px;"><span id="micInputStatusBadge" class="badge badge-warn">⚠ Dùng mic mặc định hệ thống</span></div>
++                    <select id="micInputSelect" class="ph-select">
++                        <option value="">— Không dùng thiết bị cụ thể (mic mặc định hệ thống) —</option>
++                    </select>
++                    <div class="row-buttons">
++                        <button id="btnSelectMicInput" class="setup-btn">Chọn MIC Input</button>
++                    </div>
++                </div>
++
++                <!-- TASK B71 — SYSTEM_AUDIO Input: ghi "selectedSystemAudioDeviceId" — key DUY
++                     NHẤT mà AudioSource.createSystemAudioSource() đọc để nuôi BPM/Key/Mod +
++                     MUSIC VU (xem A65/B58). Trước B71 key này không có UI nào ghi được, chỉ cấu
++                     hình thủ công qua DevTools — đây là ô đầu tiên cho phép người dùng tự chọn
++                     mà không cần DevTools. KHÔNG tự chọn MIC/soundcard cũ làm giá trị này. -->
++                <div class="panel-card">
++                    <div class="panel-card-title">🎵 SYSTEM_AUDIO Input <span class="badge badge-warn">Nguồn BPM / Key / Mod / MUSIC VU</span></div>
++                    <p class="hint-text">Thiết bị dùng để phân tích BPM/Key/Mod và đo MUSIC VU trên Menu.
++                        KHÔNG tự động dùng MIC hay "Audio Interface" thay thế — nếu chưa có nguồn phù hợp
++                        (ví dụ 1 kênh Mix loopback từ ASIO Link Pro), chọn "Không dùng thiết bị" thì
++                        BPM/Key/Mod sẽ ở trạng thái NO_DEVICE, không giả lập bằng nguồn khác.</p>
++                    <div style="margin-bottom:10px;"><span id="systemAudioInputStatusBadge" class="badge badge-warn">⚠ Chưa chọn SYSTEM_AUDIO</span></div>
++                    <select id="systemAudioInputSelect" class="ph-select">
++                        <option value="">— Không dùng thiết bị (NO_DEVICE) —</option>
++                    </select>
++                    <div class="row-buttons">
++                        <button id="btnSelectSystemAudioInput" class="setup-btn">Chọn SYSTEM_AUDIO Input</button>
++                    </div>
++                </div>
++
+                 <div class="panel-card">
+                     <div class="panel-card-title">📶 Microphone VU <span class="badge badge-live">Thật — đo trực tiếp mic đang chọn</span></div>
+                     <p class="hint-text">Đo mức tín hiệu micro bằng Web Audio API ngay trong Setup (không qua Engine của
+-- 
+2.43.0
+

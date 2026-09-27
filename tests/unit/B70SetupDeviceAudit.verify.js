@@ -19,6 +19,13 @@
  *   2 setting hoàn toàn khác nhau (selectedSoundcard vs selectedSystemAudioDeviceId), không
  *   liên quan tới nhau.
  *
+ * ĐÃ CẬP NHẬT Ở TASK B71 — Finding 1 (MIC) và Finding 3 (dot-audio Menu) đã được B71 SỬA
+ * (xem B71-REPORT.md + tests/unit/B71SetupDeviceFix.verify.js cho bộ test đầy đủ của bản sửa).
+ * 3 assertion bên dưới đã lỗi thời so với Finding 1/3 (đúng ở B70, sai ở B71 vì bug đã hết) đã
+ * được SỬA LẠI để xác nhận đúng trạng thái MỚI — không để một test "biết là sẽ fail" nằm
+ * trong bộ hồi quy. Finding 2 (thiết bị đầu ra) vẫn ĐÚNG NGUYÊN — B71 không triển khai output
+ * device (đúng phạm vi đề bài B71 Mục E).
+ *
  * Chạy: node tests/unit/B70SetupDeviceAudit.verify.js
  */
 const fs = require('fs');
@@ -41,8 +48,8 @@ const setupVuMeterSrc = fs.readFileSync(path.join(ROOT, 'ui/js/setupVuMeter.js')
 console.log('== Finding 1: "selectedMicDeviceId" không được Setup ghi — MIC VU thật trên Menu không theo Setup ==');
 assert(/getSetting\("selectedMicDeviceId"/.test(audioSourceSrc),
     'audioSource.js: createMicSource() (qua getMicDeviceId()) đọc key "selectedMicDeviceId"');
-assert(!/setSetting\("selectedMicDeviceId"|saveSetting\("selectedMicDeviceId"/.test(setupSrc),
-    'setup.js: KHÔNG có chỗ nào ghi "selectedMicDeviceId" (xác nhận Setup không điều khiển được key này)');
+assert(/saveSetting\("selectedMicDeviceId"/.test(setupSrc),
+    '[SAU B71] setup.js: NAY ĐÃ CÓ chỗ ghi "selectedMicDeviceId" (initMicInputSection() — Finding 1 đã được B71 sửa)');
 assert(!/selectedMicDeviceId/.test(rendererSrc),
     'renderer.js: không có chỗ nào đọc/ghi "selectedMicDeviceId" (Menu cũng không tự bù key này)');
 assert(/setSetting\("selectedSoundcardId"|saveSetting\("selectedSoundcardId"/.test(setupSrc),
@@ -70,15 +77,15 @@ const checkAllSystemsMatch = rendererSrc.match(/async function checkAllSystems\(
 assert(!!checkAllSystemsMatch, 'Tìm thấy checkAllSystems() (chấm tròn dot-audio) trong renderer.js');
 if (checkAllSystemsMatch) {
     const body = checkAllSystemsMatch[1];
-    assert(/getSetting\?\.\("selectedSoundcard"\)/.test(body),
-        'checkAllSystems() (dot-audio) cũng chỉ đọc "selectedSoundcard" — cùng gốc với Finding 3');
+    assert(/__micSource\?\.getState\?\.\(\)/.test(body) && !/getSetting\?\.\("selectedSoundcard"\)/.test(body),
+        '[SAU B71] checkAllSystems() (dot-audio) NAY ĐÃ đọc __micSource.getState() thật, không còn chỉ đọc chuỗi "selectedSoundcard" (Finding 3 đã được B71 sửa — xem B71-REPORT.md)');
 }
-assert(/bpmEl2\.textContent = "Chưa chọn Soundcard \(Setup\)"/.test(rendererSrc),
-    'renderer.js: text "Chưa chọn Soundcard (Setup)" chỉ xuất hiện trong nhánh SYSTEM_AUDIO NO_DEVICE (đọc selectedSystemAudioDeviceId) — hoàn toàn khác nguồn với Finding 3 ở trên -> xác nhận 2 chỉ báo không liên quan nhau (đúng nguyên nhân nghịch lý B70 mô tả)');
+assert(/bpmEl2\.textContent = "Chưa chọn SYSTEM_AUDIO \(Setup\)"/.test(rendererSrc),
+    '[SAU B71] renderer.js: text đổi thành "Chưa chọn SYSTEM_AUDIO (Setup)" (bỏ chữ "Soundcard" gây nhầm với card Audio Interface — đúng nguyên nhân Finding 3, B71 đã sửa cách đặt tên)');
 
 console.log('\n== Xác nhận lại (không đổi từ A65): SYSTEM_AUDIO không tự fallback sang MIC/selectedSoundcardId ==');
-assert(/KHÔNG.*selectedSoundcardId\/Mix 01/.test(rendererSrc) || /không còn dùng selectedSoundcardId\/Mix 01/.test(rendererSrc),
-    'renderer.js: còn nguyên chú thích A65 xác nhận SYSTEM_AUDIO không fallback về selectedSoundcardId');
+assert(!/getMicDeviceId\(\)/.test(fs.readFileSync(path.join(ROOT, 'ui/js/audioSource.js'), 'utf8').match(/function getSystemAudioDeviceId\(\)[\s\S]*?\n    \}/)?.[0] || ''),
+    'audioSource.js: getSystemAudioDeviceId() vẫn không hề gọi getMicDeviceId() ở bất kỳ đâu trong thân hàm (không fallback sang MIC)');
 assert(/function getSystemAudioDeviceId\(\)[\s\S]{0,120}selectedSystemAudioDeviceId/.test(audioSourceSrc),
     'audioSource.js: getSystemAudioDeviceId() đọc đúng "selectedSystemAudioDeviceId", không lẫn với selectedSoundcardId');
 
