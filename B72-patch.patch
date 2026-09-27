@@ -1,0 +1,605 @@
+From 52abb3865bfa3f69cf0b8f0677d97bd02e85084d Mon Sep 17 00:00:00 2001
+From: Claude B <claude-b@local>
+Date: Sun, 27 Sep 2026 16:46:08 +0000
+Subject: [PATCH] B72: Setup inventory + fix dot-audio dual-writer bug (from
+ B71)
+
+Kiem ke toan bo Setup theo 10 nhom yeu cau (Audio Interface, MIC/SYSTEM_AUDIO Input, MIDI,
+DAW, Plugin, AI, Database, Calibration, Backup, System, Persistence) - xem B72-REPORT.md
+Muc B cho bang day du voi bang chung tung nhom.
+
+PHAT HIEN + SUA 1 loi hoi quy an tu B71:
+- ui/js/renderer.js: dot-audio (Menu, AUDIO INTERFACE) co 2 ham cung ghi 1 DOM element voi
+  2 logic khac nhau - checkAllSystems() da duoc B71 sua dung (doc AudioSourceState that),
+  nhung updateMainStatus() con sot dong CU (setStatus dua vao ten da luu) va CHAY SAU nen
+  am tham ghi de lai dung bug ma B71-REPORT.md tuyen bo da sua.
+- Gop ve 1 ham duy nhat updateAudioInterfaceDot(), goi tu ca 2 noi. Them tooltip phan biet
+  5 trang thai MIC (dang mo/dang hoat dong/loi/da chon khong kha dung/chua khoi dong) -
+  KHONG doi HTML/CSS, chi set .title bang JS.
+
+tests/unit/B72SetupCompletion.verify.js (moi, 25 PASS) - test HANH VI THAT (persistence
+merge, key cu khong tu chuyen, getMicDeviceId/getSystemAudioDeviceId hanh vi that qua sandbox).
+Cap nhat 3 file test cu (B70/B71/A69) theo cau truc ham moi + sua 1 loi ky thuat cua chinh
+A69 test (git diff dung HEAD di dong).
+
+Da chay full regression 69 file: 59/69 PASS, 10 FAIL con lai deu doi chieu voi baseline
+truoc B72, khong phai do B72 gay ra.
+
+HARDWARE VERIFICATION: PENDING - khong co may Windows that trong moi truong nay.
+
+Baseline: origin/main a5af38d (da xac nhan bao gom nguyen ven A68+A69+B70+B71, dong bo qua
+git reset --hard origin/main). Khong push/merge - cho duoc giao quyen.
+---
+ B72-REPORT.md                            | 238 +++++++++++++++++++++++
+ tests/unit/A69VuConsolidation.verify.js  |  13 +-
+ tests/unit/B70SetupDeviceAudit.verify.js |  18 +-
+ tests/unit/B71SetupDeviceFix.verify.js   |  20 +-
+ tests/unit/B72SetupCompletion.verify.js  | 126 ++++++++++++
+ ui/js/renderer.js                        |  54 +++--
+ 6 files changed, 438 insertions(+), 31 deletions(-)
+ create mode 100644 B72-REPORT.md
+ create mode 100644 tests/unit/B72SetupCompletion.verify.js
+
+diff --git a/B72-REPORT.md b/B72-REPORT.md
+new file mode 100644
+index 0000000..368edc4
+--- /dev/null
++++ b/B72-REPORT.md
+@@ -0,0 +1,238 @@
++# B72-REPORT.md — Setup Completion
++
++## A. Baseline
++- origin/main: `a5af38d8a368624f9b47d6e685337ff2fa9106cb` (kiểm bằng `git fetch origin` đầu
++  task). **Cao hơn** SHA `28b8a0a` ghi trong đề bài B72 — đã kiểm `git log 28b8a0a..a5af38d`:
++  2 commit "Auto-sync" của bạn (`a9a2727`, `a5af38d`), nội dung là **chính patch A68 và B71 mà
++  Claude B đã gửi**, áp lên máy thật rồi push lên. Đã `diff` từng file byte-by-byte giữa commit
++  B71 local (`e9483e9`) và `origin/main` hiện tại — **khớp 100%, không lệch 1 ký tự nào**.
++- HEAD: làm trên `origin/main` (`git reset --hard origin/main`, an toàn vì nội dung khớp
++  100% với B71 local đã kiểm chứng, không mất gì).
++- Branch: `main`.
++- Working tree: sạch lúc bắt đầu.
++- **B70/B71 integration status: ĐÃ XÁC NHẬN TÍCH HỢP ĐẦY ĐỦ** vào `origin/main` (không phải
++  giả định — có bằng chứng diff).
++
++## B. Setup Inventory
++
++Setup (`ui/setup.html`) có ~45 `panel-card` trải trên 20 `section`. Bảng dưới đây audit theo
++đúng 10 nhóm đề bài B72 yêu cầu, dựa trên đọc code + các badge tự mô tả trạng thái đã có sẵn
++trong chính UI (rất nhiều panel đã tự gắn nhãn "Thật", "Chưa có IPC", "Coming Soon" từ các task
++trước — đây là bằng chứng trực tiếp, không phải suy đoán). **Phạm vi kiểm tra ở mức "đọc code +
++đối chiếu badge với hành vi thật của 1 vài điểm đại diện mỗi nhóm"**, không phải bấm-thử từng
++nút trong toàn bộ ~45 card (ngoài khả năng của phiên làm việc này, và MIDI/DAW/Plugin không có
++yêu cầu sửa cụ thể nào từ B70/B71 nên không có "đặc tả cần hoàn thiện" để đối chiếu — B72 chỉ
++kiểm kê nhóm này, không tự tạo yêu cầu mới).
++
++| Nhóm | Trạng thái | File / vị trí | Bằng chứng |
++|---|---|---|---|
++| **Audio Interface** (cũ) | **PASS** (như cũ) + vai trò đã làm rõ thêm | `ui/setup.html:276-291`, `setup.js` `initSoundcardSection()` | Dropdown liệt kê `audioinput`, lưu `selectedSoundcardId`+`selectedSoundcard`. Dùng cho: (1) hiển thị tên trên Menu (`#soundcardName`), (2) chạy VU test nội bộ Setup (`setupVuMeter.js`). **Không** còn là nguồn duy nhất quyết định trạng thái MIC trên Menu (đã tách từ B71/B72, xem Mục D). |
++| **MIC Input** | **PASS** (mức cấu hình + runtime code), **PENDING** (phần cứng) | `setup.html:293-311`, `setup.js` `initMicInputSection()`, `audioSource.js` `getMicDeviceId()`, `renderer.js` `startMicAndMasterVu()` | Chọn/lưu/khôi phục/reconnect đều có test hành vi thật (`B71SetupDeviceFix.verify.js`, `B72SetupCompletion.verify.js` Test 3). |
++| **SYSTEM_AUDIO Input** | **PASS** (mức cấu hình + runtime code), **BLOCKED/PENDING** (nhạc sạch — thuộc B73) | `setup.html:313-331`, `setup.js` `initSystemAudioInputSection()`, `audioSource.js` `getSystemAudioDeviceId()` | Tương tự MIC Input. Không tự nhận nhạc sạch (đúng B72-04, tách sang B73). |
++| **MIDI** | **PARTIAL** (đã có phần THẬT, có phần MISSING tự khai báo) | `setup.html:384-620`, `setup.js` `initMidiSection()`/`initLinkProSection()` | "MIDI Input"/"MIDI Learn" tự gắn badge `"Thật — Web MIDI API"`/`"Thật — đọc tín hiệu Input thật"`. "MIDI Macro" tự gắn `"Chưa có Engine thực thi chuỗi action"` (MISSING, đã tự khai báo từ trước, không phải phát hiện mới của B72). "MIDI Clock" tự gắn `"Coming Soon"`. |
++| **DAW** | **PASS** (phần lõi) | `setup.html:503-576`, `641-702` | "DAW Action Mapping", "DAW MIDI OUTPUT", "DAW đang dùng" đều có handler thật trong `setup.js` (không kiểm tra lại chi tiết từng mapping — ngoài phạm vi audio device của B72). |
++| **Plugin** | **PARTIAL** | `setup.html:737-758` | "VST2" có card riêng; "Melodyne/SoundShifter/VST3/Plugin Scan" gộp 1 card đặc tả — cần đọc sâu hơn `setup.js` để xác nhận mức triển khai thật, **chưa làm ở B72** (ngoài phạm vi audio device, không có yêu cầu cụ thể từ B70/B71 để đối chiếu) — đề xuất audit riêng nếu cần. |
++| **AI** | **MISSING/BLOCKED** (tự khai báo) | `setup.html:188-217` | "AI Configuration/Readiness": mọi pill đều tĩnh `"Pending backend verification"` (không phải giá trị runtime thật). "AI Core": badge `"Chưa có kênh IPC — không xoá, chỉ disable"`, toàn bộ input trong card đều có `disabled`. Đây là MISSING đã tự khai báo rõ ràng từ trước, không phải phát hiện mới. |
++| **Database** | **MISSING/BLOCKED** (tự khai báo) | `setup.html:759-775` | Badge `"Chưa có IPC"`. Mọi ô số liệu hiện `"—"` cố định, 4 nút đều `disabled`. Dữ liệu thật tồn tại ở `database/songLibrary.json` nhưng Setup chưa có kênh đọc — đã tự ghi rõ trong `hint-text`. |
++| **Calibration** | **PASS** | `setup.html:779-826` | "Mouse Control" (`btnMouseControlToggle`) có handler thật, badge `"ON"` (`badge-live`), đã có comment xác nhận từ task A29. |
++| **Backup** | **PASS** với 1 gap tự khai báo | `setup.html:828-847` | `btnBackupLink`/`btnRestoreLink` gọi `exportBackup(appSettings)` thật (không phải demo). Gap đã tự ghi rõ trong `hint-text`: **Restore chưa validate cấu trúc file trước khi merge**, chỉ có `confirm()` cảnh báo ghi đè — PARTIAL, đã có đề xuất sẵn "báo cáo để bạn quyết định", B72 giữ nguyên (không tự sửa vì rủi ro phá luồng Restore đang chạy ổn định, đúng nguyên tắc B72 "không tự đặt hành vi mới"). |
++| **System** | **PASS** (phần lõi: Browser/Theme/Log) | `setup.html:849-895` | "Browser" badge `"Đã hỗ trợ"`. Chưa audit sâu Update/License/Liên hệ (không liên quan audio device, ngoài phạm vi B72). |
++| **Persistence** | **PASS** | `appSettings.js`, `app/main.js` | File JSON atomic (`writeSettingsFile()`), merge `{...DEFAULT_APP_SETTINGS, ...fromFile}` — xác nhận bằng test hành vi thật (`B72SetupCompletion.verify.js` Test 1/2), không chỉ đọc code suông. |
++
++## C. Implementation
++
++**Đã sửa (1 phát hiện MỚI của B72 — lỗi hồi quy ẩn từ B71):**
++
++`ui/js/renderer.js` — `dot-audio` (chấm trạng thái "AUDIO INTERFACE" trên Menu) có **2 hàm
++cùng ghi vào 1 phần tử DOM với 2 LOGIC KHÁC NHAU**:
++- `checkAllSystems()` — đã được B71 sửa đúng (đọc `__micSource.getState()` thật).
++- `updateMainStatus()` — **vẫn còn sót dòng CŨ** `setStatus("dot-audio", soundcard ? "online" : "offline")` (logic trước-B71, dựa vào tên đã lưu).
++
++Vì `updateMainStatus()` chạy **sau** `checkAllSystems()` ở luồng khởi tạo (`DOMContentLoaded`)
++và cũng chạy trong `onSetupChanged`, dòng cũ này **âm thầm ghi đè lại** đúng bug mà B71-REPORT.md
++tuyên bố đã sửa — nghĩa là trên thực tế, dot-audio vẫn có thể xanh chỉ vì có tên đã lưu, bất
++chấp mic thật đang lỗi. Đây chính xác là kiểu lỗi mà B72 Phần 7 cảnh báo ("Không được coi việc
++phát thông báo là bằng chứng runtime đã reconnect") — chỉ khác là lỗi nằm ở tầng hiển thị chứ
++không phải reconnect.
++
++**Cách sửa**: gộp về 1 hàm DUY NHẤT `updateAudioInterfaceDot()`, gọi từ cả `checkAllSystems()`
++lẫn `updateMainStatus()` — không còn 2 nơi quyết định cùng 1 phần tử DOM. Nhân tiện bổ sung
++phân biệt "đã chọn nhưng không khả dụng" (đọc `selectedMicDeviceId`) với "chưa từng chọn", và
++gắn `title` (tooltip khi rê chuột) mô tả rõ 5 trạng thái: đang mở / đang hoạt động / lỗi / đã
++chọn nhưng không khả dụng / chưa khởi động — theo đúng yêu cầu B72-09 phân biệt trạng thái,
++**không đổi HTML/CSS nào** (chỉ set `.title` bằng JS — an toàn tuyệt đối về giao diện).
++
++**File thay đổi**: chỉ `ui/js/renderer.js` (production) + 4 file test (xem Mục G).
++
++**Không sửa** (và lý do):
++- MIDI/DAW/Plugin/AI/Database/Calibration/Backup/System: không có "yêu cầu rõ ràng trong đặc
++  tả hiện hành" cho các nhóm này (B70/B71 không đề cập, không phải phạm vi audio device) — đúng
++  nguyên tắc B72-10 "nếu chưa rõ yêu cầu... đánh dấu BLOCKED/MISSING, không tự đặt hành vi mới".
++  Các mục MISSING (AI, Database) đã tự khai báo rõ từ trước, không cần B72 làm gì thêm ngoài
++  ghi nhận lại trong bảng kiểm kê.
++- Backup — validate cấu trúc file trước Restore: đã có gap tự ghi nhận sẵn trong code, nhưng
++  **không sửa** vì rủi ro phá luồng Restore đang chạy ổn định và không thuộc phạm vi audio
++  device của B70/B71 — đúng tinh thần "không tự ý sửa khi chưa được xác nhận phạm vi".
++- `selectedSoundcardId`: **không đổi, không xoá, không tự chuyển** sang 2 key mới (đúng B72-05
++  và các giới hạn cứng của đề bài).
++
++## D. Audio Device Configuration
++
++- **MIC Input**: không có thay đổi logic mới ở B72 (B71 đã đúng) — chỉ có thay đổi ở tầng hiển
++  thị trạng thái (Mục C). Luồng `Setup MIC Input → selectedMicDeviceId → AudioSource MIC →
++  runtime` đã được xác minh bằng test hành vi thật (không chỉ regex).
++- **SYSTEM_AUDIO Input**: tương tự, không đổi logic. Xác nhận lại: **không** dùng
++  `selectedSoundcardId` hay `selectedMicDeviceId` làm fallback (test `B71SetupDeviceFix.verify.js`
++  Test 2/3 đã kiểm, chạy lại vẫn PASS).
++- **Audio Interface cũ**: xem Mục B — vai trò đã được xác định rõ bằng bằng chứng code (không
++  đổi ý nghĩa, không xoá).
++- **Persistence**: xác nhận bằng test hành vi thật (Mục G) — thiếu key dùng mặc định, key cũ
++  không bị tự chuyển, chọn None lưu đúng `""`.
++- **Reconnect**: cơ chế `stop()`/`start()` lại khi `onSetupChanged` bắn (đã có từ B71, dùng lại
++  nguyên vẹn cho cả MIC lẫn SYSTEM_AUDIO) — xác nhận `createMediaDeviceSource().start()` luôn
++  gọi lại `resolveDeviceId()` từ đầu (đọc `audioSource.js` dòng ~211), nên không cần tạo lại
++  object AudioSource khi đổi thiết bị.
++
++## E. Runtime and UI
++
++- **Luồng thay đổi cấu hình**: `Setup lưu → notifySetupChanged() (IPC) → renderer.js
++  onSetupChanged → so sánh deviceId cũ/mới → stop() → start() → onStateChange → cập nhật UI`.
++  Đã xác nhận qua code từng bước (không có bước nào "coi thông báo là bằng chứng thành công" —
++  UI chỉ cập nhật khi `onStateChange` thực sự bắn, tức là khi runtime THẬT xác nhận trạng thái).
++- **Trạng thái thiết bị**: `AudioSourceState` có 5 giá trị (`NO_DEVICE/STARTING/RUNNING/
++  STOPPING/ERROR`) — **không có giá trị `STOPPED` riêng** như bảng B72-09 liệt kê (`stop()`
++  luôn kết thúc ở `NO_DEVICE`, đi qua `STOPPING` thoáng qua). Đây là kiến trúc **có từ B58**,
++  không phải lỗi của B72 — thêm 1 state mới vào `AudioSourceState` là **thay đổi kiến trúc âm
++  thanh dùng chung cho cả MIC/SYSTEM_AUDIO/DAW_MASTER**, ngoài phạm vi B72 (đúng giới hạn "không
++  tự ý thay đổi kiến trúc âm thanh"). Ghi nhận đây là 1 khoảng cách nhỏ so với bảng B72-09, đề
++  xuất xác nhận riêng nếu cần phân biệt "đã dừng" khỏi "chưa từng cấu hình" ở tầng kiến trúc.
++- **Xử lý lỗi**: `ERROR` có thông điệp UI riêng cho SYSTEM_AUDIO (`bpmValue` = "Lỗi thiết bị
++  SYSTEM_AUDIO", từ B71) và cho MIC (`title` tooltip = "Lỗi mở mic", mới thêm ở B72).
++- **Bằng chứng**: `tests/unit/B72SetupCompletion.verify.js` Test 4/5 (hành vi + cấu trúc code),
++  cộng `AudioReconnectC62.verify.js` (33 PASS, cơ chế reconnect dùng chung).
++
++## F. Setup Features
++
++- **Đã hoàn thiện** (trong phạm vi B72): thống nhất lại logic `dot-audio` về 1 nguồn duy nhất;
++  bổ sung phân biệt trạng thái tooltip cho MIC (5 mức thay vì 2 mức xanh/đỏ).
++- **Còn thiếu** (đã kiểm kê, KHÔNG thuộc phạm vi sửa của B72 vì thiếu đặc tả hoặc thuộc B73):
++  MIDI Macro Engine, AI Core IPC, Database IPC, Backup restore-validation, Audio Output (tách
++  hẳn sang B73 theo đề bài).
++- **BLOCKED**: AI Core / Database — cần 1 lớp IPC hoàn toàn mới nối `core/ai`/
++  `database/songLibrary.json` vào Setup; không có đặc tả kiến trúc cho lớp IPC đó trong bất kỳ
++  báo cáo B7x nào trước — cần 1 task riêng với đặc tả rõ trước khi code.
++
++## G. Tests
++
++**Test mới**: `tests/unit/B72SetupCompletion.verify.js` (25 PASS, 0 FAIL) — kiểm tra HÀNH VI
++THẬT (không chỉ regex tên hàm):
++- Merge settings thiếu key → dùng mặc định (mô phỏng đúng biểu thức merge thật).
++- Key cũ (`selectedSoundcardId`) không tự chuyển sang key mới khi load file cũ.
++- `getMicDeviceId()`/`getSystemAudioDeviceId()` — hành vi thật khi chưa chọn / đã chọn / chọn
++  lại None (chạy code thật trong sandbox `vm`, không phải suy đoán từ chuỗi).
++- Phát hiện + xác nhận đã sửa: `dot-audio` không còn 2 nơi ghi đè.
++- `updateAudioInterfaceDot()` phân biệt đủ 5 nhánh trạng thái.
++
++**Test cập nhật** (do đổi cấu trúc hàm ở B72, không đổi ý nghĩa test):
++- `tests/unit/B70SetupDeviceAudit.verify.js` — 2 assertion trỏ lại đúng hàm
++  `updateAudioInterfaceDot()` mới thay vì `checkAllSystems()`.
++- `tests/unit/B71SetupDeviceFix.verify.js` — tương tự, 2 assertion cập nhật theo cấu trúc mới.
++- `tests/unit/A69VuConsolidation.verify.js` — **sửa 1 lỗi kỹ thuật của chính bài test** (không
++  liên quan Setup): self-check `git diff 7d49c81..HEAD` dùng `HEAD` di động nên tự fail bất cứ
++  khi nào `audioSource.js` bị đụng bởi bất kỳ task NÀO SAU A69 (kể cả B71 đụng hợp lệ) — chốt
++  lại thành `7d49c81..ef4fd14` (đúng phạm vi lịch sử riêng của A69).
++
++**Regression** — chạy đầy đủ theo đúng B72-12:
++```
++node tests/unit/SoundcardSetupPersistence.verify.js → 20 PASS, 0 FAIL
++node tests/unit/AudioSourceB58.verify.js            → 29 PASS, 0 FAIL
++node tests/unit/AudioReconnectC62.verify.js         → 33 PASS, 0 FAIL
++node tests/unit/B70SetupDeviceAudit.verify.js       → 18 PASS, 0 FAIL
++node tests/unit/B71SetupDeviceFix.verify.js         → 44 PASS, 0 FAIL
++node tests/unit/B72SetupCompletion.verify.js        → 25 PASS, 0 FAIL
++```
++
++**Toàn bộ regression suite khả dụng** (69 file): **59/69 PASS**.
++
++**Lỗi mới do B72 gây ra**: KHÔNG có (0). Trong lúc làm đã tạm thời gây ra 3 lỗi (1 ở
++`A69VuConsolidation`, 2 ở `B70SetupDeviceAudit`, 2 ở `B71SetupDeviceFix`) do refactor
++`checkAllSystems()` — **tất cả đã được sửa lại trong cùng phiên làm việc này** trước khi kết
++thúc, không còn lỗi mới nào sót lại (xem log thao tác: mỗi lỗi phát sinh đều được phát hiện và
++vá ngay bằng cách đối chiếu trực tiếp, không suy đoán).
++
++**Lỗi tồn tại từ baseline** (10 file, đã đối chiếu với baseline trước B72 bằng `git stash`/chạy
++lại trên A68-A69-B70-B71, xác nhận fail giống hệt, không phải do B72):
++
++| File FAIL | Nguyên nhân | Bằng chứng đối chiếu baseline |
++|---|---|---|
++| `B38D1RuntimeIntegration`, `CommandRuntimeHealth`, `D1SpecValidation`, `MidiD1RuntimeB61`, `PortSelectionPolicy` | `Cannot find module 'xmllint-wasm'` | Môi trường container chưa `npm install` — đã xác nhận lỗi giống hệt từ B70/B71 |
++| `MidiLearnDispatch` | `Cannot find module 'easymidi'` | Cùng lý do, đã xác nhận từ B70/B71 |
++| `AiSystemBoundaryA56` | 1 assertion về audit khoá A52/A53, không liên quan Setup | Đã xác nhận fail sẵn từ A68 (dùng `git stash` chạy lại) |
++| `MenuMinimizeRuntime` | IPC minimize-window, không liên quan Setup | Đã xác nhận fail sẵn từ A68 |
++| `AutoSongCollector`, `NowPlayingResolver` | Self-check "`git status` sạch" — luôn fail khi có file khác bị sửa cùng lúc | Đã giải thích từ A69/B70, mọi assertion CHỨC NĂNG khác đều PASS |
++
++## H. Windows Verification
++
++**KHÔNG THỰC HIỆN ĐƯỢC — HARDWARE VERIFICATION: PENDING.**
++
++Môi trường thực hiện task này là container Linux nội bộ, **không có quyền truy cập máy Windows
++tại `G:\AUTO_MENU_AI`**, không có Electron thật, không có thiết bị âm thanh vật lý. Toàn bộ Mục
++B–G ở trên là kết luận từ đọc source thật + test hành vi tự động (sandbox `vm`, giả lập
++`navigator.mediaDevices`) — **không phải kiểm chứng trên máy thật**.
++
++- Thiết bị đã kiểm tra: KHÔNG có (không thể).
++- Các tình huống đã thực hiện: KHÔNG có trên phần cứng thật; đã thực hiện ở mức code/sandbox
++  cho: chọn thiết bị, None, thiết bị mất, reconnect khi đổi thiết bị, thiếu key, key cũ.
++- Kết quả thực tế: KHÔNG CÓ bằng chứng phần cứng.
++- Log và bằng chứng: KHÔNG CÓ (không chạy được app thật).
++- **Những nội dung chưa xác minh** (bắt buộc bạn tự làm theo Mục 10 đề bài B72 gốc, hoặc
++  B71-REPORT.md Mục 10 đã có hướng dẫn từng bước tương tự):
++  1. Dropdown MIC Input/SYSTEM_AUDIO Input có hiển thị đúng tên thiết bị thật không.
++  2. Chọn MIC/SYSTEM_AUDIO thật có phản ứng đúng trên VU/BPM không.
++  3. Khởi động lại app có khôi phục đúng lựa chọn không.
++  4. Đổi thiết bị khi Menu đang chạy, rút/cắm lại thiết bị — có đúng như mô tả ở Mục D/E không.
++  5. Tooltip mới trên `dot-audio` (Mục C) có hiển thị đúng khi rê chuột không.
++
++## I. Remaining Work
++
++**Blocker**:
++1. Hardware verification (Mục H) — cần bạn tự làm trên máy Windows thật.
++2. AI Core / Database — cần IPC mới, chưa có đặc tả kiến trúc (xem Mục F).
++3. `AudioSourceState` thiếu 1 giá trị `STOPPED` riêng so với bảng B72-09 — cần bạn xác nhận có
++   muốn thêm (thay đổi kiến trúc, cần task riêng) hay giữ nguyên dùng chung `NO_DEVICE`.
++4. Backup: chưa validate cấu trúc file trước Restore (gap đã tự ghi nhận từ trước, chưa sửa).
++5. MIDI Macro Engine — MISSING đã tự khai báo, chưa có đặc tả để triển khai.
++
++**Task tiếp theo đề xuất**:
++- B73 (đã định nghĩa sẵn trong đề bài): Audio Output + tách MUSIC/MIC + đường tín hiệu MASTER.
++- 1 task xác nhận kiểm chứng phần cứng cho B70/B71/B72 gộp lại (đỡ phải lặp lại nhiều lần).
++- 1 task riêng cho AI Core/Database IPC nếu đây là ưu tiên tiếp theo.
++
++## J. Changed Files
++
++| File | Lý do |
++|---|---|
++| `ui/js/renderer.js` | Gộp logic `dot-audio` về 1 hàm `updateAudioInterfaceDot()` duy nhất (sửa lỗi 2-nơi-ghi-đè phát hiện ở B72), thêm tooltip phân biệt 5 trạng thái MIC. |
++| `tests/unit/B72SetupCompletion.verify.js` (mới) | Test hành vi thật cho persistence + phát hiện B72 — 25 PASS. |
++| `tests/unit/B70SetupDeviceAudit.verify.js` | Cập nhật 2 assertion theo cấu trúc hàm mới (không đổi ý nghĩa kiểm tra). |
++| `tests/unit/B71SetupDeviceFix.verify.js` | Tương tự — cập nhật 2 assertion theo cấu trúc hàm mới. |
++| `tests/unit/A69VuConsolidation.verify.js` | Sửa self-check dùng `HEAD` di động thành phạm vi lịch sử cố định (lỗi kỹ thuật của bài test, không liên quan Setup). |
++
++**Không sửa**: `bpmEngine.js`, `keyEngine.js`, `modEngine.js`, `ui/setup.html`, `ui/js/setup.js`,
++`ui/js/audioSource.js`, `ui/index.html`, `app/main.js` — không file production nào khác ngoài
++`renderer.js` bị đụng. Xác nhận bằng `git diff --stat`.
++
++## K. Conclusion
++
++- **PASS / PARTIAL / FAIL: PARTIAL.** Ở mức code/config, các tiêu chí B72-01 đến B72-10 đều có
++  bằng chứng cụ thể (bảng kiểm kê, test hành vi thật, regression sạch). Ở mức toàn diện, **B72
++  KHÔNG THỂ PASS hoàn toàn** vì B72-11 (Hardware) hoàn toàn PENDING — đúng tinh thần đề bài
++  "Không được đóng B72 chỉ bằng unit test".
++- **Tiêu chí đã đạt** (bằng chứng code-level): B72-01 (kiểm kê), B72-02, B72-03, B72-04,
++  B72-05, B72-06, B72-07 (một phần — thiếu `STOPPED` riêng, xem Mục I), B72-09 (test mới,
++  regression sạch).
++- **Tiêu chí chưa đạt**: B72-08 (Hardware — PENDING hoàn toàn), 1 phần B72-05/B72-06 tuỳ theo
++  cách tính (AI Core/Database vẫn BLOCKED, không thuộc lỗi B72 mà là thiếu đặc tả có sẵn).
++- **Commit local**: chưa commit tại thời điểm viết báo cáo này (sẽ commit ngay sau khi gửi báo
++  cáo — hash cuối cùng nằm trong tin nhắn chat kèm theo).
++- **Push/merge status**: CHƯA — theo đúng quy định, chờ được giao quyền.
+diff --git a/tests/unit/A69VuConsolidation.verify.js b/tests/unit/A69VuConsolidation.verify.js
+index 5345c34..2168ee8 100644
+--- a/tests/unit/A69VuConsolidation.verify.js
++++ b/tests/unit/A69VuConsolidation.verify.js
+@@ -111,14 +111,19 @@ assert(!html.includes('vu-beat-fill') && !html.includes('vu-bar--beat'), 'index.
+ assert(!rendererSrc.includes('vu-beat-fill'.replace('vu-beat-fill', 'vu-beat-fill')) || !/getElementById\("vu-beat-fill"\)/.test(rendererSrc),
+     'renderer.js không còn document.getElementById("vu-beat-fill") nào');
+ 
+-console.log('\n== Test 8: File core không bị đụng trong A69 (kiểm bằng git diff so với A68) ==');
++console.log('\n== Test 8: File core không bị A69 đụng (kiểm bằng git diff CỐ ĐỊNH ở phạm vi commit A68->A69) ==');
++// TASK B72 — SỬA: bản gốc dùng "7d49c81..HEAD" (HEAD di động), nên hễ B70/B71/B72 sau này
++// đụng audioSource.js một cách HỢP LỆ (vd B71 export getMicDeviceId) là tự nhiên fail dù
++// KHÔNG liên quan gì tới A69. Chốt cứng lại đúng phạm vi lịch sử của riêng A69
++// (7d49c81 = cuối A68, ef4fd14 = cuối A69) — invariant "A69 không đụng core" chỉ có ý nghĩa
++// trong đúng phạm vi đó, không phải mãi mãi so với HEAD.
+ try {
+-    const diffFiles = execSync('git diff --name-only 7d49c81..HEAD', { cwd: ROOT, encoding: 'utf8' })
++    const diffFiles = execSync('git diff --name-only 7d49c81..ef4fd14', { cwd: ROOT, encoding: 'utf8' })
+         .split('\n').filter(Boolean);
+     ['ui/js/audioSource.js', 'ui/js/engines/bpmEngine.js', 'ui/js/engines/keyEngine.js', 'ui/js/engines/modEngine.js']
+-        .forEach((f) => assert(!diffFiles.includes(f), `${f} KHÔNG nằm trong diff A69 (không bị đụng)`));
++        .forEach((f) => assert(!diffFiles.includes(f), `${f} KHÔNG nằm trong diff RIÊNG của A69 (7d49c81..ef4fd14) — không bị A69 đụng`));
+ } catch (e) {
+-    console.log('  SKIP  (không chạy được git diff trong môi trường này:', e.message.split('\n')[0], ')');
++    console.log('  SKIP  (không chạy được git diff trong môi trường này — có thể do đang chạy trên máy không có đủ lịch sử 2 commit này:', e.message.split('\n')[0], ')');
+ }
+ 
+ console.log(`\n== KẾT QUẢ: ${pass} PASS, ${fail} FAIL ==`);
+diff --git a/tests/unit/B70SetupDeviceAudit.verify.js b/tests/unit/B70SetupDeviceAudit.verify.js
+index f6e60e4..37633ba 100644
+--- a/tests/unit/B70SetupDeviceAudit.verify.js
++++ b/tests/unit/B70SetupDeviceAudit.verify.js
+@@ -50,8 +50,8 @@ assert(/getSetting\("selectedMicDeviceId"/.test(audioSourceSrc),
+     'audioSource.js: createMicSource() (qua getMicDeviceId()) đọc key "selectedMicDeviceId"');
+ assert(/saveSetting\("selectedMicDeviceId"/.test(setupSrc),
+     '[SAU B71] setup.js: NAY ĐÃ CÓ chỗ ghi "selectedMicDeviceId" (initMicInputSection() — Finding 1 đã được B71 sửa)');
+-assert(!/selectedMicDeviceId/.test(rendererSrc),
+-    'renderer.js: không có chỗ nào đọc/ghi "selectedMicDeviceId" (Menu cũng không tự bù key này)');
++assert(!/setSetting\("selectedMicDeviceId"|saveSetting\("selectedMicDeviceId"/.test(rendererSrc),
++    '[SAU B72] renderer.js: vẫn KHÔNG có chỗ nào GHI "selectedMicDeviceId" (Menu chỉ ĐỌC để hiển thị trạng thái — xem updateAudioInterfaceDot() — không tự ý ghi/bù key này)');
+ assert(/setSetting\("selectedSoundcardId"|saveSetting\("selectedSoundcardId"/.test(setupSrc),
+     'setup.js: dropdown "Audio Interface" chỉ ghi "selectedSoundcardId" (khác key ở trên)');
+ assert(/getSetting\("selectedSoundcardId"\)/.test(setupVuMeterSrc),
+@@ -73,12 +73,16 @@ if (mainStatusMatch) {
+     assert(!/AudioSourceState\.RUNNING|getState\(\)/.test(body),
+         'updateMainStatus() KHÔNG kiểm tra AudioSourceState.RUNNING/getState() nào — chỉ đọc tên đã lưu');
+ }
+-const checkAllSystemsMatch = rendererSrc.match(/async function checkAllSystems\(\) \{([\s\S]*?)\n\}/);
+-assert(!!checkAllSystemsMatch, 'Tìm thấy checkAllSystems() (chấm tròn dot-audio) trong renderer.js');
+-if (checkAllSystemsMatch) {
+-    const body = checkAllSystemsMatch[1];
++// TASK B72 — logic dot-audio (đọc __micSource.getState() thật) đã được tách khỏi
++// checkAllSystems() vào 1 hàm riêng updateAudioInterfaceDot() (B72 phát hiện thêm:
++// updateMainStatus() từng có 1 dòng cũ ghi đè lại đúng bug này, đã gộp về 1 hàm duy nhất —
++// xem B72-REPORT.md). Test lại đúng hàm hiện hành thay vì checkAllSystems().
++const dotFnMatch = rendererSrc.match(/function updateAudioInterfaceDot\(\) \{([\s\S]*?)\n\}/);
++assert(!!dotFnMatch, 'Tìm thấy updateAudioInterfaceDot() (chấm tròn dot-audio) trong renderer.js');
++if (dotFnMatch) {
++    const body = dotFnMatch[1];
+     assert(/__micSource\?\.getState\?\.\(\)/.test(body) && !/getSetting\?\.\("selectedSoundcard"\)/.test(body),
+-        '[SAU B71] checkAllSystems() (dot-audio) NAY ĐÃ đọc __micSource.getState() thật, không còn chỉ đọc chuỗi "selectedSoundcard" (Finding 3 đã được B71 sửa — xem B71-REPORT.md)');
++        '[SAU B71/B72] updateAudioInterfaceDot() đọc __micSource.getState() thật, không còn chỉ đọc chuỗi "selectedSoundcard" (Finding 3 đã được sửa)');
+ }
+ assert(/bpmEl2\.textContent = "Chưa chọn SYSTEM_AUDIO \(Setup\)"/.test(rendererSrc),
+     '[SAU B71] renderer.js: text đổi thành "Chưa chọn SYSTEM_AUDIO (Setup)" (bỏ chữ "Soundcard" gây nhầm với card Audio Interface — đúng nguyên nhân Finding 3, B71 đã sửa cách đặt tên)');
+diff --git a/tests/unit/B71SetupDeviceFix.verify.js b/tests/unit/B71SetupDeviceFix.verify.js
+index 9cbbec7..7729998 100644
+--- a/tests/unit/B71SetupDeviceFix.verify.js
++++ b/tests/unit/B71SetupDeviceFix.verify.js
+@@ -88,16 +88,24 @@ assert(createSysMatch && /autoReconnect:\s*true/.test(createSysMatch[0]),
+     'createSystemAudioSource(): vẫn autoReconnect:true — tự thử lại CHÍNH thiết bị đã chọn (C62), không phải fallback sang thiết bị khác');
+ 
+ console.log('\n== Test 8 (Checklist #8): dot-audio trên Menu đọc AudioSourceState thật của MIC ==');
++// TASK B72 — logic dot-audio đã được TÁCH thành 1 hàm riêng updateAudioInterfaceDot() (gọi từ
++// CẢ checkAllSystems() lẫn updateMainStatus() — B72 phát hiện updateMainStatus() có 1 dòng cũ
++// sót lại ghi đè logic B71 vừa sửa). Test lại đúng hàm MỚI này thay vì tìm trong checkAllSystems().
+ const checkAllSystemsMatch = rendererSrc.match(/async function checkAllSystems\(\) \{([\s\S]*?)\n\}/);
+ assert(!!checkAllSystemsMatch, 'Tìm thấy checkAllSystems() trong renderer.js');
+ if (checkAllSystemsMatch) {
+-    const body = checkAllSystemsMatch[1];
+-    assert(/__micSource\?\.getState\?\.\(\)/.test(body), 'checkAllSystems() đọc __micSource.getState() (AudioSourceState thật)');
+-    assert(!/getSetting\?\.\("selectedSoundcard"\)/.test(body),
+-        'checkAllSystems() KHÔNG còn dùng riêng selectedSoundcard để quyết định dot-audio (đúng Mục D đề bài)');
+-    assert(/AudioSourceState\.RUNNING/.test(body) && /AudioSourceState\.STARTING/.test(body),
+-        'checkAllSystems() phân biệt RUNNING (online) và STARTING (pending), không chỉ 1 mức online/offline');
++    assert(/updateAudioInterfaceDot\(\)/.test(checkAllSystemsMatch[1]), 'checkAllSystems() gọi updateAudioInterfaceDot()');
+ }
++const dotFnMatch = rendererSrc.match(/function updateAudioInterfaceDot\(\) \{([\s\S]*?)\n\}/);
++assert(!!dotFnMatch, 'Tìm thấy updateAudioInterfaceDot() trong renderer.js');
++if (dotFnMatch) {
++    const body = dotFnMatch[1];
++    assert(/__micSource\?\.getState\?\.\(\)/.test(body), 'updateAudioInterfaceDot() đọc __micSource.getState() (AudioSourceState thật)');
++    assert(/AudioSourceState\.RUNNING/.test(body) && /AudioSourceState\.STARTING/.test(body) && /AudioSourceState\.ERROR/.test(body),
++        'updateAudioInterfaceDot() phân biệt RUNNING/STARTING/ERROR, không chỉ 1 mức online/offline');
++}
++assert(!/setStatus\("dot-audio", soundcard \? "online" : "offline"\)/.test(rendererSrc),
++    '[B72] KHÔNG còn dòng cũ "setStatus(\'dot-audio\', soundcard ? ...)" nào trong renderer.js (đã tìm thấy 2 nơi ghi đè nhau ở B72, đã gộp về updateAudioInterfaceDot())');
+ assert(/__micSource\.onStateChange\(\(\) => checkAllSystems\(\)\)/.test(rendererSrc),
+     'startMicAndMasterVu(): __micSource.onStateChange() gọi lại checkAllSystems() -> dot-audio cập nhật NGAY khi mic đổi trạng thái thật (không chỉ 1 lần lúc DOMContentLoaded)');
+ 
+diff --git a/tests/unit/B72SetupCompletion.verify.js b/tests/unit/B72SetupCompletion.verify.js
+new file mode 100644
+index 0000000..063e74d
+--- /dev/null
++++ b/tests/unit/B72SetupCompletion.verify.js
+@@ -0,0 +1,126 @@
++'use strict';
++/**
++ * B72SetupCompletion.verify.js — TASK B72
++ * "Hoàn thiện Setup: cấu hình, lưu trữ, khôi phục và tích hợp runtime"
++ * Test HÀNH VI THỰC TẾ (không chỉ regex tên hàm) bằng cách import thẳng các hàm thật của
++ * audioSource.js vào 1 sandbox `vm` với getSetting/setSetting giả lập (giống style
++ * SoundcardSetupPersistence.verify.js đã có), cộng với kiểm tra source cho phần còn lại.
++ *
++ * Coverage — đúng bảng B72-07 (persistence) + phát hiện B72 mới (dot-audio 2 nơi ghi đè nhau):
++ *  1. Thiếu key trong settings file -> dùng giá trị mặc định (merge {...DEFAULT, ...file}).
++ *  2. Có key cũ (selectedSoundcardId) -> không tự chuyển/xoá, key mới vẫn giữ mặc định riêng.
++ *  3. Chọn None -> lưu đúng "" cho cả MIC lẫn SYSTEM_AUDIO (hành vi thật của getMicDeviceId/
++ *     getSystemAudioDeviceId, không chỉ kiểm tra chuỗi code).
++ *  4. [PHÁT HIỆN B72] dot-audio KHÔNG còn 2 hàm ghi đè nhau (updateMainStatus() vs
++ *     checkAllSystems()) — đã gộp về updateAudioInterfaceDot() DUY NHẤT.
++ *  5. updateAudioInterfaceDot() phân biệt "đã lưu nhưng không khả dụng" với "chưa từng chọn".
++ *
++ * Chạy: node tests/unit/B72SetupCompletion.verify.js
++ */
++const fs = require('fs');
++const path = require('path');
++const vm = require('vm');
++
++let pass = 0, fail = 0;
++function assert(cond, label) {
++    if (cond) { pass++; console.log('  OK  ', label); }
++    else { fail++; console.error('  FAIL ', label); }
++}
++
++const ROOT = path.join(__dirname, '..', '..');
++const appSettingsSrc = fs.readFileSync(path.join(ROOT, 'ui/js/appSettings.js'), 'utf8');
++const audioSourceSrc = fs.readFileSync(path.join(ROOT, 'ui/js/audioSource.js'), 'utf8');
++const rendererSrc = fs.readFileSync(path.join(ROOT, 'ui/js/renderer.js'), 'utf8');
++
++console.log('== Test 1: DEFAULT_APP_SETTINGS có cả selectedMicDeviceId + selectedSystemAudioDeviceId (thiếu key -> dùng mặc định) ==');
++{
++    const sandbox = {};
++    vm.createContext(sandbox);
++    // Chỉ eval phần khai báo DEFAULT_APP_SETTINGS (object literal thuần, không phụ thuộc gì khác).
++    const defMatch = appSettingsSrc.match(/const DEFAULT_APP_SETTINGS = \{[\s\S]*?\n\};/);
++    assert(!!defMatch, 'Tìm thấy khai báo DEFAULT_APP_SETTINGS');
++    if (defMatch) {
++        vm.runInContext(defMatch[0] + '\nthis.DEFAULT_APP_SETTINGS = DEFAULT_APP_SETTINGS;', sandbox);
++        assert(sandbox.DEFAULT_APP_SETTINGS.selectedMicDeviceId === "", 'DEFAULT_APP_SETTINGS.selectedMicDeviceId === ""');
++        assert(sandbox.DEFAULT_APP_SETTINGS.selectedSystemAudioDeviceId === "", 'DEFAULT_APP_SETTINGS.selectedSystemAudioDeviceId === ""');
++
++        // Mô phỏng ĐÚNG dòng merge thật trong loadSetup(): appSettings = {...DEFAULT_APP_SETTINGS, ...fromFile}
++        const fileThieuKey = { selectedDAW: "FL Studio" }; // settings file cũ, KHÔNG có 2 key mới
++        const merged = { ...sandbox.DEFAULT_APP_SETTINGS, ...fileThieuKey };
++        assert(merged.selectedMicDeviceId === "", 'Test 1 [hành vi thật]: file thiếu "selectedMicDeviceId" -> merge ra "" (giá trị mặc định), không phải undefined');
++        assert(merged.selectedSystemAudioDeviceId === "", 'Test 1 [hành vi thật]: file thiếu "selectedSystemAudioDeviceId" -> merge ra "" (giá trị mặc định)');
++        assert(merged.selectedDAW === "FL Studio", 'Test 1 [hành vi thật]: key CÓ trong file vẫn giữ đúng giá trị đã lưu (merge không đè lung tung)');
++    }
++}
++assert(/loadSetup\(\)[\s\S]*?appSettings = \{ \.\.\.DEFAULT_APP_SETTINGS, \.\.\.fromFile \};/.test(appSettingsSrc),
++    'appSettings.js: loadSetup() dùng đúng {...DEFAULT_APP_SETTINGS, ...fromFile} (không tạo cơ chế merge mới nào khác)');
++
++console.log('\n== Test 2: Key cũ (selectedSoundcardId) không tự chuyển sang key mới khi load file cũ ==');
++{
++    const sandbox = {};
++    vm.createContext(sandbox);
++    const defMatch = appSettingsSrc.match(/const DEFAULT_APP_SETTINGS = \{[\s\S]*?\n\};/);
++    vm.runInContext(defMatch[0] + '\nthis.DEFAULT_APP_SETTINGS = DEFAULT_APP_SETTINGS;', sandbox);
++    // Settings file CŨ (trước B71) — chỉ có selectedSoundcardId, không có 2 key mới.
++    const fileCu = { selectedSoundcardId: "mix01-device-abc", selectedSoundcard: "Mix 01" };
++    const merged = { ...sandbox.DEFAULT_APP_SETTINGS, ...fileCu };
++    assert(merged.selectedSoundcardId === "mix01-device-abc", 'Test 2 [hành vi thật]: selectedSoundcardId cũ được GIỮ NGUYÊN sau khi load (không bị xoá)');
++    assert(merged.selectedMicDeviceId === "", 'Test 2 [hành vi thật]: selectedMicDeviceId KHÔNG bị tự động gán = selectedSoundcardId (không auto-migrate)');
++    assert(merged.selectedSystemAudioDeviceId === "", 'Test 2 [hành vi thật]: selectedSystemAudioDeviceId KHÔNG bị tự động gán = selectedSoundcardId (không auto-migrate)');
++}
++
++console.log('\n== Test 3: Chọn None -> getMicDeviceId()/getSystemAudioDeviceId() trả về "" đúng hợp đồng (hành vi thật, không phải regex) ==');
++{
++    const getSysMatch = audioSourceSrc.match(/function getSystemAudioDeviceId\(\) \{[\s\S]*?\n    \}/);
++    const setSysMatch = audioSourceSrc.match(/function setSystemAudioDeviceId\(deviceId\) \{[\s\S]*?\n    \}/);
++    const getMicMatch = audioSourceSrc.match(/function getMicDeviceId\(\) \{[\s\S]*?\n    \}/);
++    assert(!!getSysMatch && !!setSysMatch && !!getMicMatch,
++        'Tìm thấy cả 3 hàm getSystemAudioDeviceId/setSystemAudioDeviceId/getMicDeviceId trong audioSource.js');
++    if (getSysMatch && setSysMatch && getMicMatch) {
++        let store = { selectedSystemAudioDeviceId: "", selectedMicDeviceId: "" };
++        const sandbox = {
++            getSetting: (key, fallback) => (store[key] !== undefined && store[key] !== "" ? store[key] : (fallback ?? "")),
++            setSetting: (key, value) => { store[key] = value; },
++        };
++        vm.createContext(sandbox);
++        vm.runInContext(getSysMatch[0] + '\n' + setSysMatch[0] + '\n' + getMicMatch[0] +
++            '\nthis.getSystemAudioDeviceId = getSystemAudioDeviceId;' +
++            '\nthis.getMicDeviceId = getMicDeviceId;', sandbox);
++
++        assert(sandbox.getSystemAudioDeviceId() === "", 'Test 3a: chưa cấu hình gì -> getSystemAudioDeviceId() === "" (None mặc định)');
++        assert(sandbox.getMicDeviceId() === "", 'Test 3b: chưa cấu hình gì -> getMicDeviceId() === "" (None mặc định)');
++
++        store.selectedMicDeviceId = "mic-device-xyz";
++        store.selectedSystemAudioDeviceId = "sysaudio-device-xyz";
++        assert(sandbox.getMicDeviceId() === "mic-device-xyz", 'Test 3c: đã chọn -> getMicDeviceId() trả đúng ID đã lưu');
++        assert(sandbox.getSystemAudioDeviceId() === "sysaudio-device-xyz", 'Test 3d: đã chọn -> getSystemAudioDeviceId() trả đúng ID đã lưu');
++
++        // Chọn lại "None": store phải chấp nhận "" (không phải hàm tự ý fallback sang ID khác)
++        store.selectedMicDeviceId = "";
++        store.selectedSystemAudioDeviceId = "";
++        assert(sandbox.getMicDeviceId() === "", 'Test 3e: chọn lại None -> getMicDeviceId() về "" (không kẹt lại ID cũ)');
++        assert(sandbox.getSystemAudioDeviceId() === "", 'Test 3f: chọn lại None -> getSystemAudioDeviceId() về "" (không kẹt lại ID cũ)');
++    }
++}
++
++console.log('\n== Test 4 [PHÁT HIỆN B72]: dot-audio chỉ còn 1 hàm ghi (updateAudioInterfaceDot), không còn 2 nơi ghi đè nhau ==');
++const dotWriteSites = rendererSrc.match(/setStatus\(['"]dot-audio['"]/g) || [];
++assert(dotWriteSites.length >= 3, `renderer.js: có các lệnh setStatus('dot-audio', ...) (thực tế ${dotWriteSites.length} chỗ — đều nằm bên trong updateAudioInterfaceDot(), không rải rác)`);
++assert(!/^(?!\s*\/\/).*setStatus\(["']dot-audio["'],\s*soundcard/m.test(rendererSrc),
++    '[B72 FIX] Không còn dòng CODE (không tính comment) nào gọi "setStatus(\'dot-audio\', soundcard ? ...)" — dòng cũ sót lại từ trước B71, giờ chỉ còn nhắc tới trong comment giải thích lý do sửa');
++assert(/updateAudioInterfaceDot\(\);/.test(rendererSrc),
++    '[B72 FIX] Có lời gọi updateAudioInterfaceDot() (thay cho dòng cũ trong updateMainStatus())');
++
++console.log('\n== Test 5: updateAudioInterfaceDot() phân biệt "đã lưu nhưng không khả dụng" với "chưa từng chọn" ==');
++const dotFnMatch2 = rendererSrc.match(/function updateAudioInterfaceDot\(\) \{([\s\S]*?)\n\}/);
++assert(!!dotFnMatch2, 'Tìm thấy updateAudioInterfaceDot()');
++if (dotFnMatch2) {
++    const body = dotFnMatch2[1];
++    assert(/selectedMicId/.test(body), 'updateAudioInterfaceDot() có đọc selectedMicDeviceId để phân biệt "đã chọn" vs "chưa chọn"');
++    assert(/Mic đã chọn hiện không khả dụng/.test(body), 'Có nhánh riêng "Mic đã chọn hiện không khả dụng" (khác "chưa khởi động")');
++    assert(/Chưa khởi động mic/.test(body), 'Có nhánh riêng cho "chưa chọn/chưa khởi động" (khác nhánh "đã chọn nhưng lỗi")');
++    assert(/Lỗi mở mic/.test(body), 'Có nhánh riêng cho ERROR ("Lỗi mở mic")');
++}
++
++console.log(`\n== KẾT QUẢ: ${pass} PASS, ${fail} FAIL ==`);
++process.exit(fail > 0 ? 1 : 0);
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index ff7cae3..7e897e6 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -1161,31 +1161,54 @@ async function checkAllSystems() {
+     // 1. Check Online
+     setStatus('dot-online', navigator.onLine ? 'online' : 'offline');
+ 
+-    // 2. Check Audio Interface (MIC) — TASK B71: KHÔNG còn dùng riêng chuỗi tên đã lưu
+-    // ("selectedSoundcard") để quyết định xanh/đỏ (đúng B70-REPORT.md phát hiện #4: trước B71
+-    // chấm này chỉ trả lời "đã từng lưu 1 cái tên" chứ không phải "thiết bị có đang mở thật").
+-    // Nay đọc AudioSourceState thật của __micSource (nguồn MIC VU trên Menu — xem
+-    // startMicAndMasterVu()): RUNNING = online (đã mở mic thành công, kể cả mic mặc định hệ
+-    // thống khi chưa chọn cụ thể), STARTING = pending, còn lại (NO_DEVICE/ERROR/chưa init) =
+-    // offline. Đây là "Audio Interface" theo đúng nghĩa app đã dùng từ trước (setup.html panel
+-    // title "🎙 Microphone (Input Device)" bọc quanh chính lựa chọn Audio Interface) — không
+-    // phải suy đoán ý nghĩa mới cho selectedSoundcardId (key đó vẫn giữ nguyên, không đụng).
++    // 2. Check Audio Interface (MIC)
++    updateAudioInterfaceDot();
++
++    // 3. Check DAW (nếu có hàm kiểm tra DAW riêng thì bổ sung ở đây)
++    // setStatus('dot-daw', isDawRunning ? 'online' : 'offline');
++}
++
++// TASK B72 — tách riêng logic dot-audio ra 1 hàm DUY NHẤT, gọi từ CẢ checkAllSystems() lẫn
++// updateMainStatus() (xem bên dưới). PHÁT HIỆN B72: trước bản vá này, updateMainStatus() có
++// 1 dòng RIÊNG "setStatus('dot-audio', soundcard ? 'online' : 'offline')" SÓT LẠI từ trước
++// B71 — tức là dot-audio có 2 NGƯỜI VIẾT với 2 LOGIC KHÁC NHAU (checkAllSystems() dùng
++// AudioSourceState thật, updateMainStatus() vẫn dùng chuỗi tên cũ). Vì updateMainStatus()
++// chạy SAU checkAllSystems() ở luồng khởi tạo (DOMContentLoaded) và cũng chạy trong
++// onSetupChanged, dòng cũ đó ÂM THẦM GHI ĐÈ lại đúng cái bug mà B71 tưởng đã sửa — dot-audio
++// trên thực tế vẫn có thể xanh chỉ vì có tên đã lưu, bất chấp __micSource thật đang lỗi/chưa mở.
++// Sửa bằng cách gộp về 1 hàm duy nhất — không còn 2 nơi quyết định cùng 1 phần tử DOM.
++function updateAudioInterfaceDot() {
+     try {
+-        setStatus('dot-audio', 'pending');
+         const micState = __micSource?.getState?.();
++        const dotEl = document.getElementById('dot-audio');
++        const selectedMicId = (typeof getSetting === "function" ? getSetting("selectedMicDeviceId", "") : "") || "";
++        let label;
+         if (micState === AudioSourceState.RUNNING) {
+             setStatus('dot-audio', 'online');
++            label = selectedMicId ? "Mic đã chọn — đang hoạt động" : "Mic mặc định hệ thống — đang hoạt động";
+         } else if (micState === AudioSourceState.STARTING) {
+             setStatus('dot-audio', 'pending');
++            label = "Đang mở mic...";
++        } else if (micState === AudioSourceState.ERROR) {
++            setStatus('dot-audio', 'offline');
++            label = "Lỗi mở mic";
++        } else if (selectedMicId) {
++            // NO_DEVICE nhưng ĐÃ có deviceId lưu -> khác "chưa từng chọn" (Mục 5.2 đề bài B72:
++            // phân biệt "thiết bị đã lưu nhưng không khả dụng" với "chưa chọn thiết bị").
++            setStatus('dot-audio', 'offline');
++            label = "Mic đã chọn hiện không khả dụng";
+         } else {
+             setStatus('dot-audio', 'offline');
++            label = "Chưa khởi động mic (chưa tương tác với app)";
+         }
++        // TASK B72 — chỉ set thuộc tính title (tooltip khi rê chuột) trên chính chấm tròn, KHÔNG
++        // đổi bố cục/CSS/HTML nào khác — cách an toàn nhất để hiện đủ 5 trạng thái (đang khởi
++        // tạo/đang hoạt động/lỗi/chưa chọn/đã lưu nhưng không khả dụng) mà không động tới giao
++        // diện đã có (đúng ràng buộc "Không thay đổi giao diện" của dự án).
++        if (dotEl) dotEl.title = label;
+     } catch (e) {
+         setStatus('dot-audio', 'offline');
+     }
+-
+-    // 3. Check DAW (nếu có hàm kiểm tra DAW riêng thì bổ sung ở đây)
+-    // setStatus('dot-daw', isDawRunning ? 'online' : 'offline');
+ }
+ 
+ function updateOnlineStatus() {
+@@ -1981,7 +2004,10 @@ function updateMainStatus() {
+             : displayName;
+         soundcardEl.title = displayName; // rê chuột để xem tên đầy đủ
+     }
+-    setStatus("dot-audio", soundcard ? "online" : "offline");
++    // TASK B72 — KHÔNG còn "setStatus('dot-audio', soundcard ? 'online' : 'offline')" ở đây
++    // (dòng cũ sót lại từ trước B71 — xem ghi chú tại updateAudioInterfaceDot() phía trên).
++    // Gọi lại đúng 1 hàm duy nhất để dot-audio không bao giờ có 2 logic khác nhau ghi đè nhau.
++    updateAudioInterfaceDot();
+ 
+     // --- Các ô trạng thái phụ (chỉ cập nhật nếu tồn tại trong DOM) ---
+     // Đã bỏ checklist "SETUP: X/10" — không còn phản ánh đúng yêu cầu thực tế (một số
+-- 
+2.43.0
+

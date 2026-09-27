@@ -87,6 +87,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     autoConnectMidi: (opts) => ipcRenderer.invoke("midi-auto-connect", opts),
     verifyMidiOutput: () => ipcRenderer.invoke("midi-verify"),
 
+    // ---- TASK A71: trạng thái RUNTIME của SYSTEM_AUDIO (sống trong renderer cửa sổ chính) cần
+    // phản ánh sang cửa sổ Setup — main.js chỉ đóng vai trò relay + cache lại giá trị mới nhất. ----
+    reportSystemAudioState: (state) => ipcRenderer.send("system-audio-state-changed", state),
+    onSystemAudioStateChange: (callback) => ipcRenderer.on("system-audio-state-changed", (event, state) => callback(state)),
+    getSystemAudioState: () => ipcRenderer.invoke("get-system-audio-state"),
+
     // ---- TASK A52: Admin Authentication (mở khoá khu vực "AI 🔒" trong Setup) ----
     // Xác thực THẬT xảy ra ở main process (core/shared/AdminAuth.js) — hàm này chỉ relay
     // qua IPC, không tự so sánh password ở renderer.

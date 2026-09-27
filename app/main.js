@@ -407,6 +407,16 @@ ipcMain.on("setup-changed", () => {
     try { CommandRuntime.reloadMappings(); } catch (err) { console.error("reloadMappings lỗi:", err); }
 });
 
+// TASK A71 — relay trạng thái RUNTIME của SYSTEM_AUDIO (NO_DEVICE/STARTING/RUNNING/ERROR/STOPPING)
+// từ cửa sổ chính (nơi object systemAudio thực sự sống, trong renderer.js) sang cửa sổ Setup.
+// Cache lại giá trị mới nhất để Setup có thể hỏi ngay khi vừa mở (trước khi có transition mới).
+let lastKnownSystemAudioState = { state: "NO_DEVICE" };
+ipcMain.on("system-audio-state-changed", (event, state) => {
+    lastKnownSystemAudioState = state;
+    setupWin?.webContents.send("system-audio-state-changed", state);
+});
+ipcMain.handle("get-system-audio-state", () => lastKnownSystemAudioState);
+
 // ================================
 // TASK B3-C — REAL MANUAL STATE IPC. Renderer gửi snapshot Manual Key/Mod THẬT (đúng lúc
 // state thay đổi thật, không polling) — main CHỈ chuyển tiếp nguyên văn vào ManualState.js,
