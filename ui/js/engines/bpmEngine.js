@@ -172,7 +172,12 @@ const BPMEngine = (() => {
                     const counts = {};
                     let bestBpm = bpm, bestCount = 0;
                     bpmVoteHistory.forEach((v) => {
-                        for (let cand = v - 1; cand <= v + 1; cand++) {
+                        for (const cand of [v, v - 1, v + 1]) {
+                            // TASK A72-04 — thứ tự duyệt ứng viên đổi từ (v-1, v, v+1) sang (v, v-1, v+1):
+                            // với toán tử `>` nghiêm ngặt, ứng viên duyệt TRƯỚC thắng khi hoà số phiếu. Bản cũ
+                            // duyệt v-1 trước nên tín hiệu sạch 120 BPM luôn ra 119 (thiên lệch -1 BPM hệ
+                            // thống, đo được ở 100/120/128/140 — xem A72-REPORT.md mục BPM, số đo TRƯỚC sửa).
+                            // Nay giá trị phiếu THẬT thắng khi hoà. Dung sai ±1 gom phiếu KHÔNG đổi.
                             counts[cand] = (counts[cand] || 0) + 1;
                             if (counts[cand] > bestCount) { bestCount = counts[cand]; bestBpm = cand; }
                         }

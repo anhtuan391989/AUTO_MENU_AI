@@ -1161,11 +1161,25 @@ async function checkAllSystems() {
     // 1. Check Online
     setStatus('dot-online', navigator.onLine ? 'online' : 'offline');
 
-    // 2. Check Audio Interface
+    // 2. Check Audio Interface (MIC) — TASK B71: KHÔNG còn dùng riêng chuỗi tên đã lưu
+    // ("selectedSoundcard") để quyết định xanh/đỏ (đúng B70-REPORT.md phát hiện #4: trước B71
+    // chấm này chỉ trả lời "đã từng lưu 1 cái tên" chứ không phải "thiết bị có đang mở thật").
+    // Nay đọc AudioSourceState thật của __micSource (nguồn MIC VU trên Menu — xem
+    // startMicAndMasterVu()): RUNNING = online (đã mở mic thành công, kể cả mic mặc định hệ
+    // thống khi chưa chọn cụ thể), STARTING = pending, còn lại (NO_DEVICE/ERROR/chưa init) =
+    // offline. Đây là "Audio Interface" theo đúng nghĩa app đã dùng từ trước (setup.html panel
+    // title "🎙 Microphone (Input Device)" bọc quanh chính lựa chọn Audio Interface) — không
+    // phải suy đoán ý nghĩa mới cho selectedSoundcardId (key đó vẫn giữ nguyên, không đụng).
     try {
         setStatus('dot-audio', 'pending');
-        const selectedCard = getSetting?.("selectedSoundcard");
-        setStatus('dot-audio', selectedCard ? 'online' : 'offline');
+        const micState = __micSource?.getState?.();
+        if (micState === AudioSourceState.RUNNING) {
+            setStatus('dot-audio', 'online');
+        } else if (micState === AudioSourceState.STARTING) {
+            setStatus('dot-audio', 'pending');
+        } else {
+            setStatus('dot-audio', 'offline');
+        }
     } catch (e) {
         setStatus('dot-audio', 'offline');
     }
@@ -1457,15 +1471,12 @@ async function applyModEvent(data) {
     }
 }
 
-document.getElementById("autoDetectBtn")?.addEventListener("click", () => {
-    console.log("RESET AI SCAN — chỉ dò lại Key, KHÔNG gửi lệnh Mod nào khác");
-
-    // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — Auto Detect = reset THẬT về chế độ nghe
-    // (LISTENING) cho cả Key/BPM/MOD, không giữ hiển thị giá trị cũ trong lúc chờ kết quả mới.
-    // CHỈ đổi CHỮ hiển thị ở đây — KHÔNG đụng originalKey/keySource.ai.value/lastPluginKey, nên
-    // Auto-Tune vẫn tiếp tục dùng đúng Key thật đang chạy cho tới khi có kết quả THẬT mới (không
-    // im lặng/lệch tiếng giữa chừng bài hát). BPMEngine/ModEngine vẫn chạy nền như cũ, không bị
-    // restart — chỉ hiển thị được xoá tạm để không gây hiểu lầm là giá trị cũ vẫn còn đúng.
+// TASK A72-04/05/06 — tách riêng phần RESET HIỂN THỊ (không đụng thuật toán/engine) thành 1 hàm
+// dùng chung, để dùng lại được ở CẢ nút "Auto Detect" (người dùng tự bấm, ĐANG chạy engine, chỉ
+// xoá chữ tạm) LẪN ở chỗ mất SYSTEM_AUDIO (đóng engine luôn — xem systemAudio.onDeviceLost bên
+// dưới). Hành vi 2 nơi gọi hàm này VẪN KHÁC NHAU (nơi nào cần stop() engine thì tự gọi thêm,
+// hàm này chỉ lo phần chữ) — không gộp logic khác nhau vào chung 1 chỗ.
+function resetAiDisplaysToListening() {
     keyEverDetected = false;
     if (currentKeyEl) currentKeyEl.textContent = "LISTENING";
     if (aiKeyDetectLineEl) aiKeyDetectLineEl.textContent = "AI Detect: LISTENING";
@@ -1479,6 +1490,18 @@ document.getElementById("autoDetectBtn")?.addEventListener("click", () => {
     if (modTimeResetEl) modTimeResetEl.textContent = "";
     if (modStatusResetEl) modStatusResetEl.textContent = "LISTENING";
     if (modTimelineResetEl) modTimelineResetEl.textContent = "";
+}
+
+document.getElementById("autoDetectBtn")?.addEventListener("click", () => {
+    console.log("RESET AI SCAN — chỉ dò lại Key, KHÔNG gửi lệnh Mod nào khác");
+
+    // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — Auto Detect = reset THẬT về chế độ nghe
+    // (LISTENING) cho cả Key/BPM/MOD, không giữ hiển thị giá trị cũ trong lúc chờ kết quả mới.
+    // CHỈ đổi CHỮ hiển thị ở đây — KHÔNG đụng originalKey/keySource.ai.value/lastPluginKey, nên
+    // Auto-Tune vẫn tiếp tục dùng đúng Key thật đang chạy cho tới khi có kết quả THẬT mới (không
+    // im lặng/lệch tiếng giữa chừng bài hát). BPMEngine/ModEngine vẫn chạy nền như cũ, không bị
+    // restart — chỉ hiển thị được xoá tạm để không gây hiểu lầm là giá trị cũ vẫn còn đúng.
+    resetAiDisplaysToListening();
 
     triggerAiKeyDetect();
 });
@@ -1537,6 +1560,7 @@ setInterval(updateSongPosition, 1000);
    ========================================================== */
 let audioMonitorStarted = false;
 let __lastKnownSystemAudioDeviceId = null; // TASK C62 — theo dõi đổi Soundcard từ Setup khi app đang chạy
+let __lastKnownMicDeviceId = null; // TASK B71 — theo dõi đổi MIC Input từ Setup khi app đang chạy
 
 // ---- DEBUG TẠM THỜI: in ra Console mỗi ~1 giây để kiểm tra mức tín hiệu thật ----
 // Xoá 2 hàm này sau khi đã xác định app chạy ổn định lâu dài.
@@ -1596,7 +1620,18 @@ function startMicAndMasterVu() {
             const meter = document.getElementById("vu-mic-fill");
             if (meter) { meter.style.width = "0%"; meter.classList.add("vu-bar--nodata"); }
         });
+        // TASK B71 — dot-audio (Menu, "AUDIO INTERFACE") nay phản ánh AudioSourceState THẬT của
+        // MIC (xem checkAllSystems()) thay vì chỉ đọc 1 chuỗi tên đã lưu. Vì startAudioMonitor()
+        // (nơi tạo __micSource) chỉ chạy sau cú click đầu tiên của người dùng (autoplay policy —
+        // xem dòng gọi startAudioMonitor() ở listener 'click' bên dưới), lần checkAllSystems()
+        // đầu tiên lúc DOMContentLoaded sẽ luôn thấy __micSource=null (offline). Đăng ký lại ở
+        // đây để chấm cập nhật NGAY khi mic thật sự đổi trạng thái (STARTING/RUNNING/ERROR),
+        // không cần đợi 1 chu kỳ checkAllSystems() nào khác (hiện không có polling định kỳ).
+        __micSource.onStateChange(() => checkAllSystems());
         __micSource.start().catch((err) => console.warn("[Audio][MIC] Không mở được mic (Mic VU sẽ trống):", err));
+        // TASK B71 — mốc so sánh khi Setup đổi "MIC Input" (giống hệt cơ chế C62 đã có cho
+        // SYSTEM_AUDIO). AudioSource.getMicDeviceId() export riêng cho renderer.js (1 nguồn sự thật).
+        __lastKnownMicDeviceId = typeof AudioSource.getMicDeviceId === "function" ? AudioSource.getMicDeviceId() : null;
     }
 
     // Master VU — DAW_MASTER chưa có native capture trong B58 (xem B58-REPORT.md). Gọi
@@ -1747,6 +1782,24 @@ async function startAudioMonitor() {
         console.error("[Audio][SYSTEM_AUDIO] Mất thiết bị hoặc lỗi khởi tạo:", reason);
         setStatus("dot-bpm", "offline");
         setSystemAudioVuNoData(true); // TASK A68 — hiển thị lại đúng trạng thái "chưa có dữ liệu" khi mất thiết bị
+        // TASK A72-04/05 — PHÁT HIỆN: trước A72, mất SYSTEM_AUDIO chỉ đổi màu chấm trạng thái +
+        // VU, nhưng KHÔNG dừng BPMEngine/KeyEngine (vòng lặp cũ vẫn chạy trên analyser đã chết)
+        // VÀ không xoá chữ BPM/Key/Mod cũ trên Menu -> đúng hiện tượng "hiển thị kết quả cũ như
+        // đang hoạt động" mà A72 cảnh báo. Sửa: dừng BPMEngine/KeyEngine (an toàn — được
+        // bindAiEnginesToSystemAudio() khởi tạo lại đối xứng mỗi lần RUNNING, xem hàm đó) + xoá
+        // chữ hiển thị. Không đổi thuật toán bên trong 2 file engine — chỉ gọi đúng .stop() đã có
+        // sẵn nhưng chưa từng được gọi ở đây.
+        //
+        // TASK A72-06 — CỐ Ý KHÔNG gọi ModEngine.stop() ở đây (khác BPM/Key): đã xác minh
+        // ModEngine.start() chỉ được `startModulationWatcher()` gọi ĐÚNG 1 LẦN DUY NHẤT/phiên
+        // (kích hoạt bởi KeyEngine.detectOnce() — 1 one-shot watcher, tự huỷ sau khi bắn 1 lần,
+        // KHÔNG có cơ chế nào tái vũ trang sau reconnect). Gọi stop() ở đây sẽ làm Mod HỎNG VĨNH
+        // VIỄN sau lần mất thiết bị đầu tiên — TỆ HƠN hiện trạng (đứng hình nhưng vẫn "sống"). Đây
+        // là giới hạn kiến trúc CÓ THẬT, ghi nhận làm GAP trong A72-REPORT.md, KHÔNG tự sửa thêm ở
+        // A72 vì "không tự bổ sung tính năng Mod mới chưa có trong đặc tả" (mục A72-06 đề bài).
+        if (typeof BPMEngine !== "undefined") BPMEngine.stop();
+        if (typeof KeyEngine !== "undefined") KeyEngine.stop();
+        resetAiDisplaysToListening();
         // TASK C62 — KHÔNG đặt lại audioMonitorStarted=false ở đây nữa: startAudioMonitor() chỉ
         // được gọi ĐÚNG 1 LẦN (click đầu tiên, xem listener {once:true} bên dưới file), nên đặt
         // lại cờ này không còn tạo ra đường "gọi lại" nào — audioSource.js (autoReconnect:true)
@@ -1763,14 +1816,6 @@ async function startAudioMonitor() {
         bindAiEnginesToSystemAudio(systemAudio);
     });
 
-    // TASK A71 — listener RIÊNG (không gộp vào listener trên) chỉ để báo MỌI transition sang cửa
-    // sổ Setup qua IPC, hiển thị badge trạng thái sống. Tách riêng để không đụng vào đúng hình
-    // dạng code mà AiSystemBoundaryA56.verify.js đang audit (bindAiEnginesToSystemAudio() vẫn là
-    // hàm DUY NHẤT trong listener CŨ, không đổi gì ở đó).
-    systemAudio.onStateChange((state) => {
-        window.electronAPI?.reportSystemAudioState?.({ state });
-    });
-
     setSystemAudioVuNoData(true); // TASK A68 — mặc định "chưa có dữ liệu" cho tới khi RUNNING lần đầu
 
     await systemAudio.start();
@@ -1780,22 +1825,30 @@ async function startAudioMonitor() {
         // TASK A65 — cập nhật lại NỘI DUNG thông điệp (chỉ console.error, KHÔNG phải text hiển
         // thị trên UI — xem A65-REPORT.md mục 5): kể từ A65, "Setup > Soundcard" (selectedSoundcardId)
         // KHÔNG còn cấp device cho SYSTEM_AUDIO nữa (xem GAP-1 trong A64-REPORT.md — dropdown đó trên
-        // máy thật là Mix 01/MIC). SYSTEM_AUDIO giờ đọc riêng "selectedSystemAudioDeviceId", hiện CHƯA
-        // có UI ghi key này -> NO_DEVICE là trạng thái mặc định, đúng chủ ý, cho tới khi có Setup UI
-        // hoặc cấu hình thủ công qua AudioSource.setSystemAudioDeviceId(deviceId) trong DevTools.
+        // máy thật là Mix 01/MIC). SYSTEM_AUDIO giờ đọc riêng "selectedSystemAudioDeviceId".
+        // TASK B71 — nay ĐÃ có Setup UI riêng ("SYSTEM_AUDIO Input", xem setup.js
+        // initSystemAudioInputSection()); trước đó chỉ cấu hình được qua DevTools thủ công.
         console.error(
             systemAudio.getState() === AudioSourceState.NO_DEVICE
-                ? "[Audio][A65] SYSTEM_AUDIO chưa được cấu hình (selectedSystemAudioDeviceId rỗng) -> " +
-                  "KHÔNG khởi tạo Key/BPM/MOD (không còn dùng selectedSoundcardId/Mix 01 làm SYSTEM_AUDIO nữa). " +
-                  "Cấu hình thủ công: AudioSource.setSystemAudioDeviceId(deviceId) trong DevTools console, " +
-                  "hoặc chờ Setup UI riêng cho SYSTEM_AUDIO (xem A65-REPORT.md)."
+                ? "[Audio][B71] SYSTEM_AUDIO chưa được cấu hình (selectedSystemAudioDeviceId rỗng) -> " +
+                  "KHÔNG khởi tạo Key/BPM/MOD (không dùng selectedSoundcardId/MIC làm SYSTEM_AUDIO). " +
+                  "Cấu hình tại Setup > Audio > \"SYSTEM_AUDIO Input\"."
                 : "[Audio] Thiết bị SYSTEM_AUDIO đã cấu hình không còn khả dụng hoặc lỗi khởi tạo -- sẽ tự thử lại " +
                   "ngầm khi thiết bị quay lại (không cần reload)."
         );
         setStatus("dot-bpm", "offline");
         const bpmEl2 = document.getElementById("bpmValue");
-        if (bpmEl2 && systemAudio.getState() === AudioSourceState.NO_DEVICE) {
-            bpmEl2.textContent = "Chưa chọn Soundcard (Setup)";
+        // TASK B71 — Mục D: phân biệt RÕ "chưa cấu hình" (NO_DEVICE) với "lỗi/mất thiết bị"
+        // (ERROR), thay vì chỉ có 1 thông điệp cho NO_DEVICE và im lặng (giữ "-- BPM") cho
+        // ERROR. Đồng thời đổi chữ "Soundcard" (dễ nhầm với card "Audio Interface" trong Setup)
+        // thành đúng tên "SYSTEM_AUDIO" khớp với tên mục Setup mới — xem B70-REPORT.md Mục D
+        // "Soundcard status discrepancy" (nguyên nhân gốc của nghịch lý nêu trong đề bài B70/B71).
+        if (bpmEl2) {
+            if (systemAudio.getState() === AudioSourceState.NO_DEVICE) {
+                bpmEl2.textContent = "Chưa chọn SYSTEM_AUDIO (Setup)";
+            } else if (systemAudio.getState() === AudioSourceState.ERROR) {
+                bpmEl2.textContent = "Lỗi thiết bị SYSTEM_AUDIO";
+            }
         }
         // TASK C62 — không đặt lại audioMonitorStarted=false: nếu là ERROR (không phải NO_DEVICE),
         // audioSource.js đã tự lên lịch retry — onStateChange ở trên tự lo phần còn lại.
@@ -1904,6 +1957,22 @@ window.electronAPI?.onSetupChanged?.(() => {
             __lastKnownSystemAudioDeviceId = newDeviceId;
             window.__systemAudioSource.stop();
             window.__systemAudioSource.start();
+        }
+    }
+
+    // TASK B71 — cùng cơ chế như trên nhưng cho MIC Input. __micSource dùng chung 1 object
+    // trong suốt vòng đời trang (không tạo lại) — stop() rồi start() lại là đủ để
+    // resolveDeviceId() (getMicDeviceId) được đọc lại với giá trị mới (xem audioSource.js
+    // createMediaDeviceSource() — start() luôn gọi resolveDeviceId() lại từ đầu, không cache).
+    // MIC không có requireExplicitDevice nên đổi về "" (None) vẫn start() thành công bình
+    // thường với mic mặc định hệ thống — không rơi về NO_DEVICE như SYSTEM_AUDIO.
+    if (__micSource && typeof AudioSource !== "undefined" && typeof AudioSource.getMicDeviceId === "function") {
+        const newMicDeviceId = AudioSource.getMicDeviceId();
+        if (newMicDeviceId !== __lastKnownMicDeviceId) {
+            console.log("[Audio][MIC] MIC Input vừa đổi ở Setup -> ngắt mic cũ, mở lại với thiết bị mới.");
+            __lastKnownMicDeviceId = newMicDeviceId;
+            __micSource.stop();
+            __micSource.start().catch((err) => console.warn("[Audio][MIC] Không mở được mic sau khi đổi thiết bị:", err));
         }
     }
 });

@@ -112,13 +112,10 @@ console.log('\n== A56.4/5 — Audio input cho Key/BPM/Mod: bắt buộc chọn t
     const bindFnBody = (rendererSrc.match(/function bindAiEnginesToSystemAudio\([\s\S]*?\n\}/) || [''])[0];
     assert(/KeyEngine\.init\(audioContext, source\)/.test(bindFnBody) && /BPMEngine\.init\(audioContext, source\)/.test(bindFnBody),
         'renderer.js: KeyEngine.init()/BPMEngine.init() nằm bên trong bindAiEnginesToSystemAudio() — hàm DUY NHẤT gọi 2 init này (đã xác nhận ở A56.1 kiểu test đếm số lần xuất hiện tương tự)');
-    // TASK A71 — regex cập nhật để khớp với thay đổi HỢP LỆ của A68 (thêm dòng
-    // setSystemAudioVuNoData(false) xen giữa) — PHÁT HIỆN lỗi này đã tồn tại SẴN từ khi A68 merge
-    // (đã xác nhận bằng cách chạy lại đúng regex cũ trên renderer.js tại commit 28b8a0a, TRƯỚC
-    // khi A71 sửa bất cứ gì — vẫn FAIL y hệt). Không phải do A71 gây ra, nhưng A71 sửa vì checklist
-    // yêu cầu rõ "test A68 liên quan đều đạt". Bất biến kiểm tra KHÔNG đổi: bindAiEnginesToSystemAudio()
-    // vẫn phải nằm ngay sau gate "if (state !== RUNNING) return", chỉ cho phép xen 1 dòng gọi hàm
-    // VU giữa 2 dòng đó (không cho phép bất kỳ logic điều kiện/rẽ nhánh nào khác chen vào).
+    // TASK A72-01 — regex cập nhật để khớp thay đổi HỢP LỆ của A68 (thêm dòng
+    // setSystemAudioVuNoData(false) xen giữa gate-check và bindAiEnginesToSystemAudio()). Đã xác
+    // nhận: lỗi này tồn tại SẴN trên baseline a5af38d (B70/B71), KHÔNG do A72 gây ra — B70/B71
+    // không đụng khối code này. Bất biến kiểm tra KHÔNG đổi, chỉ nới đúng 1 dòng được phép xen vào.
     assert(/systemAudio\.onStateChange\(\(state\) => \{\s*if \(state !== AudioSourceState\.RUNNING\) return;\s*setSystemAudioVuNoData\(false\);[^}]*bindAiEnginesToSystemAudio\(systemAudio\);/.test(rendererSrc),
         'renderer.js: bindAiEnginesToSystemAudio() CHỈ được gọi khi onStateChange báo state===RUNNING — không có đường nào gọi KeyEngine.init() khi audioSource chưa RUNNING (tức chưa có device hợp lệ), giữ đúng bất biến "không init khi chưa chọn Soundcard" dù cơ chế đã đổi từ if-inline sang event-driven (đúng kiến trúc C62 auto-reconnect)');
     assert(/KHÔNG khởi tạo Key\/BPM\/MOD/.test(rendererSrc),
