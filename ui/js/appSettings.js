@@ -13,6 +13,11 @@ const DEFAULT_APP_SETTINGS = {
     // AudioSource.setSystemAudioDeviceId() (DevTools thủ công). Mặc định rỗng => SYSTEM_AUDIO =
     // NO_DEVICE cho tới khi người dùng tự chọn (đúng chủ ý, không phải thiếu sót).
     selectedSystemAudioDeviceId: "",
+    // TASK B72 (gộp B72+B72.1) — thiết bị ĐẦU RA cho Internal Audio Backend (SoundEffectEngine:
+    // CLAP/LAUGH, HTMLAudioElement.setSinkId). "" = dùng output MẶC ĐỊNH của hệ điều hành (app KHÔNG
+    // đổi output mặc định của Windows, KHÔNG đụng Speakers 01). Chỉ ảnh hưởng âm thanh do CHÍNH app
+    // phát — không điều khiển đường phát của DAW/nhạc.
+    selectedAudioOutputDeviceId: "",
     // TASK B71 — key RIÊNG cho MIC VU trên Menu (AudioSource.createMicSource() đọc qua
     // getMicDeviceId()), TÁCH BIỆT hoàn toàn khỏi "selectedSoundcardId" ở trên (xem
     // B70-REPORT.md phát hiện #2: trước B71, "selectedSoundcardId" KHÔNG có tác dụng thật lên

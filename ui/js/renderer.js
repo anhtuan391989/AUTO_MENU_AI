@@ -145,7 +145,44 @@ const SoundEffectEngine = (() => {
         if (typeof callback === "function") listeners.push(callback);
     }
 
-    return { toggle, setVolume, isPlaying, onChange, SOUND_SOURCES };
+    /**
+     * TASK B72 (gộp B72+B72.1) — chọn thiết bị ĐẦU RA cho Internal Audio Backend bằng
+     * HTMLMediaElement.setSinkId() (Chromium/Electron hỗ trợ). CHỈ áp dụng cho âm thanh do chính
+     * app phát (CLAP/LAUGH) — KHÔNG điều khiển đường phát của DAW/nhạc, KHÔNG đổi output mặc định
+     * của Windows. deviceId rỗng = output mặc định của OS.
+     * Trả về kết quả THẬT của setSinkId (không giả lập thành công): nếu thiết bị không tồn tại /
+     * bị từ chối, promise của setSinkId reject -> ok:false + error; KHÔNG tự rơi về thiết bị khác
+     * (audio element giữ nguyên sink trước đó khi setSinkId thất bại).
+     * @param {string} deviceId
+     * @returns {Promise<{ok:boolean, requested:string, actual:(string|null), error:(string|null)}>}
+     */
+    async function setOutputDevice(deviceId) {
+        const requested = deviceId || "";
+        const list = Object.values(effects);
+        if (list.length === 0) {
+            return { ok: false, requested, actual: null, error: "Không có audio element nào để áp dụng" };
+        }
+        const results = await Promise.allSettled(list.map((e) => (
+            typeof e.audio.setSinkId === "function"
+                ? e.audio.setSinkId(requested)
+                : Promise.reject(new Error("setSinkId không được hỗ trợ trong môi trường này"))
+        )));
+        const failed = results.find((r) => r.status === "rejected");
+        return {
+            ok: !failed,
+            requested,
+            actual: getOutputDeviceId(),
+            error: failed ? String(failed.reason?.message || failed.reason) : null,
+        };
+    }
+
+    /** sinkId THẬT mà audio element đang dùng ("" = mặc định OS). null nếu chưa đọc được. */
+    function getOutputDeviceId() {
+        const first = Object.values(effects)[0];
+        return first && typeof first.audio.sinkId === "string" ? first.audio.sinkId : null;
+    }
+
+    return { toggle, setVolume, isPlaying, onChange, setOutputDevice, getOutputDeviceId, SOUND_SOURCES };
 
 })();
 
@@ -1161,31 +1198,51 @@ async function checkAllSystems() {
     // 1. Check Online
     setStatus('dot-online', navigator.onLine ? 'online' : 'offline');
 
-    // 2. Check Audio Interface (MIC) — TASK B71: KHÔNG còn dùng riêng chuỗi tên đã lưu
-    // ("selectedSoundcard") để quyết định xanh/đỏ (đúng B70-REPORT.md phát hiện #4: trước B71
-    // chấm này chỉ trả lời "đã từng lưu 1 cái tên" chứ không phải "thiết bị có đang mở thật").
-    // Nay đọc AudioSourceState thật của __micSource (nguồn MIC VU trên Menu — xem
-    // startMicAndMasterVu()): RUNNING = online (đã mở mic thành công, kể cả mic mặc định hệ
-    // thống khi chưa chọn cụ thể), STARTING = pending, còn lại (NO_DEVICE/ERROR/chưa init) =
-    // offline. Đây là "Audio Interface" theo đúng nghĩa app đã dùng từ trước (setup.html panel
-    // title "🎙 Microphone (Input Device)" bọc quanh chính lựa chọn Audio Interface) — không
-    // phải suy đoán ý nghĩa mới cho selectedSoundcardId (key đó vẫn giữ nguyên, không đụng).
-    try {
-        setStatus('dot-audio', 'pending');
-        const micState = __micSource?.getState?.();
-        if (micState === AudioSourceState.RUNNING) {
-            setStatus('dot-audio', 'online');
-        } else if (micState === AudioSourceState.STARTING) {
-            setStatus('dot-audio', 'pending');
-        } else {
-            setStatus('dot-audio', 'offline');
-        }
-    } catch (e) {
-        setStatus('dot-audio', 'offline');
-    }
+    // 2. Check Audio Interface (MIC)
+    updateAudioInterfaceDot();
 
     // 3. Check DAW (nếu có hàm kiểm tra DAW riêng thì bổ sung ở đây)
     // setStatus('dot-daw', isDawRunning ? 'online' : 'offline');
+}
+
+// TASK B72 (gộp B72+B72.1) — tách riêng logic dot-audio ra 1 hàm DUY NHẤT, gọi từ CẢ
+// checkAllSystems() lẫn updateMainStatus() (xem bên dưới). PHÁT HIỆN (đã từng sửa 1 lần ở B72
+// trước, nhưng bị mất khi origin/main được đồng bộ lại từ 1 nhánh khác — xem B72-REPORT.md mục
+// Baseline): updateMainStatus() có 1 dòng RIÊNG "setStatus('dot-audio', soundcard ? 'online' :
+// 'offline')" — tức là dot-audio có 2 NGƯỜI VIẾT với 2 LOGIC KHÁC NHAU (bản cũ dùng chuỗi tên đã
+// lưu, không xác minh AudioSource thật có RUNNING hay không). Gộp về 1 hàm duy nhất — không còn
+// 2 nơi quyết định cùng 1 phần tử DOM.
+function updateAudioInterfaceDot() {
+    try {
+        const micState = __micSource?.getState?.();
+        const dotEl = document.getElementById('dot-audio');
+        const selectedMicId = (typeof getSetting === "function" ? getSetting("selectedMicDeviceId", "") : "") || "";
+        let label;
+        if (micState === AudioSourceState.RUNNING) {
+            setStatus('dot-audio', 'online');
+            label = selectedMicId ? "Mic đã chọn — đang hoạt động" : "Mic mặc định hệ thống — đang hoạt động";
+        } else if (micState === AudioSourceState.STARTING) {
+            setStatus('dot-audio', 'pending');
+            label = "Đang mở mic...";
+        } else if (micState === AudioSourceState.ERROR) {
+            setStatus('dot-audio', 'offline');
+            label = "Lỗi mở mic";
+        } else if (selectedMicId) {
+            // NO_DEVICE nhưng ĐÃ có deviceId lưu -> khác "chưa từng chọn" (phân biệt "thiết bị
+            // đã lưu nhưng không khả dụng" với "chưa chọn thiết bị").
+            setStatus('dot-audio', 'offline');
+            label = "Mic đã chọn hiện không khả dụng";
+        } else {
+            setStatus('dot-audio', 'offline');
+            label = "Chưa khởi động mic (chưa tương tác với app)";
+        }
+        // Chỉ set thuộc tính title (tooltip khi rê chuột) trên chính chấm tròn, KHÔNG đổi bố
+        // cục/CSS/HTML nào khác — cách an toàn nhất để hiện đủ trạng thái mà không động tới
+        // giao diện đã có (đúng ràng buộc "Không thay đổi giao diện" của dự án).
+        if (dotEl) dotEl.title = label;
+    } catch (e) {
+        setStatus('dot-audio', 'offline');
+    }
 }
 
 function updateOnlineStatus() {
@@ -1560,7 +1617,7 @@ setInterval(updateSongPosition, 1000);
    ========================================================== */
 let audioMonitorStarted = false;
 let __lastKnownSystemAudioDeviceId = null; // TASK C62 — theo dõi đổi Soundcard từ Setup khi app đang chạy
-let __lastKnownMicDeviceId = null; // TASK B71 — theo dõi đổi MIC Input từ Setup khi app đang chạy
+let __lastKnownMicDeviceId = null; // TASK B72 (gộp B72+B72.1) — theo dõi đổi MIC Input từ Setup khi app đang chạy
 
 // ---- DEBUG TẠM THỜI: in ra Console mỗi ~1 giây để kiểm tra mức tín hiệu thật ----
 // Xoá 2 hàm này sau khi đã xác định app chạy ổn định lâu dài.
@@ -1620,16 +1677,19 @@ function startMicAndMasterVu() {
             const meter = document.getElementById("vu-mic-fill");
             if (meter) { meter.style.width = "0%"; meter.classList.add("vu-bar--nodata"); }
         });
-        // TASK B71 — dot-audio (Menu, "AUDIO INTERFACE") nay phản ánh AudioSourceState THẬT của
-        // MIC (xem checkAllSystems()) thay vì chỉ đọc 1 chuỗi tên đã lưu. Vì startAudioMonitor()
-        // (nơi tạo __micSource) chỉ chạy sau cú click đầu tiên của người dùng (autoplay policy —
-        // xem dòng gọi startAudioMonitor() ở listener 'click' bên dưới), lần checkAllSystems()
-        // đầu tiên lúc DOMContentLoaded sẽ luôn thấy __micSource=null (offline). Đăng ký lại ở
-        // đây để chấm cập nhật NGAY khi mic thật sự đổi trạng thái (STARTING/RUNNING/ERROR),
-        // không cần đợi 1 chu kỳ checkAllSystems() nào khác (hiện không có polling định kỳ).
-        __micSource.onStateChange(() => checkAllSystems());
+        // TASK B71/B72 — dot-audio (Menu, "AUDIO INTERFACE") phản ánh AudioSourceState THẬT của
+        // MIC (xem updateAudioInterfaceDot()) thay vì chỉ đọc 1 chuỗi tên đã lưu. Vì
+        // startAudioMonitor() (nơi tạo __micSource) chỉ chạy sau cú click đầu tiên của người
+        // dùng (autoplay policy), lần checkAllSystems() đầu tiên lúc DOMContentLoaded sẽ luôn
+        // thấy __micSource=null (offline). Đăng ký lại ở đây để chấm cập nhật NGAY khi mic thật
+        // sự đổi trạng thái. Đồng thời báo cáo trạng thái MIC qua IPC cho cửa sổ Setup, cùng cơ
+        // chế đã có cho SYSTEM_AUDIO (xem listener systemAudio.onStateChange bên dưới).
+        __micSource.onStateChange((state) => {
+            window.electronAPI?.reportMicState?.({ state });
+            checkAllSystems();
+        });
         __micSource.start().catch((err) => console.warn("[Audio][MIC] Không mở được mic (Mic VU sẽ trống):", err));
-        // TASK B71 — mốc so sánh khi Setup đổi "MIC Input" (giống hệt cơ chế C62 đã có cho
+        // TASK B71/B72 — mốc so sánh khi Setup đổi "MIC Input" (giống hệt cơ chế C62 đã có cho
         // SYSTEM_AUDIO). AudioSource.getMicDeviceId() export riêng cho renderer.js (1 nguồn sự thật).
         __lastKnownMicDeviceId = typeof AudioSource.getMicDeviceId === "function" ? AudioSource.getMicDeviceId() : null;
     }
@@ -1816,6 +1876,21 @@ async function startAudioMonitor() {
         bindAiEnginesToSystemAudio(systemAudio);
     });
 
+    // TASK A71 — listener RIÊNG (không gộp vào listener trên) chỉ để báo MỌI transition sang cửa
+    // sổ Setup qua IPC, hiển thị badge trạng thái sống. Tách riêng để không đụng vào đúng hình
+    // dạng code mà AiSystemBoundaryA56.verify.js đang audit (bindAiEnginesToSystemAudio() vẫn là
+    // hàm DUY NHẤT trong listener CŨ, không đổi gì ở đó).
+    // TASK B72 (gộp B72+B72.1) — PHÁT HIỆN: listener này đã BỊ MẤT trong bản A72 hiện có trên
+    // origin/main (đối chiếu trực tiếp `git show origin/main:ui/js/renderer.js` — không có bất
+    // kỳ dòng "reportSystemAudioState" nào), nhiều khả năng thất lạc khi A72 thêm đoạn
+    // BPMEngine.stop()/KeyEngine.stop() vào onDeviceLost ở trên. Hậu quả: badge trạng thái sống
+    // "SYSTEM_AUDIO Input" trong Setup (A71) bị ĐỨNG HÌNH ở giá trị cache cuối cùng, không còn
+    // cập nhật theo thời gian thực — đúng kiểu lỗi mà B72 (Phần B3/B72-08) yêu cầu audit. Khôi
+    // phục lại nguyên trạng A71, không đổi gì khác.
+    systemAudio.onStateChange((state) => {
+        window.electronAPI?.reportSystemAudioState?.({ state });
+    });
+
     setSystemAudioVuNoData(true); // TASK A68 — mặc định "chưa có dữ liệu" cho tới khi RUNNING lần đầu
 
     await systemAudio.start();
@@ -1940,6 +2015,35 @@ document.addEventListener("keydown", (e) => {
     });
 });
 
+// TASK B72 (gộp B72+B72.1) — Audio Output cho Internal Audio Backend (CLAP/LAUGH).
+// Trạng thái báo về Setup là kết quả THẬT của setSinkId(), không suy từ việc "đã lưu setting":
+//   DEFAULT = chưa chọn (dùng output mặc định OS) và áp dụng thành công
+//   APPLIED = đã chọn thiết bị cụ thể và setSinkId() thành công (sinkId thật khớp yêu cầu)
+//   ERROR   = setSinkId() thất bại (thiết bị mất/không hợp lệ) — KHÔNG tự rơi về thiết bị khác,
+//             KHÔNG tự xoá setting đã lưu.
+let __lastKnownOutputDeviceId = null;
+async function applyAudioOutputSetting() {
+    const id = (typeof getSetting === "function" ? getSetting("selectedAudioOutputDeviceId", "") : "") || "";
+    __lastKnownOutputDeviceId = id;
+    let payload;
+    try {
+        const r = await SoundEffectEngine.setOutputDevice(id);
+        if (!r.ok) {
+            payload = { state: "ERROR", requested: id, actual: r.actual, error: r.error };
+        } else if (id && r.actual !== id) {
+            // setSinkId resolve nhưng sinkId thật không khớp yêu cầu -> không báo APPLIED.
+            payload = { state: "ERROR", requested: id, actual: r.actual, error: "sinkId thực tế không khớp thiết bị đã chọn" };
+        } else {
+            payload = { state: id ? "APPLIED" : "DEFAULT", requested: id, actual: r.actual, error: null };
+        }
+    } catch (err) {
+        payload = { state: "ERROR", requested: id, actual: null, error: String(err?.message || err) };
+    }
+    if (payload.state === "ERROR") console.warn("[Audio][OUTPUT] Không áp dụng được thiết bị đầu ra:", payload.error);
+    window.electronAPI?.reportOutputState?.(payload);
+    return payload;
+}
+
 window.electronAPI?.onSetupChanged?.(() => {
     // appSettings là cache trong bộ nhớ của renderer này — cửa sổ Setup ghi vào
     // localStorage ở tiến trình của NÓ, nên phải load lại thì mới thấy dữ liệu mới.
@@ -1960,10 +2064,10 @@ window.electronAPI?.onSetupChanged?.(() => {
         }
     }
 
-    // TASK B71 — cùng cơ chế như trên nhưng cho MIC Input. __micSource dùng chung 1 object
-    // trong suốt vòng đời trang (không tạo lại) — stop() rồi start() lại là đủ để
-    // resolveDeviceId() (getMicDeviceId) được đọc lại với giá trị mới (xem audioSource.js
-    // createMediaDeviceSource() — start() luôn gọi resolveDeviceId() lại từ đầu, không cache).
+    // TASK B72 (gộp B72+B72.1) — cùng cơ chế như trên nhưng cho MIC Input. __micSource dùng
+    // chung 1 object trong suốt vòng đời trang (không tạo lại) — stop() rồi start() lại là đủ
+    // để resolveDeviceId() (getMicDeviceId) được đọc lại với giá trị mới (audioSource.js
+    // createMediaDeviceSource().start() luôn gọi resolveDeviceId() lại từ đầu, không cache).
     // MIC không có requireExplicitDevice nên đổi về "" (None) vẫn start() thành công bình
     // thường với mic mặc định hệ thống — không rơi về NO_DEVICE như SYSTEM_AUDIO.
     if (__micSource && typeof AudioSource !== "undefined" && typeof AudioSource.getMicDeviceId === "function") {
@@ -1974,6 +2078,12 @@ window.electronAPI?.onSetupChanged?.(() => {
             __micSource.stop();
             __micSource.start().catch((err) => console.warn("[Audio][MIC] Không mở được mic sau khi đổi thiết bị:", err));
         }
+    }
+
+    // TASK B72 — Audio Output: chỉ áp dụng lại khi lựa chọn thực sự đổi (tránh setSinkId lặp).
+    if (typeof SoundEffectEngine !== "undefined" &&
+        (getSetting?.("selectedAudioOutputDeviceId", "") || "") !== __lastKnownOutputDeviceId) {
+        applyAudioOutputSetting();
     }
 });
 
@@ -2008,7 +2118,10 @@ function updateMainStatus() {
             : displayName;
         soundcardEl.title = displayName; // rê chuột để xem tên đầy đủ
     }
-    setStatus("dot-audio", soundcard ? "online" : "offline");
+    // TASK B72 — KHÔNG còn "setStatus('dot-audio', soundcard ? 'online' : 'offline')" ở đây
+    // (dòng cũ — xem ghi chú tại updateAudioInterfaceDot() phía trên). Gọi lại đúng 1 hàm duy
+    // nhất để dot-audio không bao giờ có 2 logic khác nhau ghi đè nhau.
+    updateAudioInterfaceDot();
 
     // --- Các ô trạng thái phụ (chỉ cập nhật nếu tồn tại trong DOM) ---
     // Đã bỏ checklist "SETUP: X/10" — không còn phản ánh đúng yêu cầu thực tế (một số
@@ -2041,6 +2154,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateOnlineStatus();
     updateCacheDot();
     checkAllSystems();
+    applyAudioOutputSetting(); // TASK B72 — áp dụng thiết bị đầu ra đã lưu (nếu có) lúc khởi động
     loadData();
 
     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây

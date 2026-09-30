@@ -417,6 +417,24 @@ ipcMain.on("system-audio-state-changed", (event, state) => {
 });
 ipcMain.handle("get-system-audio-state", () => lastKnownSystemAudioState);
 
+// TASK B72 (gộp B72+B72.1) — MIC: cùng cơ chế relay với SYSTEM_AUDIO ở trên (renderer cửa sổ
+// Menu -> cache ở main -> relay sang setupWin), chỉ đổi tên kênh/biến cache, KHÔNG đụng 4 dòng trên.
+let lastKnownMicState = { state: "NO_DEVICE" };
+ipcMain.on("mic-state-changed", (event, state) => {
+    lastKnownMicState = state;
+    setupWin?.webContents.send("mic-state-changed", state);
+});
+ipcMain.handle("get-mic-state", () => lastKnownMicState);
+
+// TASK B72 — Audio Output: cùng cơ chế relay. Giá trị khởi tạo "UNKNOWN" (chưa có báo cáo nào từ
+// cửa sổ Menu) — KHÔNG mặc định là DEFAULT/APPLIED để không báo thành công khi chưa xác nhận.
+let lastKnownOutputState = { state: "UNKNOWN" };
+ipcMain.on("output-state-changed", (event, state) => {
+    lastKnownOutputState = state;
+    setupWin?.webContents.send("output-state-changed", state);
+});
+ipcMain.handle("get-output-state", () => lastKnownOutputState);
+
 // ================================
 // TASK B3-C — REAL MANUAL STATE IPC. Renderer gửi snapshot Manual Key/Mod THẬT (đúng lúc
 // state thay đổi thật, không polling) — main CHỈ chuyển tiếp nguyên văn vào ManualState.js,

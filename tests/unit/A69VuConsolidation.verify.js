@@ -111,14 +111,18 @@ assert(!html.includes('vu-beat-fill') && !html.includes('vu-bar--beat'), 'index.
 assert(!rendererSrc.includes('vu-beat-fill'.replace('vu-beat-fill', 'vu-beat-fill')) || !/getElementById\("vu-beat-fill"\)/.test(rendererSrc),
     'renderer.js không còn document.getElementById("vu-beat-fill") nào');
 
-console.log('\n== Test 8: File core không bị đụng trong A69 (kiểm bằng git diff so với A68) ==');
+console.log('\n== Test 8: File core không bị A69 đụng (kiểm bằng git diff CỐ ĐỊNH ở phạm vi commit A68->A69) ==');
+// TASK B72 (gộp) — SỬA: bản gốc dùng "7d49c81..HEAD" (HEAD di động), nên hễ các task sau này
+// (B71/A72/...) đụng audioSource.js/bpmEngine.js một cách HỢP LỆ là tự nhiên fail dù KHÔNG
+// liên quan gì tới A69. Chốt cứng lại đúng phạm vi lịch sử của riêng A69 (7d49c81 = cuối A68,
+// ef4fd14 = cuối A69) — invariant "A69 không đụng core" chỉ có ý nghĩa trong đúng phạm vi đó.
 try {
-    const diffFiles = execSync('git diff --name-only 7d49c81..HEAD', { cwd: ROOT, encoding: 'utf8' })
+    const diffFiles = execSync('git diff --name-only 7d49c81..ef4fd14', { cwd: ROOT, encoding: 'utf8' })
         .split('\n').filter(Boolean);
     ['ui/js/audioSource.js', 'ui/js/engines/bpmEngine.js', 'ui/js/engines/keyEngine.js', 'ui/js/engines/modEngine.js']
-        .forEach((f) => assert(!diffFiles.includes(f), `${f} KHÔNG nằm trong diff A69 (không bị đụng)`));
+        .forEach((f) => assert(!diffFiles.includes(f), `${f} KHÔNG nằm trong diff RIÊNG của A69 (7d49c81..ef4fd14) — không bị A69 đụng`));
 } catch (e) {
-    console.log('  SKIP  (không chạy được git diff trong môi trường này:', e.message.split('\n')[0], ')');
+    console.log('  SKIP  (không chạy được git diff trong môi trường này — máy không có đủ lịch sử 2 commit này:', e.message.split('\n')[0], ')');
 }
 
 console.log(`\n== KẾT QUẢ: ${pass} PASS, ${fail} FAIL ==`);

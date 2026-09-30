@@ -307,6 +307,28 @@
                 </div>
 
                 <div class="panel-card">
+                    <div class="panel-card-title">🎤 MIC Input <span class="badge badge-live">Nguồn cho MIC VU</span></div>
+                    <p class="hint-text">Thiết bị micro thật sự được Menu dùng để đo MIC VU — <b>TÁCH BIỆT hoàn
+                        toàn</b> khỏi "Audio Interface" ở trên (2 cấu hình độc lập, không dùng chung key).
+                        Chọn "None" để giữ hành vi mặc định: dùng mic mặc định của hệ điều hành.</p>
+                    <!-- TASK B72 (gộp B72+B72.1) — cùng mẫu 2-badge như "SYSTEM_AUDIO Input" bên dưới:
+                         badge ĐÃ CHỌN (persisted, đọc selectedMicDeviceId) khác badge ĐANG CHẠY THẬT
+                         (runtime, qua IPC từ cửa sổ Menu) — không gộp làm 1, tránh lặp lại kiểu nhầm
+                         lẫn "đã chọn" != "đang chạy" mà B70/A70 đã audit ra. -->
+                    <div style="margin-bottom:10px;"><span id="micStatusBadge" class="badge badge-warn">⚠ Dùng mic mặc định hệ thống</span></div>
+                    <select id="micSelect" class="ph-select">
+                        <option value="">— None / Dùng mic mặc định hệ thống —</option>
+                    </select>
+                    <div class="row-buttons">
+                        <button id="btnSelectMic" class="setup-btn">Chọn MIC Input</button>
+                        <button id="btnClearMic" class="setup-btn">Đặt về None</button>
+                    </div>
+                    <p class="hint-text" style="margin-top:10px;">Trạng thái kết nối thực tế (cập nhật trực tiếp
+                        từ cửa sổ Menu chính — chỉ có ý nghĩa khi Menu đang mở):</p>
+                    <div style="margin-top:6px;"><span id="micStateBadge" class="badge badge-warn">NO_DEVICE</span></div>
+                </div>
+
+                <div class="panel-card">
                     <div class="panel-card-title">🎵 SYSTEM_AUDIO Input <span class="badge badge-live">Nguồn cho BPM / Key / Mod</span></div>
                     <p class="hint-text">Chọn thiết bị đầu vào mang tín hiệu nhạc/beat — <b>TÁCH BIỆT hoàn toàn</b>
                         khỏi Microphone ở trên (2 cấu hình độc lập, không dùng chung). Chưa chọn = BPM/Key/Mod sẽ
@@ -328,6 +350,26 @@
                     <p class="hint-text" style="margin-top:6px;"><i>Lưu ý: RUNNING chỉ xác nhận thiết bị đã mở
                         thành công, KHÔNG đồng nghĩa đã có tín hiệu nhạc hợp lệ hay BPM đã tính được — xem
                         A70-REPORT.md/A67-REPORT.md nếu cần kiểm chứng nội dung tín hiệu.</i></p>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🔈 Audio Output <span class="badge badge-live">Thật — setSinkId cho hiệu ứng CLAP/LAUGH</span></div>
+                    <p class="hint-text">Chọn thiết bị phát cho âm thanh do <b>chính app</b> phát (Clap/Laugh — Internal
+                        Audio Backend). <b>KHÔNG</b> điều khiển đường phát của DAW/nhạc, <b>KHÔNG</b> đổi output mặc
+                        định của Windows, không đụng Speakers 01. "None" = dùng output mặc định của hệ điều hành.</p>
+                    <div style="margin-bottom:10px;"><span id="outputStatusBadge" class="badge badge-warn">⚠ Dùng output mặc định hệ thống</span></div>
+                    <select id="outputSelect" class="ph-select">
+                        <option value="">— None / Output mặc định hệ thống —</option>
+                    </select>
+                    <div class="row-buttons">
+                        <button id="btnSelectOutput" class="setup-btn">Chọn Audio Output</button>
+                        <button id="btnClearOutput" class="setup-btn">Đặt về None</button>
+                    </div>
+                    <p class="hint-text" style="margin-top:10px;">Kết quả áp dụng THẬT (setSinkId, báo về từ cửa sổ Menu —
+                        chỉ có ý nghĩa khi Menu đang mở):</p>
+                    <div style="margin-top:6px;"><span id="outputStateBadge" class="badge badge-warn">CHƯA XÁC NHẬN</span></div>
+                    <p class="hint-text" style="margin-top:6px;"><i>Lưu ý: APPLIED chỉ xác nhận trình phát của app đã nhận
+                        thiết bị này. Việc âm thanh thực sự phát ra đúng loa vật lý cần nghe kiểm tra trên máy thật.</i></p>
                 </div>
 
                 <div class="panel-card">

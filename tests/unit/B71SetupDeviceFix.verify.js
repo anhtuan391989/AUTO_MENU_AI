@@ -1,4 +1,9 @@
 'use strict';
+/* TASK B72 (gộp) — CẬP NHẬT TÊN: origin/main hiện dùng triển khai A71 cho SYSTEM_AUDIO (systemAudioSelect/
+ * initSystemAudioSection) và B72 thêm MIC Input theo CÙNG mẫu (micSelect/initMicSection) thay cho tên B71 cũ
+ * (micInputSelect/initMicInputSection/systemAudioInputSelect/...). Hợp đồng kiểm tra KHÔNG đổi; hành vi thật
+ * được kiểm ở tests/unit/B72AudioConfig.verify.js. Đã đối chiếu: 20 FAIL của file này trên origin/main
+ * (4dc17cd) là do đổi tên, không phải do mất hợp đồng. */
 /**
  * B71SetupDeviceFix.verify.js — TASK B71
  * "SETUP AUDIO DEVICE CONFIGURATION FIX" — verify bằng cách đọc lại source thật
@@ -35,34 +40,44 @@ const audioSourceSrc = fs.readFileSync(path.join(ROOT, 'ui/js/audioSource.js'), 
 const appSettingsSrc = fs.readFileSync(path.join(ROOT, 'ui/js/appSettings.js'), 'utf8');
 const rendererSrc = fs.readFileSync(path.join(ROOT, 'ui/js/renderer.js'), 'utf8');
 
+// Trích thân hàm theo cặp ngoặc {} thật (regex non-greedy cắt sai khi hàm có khối lồng nhau / không liền kề).
+function extractFnBody(src, re) {
+    const m = re.exec(src); if (!m) return null;
+    let i = src.indexOf('{', m.index), d = 0;
+    for (let j = i; j < src.length; j++) {
+        if (src[j] === '{') d++;
+        else if (src[j] === '}' && --d === 0) return [src.slice(m.index, j + 1), src.slice(i + 1, j)];
+    }
+    return null;
+}
 console.log('== Test 1 (Checklist #1): Setup có 2 mục MIC Input / SYSTEM_AUDIO Input độc lập ==');
-assert(setupHtml.includes('id="micInputSelect"'), 'setup.html: có <select id="micInputSelect">');
-assert(setupHtml.includes('id="systemAudioInputSelect"'), 'setup.html: có <select id="systemAudioInputSelect">');
-assert(setupHtml.includes('id="btnSelectMicInput"'), 'setup.html: có nút "Chọn MIC Input"');
-assert(setupHtml.includes('id="btnSelectSystemAudioInput"'), 'setup.html: có nút "Chọn SYSTEM_AUDIO Input"');
+assert(setupHtml.includes('id="micSelect"'), 'setup.html: có <select id="micSelect">');
+assert(setupHtml.includes('id="systemAudioSelect"'), 'setup.html: có <select id="systemAudioSelect">');
+assert(setupHtml.includes('id="btnSelectMic"'), 'setup.html: có nút "Chọn MIC Input"');
+assert(setupHtml.includes('id="btnSelectSystemAudio"'), 'setup.html: có nút "Chọn SYSTEM_AUDIO Input"');
 assert(setupHtml.includes('id="soundcardSelect"') && setupHtml.includes('id="btnSelectSoundcard"'),
     'setup.html: card "Audio Interface" cũ (selectedSoundcardId) VẪN CÒN NGUYÊN, không bị xoá');
-assert(/function initMicInputSection\(\)/.test(setupSrc), 'setup.js: có initMicInputSection()');
-assert(/function initSystemAudioInputSection\(\)/.test(setupSrc), 'setup.js: có initSystemAudioInputSection()');
-assert(/initMicInputSection\(\);/.test(setupSrc) && /initSystemAudioInputSection\(\);/.test(setupSrc),
+assert(/function initMicSection\(\)/.test(setupSrc), 'setup.js: có initMicSection()');
+assert(/function initSystemAudioSection\(\)/.test(setupSrc), 'setup.js: có initSystemAudioSection()');
+assert(/initMicSection\(\);/.test(setupSrc) && /initSystemAudioSection\(\);/.test(setupSrc),
     'setup.js: cả 2 hàm init đều được GỌI trong luồng khởi tạo (không chỉ định nghĩa suông)');
 
 console.log('\n== Test 2/3 (Checklist #2,#3,#6): MIC và SYSTEM_AUDIO ghi 2 key khác nhau, không lẫn nhau ==');
-const micSectionMatch = setupSrc.match(/function initMicInputSection\(\) \{([\s\S]*?)\n\}\n\nfunction initSystemAudioInputSection/);
-assert(!!micSectionMatch, 'Tìm thấy toàn bộ thân initMicInputSection()');
+const micSectionMatch = extractFnBody(setupSrc, /function initMicSection\(\) \{/);
+assert(!!micSectionMatch, 'Tìm thấy toàn bộ thân initMicSection()');
 if (micSectionMatch) {
     const body = micSectionMatch[1];
-    assert(/saveSetting\("selectedMicDeviceId"/.test(body), 'initMicInputSection() ghi "selectedMicDeviceId"');
-    assert(!/selectedSystemAudioDeviceId/.test(body), 'initMicInputSection() KHÔNG đụng "selectedSystemAudioDeviceId"');
-    assert(!/selectedSoundcardId/.test(body), 'initMicInputSection() KHÔNG dùng "selectedSoundcardId" làm fallback (đúng Mục A đề bài)');
+    assert(/saveSetting\("selectedMicDeviceId"/.test(body), 'initMicSection() ghi "selectedMicDeviceId"');
+    assert(!/selectedSystemAudioDeviceId/.test(body), 'initMicSection() KHÔNG đụng "selectedSystemAudioDeviceId"');
+    assert(!/selectedSoundcardId/.test(body), 'initMicSection() KHÔNG dùng "selectedSoundcardId" làm fallback (đúng Mục A đề bài)');
 }
-const sysSectionMatch = setupSrc.match(/function initSystemAudioInputSection\(\) \{([\s\S]*?)\n\}\n/);
-assert(!!sysSectionMatch, 'Tìm thấy toàn bộ thân initSystemAudioInputSection()');
+const sysSectionMatch = extractFnBody(setupSrc, /function initSystemAudioSection\(\) \{/);
+assert(!!sysSectionMatch, 'Tìm thấy toàn bộ thân initSystemAudioSection()');
 if (sysSectionMatch) {
     const body = sysSectionMatch[1];
-    assert(/saveSetting\("selectedSystemAudioDeviceId"/.test(body), 'initSystemAudioInputSection() ghi "selectedSystemAudioDeviceId"');
-    assert(!/selectedMicDeviceId/.test(body), 'initSystemAudioInputSection() KHÔNG đụng "selectedMicDeviceId"');
-    assert(!/selectedSoundcardId/.test(body), 'initSystemAudioInputSection() KHÔNG dùng "selectedSoundcardId" làm fallback (đúng Mục A đề bài)');
+    assert(/saveSetting\("selectedSystemAudioDeviceId"/.test(body), 'initSystemAudioSection() ghi "selectedSystemAudioDeviceId"');
+    assert(!/selectedMicDeviceId/.test(body), 'initSystemAudioSection() KHÔNG đụng "selectedMicDeviceId"');
+    assert(!/selectedSoundcardId/.test(body), 'initSystemAudioSection() KHÔNG dùng "selectedSoundcardId" làm fallback (đúng Mục A đề bài)');
 }
 assert(/getSetting\("selectedMicDeviceId"/.test(audioSourceSrc), 'audioSource.js: createMicSource() (getMicDeviceId) đọc đúng "selectedMicDeviceId"');
 assert(/getSetting\("selectedSystemAudioDeviceId"/.test(audioSourceSrc), 'audioSource.js: createSystemAudioSource() (getSystemAudioDeviceId) đọc đúng "selectedSystemAudioDeviceId"');
@@ -76,9 +91,9 @@ assert(!!createMicMatch && /requireExplicitDevice:\s*false/.test(createMicMatch[
 const createSysMatch = audioSourceSrc.match(/function createSystemAudioSource\(\) \{([\s\S]*?)\n    \}/);
 assert(!!createSysMatch && /requireExplicitDevice:\s*true/.test(createSysMatch[0]),
     'createSystemAudioSource(): vẫn requireExplicitDevice:true (None/rỗng -> NO_DEVICE, KHÔNG đổi từ B58/A65)');
-assert(/— Không dùng thiết bị cụ thể \(mic mặc định hệ thống\) —/.test(setupHtml),
+assert(/— None \/ Dùng mic mặc định hệ thống —/.test(setupHtml),
     'setup.html: option "None" của MIC Input diễn giải đúng ý nghĩa (mic mặc định hệ thống)');
-assert(/— Không dùng thiết bị \(NO_DEVICE\) —/.test(setupHtml),
+assert(/— None \/ Chưa chọn thiết bị —/.test(setupHtml),
     'setup.html: option "None" của SYSTEM_AUDIO Input diễn giải đúng ý nghĩa (NO_DEVICE)');
 
 console.log('\n== Test 7 (Checklist #7): Không fallback sang nguồn khác khi mất thiết bị (không đổi hành vi cũ) ==');
@@ -88,18 +103,15 @@ assert(createSysMatch && /autoReconnect:\s*true/.test(createSysMatch[0]),
     'createSystemAudioSource(): vẫn autoReconnect:true — tự thử lại CHÍNH thiết bị đã chọn (C62), không phải fallback sang thiết bị khác');
 
 console.log('\n== Test 8 (Checklist #8): dot-audio trên Menu đọc AudioSourceState thật của MIC ==');
-const checkAllSystemsMatch = rendererSrc.match(/async function checkAllSystems\(\) \{([\s\S]*?)\n\}/);
-assert(!!checkAllSystemsMatch, 'Tìm thấy checkAllSystems() trong renderer.js');
-if (checkAllSystemsMatch) {
-    const body = checkAllSystemsMatch[1];
-    assert(/__micSource\?\.getState\?\.\(\)/.test(body), 'checkAllSystems() đọc __micSource.getState() (AudioSourceState thật)');
-    assert(!/getSetting\?\.\("selectedSoundcard"\)/.test(body),
-        'checkAllSystems() KHÔNG còn dùng riêng selectedSoundcard để quyết định dot-audio (đúng Mục D đề bài)');
-    assert(/AudioSourceState\.RUNNING/.test(body) && /AudioSourceState\.STARTING/.test(body),
-        'checkAllSystems() phân biệt RUNNING (online) và STARTING (pending), không chỉ 1 mức online/offline');
-}
-assert(/__micSource\.onStateChange\(\(\) => checkAllSystems\(\)\)/.test(rendererSrc),
-    'startMicAndMasterVu(): __micSource.onStateChange() gọi lại checkAllSystems() -> dot-audio cập nhật NGAY khi mic đổi trạng thái thật (không chỉ 1 lần lúc DOMContentLoaded)');
+// TASK B72 (gộp) — logic dot-audio nằm ở updateAudioInterfaceDot() (checkAllSystems()/updateMainStatus() đều gọi hàm này).
+const checkAllSystemsFn = extractFnBody(rendererSrc, /async function checkAllSystems\(\) \{/);
+assert(!!checkAllSystemsFn && /updateAudioInterfaceDot\(\)/.test(checkAllSystemsFn[1]), 'checkAllSystems() gọi updateAudioInterfaceDot()');
+const dotFn = extractFnBody(rendererSrc, /function updateAudioInterfaceDot\(\) \{/);
+assert(!!dotFn && /__micSource\?\.getState\?\.\(\)/.test(dotFn[1]), 'updateAudioInterfaceDot() đọc __micSource.getState() (AudioSourceState thật)');
+assert(!!dotFn && /AudioSourceState\.RUNNING/.test(dotFn[1]) && /AudioSourceState\.STARTING/.test(dotFn[1]),
+    'updateAudioInterfaceDot() phân biệt RUNNING (online) và STARTING (pending), không chỉ 1 mức online/offline');
+assert(/__micSource\.onStateChange\(\(state\) => \{[\s\S]{0,300}checkAllSystems\(\)/.test(rendererSrc),
+    'startMicAndMasterVu(): __micSource.onStateChange() gọi lại checkAllSystems() -> dot-audio cập nhật NGAY khi mic đổi trạng thái thật');
 
 console.log('\n== Test 8b: bpmValue phân biệt "chưa cấu hình" (NO_DEVICE) và "lỗi" (ERROR) ==');
 assert(/bpmEl2\.textContent = "Chưa chọn SYSTEM_AUDIO \(Setup\)"/.test(rendererSrc),
@@ -130,8 +142,8 @@ if (onSetupChangedMatch) {
 }
 
 console.log('\n== Test — Setup gọi notifySetupChanged() sau khi lưu (để Menu áp dụng ngay, không cần reload) ==');
-if (micSectionMatch) assert(/notifySetupChanged\(\)/.test(micSectionMatch[1]), 'initMicInputSection(): gọi notifySetupChanged() sau khi lưu');
-if (sysSectionMatch) assert(/notifySetupChanged\(\)/.test(sysSectionMatch[1]), 'initSystemAudioInputSection(): gọi notifySetupChanged() sau khi lưu');
+if (micSectionMatch) assert(/notifySetupChanged\(\)/.test(micSectionMatch[1]), 'initMicSection(): gọi notifySetupChanged() sau khi lưu');
+if (sysSectionMatch) assert(/notifySetupChanged\(\)/.test(sysSectionMatch[1]), 'initSystemAudioSection(): gọi notifySetupChanged() sau khi lưu');
 
 console.log(`\n== KẾT QUẢ: ${pass} PASS, ${fail} FAIL ==`);
 process.exit(fail > 0 ? 1 : 0);

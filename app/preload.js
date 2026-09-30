@@ -92,6 +92,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     reportSystemAudioState: (state) => ipcRenderer.send("system-audio-state-changed", state),
     onSystemAudioStateChange: (callback) => ipcRenderer.on("system-audio-state-changed", (event, state) => callback(state)),
     getSystemAudioState: () => ipcRenderer.invoke("get-system-audio-state"),
+    // TASK B72 (gộp B72+B72.1) — MIC: cùng cơ chế IPC 2 chiều với SYSTEM_AUDIO (A71) ở trên,
+    // chỉ đổi tên kênh, KHÔNG đụng 3 dòng trên.
+    reportMicState: (state) => ipcRenderer.send("mic-state-changed", state),
+    onMicStateChange: (callback) => ipcRenderer.on("mic-state-changed", (event, state) => callback(state)),
+    getMicState: () => ipcRenderer.invoke("get-mic-state"),
+    // TASK B72 — Audio Output: cùng cơ chế IPC 2 chiều, kênh riêng.
+    reportOutputState: (state) => ipcRenderer.send("output-state-changed", state),
+    onOutputStateChange: (callback) => ipcRenderer.on("output-state-changed", (event, state) => callback(state)),
+    getOutputState: () => ipcRenderer.invoke("get-output-state"),
 
     // ---- TASK A52: Admin Authentication (mở khoá khu vực "AI 🔒" trong Setup) ----
     // Xác thực THẬT xảy ra ở main process (core/shared/AdminAuth.js) — hàm này chỉ relay
