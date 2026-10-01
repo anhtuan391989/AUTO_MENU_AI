@@ -200,7 +200,15 @@ console.log('\n== A72.8 — Mất SYSTEM_AUDIO: dừng AI + xoá kết quả cũ
     assert(lost.length > 0, 'Tìm thấy handler systemAudio.onDeviceLost');
     assert(/BPMEngine\.stop\(\)/.test(lost) && /KeyEngine\.stop\(\)/.test(lost), 'onDeviceLost dừng BPMEngine và KeyEngine');
     assert(/resetAiDisplaysToListening\(\)/.test(lost), 'onDeviceLost xoá BPM/Key/Mod cũ khỏi Menu (không hiển thị kết quả cũ như đang chạy)');
-    assert(!/^[^/\n]*ModEngine\.stop\(\)/m.test(lost), 'onDeviceLost KHÔNG gọi ModEngine.stop() (có chủ đích — ModEngine chỉ start 1 lần/phiên, stop sẽ làm hỏng vĩnh viễn; ghi GAP trong report)');
+    // TASK A73-02 — ĐÍNH CHÍNH: A72 khẳng định "không gọi ModEngine.stop()" vì tưởng
+    // ModEngine.start() chỉ chạy 1 lần/phiên (SAI). A73 audit lại: modEngine.js start() tự stop()
+    // ngay dòng đầu (tự an toàn khi gọi lại), và startAiRealtimeLoop() tự tái vũ trang sau mỗi lần
+    // detect Key mới — ModEngine.start() thực ra được gọi lại nhiều lần/phiên, không phải 1 lần.
+    // Nay onDeviceLost ĐÃ gọi ModEngine.stop() (an toàn, có restart qua triggerAiKeyDetect() khi
+    // reconnect) — xem A73-REPORT.md mục ModEngine lifecycle.
+    assert(/ModEngine\.stop\(\)/.test(lost), 'onDeviceLost DỪNG ModEngine (đính chính A73 — an toàn vì start() tự stop() trước, restart qua triggerAiKeyDetect() khi reconnect)');
+    assert(/window\.__keyDetectStopWatcher[\s\S]{0,40}window\.__keyDetectStopWatcher = null/.test(lost),
+        'onDeviceLost huỷ watcher detectOnce cũ (window.__keyDetectStopWatcher) — không treo chờ dữ liệu từ nguồn đã chết');
     assert(/function resetAiDisplaysToListening\(\)/.test(rSrc), 'Có hàm dùng chung resetAiDisplaysToListening()');
     const autoBtn = (rSrc.match(/getElementById\("autoDetectBtn"\)\?\.addEventListener\("click", \(\) => \{[\s\S]*?\n\}\);/) || [''])[0];
     assert(/resetAiDisplaysToListening\(\)/.test(autoBtn), 'Nút Auto Detect dùng lại hàm reset chung (refactor không đổi hành vi)');

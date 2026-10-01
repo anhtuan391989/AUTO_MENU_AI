@@ -274,8 +274,6 @@ function initSetupPage() {
     initModal("openSoundcardModal", "soundcardModal", "closeSoundcardBtn");
     initSoundcardSection();
     initSystemAudioSection(); // TASK A71
-    initMicSection(); // TASK B72 — cùng mẫu với SYSTEM_AUDIO (A71), MIC Input độc lập
-    initOutputSection(); // TASK B72 — Audio Output (setSinkId cho Internal Audio Backend)
     initModal("openMidiModal", "midiModal", "closeMidiBtn");
     initMidiSection();
     initLinkProSection();
@@ -1191,6 +1189,13 @@ function initSoundcardSection() {
         const label = select.selectedOptions[0]?.textContent || select.value;
         saveSetting("selectedSoundcard", label);
         saveSetting("selectedSoundcardId", select.value);
+        // TASK A73-01 — PHÁT HIỆN REGRESSION: bản merge trước A73 đã làm mất dòng ghi
+        // "selectedMicDeviceId" (key mà createMicSource()/getMicDeviceId() trong audioSource.js
+        // THẬT SỰ đọc — đã audit + khoá bằng test ở A72AiLifecycle.verify.js mục A72.6, từng PASS
+        // trên baseline trước). Thiếu dòng này = giao diện "đã chọn Soundcard" nhưng MIC runtime
+        // vẫn dùng mic mặc định OS, y hệt GAP-3 mà A65/A70/A72 đã lần lượt ghi nhận. Khôi phục lại
+        // ĐÚNG hành vi đã xác minh — không đổi UI, không đổi tên field nào khác.
+        saveSetting("selectedMicDeviceId", select.value || "");
 
         // S2 mục 5 — chỉ cấu hình + lưu + refresh UI status, KHÔNG restart KeyEngine/BPM/MOD/VU,
         // KHÔNG tạo AudioContext/getUserMedia mới cho pipeline chính. Refresh lại đúng bằng cách
@@ -1216,182 +1221,6 @@ function initSoundcardSection() {
 /* ================= SYSTEM_AUDIO (TASK A71 — độc lập hoàn toàn với MIC/Soundcard ở trên) ================= */
 // Quy tắc bắt buộc A71: KHÔNG ghi đè selectedSoundcardId, KHÔNG tự chọn MIC làm SYSTEM_AUDIO,
 // KHÔNG tự fallback khi thiết bị đã lưu không còn tồn tại (chỉ hiển thị "không khả dụng").
-// TASK B72 (gộp B72+B72.1) — MIC Input: cùng mẫu 2-badge với SYSTEM_AUDIO (A71) bên dưới.
-// Badge "đã LƯU gì" (persisted) — khác None-nghĩa-là-NO_DEVICE của SYSTEM_AUDIO: với MIC,
-// None nghĩa là "dùng mic mặc định hệ thống" (đúng hợp đồng requireExplicitDevice:false đã có
-// từ B58, KHÔNG đổi ở đây).
-function updateMicStatusBadge(foundInRealList) {
-    const savedId = getSetting("selectedMicDeviceId");
-    const badge = document.getElementById("micStatusBadge");
-    if (!badge) return;
-
-    if (!savedId) {
-        badge.textContent = "⚠ Dùng mic mặc định hệ thống";
-        badge.className = "badge badge-warn";
-    } else if (foundInRealList) {
-        badge.textContent = "● Đã chọn MIC Input";
-        badge.className = "badge badge-live";
-    } else {
-        // Đã lưu deviceId nhưng không còn trong danh sách audioinput hiện tại — giữ nguyên
-        // setting (không tự xoá/tự đổi thiết bị khác — cùng nguyên tắc B đề bài B72).
-        badge.textContent = "⚠ MIC Input đã chọn không còn khả dụng";
-        badge.className = "badge badge-warn";
-    }
-}
-
-// Badge "đang CHẠY THẬT" (runtime, qua IPC từ cửa sổ Menu) — dùng lại đúng bảng ánh xạ trạng
-// thái với SYSTEM_AUDIO (AudioSourceState là enum DÙNG CHUNG cho mọi loại nguồn, không tạo
-// bảng ánh xạ thứ 2 trùng lặp).
-function renderMicStateBadge(payload) {
-    const el = document.getElementById("micStateBadge");
-    if (!el) return;
-    const state = payload?.state || "NO_DEVICE";
-    const map = {
-        NO_DEVICE: ["NO_DEVICE", "badge badge-warn"],
-        STARTING: ["STARTING…", "badge badge-warn"],
-        RUNNING: ["● RUNNING", "badge badge-live"],
-        ERROR: ["✕ ERROR", "badge badge-unwired"],
-        STOPPING: ["STOPPED", "badge badge-warn"],
-    };
-    const [text, cls] = map[state] || [state, "badge badge-warn"];
-    el.textContent = text;
-    el.className = cls;
-}
-
-function initMicSection() {
-    const select = document.getElementById("micSelect");
-    if (!select) return;
-
-    const savedId = getSetting("selectedMicDeviceId");
-    populateSoundcardOptions(select, savedId, "— None / Dùng mic mặc định hệ thống —").then(({ foundInRealList }) => {
-        updateMicStatusBadge(foundInRealList);
-    });
-
-    document.getElementById("btnSelectMic")?.addEventListener("click", () => {
-        // select.value === "" hợp lệ ở đây (None = mic mặc định hệ thống) — không chặn, giống
-        // hệt cách SYSTEM_AUDIO (A71) đã xử lý None cho field của nó.
-        saveSetting("selectedMicDeviceId", select.value || "");
-        populateSoundcardOptions(select, select.value, "— None / Dùng mic mặc định hệ thống —").then(({ foundInRealList }) => {
-            updateMicStatusBadge(foundInRealList);
-        });
-        notifySetupChanged(); // cửa sổ Menu (nếu đang mở) tự stop()/start() lại MIC với deviceId mới
-        alert(select.value ? "Đã lưu MIC Input." : "Đã đặt MIC Input về None (mic mặc định hệ thống).");
-    });
-
-    document.getElementById("btnClearMic")?.addEventListener("click", () => {
-        select.value = "";
-        saveSetting("selectedMicDeviceId", "");
-        updateMicStatusBadge(false);
-        notifySetupChanged();
-    });
-
-    // Trạng thái RUNTIME sống: hỏi giá trị hiện có ngay khi mở Setup (phòng Menu đã RUNNING từ
-    // trước), rồi lắng nghe mọi thay đổi tiếp theo qua IPC — cùng cơ chế IPC với SYSTEM_AUDIO,
-    // chỉ khác tên kênh (mic-state-changed / get-mic-state, xem preload.js + main.js).
-    window.electronAPI?.getMicState?.().then((payload) => renderMicStateBadge(payload));
-    window.electronAPI?.onMicStateChange?.((payload) => renderMicStateBadge(payload));
-}
-
-// TASK B72 — Audio Output: liệt kê audiooutput (hàm riêng vì populateSoundcardOptions() chỉ lọc
-// audioinput — không đổi hàm đó để không ảnh hưởng 3 chỗ đang dùng nó).
-async function populateOutputOptions(selectEl, selectedValue) {
-    if (!navigator.mediaDevices?.enumerateDevices) return { foundInRealList: false };
-    try {
-        // Cần quyền mic thì enumerateDevices mới trả label thật (cùng cách populateSoundcardOptions).
-        try {
-            const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
-            tmp.getTracks().forEach((t) => t.stop());
-        } catch (permErr) {
-            console.warn("Không có quyền mic, danh sách output có thể thiếu tên:", permErr);
-        }
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const outputs = devices.filter((d) => d.kind === "audiooutput");
-        selectEl.innerHTML = '<option value="">— None / Output mặc định hệ thống —</option>';
-        outputs.forEach((device, idx) => {
-            const opt = document.createElement("option");
-            opt.value = device.deviceId;
-            opt.textContent = device.label || `Output ${idx + 1}`;
-            selectEl.appendChild(opt);
-        });
-        const foundInRealList = !selectedValue ? false : outputs.some((d) => d.deviceId === selectedValue);
-        if (selectedValue) {
-            const match = [...selectEl.options].find((o) => o.value === selectedValue);
-            if (match) {
-                selectEl.value = selectedValue;
-            } else {
-                // Không tự xoá setting khi thiết bị tạm thời không thấy — chỉ thêm option để UI hiển thị.
-                const fb = document.createElement("option");
-                fb.value = selectedValue;
-                fb.textContent = `(Đã lưu trước đó) ${selectedValue}`;
-                selectEl.appendChild(fb);
-                selectEl.value = selectedValue;
-            }
-        }
-        return { foundInRealList };
-    } catch (err) {
-        console.error("Không thể liệt kê thiết bị output:", err);
-        return { foundInRealList: false };
-    }
-}
-
-// Badge "đã LƯU gì" (persisted).
-function updateOutputStatusBadge(foundInRealList) {
-    const savedId = getSetting("selectedAudioOutputDeviceId");
-    const badge = document.getElementById("outputStatusBadge");
-    if (!badge) return;
-    if (!savedId) {
-        badge.textContent = "⚠ Dùng output mặc định hệ thống";
-        badge.className = "badge badge-warn";
-    } else if (foundInRealList) {
-        badge.textContent = "● Đã chọn Audio Output";
-        badge.className = "badge badge-live";
-    } else {
-        badge.textContent = "⚠ Audio Output đã chọn không còn khả dụng";
-        badge.className = "badge badge-warn";
-    }
-}
-
-// Badge "áp dụng THẬT" (runtime, kết quả setSinkId() báo qua IPC từ cửa sổ Menu).
-function renderOutputStateBadge(payload) {
-    const el = document.getElementById("outputStateBadge");
-    if (!el) return;
-    const state = payload?.state || "UNKNOWN";
-    const map = {
-        UNKNOWN: ["CHƯA XÁC NHẬN (Menu chưa báo cáo)", "badge badge-warn"],
-        DEFAULT: ["● Output mặc định hệ thống", "badge badge-live"],
-        APPLIED: ["● APPLIED (setSinkId thành công)", "badge badge-live"],
-        ERROR: ["✕ ERROR" + (payload?.error ? " — " + payload.error : ""), "badge badge-unwired"],
-    };
-    const [text, cls] = map[state] || [state, "badge badge-warn"];
-    el.textContent = text;
-    el.className = cls;
-}
-
-function initOutputSection() {
-    const select = document.getElementById("outputSelect");
-    if (!select) return;
-
-    const savedId = getSetting("selectedAudioOutputDeviceId");
-    populateOutputOptions(select, savedId).then(({ foundInRealList }) => updateOutputStatusBadge(foundInRealList));
-
-    document.getElementById("btnSelectOutput")?.addEventListener("click", () => {
-        // "" hợp lệ = None = output mặc định của OS (app không đổi output mặc định Windows).
-        saveSetting("selectedAudioOutputDeviceId", select.value || "");
-        populateOutputOptions(select, select.value).then(({ foundInRealList }) => updateOutputStatusBadge(foundInRealList));
-        notifySetupChanged(); // Menu áp dụng setSinkId() và báo kết quả thật về badge bên dưới
-    });
-
-    document.getElementById("btnClearOutput")?.addEventListener("click", () => {
-        select.value = "";
-        saveSetting("selectedAudioOutputDeviceId", "");
-        updateOutputStatusBadge(false);
-        notifySetupChanged();
-    });
-
-    window.electronAPI?.getOutputState?.().then((payload) => renderOutputStateBadge(payload));
-    window.electronAPI?.onOutputStateChange?.((payload) => renderOutputStateBadge(payload));
-}
-
 function updateSystemAudioStatusBadge(foundInRealList) {
     const savedId = getSetting("selectedSystemAudioDeviceId");
     const badge = document.getElementById("systemAudioStatusBadge");

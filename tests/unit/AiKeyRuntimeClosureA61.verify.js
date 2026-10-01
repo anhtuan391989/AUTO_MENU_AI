@@ -59,6 +59,11 @@ const assembled = `
 ${extractConst('keySource')}
 let lastPluginKey = appState.originalKey;
 let keyEverDetected = false;
+// TASK A73-04 — stub tối thiểu cho phần ngoài biên MỚI (AI State UI label), giống cách file này
+// đã stub keyEverDetected: startAiRealtimeLoop() thật có gọi __aiState.hasConfirmed/
+// updateAiSourceStateLabel(), không phải logic A61 đang audit nên chỉ cần no-op ở đây.
+const __aiState = { hasConfirmed: false };
+function updateAiSourceStateLabel() {}
 ${extractFn('logKeySource')}
 ${extractFn('getActiveSourceName')}
 ${extractFn('getActiveKeyValue')}

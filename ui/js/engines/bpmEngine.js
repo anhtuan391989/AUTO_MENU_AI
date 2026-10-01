@@ -41,7 +41,10 @@ const BPMEngine = (() => {
     const BPM_VOTE_MIN_AGREE = 5;
 
     let lastConfirmedBpm = null;
+    let lastCandidateBpm = null; // TASK A73-03 — BPM ứng viên gần nhất (có thể CHƯA đủ tin cậy)
+    let lastConfidence = null;   // TASK A73-03 — {bpm, voteCount, intervalCV, confidence, stable, sampleCount}
     const listeners = [];      // callback(bpm) khi có kết quả mới đủ tin cậy
+    const confidenceListeners = []; // TASK A73-03 — callback(lastConfidence) MỖI lần có ứng viên mới, kể cả chưa "stable"
     const levelListeners = []; // callback({bassEnergy, localAvg, maxByte, vuPercent, rms, dbfs}) mỗi khung
 
     // === VU METER V2 (Section 6/7/11/12) — metric HOÀN TOÀN TÁCH BIỆT với bassEnergy/flux ở trên.
@@ -86,6 +89,8 @@ const BPMEngine = (() => {
         lastEnergy = 0;
         lastBeatTime = 0;
         lastConfirmedBpm = null;
+        lastCandidateBpm = null; // TASK A73-03 — reset khi đổi nguồn, không giữ confidence của nguồn cũ
+        lastConfidence = null;
         prevSpectrum = null;
         vuSmoothedPercent = 0; // VU METER V2 — reset riêng, không đụng biến BPM nào ở trên
 
@@ -184,8 +189,44 @@ const BPMEngine = (() => {
                     });
 
                     if (bestCount >= BPM_VOTE_MIN_AGREE) {
-                        lastConfirmedBpm = bestBpm;
-                        listeners.forEach((cb) => cb(bestBpm));
+                        // TASK A73-03 — BPM CONFIDENCE CONTRACT (đề xuất, chưa phải tiêu chuẩn chính
+                        // thức của dự án — xem A73-REPORT.md mục BPM confidence để Khói duyệt ngưỡng).
+                        //
+                        // Vấn đề từ A72: nhịp beat khoảng cách NGẪU NHIÊN (0.3-1.3s) vẫn có lúc đạt đủ
+                        // bestCount>=5/15 phiếu ±1 nhờ trùng hợp thống kê, và bị "confirmed" (151 BPM)
+                        // dù không hề có tempo ổn định thật. bestCount đo ĐỘ NHẤT QUÁN GIỮA CÁC ỨNG
+                        // VIÊN nhưng KHÔNG đo được ĐỘ ỔN ĐỊNH THỜI GIAN giữa các beat — 2 đặc trưng khác
+                        // nhau, cần CẢ HAI mới đủ. Bổ sung: hệ số biến thiên (coefficient of variation)
+                        // của beatTimes — đo trực tiếp "khoảng cách giữa các beat lệch nhau bao nhiêu %".
+                        // Nhịp thật ổn định: CV thấp (<10-15%). Nhịp ngẫu nhiên: CV cao (thường >25%).
+                        const n = beatTimes.length;
+                        const mean = avgInterval;
+                        const variance = beatTimes.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n;
+                        const stddev = Math.sqrt(variance);
+                        const intervalCV = mean > 0 ? stddev / mean : 1;
+
+                        // Ngưỡng TẠM THỜI (đề xuất, KHÔNG PHẢI tiêu chuẩn chính thức — cần Khói duyệt
+                        // bằng log tín hiệu nhạc thật trước khi coi là chốt). Căn cứ: CV của nhịp đều
+                        // đặn (jitter máy đo ±1 khung ở 60fps trên khoảng beat ~500ms) rơi vào ~2-5%;
+                        // CV của test "nhịp ngẫu nhiên 0.3-1.3s" (A72AiLifecycle.verify.js) đo được
+                        // thường >25%. Chọn 15% làm mốc giữa, thiên về AN TOÀN (thà báo "chưa ổn định"
+                        // oan còn hơn khoá nhầm 1 con số sai).
+                        const BPM_CV_CONFIRM_THRESHOLD_TENTATIVE = 0.15;
+                        const stable = intervalCV <= BPM_CV_CONFIRM_THRESHOLD_TENTATIVE;
+                        const confidence = Math.max(0, Math.min(1, 1 - intervalCV / BPM_CV_CONFIRM_THRESHOLD_TENTATIVE * 0.5));
+
+                        lastCandidateBpm = bestBpm;
+                        lastConfidence = { bpm: bestBpm, voteCount: bestCount, intervalCV, confidence, stable, sampleCount: n };
+                        confidenceListeners.forEach((cb) => cb(lastConfidence));
+
+                        // CHỈ "confirmed" (bắn onUpdate cũ, ảnh hưởng UI/IPC) khi CẢ vote LẪN CV đạt —
+                        // đúng yêu cầu A73-03 "không công bố BPM ổn định khi tín hiệu chưa đáp ứng tiêu
+                        // chí confidence". Không đổi ý nghĩa/chữ ký onUpdate(bpm) — vẫn 1 số, để không
+                        // phá vỡ nơi gọi hiện có (renderer.js) — muốn cả object thì dùng onConfidence().
+                        if (stable) {
+                            lastConfirmedBpm = bestBpm;
+                            listeners.forEach((cb) => cb(bestBpm));
+                        }
                     }
                 }
             }
@@ -199,13 +240,24 @@ const BPMEngine = (() => {
         running = false;
         if (rafId) cancelAnimationFrame(rafId);
         rafId = null;
+        // TASK A73-03 — vô hiệu hoá NGAY kết quả cũ khi dừng (không đợi init() lần sau mới xoá) —
+        // đúng yêu cầu "mất tín hiệu -> reset/vô hiệu hoá BPM theo hợp đồng". getCurrentBpm()/
+        // getConfidence() gọi giữa lúc stop() và lần init() kế tiếp sẽ trả về null, không phải
+        // giá trị của nguồn đã chết.
+        lastConfirmedBpm = null;
+        lastCandidateBpm = null;
+        lastConfidence = null;
     }
+
+    function onConfidence(cb) { confidenceListeners.push(cb); } // TASK A73-03
+    function getConfidence() { return lastConfidence; }         // TASK A73-03
+    function getCandidateBpm() { return lastCandidateBpm; }     // TASK A73-03 — BPM tạm thời, CHƯA chắc đáng tin
 
     function onUpdate(cb) { listeners.push(cb); }
     function onLevel(cb) { levelListeners.push(cb); } // dùng cho debug log / VU meter
     function getCurrentBpm() { return lastConfirmedBpm; }
 
-    return { init, stop, onUpdate, onLevel, getCurrentBpm };
+    return { init, stop, onUpdate, onLevel, getCurrentBpm, onConfidence, getConfidence, getCandidateBpm };
 })();
 
 window.BPMEngine = BPMEngine;

@@ -185,6 +185,10 @@ không đọc kích thước phần tử, nên đổi số đo ở đây không 
    (.analyzer-icon), luôn dính sát chữ, không còn absolute-position ở góc card (dễ trông như
    trạng thái chung của cả card, đúng lỗi Mục 2 mô tả). Không đổi vị trí/kích thước card. */
 .inline-dot { flex-shrink: 0; margin-left: 0; } /* .analyzer-icon đã có gap:6px lo khoảng cách với chữ — không cộng dồn thêm margin */
+/* TASK A73-04 — nhãn trạng thái AI phụ trợ (NO SOURCE/STARTING/NO SIGNAL/ANALYZING/ERROR), thuần
+   hiển thị, KHÔNG ảnh hưởng logic — chữ/giá trị BPM/Key chính (bao gồm sentinel "LISTENING" mà
+   Auto-Tune có kiểm tra) giữ nguyên 100%, không đụng. */
+.ai-source-state { font-size: 10px; opacity: .65; margin-left: 6px; letter-spacing: .3px; }
 
 /* Tinh chỉnh lại card content */
 .card-content { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 0 10px;}
