@@ -85,8 +85,16 @@ console.log('\n== A71.7 — renderer.js: listener báo cáo TÁCH RIÊNG, không
 const onStateChangeOccurrences = (rendererSrc.match(/^\s*systemAudio\.onStateChange\(/gm) || []).length;
 assert(onStateChangeOccurrences === 2,
     `renderer.js có ĐÚNG 2 lời gọi THẬT (không tính comment) systemAudio.onStateChange() — 1 cái gốc (bindAiEnginesToSystemAudio, không đổi) + 1 cái MỚI (báo cáo IPC) (thực tế: ${onStateChangeOccurrences})`);
-assert(/systemAudio\.onStateChange\(\(state\) => \{\s*window\.electronAPI\?\.reportSystemAudioState\?\.\(\{ state \}\);\s*\}\);/.test(rendererSrc),
-    'Listener MỚI chỉ làm đúng 1 việc: báo cáo state qua IPC, không xen logic BPM/Key nào vào');
+// TASK A74-02 — nới regex để chấp nhận thêm 1 dòng cập nhật nhãn AI State UI
+// (__aiState.sysState = state; updateAiSourceStateLabel();) ngay sau dòng báo IPC gốc — đây là mở
+// rộng HỢP LỆ (thuần hiển thị/báo cáo trạng thái, xem A73/A74-REPORT.md), KHÔNG phải logic BPM/
+// Key. Bất biến THẬT giữ nguyên: listener này tuyệt đối không được gọi bindAiEnginesToSystemAudio
+// hay BPMEngine/KeyEngine.init trực tiếp — assert riêng dòng dưới để khoá đúng phần cốt lõi.
+const newListenerBlock = (rendererSrc.match(/systemAudio\.onStateChange\(\(state\) => \{\s*window\.electronAPI\?\.reportSystemAudioState\?\.\(\{ state \}\);[\s\S]*?\n    \}\);/) || [''])[0];
+assert(newListenerBlock.length > 0,
+    'Listener MỚI (báo IPC + nhãn AI State UI) tồn tại đúng hình dạng mở rộng từ A74');
+assert(!/bindAiEnginesToSystemAudio|BPMEngine\.init|KeyEngine\.init/.test(newListenerBlock),
+    'Listener MỚI vẫn KHÔNG xen logic khởi tạo BPM/Key nào vào (chỉ IPC + nhãn hiển thị)');
 
 console.log(`\n== KẾT QUẢ: ${pass} PASS, ${fail} FAIL ==`);
 if (fail > 0) process.exit(1);

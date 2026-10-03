@@ -42,7 +42,10 @@ assert(callSites >= 5, `updateAiSourceStateLabel() được gọi từ nhiều �
 assert(/reportSystemAudioState[\s\S]{0,60}__aiState\.sysState = state; updateAiSourceStateLabel/.test(rSrc), 'Listener trạng thái SYSTEM_AUDIO cập nhật sysState + gọi label (NO_DEVICE/STARTING/RUNNING/ERROR)');
 assert(/lastSignalTime = Date\.now\(\);[\s\S]{0,10}\}\s*updateAiSourceStateLabel\(\);/.test(rSrc.replace(/\n/g, ' ')) || /AI_SIGNAL_VU_FLOOR_TENTATIVE[\s\S]{0,200}updateAiSourceStateLabel/.test(rSrc),
     'BPMEngine.onLevel() cập nhật lastSignalTime theo ngưỡng VU + gọi label');
-assert(/hasConfirmed = true; updateAiSourceStateLabel\(\); \/\/ TASK A73-04/.test(rSrc), 'Có điểm set hasConfirmed=true kèm gọi label (BPM onUpdate / Key detect)');
+// TASK A74-02 — regex nới để chấp nhận cả tag "A73-04" (bản gốc) lẫn "A74-02" (bản A74 khôi
+// phục lại logic này sau khi bị thất lạc trong 1 lần reconcile baseline — xem A74-REPORT.md).
+// Bất biến kiểm tra KHÔNG đổi: vẫn phải có __aiState.hasConfirmed=true kèm gọi label ngay sau.
+assert(/hasConfirmed = true; updateAiSourceStateLabel\(\); \/\/ TASK A7[34]-0[24]/.test(rSrc), 'Có điểm set hasConfirmed=true kèm gọi label (BPM onUpdate / Key detect)');
 assert(/function resetAiDisplaysToListening\(\) \{\s*__aiState\.hasConfirmed = false; updateAiSourceStateLabel\(\);/.test(rSrc),
     'resetAiDisplaysToListening() reset hasConfirmed + gọi lại label (mất nguồn / Auto Detect đều qua đây)');
 

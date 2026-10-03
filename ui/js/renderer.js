@@ -774,16 +774,14 @@ let lastNowPlayingKey = null;             // "<title>|<artist>" gần nhất, đ
 // đặt lại về false để RESET hiển thị mỗi lần bấm Auto Detect.
 let keyEverDetected = false;
 
-// TASK A73-04 — AI STATE UI (đề xuất, xem A73-REPORT.md để Khói duyệt ngưỡng). CHỈ điều khiển
-// nhãn phụ trợ #aiSourceState (NO SOURCE/STARTING/NO SIGNAL/ANALYZING/ERROR) — KHÔNG đụng
-// currentKey/currentBpm/sentinel "LISTENING" (Auto-Tune có kiểm tra chuỗi này, xem dòng 1244).
+// TASK A74-02 — AI STATE UI (đề xuất, xem A73-REPORT.md để Khói duyệt ngưỡng; KHÔI PHỤC lại ở
+// A74 vì bị thất lạc trong lần reconcile B73 trước đó — không có trong baseline A74 nhận được).
+// CHỈ điều khiển nhãn phụ trợ #aiSourceState (NO SOURCE/STARTING/NO SIGNAL/ANALYZING/ERROR) —
+// KHÔNG đụng currentKey/currentBpm/sentinel "LISTENING" (Auto-Tune có kiểm tra chuỗi này).
 const __aiState = { sysState: "NO_DEVICE", lastSignalTime: 0, hasConfirmed: false };
-// Ngưỡng TẠM THỜI (đề xuất, CHƯA phải tiêu chuẩn chính thức) — "không có tín hiệu trong bao lâu
-// thì coi là NO SIGNAL". 3 giây đủ để không nhấp nháy qua vài khoảng lặng ngắn giữa câu hát,
-// nhưng cần hiệu chỉnh bằng log thật (mục A73-04.4 đề bài) trước khi coi là chốt.
+// Ngưỡng TẠM THỜI (đề xuất, CHƯA phải tiêu chuẩn chính thức, theo đúng mục A74-01 đề bài — giữ
+// nguyên giá trị A73, KHÔNG tự đổi vì chưa có log thật để hiệu chỉnh lại).
 const AI_NO_SIGNAL_TIMEOUT_MS_TENTATIVE = 3000;
-// Ngưỡng vuPercent TẠM THỜI coi là "có tín hiệu" — kế thừa gợi ý VU_DB_FLOOR=-50 từ
-// A72-REPORT.md, quy đổi thô sang thang vuPercent hiện có (0-100) của BPMEngine.onLevel().
 const AI_SIGNAL_VU_FLOOR_TENTATIVE = 2;
 
 function updateAiSourceStateLabel() {
@@ -1072,7 +1070,7 @@ function startAiRealtimeLoop() {
 
         keySource.ai.value = result.key;
         keyEverDetected = true; // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — có kết quả THẬT từ audio
-        __aiState.hasConfirmed = true; updateAiSourceStateLabel(); // TASK A73-04
+        __aiState.hasConfirmed = true; updateAiSourceStateLabel(); // TASK A74-02
         window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
         refreshKeySourceDisplay();
 
@@ -1565,7 +1563,7 @@ async function applyModEvent(data) {
 // dưới). Hành vi 2 nơi gọi hàm này VẪN KHÁC NHAU (nơi nào cần stop() engine thì tự gọi thêm,
 // hàm này chỉ lo phần chữ) — không gộp logic khác nhau vào chung 1 chỗ.
 function resetAiDisplaysToListening() {
-    __aiState.hasConfirmed = false; updateAiSourceStateLabel(); // TASK A73-04
+    __aiState.hasConfirmed = false; updateAiSourceStateLabel(); // TASK A74-02
     keyEverDetected = false;
     if (currentKeyEl) currentKeyEl.textContent = "LISTENING";
     if (aiKeyDetectLineEl) aiKeyDetectLineEl.textContent = "AI Detect: LISTENING";
@@ -1782,7 +1780,7 @@ function bindAiEnginesToSystemAudio(systemAudio) {
                 if (bpmEl1) bpmEl1.textContent = bpm;
                 if (bpmEl2) bpmEl2.textContent = bpm + " BPM";
                 setStatus("dot-bpm", "online"); // xanh: đã dò được BPM ổn định, đủ phiếu đồng thuận
-                __aiState.hasConfirmed = true; updateAiSourceStateLabel(); // TASK A73-04
+                __aiState.hasConfirmed = true; updateAiSourceStateLabel(); // TASK A74-02
 
                 // Gửi kết quả sang Core (AIContext) qua IPC — không ảnh hưởng logic hiển thị phía trên
                 window.electronAPI?.reportAiResult("bpm", { bpm });
@@ -1794,7 +1792,7 @@ function bindAiEnginesToSystemAudio(systemAudio) {
                 const musicMeter = document.getElementById("vu-music-fill");
                 if (musicMeter) musicMeter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
 
-                // TASK A73-04 — AI State UI: coi là "có tín hiệu" khi vuPercent vượt ngưỡng tạm thời.
+                // TASK A74-02 — AI State UI: coi là "có tín hiệu" khi vuPercent vượt ngưỡng tạm thời.
                 // KHÔNG dùng riêng điều này để kết luận "AI đang phân tích THÀNH CÔNG" (đề bài cấm) —
                 // chỉ dùng để phân biệt NO SIGNAL (im lặng) với ANALYZING (có tín hiệu, chờ xác nhận).
                 if (vuPercent > AI_SIGNAL_VU_FLOOR_TENTATIVE) { __aiState.lastSignalTime = Date.now(); }
@@ -1889,16 +1887,18 @@ async function startAudioMonitor() {
         // chữ hiển thị. Không đổi thuật toán bên trong 2 file engine — chỉ gọi đúng .stop() đã có
         // sẵn nhưng chưa từng được gọi ở đây.
         //
-        // TASK A73-02 — ĐÍNH CHÍNH kết luận A72-06 (đã SAI): A72 cho rằng ModEngine.start() chỉ
-        // gọi 1 lần/phiên nên không dám stop(). Audit lại kỹ hơn ở A73 phát hiện: modEngine.js
-        // start() tự gọi stop() ngay dòng đầu ("tránh chạy trùng nhiều watcher") — TỰ AN TOÀN khi
-        // gọi lại. Và startAiRealtimeLoop() (renderer.js) tự TÁI VŨ TRANG sau MỖI lần detect được
-        // Key mới (đệ quy ở cuối callback) — nên startModulationWatcher()/ModEngine.start() THẬT
-        // RA được gọi lại nhiều lần suốt phiên, không phải đúng 1 lần. Vấn đề THẬT không phải "gọi
-        // stop() sẽ hỏng vĩnh viễn" mà là: (1) watcher detectOnce cũ (window.__keyDetectStopWatcher)
-        // không bị huỷ khi mất nguồn -> treo chờ dữ liệu từ source đã chết; (2) ModEngine vẫn poll
-        // KeyEngine.estimateKeyFromChroma() trên chromaVector ĐÓNG BĂNG (KeyEngine.stop() không xoá
-        // nó) -> có thể phát sự kiện modulation giả từ dữ liệu cũ. Sửa cả 2, đúng yêu cầu A73-02.
+        // TASK A74-03 — ĐÍNH CHÍNH A72-06 (từng SAI, xem A73-REPORT.md "ModEngine lifecycle" để
+        // biết chi tiết điều tra lại): A72 tưởng ModEngine.start() chỉ chạy 1 lần/phiên nên không
+        // dám stop(). Audit lại: modEngine.js start() tự gọi stop() ngay dòng đầu ("tránh chạy
+        // trùng nhiều watcher") -> TỰ AN TOÀN khi gọi lại. Và startAiRealtimeLoop() (renderer.js)
+        // tự TÁI VŨ TRANG sau MỖI lần detect Key mới -> ModEngine.start() thực ra được gọi lại
+        // nhiều lần/phiên, không phải đúng 1 lần. Vấn đề THẬT: (1) watcher detectOnce cũ
+        // (window.__keyDetectStopWatcher) không bị huỷ khi mất nguồn -> treo chờ dữ liệu từ
+        // source đã chết; (2) ModEngine vẫn poll KeyEngine.estimateKeyFromChroma() trên
+        // chromaVector ĐÓNG BĂNG (KeyEngine.stop() không xoá nó) -> có thể phát sự kiện modulation
+        // giả từ dữ liệu cũ. Sửa cả 2. Reconnect đã có sẵn cơ chế tự khởi động lại (xem
+        // setTimeout(triggerAiKeyDetect, 2000) trong bindAiEnginesToSystemAudio bên dưới) — không
+        // cần thêm gì cho chiều reconnect.
         if (typeof BPMEngine !== "undefined") BPMEngine.stop();
         if (typeof KeyEngine !== "undefined") KeyEngine.stop();
         if (window.__keyDetectStopWatcher) { window.__keyDetectStopWatcher(); window.__keyDetectStopWatcher = null; }
@@ -1933,7 +1933,7 @@ async function startAudioMonitor() {
     // phục lại nguyên trạng A71, không đổi gì khác.
     systemAudio.onStateChange((state) => {
         window.electronAPI?.reportSystemAudioState?.({ state });
-        __aiState.sysState = state; updateAiSourceStateLabel(); // TASK A73-04
+        __aiState.sysState = state; updateAiSourceStateLabel(); // TASK A74-02
     });
 
     setSystemAudioVuNoData(true); // TASK A68 — mặc định "chưa có dữ liệu" cho tới khi RUNNING lần đầu
