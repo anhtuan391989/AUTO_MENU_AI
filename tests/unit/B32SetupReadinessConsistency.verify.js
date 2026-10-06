@@ -83,34 +83,37 @@ const FULLY_READY_SETTINGS = {
     selectedSoundcard: 'Focusrite 2i2',
     selectedBrowser: 'brave',
     selectedBrowserPath: 'C:\\Brave\\brave.exe',
+    // TASK A75-10 — thêm vào fixture "mọi mục đã sẵn sàng": checklist nay có 10 mục (không còn 9),
+    // thiếu field này sẽ làm isSetupFullyComplete() đúng là false — xem A75-REPORT.md.
+    selectedSystemAudioDeviceId: 'sysaudio-device-xyz',
     coordinateProfiles: { studio_one: { autokey1: '1,1', autokey2: '2,2', autotunekey: '3,3', chromatic: '4,4' } },
 };
 
-console.log('===== B32.2 — Readiness matrix: xác nhận đúng 9 mục, không thiếu/thừa =====');
+console.log('===== B32.2 — Readiness matrix: xác nhận đúng 10 mục, không thiếu/thừa (TASK A75-10: 9 cũ + selectedSystemAudioDeviceId) =====');
 {
     const s = buildSandbox({});
     const keys = s.getSetupReadinessChecklist().map((x) => x.key);
-    const expected = ['selectedDAW', 'selectedAutoKey', 'selectedAutoTune', 'selectedSoundcard', 'selectedBrowser', 'autokey1', 'autokey2', 'autotunekey', 'chromatic'];
-    assert(keys.length === 9, `checklist có đúng 9 mục (thực tế: ${keys.length})`);
-    assert(JSON.stringify(keys) === JSON.stringify(expected), `đúng thứ tự/tên 9 mục như hợp đồng hiện tại (thực tế: ${JSON.stringify(keys)})`);
-    assert(!keys.includes('midiOutputPort'), 'KHÔNG có mục MIDI nào trong checklist — đúng chỉ định B32 "không đưa MIDI vào X/9"');
+    const expected = ['selectedDAW', 'selectedAutoKey', 'selectedAutoTune', 'selectedSoundcard', 'selectedBrowser', 'autokey1', 'autokey2', 'autotunekey', 'chromatic', 'selectedSystemAudioDeviceId'];
+    assert(keys.length === 10, `checklist có đúng 10 mục (thực tế: ${keys.length})`);
+    assert(JSON.stringify(keys) === JSON.stringify(expected), `đúng thứ tự/tên 10 mục như hợp đồng A75-10 (thực tế: ${JSON.stringify(keys)})`);
+    assert(!keys.includes('midiOutputPort'), 'KHÔNG có mục MIDI nào trong checklist — đúng chỉ định B32 "không đưa MIDI vào X/N"');
 }
 
-console.log('\n===== B32.5 — Invariant 3 & 4: MIDI hint (mọi giá trị) KHÔNG được rò rỉ vào X/9 =====');
+console.log('\n===== B32.5 — Invariant 3 & 4: MIDI hint (mọi giá trị) KHÔNG được rò rỉ vào X/10 =====');
 {
     for (const midiHint of [null, true, false]) {
         const s = buildSandbox(FULLY_READY_SETTINGS);
         s.setSoundcardAvailabilityHint(true);
         s.setBrowserPathAvailabilityHint(true);
         if (midiHint !== null) s.setMidiPortAvailabilityHint(midiHint);
-        // Trạng thái baseline (không set midiOutputPort setting): 9/9, isSetupFullyComplete()=true
-        assert(s.countSetupReady() === 9, `midiHint=${midiHint}: countSetupReady() vẫn = 9 (không đổi vì hint MIDI) (thực tế: ${s.countSetupReady()})`);
+        // Trạng thái baseline (không set midiOutputPort setting): 10/10, isSetupFullyComplete()=true
+        assert(s.countSetupReady() === 10, `midiHint=${midiHint}: countSetupReady() vẫn = 10 (không đổi vì hint MIDI) (thực tế: ${s.countSetupReady()})`);
         assert(s.isSetupFullyComplete() === true, `midiHint=${midiHint}: isSetupFullyComplete() vẫn true, không bị hint MIDI chi phối`);
     }
 
-    // Đảo ngược: baseline 8/9 (thiếu AutoKey — 1 mục lá, không cascade sang mục khác, khác với
+    // Đảo ngược: baseline 9/10 (thiếu AutoKey — 1 mục lá, không cascade sang mục khác, khác với
     // xoá selectedDAW sẽ kéo theo cả 4 mục coordinate vì chúng scope theo DAW từ B25) — hint MIDI
-    // cũng không được "cứu" nó thành 9/9
+    // cũng không được "cứu" nó thành 10/10
     for (const midiHint of [null, true, false]) {
         const incomplete = { ...FULLY_READY_SETTINGS };
         delete incomplete.selectedAutoKey;
@@ -118,7 +121,7 @@ console.log('\n===== B32.5 — Invariant 3 & 4: MIDI hint (mọi giá trị) KH�
         s.setSoundcardAvailabilityHint(true);
         s.setBrowserPathAvailabilityHint(true);
         if (midiHint !== null) s.setMidiPortAvailabilityHint(midiHint);
-        assert(s.countSetupReady() === 8, `midiHint=${midiHint}, thiếu AutoKey: vẫn đúng 8/9, hint MIDI không "cứu" thành 9/9 (thực tế: ${s.countSetupReady()})`);
+        assert(s.countSetupReady() === 9, `midiHint=${midiHint}, thiếu AutoKey: vẫn đúng 9/10, hint MIDI không "cứu" thành 10/10 (thực tế: ${s.countSetupReady()})`);
         assert(s.isSetupFullyComplete() === false, `midiHint=${midiHint}, thiếu AutoKey: isSetupFullyComplete() vẫn false`);
     }
 }

@@ -222,6 +222,10 @@ console.log('\n===== B31.2 — Browser path real-filesystem validation (lifecycl
     console.log('\n== Case 13 — Integration: isSetupFullyComplete() không bao giờ READY giả khi Browser hint=false, kể cả khi mọi mục khác đã xong ==');
     Object.assign(store, {
         selectedDAW: 'studio_one', selectedAutoKey: 'x', selectedAutoTune: 'y', selectedSoundcard: 'z',
+        // TASK A75-10 — thêm selectedSystemAudioDeviceId vào fixture "mọi mục khác đã xong": từ A75,
+        // checklist có 10 mục (không còn 9), thiếu field này thì isSetupFullyComplete() đúng là phải
+        // false (không phải lỗi) — xem A75-REPORT.md mục Setup cache.
+        selectedSystemAudioDeviceId: 'sysaudio-device-xyz',
         coordinateProfiles: { studio_one: { autokey1: '1,1', autokey2: '2,2', autotunekey: '3,3', chromatic: '4,4' } },
     });
     sandbox.setSoundcardAvailabilityHint(true);

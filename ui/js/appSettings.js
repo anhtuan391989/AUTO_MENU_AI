@@ -438,7 +438,14 @@ function getSetupReadinessChecklist() {
         { key: "autokey1", ready: !!getCoordinate("autokey1") },
         { key: "autokey2", ready: !!getCoordinate("autokey2") },
         { key: "autotunekey", ready: !!getCoordinate("autotunekey") },
-        { key: "chromatic", ready: !!getCoordinate("chromatic") }
+        { key: "chromatic", ready: !!getCoordinate("chromatic") },
+        // TASK A75-10 — PHÁT HIỆN: checklist "Setup Complete" trước đây KHÔNG kiểm tra
+        // selectedSystemAudioDeviceId — nghĩa là Setup có thể báo "configured" dù SYSTEM_AUDIO
+        // (nguồn BPM/Key/Mod) chưa có nguồn nào, đúng hiện tượng A75-10 đề bài cảnh báo. Thêm mục
+        // riêng, đúng key mà audioSource.js thật sự đọc (không phải selectedSoundcard/MIC — xem
+        // A65-A74-REPORT.md, 2 khái niệm này đã tách biệt hoàn toàn từ A65). "AI source ready"
+        // trong ngôn ngữ A75-10 = chính mục này.
+        { key: "selectedSystemAudioDeviceId", ready: !!getSetting("selectedSystemAudioDeviceId") }
     ];
 }
 

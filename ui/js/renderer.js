@@ -1580,15 +1580,29 @@ function resetAiDisplaysToListening() {
 }
 
 document.getElementById("autoDetectBtn")?.addEventListener("click", () => {
-    console.log("RESET AI SCAN — chỉ dò lại Key, KHÔNG gửi lệnh Mod nào khác");
+    console.log("RESET AI SCAN — reset BPM + KEY + MOD, dò lại từ đầu trên CÙNG nguồn SYSTEM_AUDIO đang chạy");
 
     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — Auto Detect = reset THẬT về chế độ nghe
     // (LISTENING) cho cả Key/BPM/MOD, không giữ hiển thị giá trị cũ trong lúc chờ kết quả mới.
     // CHỈ đổi CHỮ hiển thị ở đây — KHÔNG đụng originalKey/keySource.ai.value/lastPluginKey, nên
     // Auto-Tune vẫn tiếp tục dùng đúng Key thật đang chạy cho tới khi có kết quả THẬT mới (không
-    // im lặng/lệch tiếng giữa chừng bài hát). BPMEngine/ModEngine vẫn chạy nền như cũ, không bị
-    // restart — chỉ hiển thị được xoá tạm để không gây hiểu lầm là giá trị cũ vẫn còn đúng.
+    // im lặng/lệch tiếng giữa chừng bài hát).
     resetAiDisplaysToListening();
+
+    // TASK A75-06 — ĐÃ ĐỔI: trước đây chỉ reset chữ hiển thị, BPMEngine/ModEngine "vẫn chạy nền
+    // như cũ, không bị restart" (xem lịch sử git) — KHÔNG đúng ý nghĩa thật của "reset AI scan".
+    // Nay Auto Detect reset THẬT cả 3 engine, dùng LẠI đúng nguồn SYSTEM_AUDIO đang RUNNING (không
+    // tạo AudioContext/MediaStreamSource mới, không đóng/mở lại thiết bị — chỉ reset trạng thái
+    // phân tích nội bộ của từng engine, nhẹ hơn và nhanh hơn 1 chu kỳ stop()/start() đầy đủ).
+    if (window.__systemAudioSource?.getState?.() === AudioSourceState.RUNNING) {
+        // bindAiEnginesToSystemAudio() tự gọi BPMEngine.stop()+init() và KeyEngine.stop()+init()
+        // với CHÍNH XÁC audioContext/source hiện tại — không duplicate AudioContext/analyser (đúng
+        // cơ chế C62 có sẵn, không viết logic mới). __systemAudioListenersRegistered vẫn giữ
+        // nguyên true nên KHÔNG đăng ký thêm listener trùng.
+        bindAiEnginesToSystemAudio(window.__systemAudioSource);
+    }
+    if (window.__keyDetectStopWatcher) { window.__keyDetectStopWatcher(); window.__keyDetectStopWatcher = null; }
+    if (typeof ModEngine !== "undefined") ModEngine.stop();
 
     triggerAiKeyDetect();
 });
@@ -1993,6 +2007,33 @@ async function listAudioInputDevices() {
         console.error("Không thể liệt kê thiết bị audio:", err);
     }
 }
+
+// TASK A75-08 — enumerate ĐẦY ĐỦ audioinput + audiooutput, phân loại DUY NHẤT bằng `device.kind`
+// (KHÔNG suy đoán theo tên như "Mix 01"/"Speaker 01" — đúng cấm mục A75-08 đề bài). Đây là hàm
+// CHẨN ĐOÁN/tiện ích enumerate thuần (trả về danh sách phân loại đúng kind) — KHÔNG kèm UI chọn
+// output/routing nào (routing/Audio Output UI vẫn thuộc phạm vi B72, không triển khai ở A75).
+async function enumerateAudioDevices() {
+    try {
+        // TASK A75-08 — KHÔNG tự xin quyền mic riêng ở đây (tránh thêm 1 lệnh mở mic không ràng
+        // buộc thứ hai trong file — AiSystemBoundaryA56/AudioRoutingClosureC61 khoá CHẶT bất biến
+        // "đúng 1 lệnh mở mic kiểu này", đề phòng vô tình mở thêm 1 đường mic thật). Nếu quyền mic
+        // chưa từng được cấp (chưa chạy listAudioInputDevices() hay mở SYSTEM_AUDIO lần nào), label
+        // có thể trống — chấp nhận được cho 1 hàm chẩn đoán gọi tay qua DevTools.
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const result = { audioinput: [], audiooutput: [], other: [] };
+        devices.forEach((d) => {
+            const entry = { label: d.label || "(không có tên)", deviceId: d.deviceId, groupId: d.groupId };
+            if (d.kind === "audioinput") result.audioinput.push(entry);
+            else if (d.kind === "audiooutput") result.audiooutput.push(entry);
+            else result.other.push({ ...entry, kind: d.kind });
+        });
+        return result;
+    } catch (err) {
+        console.error("[A75-08] enumerateAudioDevices() lỗi:", err);
+        return { audioinput: [], audiooutput: [], other: [], error: String(err) };
+    }
+}
+window.enumerateAudioDevices = enumerateAudioDevices; // gọi tay trong DevTools để chẩn đoán
 
 /* ==========================================================
    14. ELECTRON API HOOKS (có kiểm tra tồn tại trước khi gọi)

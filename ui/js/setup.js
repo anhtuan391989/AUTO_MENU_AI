@@ -1472,7 +1472,7 @@ function updateSetupStatus() {
 }
 
 function updateSetupProgress() {
-    const total = 9; // đã bỏ mục soundshifter (giờ dùng MIDI, không cần capture chuột)
+    const total = 10; // TASK A75-10 — 9 mục cũ + 1 mục SYSTEM_AUDIO mới (xem appSettings.js getSetupReadinessChecklist)
     const ready = countSetupReady();
 
     const percent = Math.round((ready / total) * 100);
