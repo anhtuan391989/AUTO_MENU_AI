@@ -274,6 +274,8 @@ function initSetupPage() {
     initModal("openSoundcardModal", "soundcardModal", "closeSoundcardBtn");
     initSoundcardSection();
     initSystemAudioSection(); // TASK A71
+    initMicSection(); // TASK A76-FIX
+    initOutputSection(); // TASK A76-FIX
     initModal("openMidiModal", "midiModal", "closeMidiBtn");
     initMidiSection();
     initLinkProSection();
@@ -937,7 +939,9 @@ function initProjectSection() {
 /* ================= SOUNDCARD (AUDIO INTERFACE) ================= */
 // TASK A71 — tham số thứ 3 `placeholderText` (tuỳ chọn, mặc định "Chọn Soundcard..." như cũ) để
 // hàm này dùng lại được cho SYSTEM_AUDIO select (mục 4 bên dưới) mà không đổi hành vi/lời gọi cũ.
-async function populateSoundcardOptions(selectEl, selectedValue, placeholderText = "Chọn Soundcard...") {
+// TASK A76-FIX — tham số thứ 4 `kind` (mặc định "audioinput" = hành vi cũ, các nơi gọi cũ không đổi).
+// Truyền "audiooutput" cho Audio Output: liệt kê RIÊNG loa/tai nghe, KHÔNG lẫn với danh sách input.
+async function populateSoundcardOptions(selectEl, selectedValue, placeholderText = "Chọn Soundcard...", kind = "audioinput") {
     if (!navigator.mediaDevices?.enumerateDevices) {
         return { foundInRealList: false };
     }
@@ -953,14 +957,14 @@ async function populateSoundcardOptions(selectEl, selectedValue, placeholderText
         }
 
         const devices = await navigator.mediaDevices.enumerateDevices();
-        const inputs = devices.filter(d => d.kind === "audioinput");
+        const inputs = devices.filter(d => d.kind === kind);
 
         selectEl.innerHTML = `<option value="">${placeholderText}</option>`;
 
         inputs.forEach((device, idx) => {
             const opt = document.createElement("option");
             opt.value = device.deviceId;
-            opt.textContent = device.label || `Soundcard ${idx + 1}`;
+            opt.textContent = device.label || `${kind === "audiooutput" ? "Output" : "Soundcard"} ${idx + 1}`;
             selectEl.appendChild(opt);
         });
 
@@ -1290,6 +1294,134 @@ function initSystemAudioSection() {
     // thay đổi tiếp theo qua IPC (main.js relay từ renderer.js của cửa sổ Menu).
     window.electronAPI?.getSystemAudioState?.().then((payload) => renderSystemAudioStateBadge(payload));
     window.electronAPI?.onSystemAudioStateChange?.((payload) => renderSystemAudioStateBadge(payload));
+}
+
+/* ================= MIC INPUT (TASK A76-FIX) — route riêng: audioinput -> selectedMicDeviceId -> createMicSource() ================= */
+// Không phụ thuộc selectedSoundcardId / selectedSystemAudioDeviceId, không fallback ngầm sang SYSTEM_AUDIO.
+function updateMicStatusBadge(foundInRealList) {
+    const savedId = getSetting("selectedMicDeviceId");
+    const badge = document.getElementById("micStatusBadge");
+    if (!badge) return;
+    if (!savedId) {
+        badge.textContent = "⚠ Dùng mic mặc định hệ thống";
+        badge.className = "badge badge-warn";
+    } else if (foundInRealList) {
+        badge.textContent = "● Đã chọn MIC Input";
+        badge.className = "badge badge-live";
+    } else {
+        // Giữ nguyên deviceId đã lưu, KHÔNG tự đổi sang thiết bị khác.
+        badge.textContent = "⚠ MIC đã chọn không còn khả dụng";
+        badge.className = "badge badge-warn";
+    }
+}
+
+function renderMicStateBadge(payload) {
+    const el = document.getElementById("micStateBadge");
+    if (!el) return;
+    const state = payload?.state || "NO_DEVICE";
+    const map = {
+        NO_DEVICE: ["NO_DEVICE", "badge badge-warn"],
+        STARTING: ["STARTING…", "badge badge-warn"],
+        RUNNING: ["● RUNNING", "badge badge-live"],
+        ERROR: ["✕ ERROR", "badge badge-unwired"],
+        STOPPING: ["STOPPED", "badge badge-warn"],
+    };
+    const [text, cls] = map[state] || [state, "badge badge-warn"];
+    el.textContent = text;
+    el.className = cls;
+}
+
+function initMicSection() {
+    const select = document.getElementById("micSelect");
+    if (!select) return;
+    const MIC_PLACEHOLDER = "— None / Dùng mic mặc định hệ thống —";
+
+    populateSoundcardOptions(select, getSetting("selectedMicDeviceId"), MIC_PLACEHOLDER, "audioinput").then(({ foundInRealList }) => {
+        updateMicStatusBadge(foundInRealList);
+    });
+
+    document.getElementById("btnSelectMic")?.addEventListener("click", () => {
+        // Chỉ ghi ĐÚNG 1 key (MIC); không đụng các route khác.
+        saveSetting("selectedMicDeviceId", select.value || "");
+        populateSoundcardOptions(select, select.value, MIC_PLACEHOLDER, "audioinput").then(({ foundInRealList }) => {
+            updateMicStatusBadge(foundInRealList);
+        });
+        notifySetupChanged(); // Menu tự đổi MIC khi selectedMicDeviceId thay đổi (cơ chế B72 có sẵn)
+        alert(select.value ? "Đã lưu MIC Input." : "Đã đặt MIC về None (dùng mic mặc định hệ thống).");
+    });
+
+    document.getElementById("btnClearMic")?.addEventListener("click", () => {
+        select.value = "";
+        saveSetting("selectedMicDeviceId", "");
+        updateMicStatusBadge(false);
+        notifySetupChanged();
+    });
+
+    window.electronAPI?.getMicState?.().then((payload) => renderMicStateBadge(payload));
+    window.electronAPI?.onMicStateChange?.((payload) => renderMicStateBadge(payload));
+}
+
+/* ================= AUDIO OUTPUT (TASK A76-FIX) — route riêng: audiooutput -> selectedAudioOutputDeviceId -> applyAudioOutputSetting() ================= */
+// Danh sách lấy từ kind === "audiooutput". KHÔNG bao giờ ghi vào selectedMicDeviceId /
+// selectedSystemAudioDeviceId, KHÔNG đổi output mặc định của Windows.
+function updateOutputStatusBadge(foundInRealList) {
+    const savedId = getSetting("selectedAudioOutputDeviceId");
+    const badge = document.getElementById("outputStatusBadge");
+    if (!badge) return;
+    if (!savedId) {
+        badge.textContent = "⚠ Dùng output mặc định hệ thống";
+        badge.className = "badge badge-warn";
+    } else if (foundInRealList) {
+        badge.textContent = "● Đã chọn Audio Output";
+        badge.className = "badge badge-live";
+    } else {
+        badge.textContent = "⚠ Output đã chọn không còn khả dụng";
+        badge.className = "badge badge-warn";
+    }
+}
+
+// Payload từ Menu (applyAudioOutputSetting): { state: "DEFAULT" | "APPLIED" | "ERROR", requested, actual, error }
+function renderOutputStateBadge(payload) {
+    const el = document.getElementById("outputStateBadge");
+    if (!el) return;
+    const state = payload?.state;
+    const map = {
+        DEFAULT: ["DEFAULT (output hệ thống)", "badge badge-warn"],
+        APPLIED: ["● APPLIED", "badge badge-live"],
+        ERROR: ["✕ ERROR", "badge badge-unwired"],
+    };
+    const [text, cls] = map[state] || ["CHƯA XÁC NHẬN", "badge badge-warn"];
+    el.textContent = text;
+    el.className = cls;
+}
+
+function initOutputSection() {
+    const select = document.getElementById("outputSelect");
+    if (!select) return;
+    const OUTPUT_PLACEHOLDER = "— None / Output mặc định hệ thống —";
+
+    populateSoundcardOptions(select, getSetting("selectedAudioOutputDeviceId"), OUTPUT_PLACEHOLDER, "audiooutput").then(({ foundInRealList }) => {
+        updateOutputStatusBadge(foundInRealList);
+    });
+
+    document.getElementById("btnSelectOutput")?.addEventListener("click", () => {
+        saveSetting("selectedAudioOutputDeviceId", select.value || "");
+        populateSoundcardOptions(select, select.value, OUTPUT_PLACEHOLDER, "audiooutput").then(({ foundInRealList }) => {
+            updateOutputStatusBadge(foundInRealList);
+        });
+        notifySetupChanged(); // Menu gọi applyAudioOutputSetting() khi selectedAudioOutputDeviceId đổi
+        alert(select.value ? "Đã lưu Audio Output." : "Đã đặt Audio Output về None (output mặc định hệ thống).");
+    });
+
+    document.getElementById("btnClearOutput")?.addEventListener("click", () => {
+        select.value = "";
+        saveSetting("selectedAudioOutputDeviceId", "");
+        updateOutputStatusBadge(false);
+        notifySetupChanged();
+    });
+
+    window.electronAPI?.getOutputState?.().then((payload) => renderOutputStateBadge(payload));
+    window.electronAPI?.onOutputStateChange?.((payload) => renderOutputStateBadge(payload));
 }
 
 /* ================= LINK PRO: BACKUP / RESTORE ================= */
