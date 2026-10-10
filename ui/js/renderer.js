@@ -1731,6 +1731,12 @@ function startMicAndMasterVu() {
         __micSource.onStateChange((state) => {
             window.electronAPI?.reportMicState?.({ state });
             checkAllSystems();
+            // TASK A76-FIX-R1 (R1-04) — khi MIC không còn RUNNING (STOP / đổi thiết bị / lỗi) vòng
+            // lặp level dừng nhưng thanh VU giữ nguyên mức cuối -> trông như MIC vẫn có tiếng.
+            if (state !== AudioSourceState.RUNNING) {
+                const micMeter = document.getElementById("vu-mic-fill");
+                if (micMeter) micMeter.style.width = "0%";
+            }
         });
         __micSource.start().catch((err) => console.warn("[Audio][MIC] Không mở được mic (Mic VU sẽ trống):", err));
         // TASK B71/B72 — mốc so sánh khi Setup đổi "MIC Input" (giống hệt cơ chế C62 đã có cho
@@ -1945,9 +1951,23 @@ async function startAudioMonitor() {
     // "SYSTEM_AUDIO Input" trong Setup (A71) bị ĐỨNG HÌNH ở giá trị cache cuối cùng, không còn
     // cập nhật theo thời gian thực — đúng kiểu lỗi mà B72 (Phần B3/B72-08) yêu cầu audit. Khôi
     // phục lại nguyên trạng A71, không đổi gì khác.
+    // TASK A76-FIX-R1 (R1-04/R1-01) — PHÁT HIỆN: stop() chủ động (Setup đổi SYSTEM_AUDIO sang
+    // thiết bị khác hoặc về None) chỉ phát STOPPING/NO_DEVICE, KHÔNG phát onDeviceLost, nên
+    // BPM/Key/Mod vẫn chạy trên nguồn đã đóng, Music VU đứng ở mức cuối và chữ BPM/Key cũ còn
+    // đó. Listener riêng (không đổi onDeviceLost ở trên): NO_DEVICE => dừng AI + xoá hiển thị.
+    // Khi nguồn mới RUNNING, bindAiEnginesToSystemAudio() khởi tạo lại như cũ.
+    // (gộp vào listener báo IPC ngay bên dưới — test A71 khoá đúng 2 lời gọi onStateChange.)
     systemAudio.onStateChange((state) => {
         window.electronAPI?.reportSystemAudioState?.({ state });
         __aiState.sysState = state; updateAiSourceStateLabel(); // TASK A74-02
+        if (state === AudioSourceState.NO_DEVICE) {
+            setSystemAudioVuNoData(true);
+            if (typeof BPMEngine !== "undefined") BPMEngine.stop();
+            if (typeof KeyEngine !== "undefined") KeyEngine.stop();
+            if (window.__keyDetectStopWatcher) { window.__keyDetectStopWatcher(); window.__keyDetectStopWatcher = null; }
+            if (typeof ModEngine !== "undefined") ModEngine.stop();
+            resetAiDisplaysToListening();
+        }
     });
 
     setSystemAudioVuNoData(true); // TASK A68 — mặc định "chưa có dữ liệu" cho tới khi RUNNING lần đầu

@@ -378,6 +378,15 @@ function setSoundcardAvailabilityHint(isAvailable) {
     __soundcardAvailabilityHint = isAvailable === true || isAvailable === false ? isAvailable : null;
 }
 
+// TASK A76-FIX-R1 (R1-05) — CÙNG cơ chế với __soundcardAvailabilityHint nhưng cho SYSTEM_AUDIO:
+// trước đây mục selectedSystemAudioDeviceId chỉ kiểm tra "chuỗi khác rỗng" nên thiết bị đã lưu
+// nhưng đã bị rút vẫn được tính READY. setup.js gọi hàm này sau khi enumerate thật.
+let __systemAudioAvailabilityHint = null; // null = chưa biết | true/false = đã enumerate xong
+
+function setSystemAudioAvailabilityHint(isAvailable) {
+    __systemAudioAvailabilityHint = isAvailable === true || isAvailable === false ? isAvailable : null;
+}
+
 // TASK B30.2 — CÙNG BẢN CHẤT với __soundcardAvailabilityHint ở trên nhưng cho đường dẫn trình
 // duyệt (selectedBrowserPath): trước đây checklist chỉ kiểm tra 2 chuỗi khác rỗng, không biết file
 // .exe đã lưu có còn tồn tại trên đĩa hay không (đã bị xoá/di chuyển sau khi lưu). setup.js chịu
@@ -445,7 +454,7 @@ function getSetupReadinessChecklist() {
         // riêng, đúng key mà audioSource.js thật sự đọc (không phải selectedSoundcard/MIC — xem
         // A65-A74-REPORT.md, 2 khái niệm này đã tách biệt hoàn toàn từ A65). "AI source ready"
         // trong ngôn ngữ A75-10 = chính mục này.
-        { key: "selectedSystemAudioDeviceId", ready: !!getSetting("selectedSystemAudioDeviceId") }
+        { key: "selectedSystemAudioDeviceId", ready: !!getSetting("selectedSystemAudioDeviceId") && (typeof __systemAudioAvailabilityHint === "undefined" || __systemAudioAvailabilityHint !== false) } // A76-FIX-R1: đã lưu nhưng không còn khả dụng => NOT READY
     ];
 }
 

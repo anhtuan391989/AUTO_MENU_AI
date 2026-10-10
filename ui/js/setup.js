@@ -1269,6 +1269,9 @@ function initSystemAudioSection() {
     const savedId = getSetting("selectedSystemAudioDeviceId");
     populateSoundcardOptions(select, savedId, "— None / Chưa chọn thiết bị —").then(({ foundInRealList }) => {
         updateSystemAudioStatusBadge(foundInRealList);
+        // TASK A76-FIX-R1 (R1-05) — báo cho readiness biết thiết bị đã lưu còn thật hay không.
+        if (savedId && typeof setSystemAudioAvailabilityHint === "function") setSystemAudioAvailabilityHint(foundInRealList);
+        if (typeof updateSetupProgress === "function") updateSetupProgress();
     });
 
     document.getElementById("btnSelectSystemAudio")?.addEventListener("click", () => {
@@ -1277,6 +1280,8 @@ function initSystemAudioSection() {
         saveSetting("selectedSystemAudioDeviceId", select.value || "");
         populateSoundcardOptions(select, select.value, "— None / Chưa chọn thiết bị —").then(({ foundInRealList }) => {
             updateSystemAudioStatusBadge(foundInRealList);
+            if (typeof setSystemAudioAvailabilityHint === "function") setSystemAudioAvailabilityHint(select.value ? foundInRealList : null); // A76-FIX-R1
+            if (typeof updateSetupProgress === "function") updateSetupProgress(); // A76-FIX-R1: Setup X/10 cập nhật ngay sau khi chọn
         });
         notifySetupChanged(); // cửa sổ Menu (nếu đang mở) tự stop()/start() lại với deviceId mới — cơ chế A65/C62 có sẵn
         alert(select.value ? "Đã lưu SYSTEM_AUDIO." : "Đã đặt SYSTEM_AUDIO về None (NO_DEVICE).");
@@ -1286,6 +1291,8 @@ function initSystemAudioSection() {
         select.value = "";
         saveSetting("selectedSystemAudioDeviceId", "");
         updateSystemAudioStatusBadge(false);
+        if (typeof setSystemAudioAvailabilityHint === "function") setSystemAudioAvailabilityHint(null); // A76-FIX-R1
+        if (typeof updateSetupProgress === "function") updateSetupProgress();
         notifySetupChanged();
     });
 
