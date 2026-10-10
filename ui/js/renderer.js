@@ -1033,6 +1033,54 @@ function onNowPlayingLost() {
 
 }
 
+// ==========================================================
+// TASK AI-ALG-01-NOWPLAYING / AI-NOWPLAYING-OPT — NowPlaying đổi bài => TỰ chuyển KEY/BPM/MOD về
+// LISTENING và dò lại, KHÔNG cần bấm AUTO DETECT. NowPlaying CHỈ là tín hiệu bắt đầu chu trình
+// (không cung cấp Key/BPM). Tái dùng NGUYÊN chu trình AUTO DETECT (A75-06): reset chữ + stop/init
+// BPM+Key trên nguồn SYSTEM_AUDIO đang chạy + ModEngine.stop() + triggerAiKeyDetect(). KHÔNG tạo
+// pipeline thứ hai, KHÔNG mở MIC/thiết bị mới, KHÔNG đổi thuật toán/ngưỡng.
+//  - __aiCycleGen: generation token, tăng mỗi lần đổi bài. Callback/timer của chu trình cũ so token
+//    và tự bỏ nếu đã lỗi thời (kết quả bài trước đến muộn không ghi đè bài mới).
+//  - __npLastSongKey: bài (khác rỗng) gần nhất đã khởi động chu trình -> sự kiện lặp cùng bài KHÔNG
+//    khởi động lại; A->B->A vẫn khởi động mỗi lần vì key đổi.
+//  - metadata rỗng thoáng qua: chỉ coi là "mất bài" sau NOWPLAYING_EMPTY_GRACE_MS_TENTATIVE (TẠM
+//    THỜI, chưa hiệu chuẩn); quay lại đúng bài cũ trong khoảng đó = cùng bài, không dò lại.
+// ==========================================================
+let __aiCycleGen = 0;
+let __npLastSongKey = null;
+let __npEmptyTimer = null;
+const NOWPLAYING_EMPTY_GRACE_MS_TENTATIVE = 5000;
+
+function restartAiForNewSong(songKey) {
+    __aiCycleGen++; // vô hiệu hoá mọi callback/timer của bài trước
+    console.log(`[NowPlaying][AI] Bài mới -> reset KEY/BPM/MOD về LISTENING và dò lại (gen=${__aiCycleGen})`);
+    const sys = window.__systemAudioSource;
+    if (typeof AudioSourceState !== "undefined" && sys?.getState?.() === AudioSourceState.RUNNING) {
+        // Đúng chu trình AUTO DETECT đã có (A75-06) — không sao chép logic.
+        document.getElementById("autoDetectBtn")?.click();
+    } else {
+        // Chưa có nguồn/frame: chỉ về trạng thái chờ, KHÔNG giả lập Key/BPM. Khi SYSTEM_AUDIO RUNNING,
+        // bindAiEnginesToSystemAudio() tự khởi động lại việc dò như cũ.
+        resetAiDisplaysToListening();
+        if (window.__keyDetectStopWatcher) { window.__keyDetectStopWatcher(); window.__keyDetectStopWatcher = null; }
+        if (typeof ModEngine !== "undefined") ModEngine.stop();
+    }
+}
+
+// songKey: "<title>|<artist>" hoặc null khi metadata rỗng/mất.
+function handleNowPlayingForAi(songKey) {
+    if (songKey === null) {
+        if (__npLastSongKey !== null && __npEmptyTimer === null) {
+            __npEmptyTimer = setTimeout(() => { __npEmptyTimer = null; __npLastSongKey = null; }, NOWPLAYING_EMPTY_GRACE_MS_TENTATIVE);
+        }
+        return;
+    }
+    if (__npEmptyTimer !== null) { clearTimeout(__npEmptyTimer); __npEmptyTimer = null; }
+    if (songKey === __npLastSongKey) return; // sự kiện lặp / quay lại cùng bài sau khoảng trống ngắn
+    __npLastSongKey = songKey;
+    restartAiForNewSong(songKey);
+}
+
 // Mục IX: bài hát đổi -> huỷ Timer Manual, xoá trạng thái bài cũ. Dữ liệu bài mới (match/miss)
 // sẽ được nạp ngay sau đó qua onSongDatabaseMatch()/onSongDatabaseMiss() (do main process gửi).
 function dispatchNowPlayingPayload(payload) {
@@ -1044,6 +1092,9 @@ function dispatchNowPlayingPayload(payload) {
         cancelManualOverride();
         lastNowPlayingKey = key;
     }
+
+    // TASK AI-ALG-01-NOWPLAYING — metadata rỗng (không title lẫn artist) coi như "không có bài".
+    handleNowPlayingForAi(payload && (payload.title || payload.artist) ? key : null);
 
     if (!payload) {
         onNowPlayingLost();
@@ -1064,7 +1115,11 @@ function dispatchNowPlayingPayload(payload) {
 
 function startAiRealtimeLoop() {
 
+    const cycleGen = __aiCycleGen; // TASK AI-ALG-01-NOWPLAYING — token của chu trình này
     window.__keyDetectStopWatcher = KeyEngine.detectOnce((result) => {
+
+        // Kết quả của bài trước đến muộn: bỏ, KHÔNG ghi đè trạng thái bài mới (chu trình mới đã có vòng dò riêng).
+        if (cycleGen !== __aiCycleGen) return;
 
         window.__keyDetectStopWatcher = null;
 
