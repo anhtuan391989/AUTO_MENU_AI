@@ -1051,8 +1051,38 @@ let __npLastSongKey = null;
 let __npEmptyTimer = null;
 const NOWPLAYING_EMPTY_GRACE_MS_TENTATIVE = 5000;
 
+// TASK AI-NOWPLAYING-OPT-02 — LOG CHẨN ĐOÁN tối thiểu (chỉ ghi log + bộ đếm; KHÔNG đổi thuật toán,
+// thứ tự gọi hay âm thanh). Gắn mã chu trình (gen) + tên bài vào mọi dòng để phân biệt kết quả giữa
+// các bài. Xem tổng hợp bằng DevTools: __aiDiagReport(). Tắt: setSetting("aiDiagLogEnabled", false).
+const __aiDiagState = { t0: null, song: null, cur: null, history: [] };
+function aiDiag(event, extra) {
+    try {
+        const enabled = typeof getSetting === "function" ? getSetting("aiDiagLogEnabled", true) : true;
+        if (enabled === false || enabled === "false") return;
+        const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+        if (event === "CYCLE_START") {
+            if (__aiDiagState.cur) __aiDiagState.history.push(__aiDiagState.cur);
+            if (__aiDiagState.history.length > 30) __aiDiagState.history.shift();
+            __aiDiagState.t0 = now;
+            __aiDiagState.cur = { gen: __aiCycleGen, song: __aiDiagState.song, triggers: 0, cancels: 0, staleDrops: 0, bpmUpdates: 0, keyResults: 0, firstKeyMs: null, firstBpmMs: null };
+        }
+        const c = __aiDiagState.cur, dt = __aiDiagState.t0 === null ? null : Math.round(now - __aiDiagState.t0);
+        if (c) {
+            if (event === "KEY_TRIGGER") c.triggers++;
+            else if (event === "WATCHER_CANCEL") c.cancels++;
+            else if (event === "KEY_RESULT_STALE_DROPPED") c.staleDrops++;
+            else if (event === "KEY_RESULT") { c.keyResults++; if (c.firstKeyMs === null) c.firstKeyMs = dt; }
+            else if (event === "BPM_UPDATE") { c.bpmUpdates++; if (c.firstBpmMs === null) c.firstBpmMs = dt; }
+        }
+        console.log(`[AI-DIAG] cycle=${__aiCycleGen} song="${__aiDiagState.song}" +${dt}ms ${event}`, extra === undefined ? "" : extra);
+    } catch (e) { /* diagnostics không bao giờ được làm hỏng luồng AI */ }
+}
+window.__aiDiagReport = () => [...__aiDiagState.history, ...(__aiDiagState.cur ? [__aiDiagState.cur] : [])];
+
 function restartAiForNewSong(songKey) {
     __aiCycleGen++; // vô hiệu hoá mọi callback/timer của bài trước
+    __aiDiagState.song = songKey;
+    aiDiag("CYCLE_START", { source: window.__systemAudioSource?.getState?.() });
     console.log(`[NowPlaying][AI] Bài mới -> reset KEY/BPM/MOD về LISTENING và dò lại (gen=${__aiCycleGen})`);
     const sys = window.__systemAudioSource;
     if (typeof AudioSourceState !== "undefined" && sys?.getState?.() === AudioSourceState.RUNNING) {
@@ -1069,6 +1099,7 @@ function restartAiForNewSong(songKey) {
 
 // songKey: "<title>|<artist>" hoặc null khi metadata rỗng/mất.
 function handleNowPlayingForAi(songKey) {
+    if (typeof aiDiag === "function") aiDiag("NP_EVENT", songKey === null ? "empty" : (songKey === __npLastSongKey ? "duplicate" : "new"));
     if (songKey === null) {
         if (__npLastSongKey !== null && __npEmptyTimer === null) {
             __npEmptyTimer = setTimeout(() => { __npEmptyTimer = null; __npLastSongKey = null; }, NOWPLAYING_EMPTY_GRACE_MS_TENTATIVE);
@@ -1116,10 +1147,14 @@ function dispatchNowPlayingPayload(payload) {
 function startAiRealtimeLoop() {
 
     const cycleGen = __aiCycleGen; // TASK AI-ALG-01-NOWPLAYING — token của chu trình này
+    // TASK AI-KEY-FAST-02 — "danh tính" của watcher: token chu trình + epoch engine + nguồn audio lúc tạo.
+    // triggerAiKeyDetect() dùng nó để biết watcher đang chạy còn hợp lệ hay không (đặt TRƯỚC detectOnce).
+    window.__keyWatcherMeta = { gen: cycleGen, epoch: window.__aiEngineEpoch, src: window.__aiEngineSrc };
     window.__keyDetectStopWatcher = KeyEngine.detectOnce((result) => {
 
         // Kết quả của bài trước đến muộn: bỏ, KHÔNG ghi đè trạng thái bài mới (chu trình mới đã có vòng dò riêng).
-        if (cycleGen !== __aiCycleGen) return;
+        if (cycleGen !== __aiCycleGen) { if (typeof aiDiag === "function") aiDiag("KEY_RESULT_STALE_DROPPED", { resultGen: cycleGen, key: result.key }); return; }
+        if (typeof aiDiag === "function") aiDiag("KEY_RESULT", { key: result.key, confidence: result.confidence });
 
         window.__keyDetectStopWatcher = null;
 
@@ -1165,7 +1200,20 @@ function triggerAiKeyDetect() {
 
     }
 
-    if (window.__keyDetectStopWatcher) { window.__keyDetectStopWatcher(); window.__keyDetectStopWatcher = null; }
+    if (typeof aiDiag === "function") aiDiag("KEY_TRIGGER"); // AI-NOWPLAYING-OPT-02 (chỉ log)
+    // TASK AI-KEY-FAST-02 — watcher đang chạy VÀ cùng chu trình (token) + cùng epoch engine + cùng nguồn
+    // audio => KHÔNG huỷ/khởi động lại (giữ tiến độ tích luỹ, ví dụ timer 2s của bindAiEnginesToSystemAudio).
+    // Khác token/epoch/nguồn (đổi bài, bind lại/reconnect/đổi thiết bị) hoặc không còn watcher => huỷ + tạo mới.
+    const __meta = window.__keyWatcherMeta;
+    if (window.__keyDetectStopWatcher && __meta && __meta.gen === __aiCycleGen
+        && __meta.epoch === window.__aiEngineEpoch && __meta.src === window.__aiEngineSrc) {
+        if (typeof aiDiag === "function") aiDiag("KEY_TRIGGER_KEPT_VALID_WATCHER");
+        return;
+    }
+    if (window.__keyDetectStopWatcher) {
+        if (typeof aiDiag === "function") aiDiag("WATCHER_CANCEL");
+        window.__keyDetectStopWatcher(); window.__keyDetectStopWatcher = null;
+    }
     startAiRealtimeLoop();
 
 }
@@ -1845,11 +1893,16 @@ function bindAiEnginesToSystemAudio(systemAudio) {
         // Từ đây, mỗi engine tự tạo analyser riêng + tự chạy vòng lặp riêng của nó.
         BPMEngine.init(audioContext, source);
         KeyEngine.init(audioContext, source);
+        // TASK AI-KEY-FAST-02 — mỗi lần bind (AUTO DETECT, reconnect, đổi thiết bị) = engine mới => epoch mới;
+        // watcher tạo trước đó (epoch/nguồn cũ) bị triggerAiKeyDetect() coi là không còn hợp lệ.
+        window.__aiEngineEpoch = (window.__aiEngineEpoch || 0) + 1;
+        window.__aiEngineSrc = source;
 
         if (!__systemAudioListenersRegistered) {
             __systemAudioListenersRegistered = true;
 
             BPMEngine.onUpdate((bpm) => {
+                aiDiag("BPM_UPDATE", bpm); // AI-NOWPLAYING-OPT-02 (chỉ log)
                 const bpmEl1 = document.getElementById("currentBpm");
                 const bpmEl2 = document.getElementById("bpmValue");
                 if (bpmEl1) bpmEl1.textContent = bpm;

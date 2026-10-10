@@ -25,11 +25,13 @@ function build(running = true) {
         setTimeout: (fn, ms) => { timers.push({ id: ++tid, at: now + ms, fn }); return tid; },
         clearTimeout: (id) => { timers = timers.filter((t) => t.id !== id); },
         __running: running,
+        getSetting: (k, f) => f,
     };
     vm.createContext(sb);
     const code = [
         'let __aiCycleGen = 0; let __npLastSongKey = null; let __npEmptyTimer = null;',
         'const NOWPLAYING_EMPTY_GRACE_MS_TENTATIVE = 5000;',
+        'const __aiDiagState = { t0: null, song: null, cur: null, history: [] };', fnText('aiDiag'),
         fnText('restartAiForNewSong'), fnText('handleNowPlayingForAi'),
         'this.api = { handle: handleNowPlayingForAi, gen: () => __aiCycleGen, last: () => __npLastSongKey };',
     ].join('\n');
@@ -67,12 +69,12 @@ console.log('\n== 6. Nguồn audio chưa chạy: không giả lập, chỉ chờ
 
 console.log('\n== 7. Ranh giới / không đổi thuật toán (static) ==');
 {
-    const fns = fnText('restartAiForNewSong') + fnText('handleNowPlayingForAi');
+    const fns = fnText('restartAiForNewSong') + fnText('handleNowPlayingForAi'); // aiDiag chỉ log, không nằm trong kiểm tra ranh giới này
     ok(!/getUserMedia|createMicSource|__micSource|new AudioContext|BPMEngine|KeyEngine|BPM_CV|AI_NO_SIGNAL|AI_SIGNAL_VU/.test(fns), 'không mở thiết bị/MIC mới, không chạm engine hay ngưỡng');
     ok(/autoDetectBtn"\)\?\.click\(\)/.test(fnText('restartAiForNewSong')), 'tái dùng chu trình AUTO DETECT, không viết pipeline thứ hai');
     ok(/handleNowPlayingForAi\(payload && \(payload\.title \|\| payload\.artist\) \? key : null\)/.test(fnText('dispatchNowPlayingPayload')), 'nối vào dispatchNowPlayingPayload (điểm duy nhất nhận NowPlaying)');
     const loop = fnText('startAiRealtimeLoop');
-    ok(/const cycleGen = __aiCycleGen/.test(loop) && /if \(cycleGen !== __aiCycleGen\) return;/.test(loop), 'kết quả Key của chu trình cũ bị bỏ (generation guard)');
+    ok(/const cycleGen = __aiCycleGen/.test(loop) && /if \(cycleGen !== __aiCycleGen\) \{[\s\S]{0,200}?\breturn; \}/.test(loop), 'kết quả Key của chu trình cũ bị bỏ (generation guard)');
     ok(/data\.currentKey !== "LISTENING"/.test(src), 'sentinel "LISTENING" của Auto-Tune còn nguyên');
     ok(/BPM_CV_CONFIRM_THRESHOLD_TENTATIVE\s*=\s*0\.15/.test(fs.readFileSync(path.join(__dirname, '../../ui/js/engines/bpmEngine.js'), 'utf8') + src), 'ngưỡng BPM CV 0.15 giữ nguyên');
     ok(/AI_NO_SIGNAL_TIMEOUT_MS_TENTATIVE\s*=\s*3000/.test(src) && /AI_SIGNAL_VU_FLOOR_TENTATIVE\s*=\s*2/.test(src), 'timeout 3000ms / VU floor 2 giữ nguyên');
