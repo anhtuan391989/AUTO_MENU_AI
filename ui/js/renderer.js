@@ -1098,7 +1098,7 @@ window.__aiDiagStatus = () => {
         systemAudioExists: !!window.__systemAudioSource, systemAudioState: null, audioMonitorStarted: typeof audioMonitorStarted !== "undefined" ? audioMonitorStarted : null,
         keyEngineFrames: null, keyEngineHasMusicalContent: null, aiDiagEnabled: null };
     try { out.systemAudioState = window.__systemAudioSource?.getState?.() ?? null; } catch (e) {}
-    try { const d = typeof KeyEngine !== "undefined" && KeyEngine.getDebugSnapshot ? KeyEngine.getDebugSnapshot() : null; if (d) { out.keyEngineFrames = d.frameCounter; out.keyEngineHasMusicalContent = d.hasMusicalContent; out.keyInput = d.inputProbe || null; out.keyChroma = d.chromaVector; } } catch (e) {}
+    try { const d = typeof KeyEngine !== "undefined" && KeyEngine.getDebugSnapshot ? KeyEngine.getDebugSnapshot() : null; if (d) { out.keyEngineFrames = d.frameCounter; out.keyEngineHasMusicalContent = d.hasMusicalContent; out.keyInput = d.inputProbe || null; out.keyChroma = d.chromaVector; out.keyLoops = d.loopStats || null; } } catch (e) {}
     // TASK AI-KEY-FAST-05 — mức VU (analyser BPMEngine, cùng raw source node với KeyEngine) + thông tin track/AudioContext thật của SYSTEM_AUDIO.
     try { out.musicVuLevel = window.__aiLastLevel ? { ...window.__aiLastLevel, ageMs: Date.now() - window.__aiLastLevel.t } : null; } catch (e) {}
     try { out.sourceInfo = window.__systemAudioSource?.getDiagnostics?.() ?? null; } catch (e) {}
@@ -1182,7 +1182,12 @@ function startAiRealtimeLoop() {
 
         // Kết quả của bài trước đến muộn: bỏ, KHÔNG ghi đè trạng thái bài mới (chu trình mới đã có vòng dò riêng).
         if (cycleGen !== __aiCycleGen) { if (typeof aiDiag === "function") aiDiag("KEY_RESULT_STALE_DROPPED", { resultGen: cycleGen, key: result.key }); return; }
-        if (typeof aiDiag === "function") aiDiag("KEY_RESULT", { key: result.key, confidence: result.confidence });
+        if (typeof aiDiag === "function") {
+            // TASK AI-KEY-FAST-06 — stack rút gọn tại thời điểm có kết quả (phân biệt callback lồng nhau với vòng chạy song song) + số vòng đang chạy.
+            let st = null; try { st = String(new Error().stack || "").split("\n").slice(1, 7).map((x) => x.trim().replace(/^at\s+/, "")); } catch (e) {}
+            let loops = null; try { loops = KeyEngine.getDebugSnapshot().loopStats; } catch (e) {}
+            aiDiag("KEY_RESULT", { key: result.key, confidence: result.confidence, loops, stack: st });
+        }
 
         window.__keyDetectStopWatcher = null;
 
@@ -1931,7 +1936,7 @@ function bindAiEnginesToSystemAudio(systemAudio) {
         // watcher tạo trước đó (epoch/nguồn cũ) bị triggerAiKeyDetect() coi là không còn hợp lệ.
         window.__aiEngineEpoch = (window.__aiEngineEpoch || 0) + 1;
         window.__aiEngineSrc = source;
-        if (typeof aiDiag === "function") aiDiag("ENGINE_BIND", { epoch: window.__aiEngineEpoch }); // TASK AI-KEY-FAST-03 (chỉ log)
+        if (typeof aiDiag === "function") { let caller = null; try { caller = String(new Error().stack || "").split("\n").slice(2, 4).map((x) => x.trim().replace(/^at\s+/, "")).join(" <- "); } catch (e) {} aiDiag("ENGINE_BIND", { epoch: window.__aiEngineEpoch, caller, srcState: systemAudio?.getState?.() ?? null }); } // TASK AI-KEY-FAST-03 (chỉ log)
 
         if (!__systemAudioListenersRegistered) {
             __systemAudioListenersRegistered = true;

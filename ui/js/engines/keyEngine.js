@@ -95,6 +95,8 @@ const KeyEngine = (() => {
 
     // TASK AI-KEY-FAST-05 — PROBE tín hiệu tại ĐÚNG điểm KeyEngine đọc phổ (chỉ ghi số để chẩn đoán; KHÔNG tham gia
     // quyết định Key). Đọc qua getDebugSnapshot().inputProbe.
+    // TASK AI-KEY-FAST-06 — đếm vòng runVoteLoop (chỉ để chẩn đoán lifecycle; không tham gia quyết định): active>1 = có vòng chạy song song.
+    const loopStats = { started: 0, stopped: 0, active: 0, maxActive: 0 };
     const inputProbe = { frames: 0, framesWithContent: 0, lastContentRms: 0, maxContentRms: 0, lastMaxDb: null, maxDbEver: null, finiteBins: 0, sampleRate: null, fftSize: null, binCount: null, lastFrameAt: null };
 
     function init(audioContext, sourceNode) {
@@ -473,9 +475,13 @@ const KeyEngine = (() => {
         let fastPathStreakKey = null;
         let fastPathLastFiredKey = null;
 
+        // TASK AI-KEY-FAST-06 — đếm vòng (idempotent: clearInterval gọi lặp vẫn vô hại như cũ; chỉ đếm 1 lần/vòng).
+        let loopStopped = false;
+        loopStats.started++; loopStats.active++; if (loopStats.active > loopStats.maxActive) loopStats.maxActive = loopStats.active;
         function stopBoth() {
             clearInterval(timer);
             clearInterval(fastTimer);
+            if (!loopStopped) { loopStopped = true; loopStats.stopped++; loopStats.active--; }
         }
 
         const fastTimer = setInterval(() => {
@@ -708,7 +714,7 @@ const KeyEngine = (() => {
     function getDebugSnapshot() {
         return {
             chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice(),
-            frameCounter, hasMusicalContent, contentEnergyEMA, inputProbe: { ...inputProbe },
+            frameCounter, hasMusicalContent, contentEnergyEMA, inputProbe: { ...inputProbe }, loopStats: { ...loopStats },
             firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
         };
     }

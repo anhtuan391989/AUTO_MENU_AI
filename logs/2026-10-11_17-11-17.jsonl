@@ -1,0 +1,82 @@
+{"event":"FIRST_EVIDENCE","frame":106}
+{"time":1.5,"top1":"C Major","top2":"C Minor","confidence":1.4242852579662983,"margin":0.065945838520022,"stability":1,"top1Stable":0,"decisionScore":0.7217963781022172,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"event":"FIRST_PROVISIONAL","frame":122,"key":"C Major","confidence":1.4313520646782294}
+{"event":"TOP1_CHANGED","from":"C Major","to":"B Minor","time":1.5}
+{"time":1.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.2651510330419353,"stability":0,"top1Stable":0,"decisionScore":0.591773943949551,"votes":0,"window":0,"locked":false}
+{"event":"LOCK","time":2.8,"key":"B Minor","decisionScore":0.8853978076665692,"reason":"fast-path-A35","frame":362,"framesToStable":362,"firstEvidenceAt":1791713477389,"firstEvidenceFrame":106,"firstProvisionalAt":1791713477603,"firstProvisionalFrame":122}
+{"event":"MOD_CANDIDATE","candidate":"A Minor","confidence":1.525169028771456,"persistence":1,"sustainRequired":3,"timestamp":1791713481807}
+{"time":1.5,"top1":"B Minor","top2":"A Major","confidence":1.534186745122222,"margin":0.1643510817484517,"stability":1,"top1Stable":2.801,"decisionScore":0.9457216151288108,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"event":"LOCK","time":2,"key":"B Minor","decisionScore":0.9815616481162406,"reason":"fast-path-A35","frame":511,"framesToStable":511,"firstEvidenceAt":1791713477389,"firstEvidenceFrame":106,"firstProvisionalAt":1791713477603,"firstProvisionalFrame":122}
+{"time":1.5,"top1":"B Minor","top2":"E Minor","confidence":1.4146783952726933,"margin":0.04078778153544471,"stability":1,"top1Stable":4.803,"decisionScore":0.6763701062152547,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"time":3,"top1":"B Minor","top2":"B Major","confidence":1.4790568045418062,"margin":0.03974380197673333,"stability":1,"top1Stable":6.303,"decisionScore":0.6932057547597009,"votes":2,"window":2,"locked":false,"highConfidenceStreak":0}
+{"event":"LOCK","time":3.6,"key":"B Minor","decisionScore":0.8786758205488242,"reason":"fast-path-A35","frame":781,"framesToStable":781,"firstEvidenceAt":1791713477389,"firstEvidenceFrame":106,"firstProvisionalAt":1791713477603,"firstProvisionalFrame":122}
+{"time":1.5,"top1":"B Minor","top2":"C Major","confidence":1.4221586510036233,"margin":0.05761580039149061,"stability":1,"top1Stable":8.404,"decisionScore":0.7991819747771473,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"time":3,"top1":"B Minor","top2":"B Major","confidence":1.42622060138648,"margin":0.010601066173707041,"stability":1,"top1Stable":9.904,"decisionScore":0.6139229502665169,"votes":2,"window":2,"locked":false,"highConfidenceStreak":0}
+{"event":"MOD_CANDIDATE","candidate":"E Minor","confidence":1.506036626430211,"persistence":1,"sustainRequired":3,"timestamp":1791713490410}
+{"event":"TOP1_CHANGED","from":"B Minor","to":"E Minor","time":4.5}
+{"time":4.5,"top1":"E Minor","top2":"B Minor","confidence":1.496972157765901,"margin":0.07478687822207464,"stability":0.4444444444444444,"top1Stable":0,"decisionScore":0.7398182003208827,"votes":2,"window":3,"locked":false,"highConfidenceStreak":0}
+{"event":"MOD_CANDIDATE","candidate":"D Major","confidence":1.4603094320080852,"persistence":1,"sustainRequired":3,"timestamp":1791713491409}
+{"event":"MOD_CANDIDATE","candidate":"A Minor","confidence":1.4282132602676287,"persistence":1,"sustainRequired":3,"timestamp":1791713492409}
+{"event":"TOP1_CHANGED","from":"E Minor","to":"A Minor","time":6}
+{"time":6,"top1":"A Minor","top2":"D Minor","confidence":1.4282132602676287,"margin":0.020165886036939584,"stability":0.25,"top1Stable":0,"decisionScore":0.5848841532371456,"votes":2,"window":4,"locked":false,"highConfidenceStreak":0}
+{"event":"TOP1_CHANGED","from":"A Minor","to":"B Minor","time":7.5}
+{"time":7.5,"top1":"B Minor","top2":"B Major","confidence":1.4357389114912835,"margin":0.04901758143110513,"stability":0.36,"top1Stable":0,"decisionScore":0.6638918959727897,"votes":3,"window":5,"locked":false,"highConfidenceStreak":0}
+{"event":"LOCK","time":7.6,"key":"B Minor","decisionScore":0.9547506811664581,"reason":"fast-path-A35","frame":1289,"framesToStable":1289,"firstEvidenceAt":1791713477389,"firstEvidenceFrame":106,"firstProvisionalAt":1791713477603,"firstProvisionalFrame":122}
+{"event":"TOP1_CHANGED","from":"B Minor","to":"E Major","time":1.5}
+{"time":1.5,"top1":"E Major","top2":"E Minor","confidence":1.4452039840156536,"margin":0.008488725907300099,"stability":1,"top1Stable":0,"decisionScore":0.6096713163500207,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"event":"MOD_CANDIDATE","candidate":"E Minor","confidence":1.4964393885649987,"persistence":1,"sustainRequired":3,"timestamp":1791713496010}
+{"event":"TOP1_CHANGED","from":"E Major","to":"E Minor","time":3}
+{"time":3,"top1":"E Minor","top2":"E Major","confidence":0,"margin":0.08942502999061053,"stability":0,"top1Stable":0,"decisionScore":0.529194174444042,"votes":0,"window":1,"locked":false}
+{"time":1.5,"top1":"C Major","top2":"C Minor","confidence":0,"margin":0,"stability":0,"top1Stable":0,"decisionScore":0,"votes":0,"window":0,"locked":false}
+{"event":"FIRST_EVIDENCE","frame":217}
+{"event":"TOP1_CHANGED","from":"C Major","to":"G Major","time":3}
+{"time":3,"top1":"G Major","top2":"G Minor","confidence":1.4776759021651797,"margin":0.07663868819495279,"stability":1,"top1Stable":0,"decisionScore":0.7503008300119295,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"event":"FIRST_PROVISIONAL","frame":242,"key":"G Major","confidence":1.473406469048496}
+{"event":"FIRST_EVIDENCE","frame":16}
+{"event":"FIRST_PROVISIONAL","frame":61,"key":"B Minor","confidence":1.4429804932230517}
+{"time":1.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.25775652387919235,"stability":0,"top1Stable":0,"decisionScore":0.58828631544671,"votes":0,"window":0,"locked":false}
+{"event":"TOP1_CHANGED","from":"B Minor","to":"C Major","time":3}
+{"time":3,"top1":"C Major","top2":"B Minor","confidence":1.401936619945027,"margin":0.027264366293962894,"stability":1,"top1Stable":0,"decisionScore":0.7848865160430598,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"event":"TOP1_CHANGED","from":"C Major","to":"B Minor","time":4.5}
+{"time":4.5,"top1":"B Minor","top2":"C Major","confidence":0,"margin":0.002502562277789,"stability":0,"top1Stable":0,"decisionScore":0.3807138512988944,"votes":0,"window":1,"locked":false}
+{"event":"TOP1_CHANGED","from":"B Minor","to":"D Major","time":6}
+{"time":6,"top1":"D Major","top2":"D Minor","confidence":1.4391065394312768,"margin":0.0027019582169349743,"stability":0.25,"top1Stable":0,"decisionScore":0.44728478835804014,"votes":1,"window":2,"locked":false,"highConfidenceStreak":0}
+{"event":"TOP1_CHANGED","from":"D Major","to":"B Minor","time":7.5}
+{"time":7.5,"top1":"B Minor","top2":"D Major","confidence":0,"margin":0.15260705106197037,"stability":0,"top1Stable":0,"decisionScore":0.5753301251771542,"votes":0,"window":2,"locked":false}
+{"event":"LOCK","time":8.8,"key":"B Minor","decisionScore":0.9593449955663313,"reason":"fast-path-A35","frame":609,"framesToStable":609,"firstEvidenceAt":1791713503193,"firstEvidenceFrame":16,"firstProvisionalAt":1791713503798,"firstProvisionalFrame":61}
+{"time":1.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.20851726942408422,"stability":0,"top1Stable":2.801,"decisionScore":0.5635684388445708,"votes":0,"window":0,"locked":false}
+{"time":3,"top1":"B Minor","top2":"D Major","confidence":1.4907691001782104,"margin":0.2336668815869003,"stability":1,"top1Stable":4.3,"decisionScore":0.9803056734031477,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"time":4.5,"top1":"B Minor","top2":"D Major","confidence":0,"margin":0.15226676693502394,"stability":0,"top1Stable":5.8,"decisionScore":0.5849566612431193,"votes":0,"window":1,"locked":false}
+{"event":"MOD_CANDIDATE","candidate":"A Minor","confidence":1.5215182550774278,"persistence":1,"sustainRequired":3,"timestamp":1791713517801}
+{"event":"TOP1_CHANGED","from":"B Minor","to":"A Minor","time":6}
+{"time":6,"top1":"A Minor","top2":"A Major","confidence":1.5215182550774278,"margin":0.1683480968599611,"stability":0.25,"top1Stable":0,"decisionScore":0.8149035063481387,"votes":1,"window":2,"locked":false,"highConfidenceStreak":0}
+{"event":"TOP1_CHANGED","from":"A Minor","to":"B Minor","time":7.5}
+{"time":7.5,"top1":"B Minor","top2":"A Minor","confidence":0,"margin":0.10178388918726622,"stability":0,"top1Stable":0,"decisionScore":0.576833113961279,"votes":0,"window":2,"locked":false}
+{"time":9,"top1":"B Minor","top2":"B Major","confidence":1.5157262436744896,"margin":0.1117678845845913,"stability":0.4444444444444444,"top1Stable":1.499,"decisionScore":0.7912866976746493,"votes":2,"window":3,"locked":false,"highConfidenceStreak":0}
+{"time":10.5,"top1":"B Minor","top2":"B Major","confidence":1.4612366272646375,"margin":0.04772702097566417,"stability":0.5625,"top1Stable":2.999,"decisionScore":0.614106476115688,"votes":3,"window":4,"locked":false,"highConfidenceStreak":0}
+{"time":12,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.038239747067010166,"stability":0,"top1Stable":4.499,"decisionScore":0.28062618086261654,"votes":0,"window":4,"locked":false}
+{"time":13.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.038239747067010166,"stability":0,"top1Stable":5.999,"decisionScore":0.28062618086261654,"votes":0,"window":4,"locked":false}
+{"time":15,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03940140421129534,"stability":0,"top1Stable":7.499,"decisionScore":0.2849710948002128,"votes":0,"window":4,"locked":false}
+{"time":16.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":9,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":18,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":10.499,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":19.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":11.999,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":21,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":13.499,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":22.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":15.001,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":24,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":16.499,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":25.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":17.999,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":27,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":19.499,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":28.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":21,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":30,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":22.5,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":31.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":24,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":33,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":25.499,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":34.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":26.999,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":36,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":28.499,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":37.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":29.999,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":39,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":31.5,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":40.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":32.999,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":42,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":34.499,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":43.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":35.999,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":45,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":37.499,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":46.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":39,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":48,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":40.499,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
+{"time":49.5,"top1":"B Minor","top2":"B Major","confidence":0,"margin":0.03937267284180335,"stability":0,"top1Stable":41.999,"decisionScore":0.28511325016305167,"votes":0,"window":4,"locked":false}
