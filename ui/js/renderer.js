@@ -764,6 +764,32 @@ const keySource = {
 };
 
 let lastPluginKey = appState.originalKey; // giá trị THẬT đã gửi xuống Plugin lần gần nhất (chống gửi trùng)
+// TASK AI-KEY-FAST-08 — chống gửi lại + log lặp khi Mouse Control TẮT (status "MOUSE_DISABLED"). KHÔNG có vòng retry nền: chỉ quyết định
+// tại thời điểm applyActiveKeyToPlugin() được gọi. Phát hiện "bật lại" bằng cách ĐỌC LẠI đúng 2 setting mà sendKeyToAutotune() đọc
+// (mouseControlEnabled, midiOutputPort) — chữ ký đổi => thử gửi lại ngay, không cần bài/Key đổi. Lỗi KHÁC MOUSE_DISABLED: giữ nguyên hành vi cũ.
+// Chỉ áp cho đường AI/Database (applyActiveKeyToPlugin); nút SEND thủ công của người dùng giữ nguyên.
+const __pluginMouseBlock = { active: false, sig: null, keys: {}, logged: false, episodes: 0, suppressedSends: 0, suppressedLogs: 0, recoveries: 0 };
+function pluginMouseSig() { try { return typeof getSetting === "function" ? `${getSetting("mouseControlEnabled")}|${getSetting("midiOutputPort")}` : "n/a"; } catch (e) { return "err"; } }
+function pluginSendShouldSkip(value) {
+    const b = __pluginMouseBlock;
+    if (!b.active) return false;
+    if (b.sig !== pluginMouseSig()) { b.active = false; b.keys = {}; b.logged = false; b.recoveries++; return false; } // Mouse Control/MIDI đổi => cho gửi lại
+    if (b.keys[value]) { b.suppressedSends++; return true; } // cùng Key đã thử trong đợt lỗi này
+    return false; // Key mới: vẫn thử (hành vi cũ), nhưng log lỗi không lặp
+}
+// Trả true nếu NÊN nuốt console.error (chỉ với MOUSE_DISABLED lặp trong cùng đợt lỗi).
+function pluginSendOutcome(value, result) {
+    const b = __pluginMouseBlock;
+    if (result && result.ok) { b.active = false; b.keys = {}; b.logged = false; return false; }
+    if (result && result.status === "MOUSE_DISABLED") {
+        if (!b.active) { b.active = true; b.sig = pluginMouseSig(); b.keys = {}; b.logged = false; b.episodes++; }
+        b.keys[value] = true;
+        if (b.logged) { b.suppressedLogs++; return true; }
+        b.logged = true; return false;
+    }
+    b.active = false; b.keys = {}; b.logged = false; // lỗi khác: kết thúc đợt MOUSE_DISABLED, giữ log như cũ
+    return false;
+}
 let lastNowPlayingKey = null;             // "<title>|<artist>" gần nhất, để tự phát hiện đổi bài (mục IX)
 
 // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — true SAU KHI đã có ít nhất 1 kết quả Key
@@ -923,17 +949,20 @@ function applyActiveKeyToPlugin(sourceLabel) {
 
     }
 
+    if (typeof pluginSendShouldSkip === "function" && pluginSendShouldSkip(value)) return; // TASK AI-KEY-FAST-08: MOUSE_DISABLED cùng Key, setting chưa đổi
+
     setStatus("dot-key", "pending");
 
     sendKeyToAutotune(value).then((result) => {
 
         if (typeof aiRecordPluginSend === "function") aiRecordPluginSend(value, result, sourceLabel); // TASK AI-KEY-FAST-07 (chỉ đếm/log)
         if (result.ok) {
+            if (typeof pluginSendOutcome === "function") pluginSendOutcome(value, result);
             setStatus("dot-key", "online");
             lastPluginKey = value;
         } else {
             setStatus("dot-key", "offline");
-            console.error("sendKeyToAutotune lỗi:", result.detail);
+            if (!(typeof pluginSendOutcome === "function" && pluginSendOutcome(value, result))) console.error("sendKeyToAutotune lỗi:", result.detail);
         }
 
         refreshKeySourceDisplay();
@@ -1116,7 +1145,7 @@ function aiRecordPluginSend(value, result, sourceLabel) {
     } catch (e) {}
 }
 window.__aiKeyHistory = () => __aiKeyHistory.slice();
-window.__aiPluginSendStats = () => JSON.parse(JSON.stringify(__aiPluginSend));
+window.__aiPluginSendStats = () => ({ ...JSON.parse(JSON.stringify(__aiPluginSend)), mouseBlock: JSON.parse(JSON.stringify(__pluginMouseBlock)) });
 // TASK AI-KEY-FAST-03 — trạng thái SỐNG (đọc trực tiếp tại thời điểm gọi, KHÔNG phải snapshot): dùng để biết luồng đứt ở đâu.
 // Chỉ đọc; không đổi hành vi. Gọi trong DevTools: JSON.stringify(window.__aiDiagStatus(), null, 2)
 window.__aiDiagStatus = () => {
