@@ -286,32 +286,70 @@ async function listMidiOutputs() {
     }
 }
 
+// TASK MIDI-01 — CHẨN ĐOÁN đường MIDI (chỉ ghi nhận, không đổi giao thức). Trạng thái:
+//   MIDI_UNINITIALIZED / MIDI_NO_OUTPUT (Web MIDI không dùng được) / MIDI_PORT_NOT_SELECTED / MIDI_PORT_NOT_FOUND / MIDI_PORT_CLOSED (port
+//   state "disconnected" hoặc send() ném InvalidStateError) / MIDI_SEND_ATTEMPTED / MIDI_SEND_FAILED / MIDI_SENT_UNCONFIRMED.
+//   Web MIDI KHÔNG có xác nhận phía đích => KHÔNG BAO GIỜ có MIDI_RECEIVED_AT_DESTINATION từ mã này (cần MIDI monitor/loopback ngoài).
+//   Đọc trong DevTools: window.__midiDiagReport(). Bộ đệm vòng 60 mục; chỉ console.warn khi lỗi MỚI khác lỗi liền trước (không log lặp).
+const __midiDiagBuf = [];
+let __midiDiagLastWarn = null;
+function midiDiag(state, extra) {
+    try {
+        const corr = (typeof window !== "undefined" && window.__midiCorrelation) || null;
+        const rec = { t: Date.now(), state, corr: corr ? corr.id : null, ...(extra || {}) };
+        __midiDiagBuf.push(rec); if (__midiDiagBuf.length > 60) __midiDiagBuf.shift();
+        if (/FAILED|NOT_FOUND|NOT_SELECTED|CLOSED|NO_OUTPUT/.test(state)) {
+            const sig = state + "|" + (extra && (extra.port || extra.error) || "");
+            if (sig !== __midiDiagLastWarn) { __midiDiagLastWarn = sig; console.warn("[MIDI-DIAG]", rec); }
+        } else if (state === "MIDI_SENT_UNCONFIRMED") { __midiDiagLastWarn = null; }
+    } catch (e) { /* chẩn đoán không bao giờ được làm hỏng đường gửi */ }
+}
+if (typeof window !== "undefined") window.__midiDiagReport = () => __midiDiagBuf.slice();
+
 // Lấy đúng cổng MIDI đã lưu trong Setup (theo tên cổng)
 async function getSelectedMidiOutput() {
     const portName = getSetting("midiOutputPort");
-    if (!portName) return null;
+    if (!portName) { midiDiag("MIDI_PORT_NOT_SELECTED"); return null; }
 
     try {
         const access = await getMidiAccess();
-        return [...access.outputs.values()].find((o) => o.name === portName) || null;
+        const port = [...access.outputs.values()].find((o) => o.name === portName) || null;
+        if (!port) midiDiag("MIDI_PORT_NOT_FOUND", { port: portName, available: [...access.outputs.values()].length });
+        return port;
     } catch (err) {
         console.error("Không mở được cổng MIDI:", err);
+        midiDiag("MIDI_NO_OUTPUT", { port: portName, error: String(err && err.message || err) });
         return null;
     }
+}
+
+// TASK MIDI-01 — output.send() có thể NÉM (vd InvalidStateError khi cổng bị rút/loopMIDI tắt). Hợp đồng của các hàm gửi (xem
+// actionRegistry.js, vocalCommandRouter.js) là trả false, KHÔNG throw; trước đây ngoại lệ lan lên sendKeyToAutotune()
+// => bỏ qua nhánh fallback + promise bị reject không ai bắt. Nay bắt lỗi và trả false (kết quả true vẫn chỉ nghĩa "API send không ném", chưa xác nhận đích).
+function __midiSend(output, bytes, label) {
+    const info = { port: output.name, label, bytes: bytes.slice(), portState: output.state, connection: output.connection };
+    midiDiag("MIDI_SEND_ATTEMPTED", info);
+    try {
+        output.send(bytes);
+    } catch (err) {
+        const closed = output.state === "disconnected" || (err && err.name === "InvalidStateError");
+        midiDiag(closed ? "MIDI_PORT_CLOSED" : "MIDI_SEND_FAILED", { ...info, error: String(err && err.name || "") + ": " + String(err && err.message || err) });
+        return false;
+    }
+    midiDiag("MIDI_SENT_UNCONFIRMED", info);
+    return true;
 }
 
 async function sendMidiNoteOn(noteNumber, velocity = 100, channel = 0) {
     const output = await getSelectedMidiOutput();
     if (!output) return false;
-    output.send([0x90 | (channel & 0x0f), noteNumber & 0x7f, velocity & 0x7f]);
-    return true;
+    return __midiSend(output, [0x90 | (channel & 0x0f), noteNumber & 0x7f, velocity & 0x7f], "NOTE_ON");
 }
 
 async function sendMidiNoteOff(noteNumber, channel = 0) {
     const output = await getSelectedMidiOutput();
     if (!output) return false;
-    output.send([0x80 | (channel & 0x0f), noteNumber & 0x7f, 0]);
-    return true;
+    return __midiSend(output, [0x80 | (channel & 0x0f), noteNumber & 0x7f, 0], "NOTE_OFF");
 }
 
 // Gửi Note On rồi tự Note Off sau 1 khoảng ngắn — kiểu gửi phù hợp cho "MIDI Learn" theo nốt
@@ -325,8 +363,7 @@ async function sendMidiNotePulse(noteNumber, velocity = 100, channel = 0, durati
 async function sendMidiCC(ccNumber, value, channel = 0) {
     const output = await getSelectedMidiOutput();
     if (!output) return false;
-    output.send([0xb0 | (channel & 0x0f), ccNumber & 0x7f, value & 0x7f]);
-    return true;
+    return __midiSend(output, [0xb0 | (channel & 0x0f), ccNumber & 0x7f, value & 0x7f], "CC");
 }
 
 /* ==========================================================

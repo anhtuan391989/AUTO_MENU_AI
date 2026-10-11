@@ -773,6 +773,9 @@ function pluginMouseSig() { try { return typeof getSetting === "function" ? `${g
 function pluginSendShouldSkip(value) {
     const b = __pluginMouseBlock;
     if (!b.active) return false;
+    // TASK MIDI-01 — nếu ĐÃ cấu hình cổng MIDI thì KHÔNG bỏ qua lần gửi: đường MIDI có thể hồi phục mà KHÔNG đổi setting nào (cắm lại cổng/loopMIDI
+    // bật lại), nên phải thử lại mỗi lần như trước FAST-08. FAST-08 vẫn nuốt log lỗi lặp (pluginSendOutcome) trong cùng đợt lỗi.
+    try { if (typeof getSetting === "function" && getSetting("midiOutputPort")) return false; } catch (e) {}
     if (b.sig !== pluginMouseSig()) { b.active = false; b.keys = {}; b.logged = false; b.recoveries++; return false; } // Mouse Control/MIDI đổi => cho gửi lại
     if (b.keys[value]) { b.suppressedSends++; return true; } // cùng Key đã thử trong đợt lỗi này
     return false; // Key mới: vẫn thử (hành vi cũ), nhưng log lỗi không lặp
@@ -953,9 +956,13 @@ function applyActiveKeyToPlugin(sourceLabel) {
 
     setStatus("dot-key", "pending");
 
+    // TASK MIDI-01 — correlation ID cho 1 lần áp dụng Key (đọc bởi midiDiag trong appSettings.js); AI_KEY_READY ≠ MIDI_SEND_ATTEMPTED.
+    try { window.__midiCorrelation = { id: `k${Date.now().toString(36)}-${(window.__midiCorrSeq = (window.__midiCorrSeq || 0) + 1)}`, key: value, caller: sourceLabel || null };
+          if (typeof midiDiag === "function") midiDiag("AI_KEY_READY", { key: value, caller: sourceLabel || null }); } catch (e) {}
     sendKeyToAutotune(value).then((result) => {
 
         if (typeof aiRecordPluginSend === "function") aiRecordPluginSend(value, result, sourceLabel); // TASK AI-KEY-FAST-07 (chỉ đếm/log)
+        try { if (typeof midiDiag === "function") midiDiag("PLUGIN_SEND_RESULT", { key: value, ok: !!result.ok, driver: result.driverUsed || null, status: result.status || null, midi: result.midi || null, confirmation: result.confirmation || null }); } catch (e) {}
         if (result.ok) {
             if (typeof pluginSendOutcome === "function") pluginSendOutcome(value, result);
             setStatus("dot-key", "online");

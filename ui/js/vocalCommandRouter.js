@@ -119,12 +119,16 @@ function isMouseFallbackAllowed() {
 async function sendKeyToAutotune(keyName) {
     const root = keyName.match(/^[A-G]#?/)?.[0];
     const note = NOTE_MAP[root];
+    // TASK MIDI-01 — chỉ THÊM trường chẩn đoán vào kết quả (không đổi ok/driverUsed/status/detail): midi = {attempted, sent|reason}.
+    let midi = { attempted: false, reason: getSetting("midiOutputPort") ? "NO_NOTE_FOR_KEY" : "MIDI_PORT_NOT_SELECTED" };
 
     // --- 1) Ưu tiên MIDI ---
     const midiPort = getSetting("midiOutputPort");
     if (midiPort && note !== undefined) {
         const sent = await sendMidiNotePulse(note);
-        if (sent) return { ok: true, driverUsed: "midi" };
+        midi = { attempted: true, sent: !!sent, port: midiPort, note };
+        // sent=true chỉ nghĩa là API Web MIDI không ném lỗi (MIDI_SENT_UNCONFIRMED) — KHÔNG xác nhận phía đích đã nhận.
+        if (sent) return { ok: true, driverUsed: "midi", midi, confirmation: "MIDI_SENT_UNCONFIRMED" };
         // Nếu gửi lỗi (vd cổng MIDI đã bị rút/đổi tên) -> rơi xuống fallback bên dưới
     }
 
@@ -136,15 +140,17 @@ async function sendKeyToAutotune(keyName) {
                 ok: false,
                 driverUsed: "mouse",
                 status: "MOUSE_DISABLED",
+                midi,
                 detail: 'Mouse Control đang TẮT (Setup > Calibration) — không tự click chuột để đổi Key. Bật lại Mouse Control hoặc cấu hình MIDI (Setup > MIDI) để Key tiếp tục gửi tự động.',
             };
         }
         const result = await window.electronAPI.clickAtPoint(point);
-        return { ok: result.ok, driverUsed: "mouse", detail: result.detail };
+        return { ok: result.ok, driverUsed: "mouse", midi, detail: result.detail };
     }
 
     return {
         ok: false,
+        midi,
         detail: 'Chưa cấu hình cổng MIDI (Setup > MIDI) hoặc toạ độ "Key Auto-Tune" (Setup > Lấy tọa độ).',
     };
 }
