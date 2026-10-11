@@ -317,6 +317,14 @@
         if (options.exposeRawNodeForAdapter) {
             api.getAudioContextForAdapter = () => audioContext;
             api.getRawSourceNodeForAdapter = () => mediaSourceNode;
+            // TASK AI-KEY-FAST-05 — chẩn đoán chỉ-đọc: trạng thái AudioContext + track thật (nhãn, muted, readyState, channelCount).
+            api.getDiagnostics = () => {
+                const t = stream && stream.getAudioTracks ? stream.getAudioTracks()[0] : null;
+                let settings = null; try { settings = t && t.getSettings ? t.getSettings() : null; } catch (e) {}
+                return { state, ctxState: audioContext ? audioContext.state : null, sampleRate: audioContext ? audioContext.sampleRate : null,
+                    trackLabel: t ? t.label : null, trackMuted: t ? t.muted : null, trackEnabled: t ? t.enabled : null, trackReadyState: t ? t.readyState : null,
+                    channelCount: settings ? settings.channelCount ?? null : null, deviceIdSet: !!(settings && settings.deviceId) };
+            };
         }
 
         return api;

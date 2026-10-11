@@ -93,6 +93,10 @@ const KeyEngine = (() => {
     const provisionalListeners = [];
     let provisionalTimerId = null;
 
+    // TASK AI-KEY-FAST-05 — PROBE tín hiệu tại ĐÚNG điểm KeyEngine đọc phổ (chỉ ghi số để chẩn đoán; KHÔNG tham gia
+    // quyết định Key). Đọc qua getDebugSnapshot().inputProbe.
+    const inputProbe = { frames: 0, framesWithContent: 0, lastContentRms: 0, maxContentRms: 0, lastMaxDb: null, maxDbEver: null, finiteBins: 0, sampleRate: null, fftSize: null, binCount: null, lastFrameAt: null };
+
     function init(audioContext, sourceNode) {
         audioCtxRef = audioContext;
         chromaAnalyser = audioContext.createAnalyser();
@@ -112,6 +116,7 @@ const KeyEngine = (() => {
         candidateHistory = {};
 
         frameCounter = 0;
+        inputProbe.frames = 0; inputProbe.framesWithContent = 0; inputProbe.lastContentRms = 0; inputProbe.maxContentRms = 0; inputProbe.lastMaxDb = null; inputProbe.maxDbEver = null; inputProbe.finiteBins = 0; // TASK AI-KEY-FAST-05
         firstEvidenceAt = null;
         firstEvidenceFrame = null;
         firstProvisionalAt = null;
@@ -172,6 +177,18 @@ const KeyEngine = (() => {
             contentRms += amp * amp;
         }
         const frameHasContent = contentCount > 0 && Math.sqrt(contentRms / contentCount) > 0.0005;
+        // TASK AI-KEY-FAST-05 — chỉ ghi probe (không dùng cho quyết định). maxDb = bin lớn nhất trong 50–6000 Hz;
+        // -Infinity/null = buffer toàn "không có tín hiệu"; finiteBins = số bin > -100 dB.
+        try {
+            let maxDb = -Infinity, finite = 0;
+            for (let b = BIN_LO; b <= BIN_HI; b++) { const d = chromaDataArray[b]; if (d > maxDb) maxDb = d; if (d > -100) finite++; }
+            const rmsVal = contentCount > 0 ? Math.sqrt(contentRms / contentCount) : 0;
+            inputProbe.frames++; if (frameHasContent) inputProbe.framesWithContent++;
+            inputProbe.lastContentRms = rmsVal; if (rmsVal > inputProbe.maxContentRms) inputProbe.maxContentRms = rmsVal;
+            inputProbe.lastMaxDb = Number.isFinite(maxDb) ? maxDb : null;
+            if (inputProbe.lastMaxDb !== null && (inputProbe.maxDbEver === null || inputProbe.lastMaxDb > inputProbe.maxDbEver)) inputProbe.maxDbEver = inputProbe.lastMaxDb;
+            inputProbe.finiteBins = finite; inputProbe.sampleRate = sampleRate; inputProbe.fftSize = chromaAnalyser.fftSize; inputProbe.binCount = binCount; inputProbe.lastFrameAt = Date.now();
+        } catch (e) { /* probe không bao giờ được làm hỏng vòng phân tích */ }
 
         contentEnergyEMA = contentEnergyEMA * 0.9 + (frameHasContent ? 1 : 0) * 0.1;
         hasMusicalContent = contentEnergyEMA >= 0.5;
@@ -691,7 +708,7 @@ const KeyEngine = (() => {
     function getDebugSnapshot() {
         return {
             chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice(),
-            frameCounter, hasMusicalContent, contentEnergyEMA,
+            frameCounter, hasMusicalContent, contentEnergyEMA, inputProbe: { ...inputProbe },
             firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
         };
     }

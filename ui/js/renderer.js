@@ -1098,7 +1098,10 @@ window.__aiDiagStatus = () => {
         systemAudioExists: !!window.__systemAudioSource, systemAudioState: null, audioMonitorStarted: typeof audioMonitorStarted !== "undefined" ? audioMonitorStarted : null,
         keyEngineFrames: null, keyEngineHasMusicalContent: null, aiDiagEnabled: null };
     try { out.systemAudioState = window.__systemAudioSource?.getState?.() ?? null; } catch (e) {}
-    try { const d = typeof KeyEngine !== "undefined" && KeyEngine.getDebugSnapshot ? KeyEngine.getDebugSnapshot() : null; if (d) { out.keyEngineFrames = d.frameCounter; out.keyEngineHasMusicalContent = d.hasMusicalContent; } } catch (e) {}
+    try { const d = typeof KeyEngine !== "undefined" && KeyEngine.getDebugSnapshot ? KeyEngine.getDebugSnapshot() : null; if (d) { out.keyEngineFrames = d.frameCounter; out.keyEngineHasMusicalContent = d.hasMusicalContent; out.keyInput = d.inputProbe || null; out.keyChroma = d.chromaVector; } } catch (e) {}
+    // TASK AI-KEY-FAST-05 — mức VU (analyser BPMEngine, cùng raw source node với KeyEngine) + thông tin track/AudioContext thật của SYSTEM_AUDIO.
+    try { out.musicVuLevel = window.__aiLastLevel ? { ...window.__aiLastLevel, ageMs: Date.now() - window.__aiLastLevel.t } : null; } catch (e) {}
+    try { out.sourceInfo = window.__systemAudioSource?.getDiagnostics?.() ?? null; } catch (e) {}
     try { const en = typeof getSetting === "function" ? getSetting("aiDiagLogEnabled", true) : true; out.aiDiagEnabled = !(en === false || en === "false"); } catch (e) {}
     return out;
 };
@@ -1225,7 +1228,13 @@ function triggerAiKeyDetect() {
 
     }
 
-    if (typeof aiDiag === "function") aiDiag("KEY_TRIGGER"); // AI-NOWPLAYING-OPT-02 (chỉ log)
+    if (typeof aiDiag === "function") {
+        // TASK AI-KEY-FAST-05 — ghi NGƯỜI GỌI (dòng stack ngay sau triggerAiKeyDetect) + trạng thái watcher/epoch để chứng minh
+        // lần gọi nào KEEP/CANCEL/START. Chỉ log (không đổi luồng, không đổi chữ ký hàm nên A61 không bị ảnh hưởng).
+        let caller = null; try { caller = String(new Error().stack || "").split("\n").slice(2, 4).map((x) => x.trim().replace(/^at\s+/, "")).join(" <- "); } catch (e) {}
+        aiDiag("KEY_TRIGGER", { caller, gen: __aiCycleGen, epoch: window.__aiEngineEpoch ?? null, hasSrc: !!window.__aiEngineSrc, watcherActive: !!window.__keyDetectStopWatcher,
+            metaEpoch: window.__keyWatcherMeta ? (window.__keyWatcherMeta.epoch ?? null) : null, srcState: window.__systemAudioSource?.getState?.() ?? null });
+    } // AI-NOWPLAYING-OPT-02 (log)
     // TASK AI-KEY-FAST-02 — watcher đang chạy VÀ cùng chu trình (token) + cùng epoch engine + cùng nguồn
     // audio => KHÔNG huỷ/khởi động lại (giữ tiến độ tích luỹ, ví dụ timer 2s của bindAiEnginesToSystemAudio).
     // Khác token/epoch/nguồn (đổi bài, bind lại/reconnect/đổi thiết bị) hoặc không còn watcher => huỷ + tạo mới.
@@ -1941,6 +1950,8 @@ function bindAiEnginesToSystemAudio(systemAudio) {
             });
 
             BPMEngine.onLevel(({ bassEnergy, localAvg, maxByte, vuPercent, rms, dbfs, peak }) => {
+                // TASK AI-KEY-FAST-05 — lưu mức mới nhất của analyser BPMEngine (chính là nguồn của Music VU) để đối chiếu với probe KeyEngine.
+                (window.__aiLastLevel = window.__aiLastLevel || {}); Object.assign(window.__aiLastLevel, { rms, dbfs, peak, vuPercent, maxByte, bassFlux: bassEnergy, t: Date.now() });
                 // TASK B58 — Music VU: RMS/dBFS toàn dải của SYSTEM_AUDIO (vuPercent, KHÔNG đổi
                 // nguồn số liệu so với #vu-fill cũ — chỉ đổi element đích sang #vu-music-fill).
                 const musicMeter = document.getElementById("vu-music-fill");

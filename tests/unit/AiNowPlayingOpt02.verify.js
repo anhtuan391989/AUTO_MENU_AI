@@ -67,7 +67,7 @@ console.log('\n== 4. Log chẩn đoán: hành vi (chạy hàm thật aiDiag) và
     ok(sb.S.history.length === 1 && sb.S.history[0].song === 'A|x' && sb.S.cur.song === 'B|y' && sb.S.cur.staleDrops === 1, 'bài mới tách chu trình cũ khỏi chu trình mới; đếm kết quả cũ bị bỏ');
     enabled = false; const n = logs.length; sb.D('KEY_TRIGGER'); ok(logs.length === n, 'tắt bằng setting aiDiagLogEnabled=false => im lặng');
     ok(/__aiDiagReport/.test(src), 'có window.__aiDiagReport() để xem tổng hợp trong DevTools');
-    ok(/typeof aiDiag === "function"\) aiDiag\("KEY_TRIGGER"\)/.test(fnText('triggerAiKeyDetect')), 'log trong triggerAiKeyDetect có guard typeof (hàm được test A61 trích đọc độc lập)');
+    ok(/typeof aiDiag === "function"\) \{[\s\S]{0,900}?aiDiag\("KEY_TRIGGER"/.test(fnText('triggerAiKeyDetect')), 'log trong triggerAiKeyDetect có guard typeof (hàm được test A61 trích đọc độc lập)');
     ok(/typeof aiDiag === "function"\) aiDiag\("KEY_RESULT"/.test(fnText('startAiRealtimeLoop')), 'log trong startAiRealtimeLoop có guard typeof');
 }
 console.log('\n== 5. Ranh giới: không đổi thuật toán/ngưỡng/routing ==');
