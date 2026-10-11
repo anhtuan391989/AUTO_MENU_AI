@@ -927,6 +927,7 @@ function applyActiveKeyToPlugin(sourceLabel) {
 
     sendKeyToAutotune(value).then((result) => {
 
+        if (typeof aiRecordPluginSend === "function") aiRecordPluginSend(value, result, sourceLabel); // TASK AI-KEY-FAST-07 (chỉ đếm/log)
         if (result.ok) {
             setStatus("dot-key", "online");
             lastPluginKey = value;
@@ -1089,6 +1090,33 @@ function aiDiag(event, extra) {
     } catch (e) { /* diagnostics không bao giờ được làm hỏng luồng AI */ }
 }
 window.__aiDiagReport = () => [...__aiDiagState.history, ...(__aiDiagState.cur ? [__aiDiagState.cur] : [])];
+// TASK AI-KEY-FAST-07 — CHỈ CHẨN ĐOÁN (không đổi hành vi): lịch sử kết quả Key (mọi KEY_RESULT đều là kết quả ĐÃ KHÓA vì
+// onWinner chỉ chạy khi khóa) + bộ đếm gửi Key sang Plugin theo từng giá trị (thành công/thất bại/thử lại).
+const __aiKeyHistory = [];
+const __aiPluginSend = { total: 0, ok: 0, fail: 0, byKey: {}, lastStatus: null, lastDetail: null };
+function aiRecordKeyResult(result, meta) {
+    try {
+        const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+        __aiKeyHistory.push({ tMs: Math.round(now), wall: Date.now(), gen: __aiCycleGen, epoch: window.__aiEngineEpoch ?? null, key: result.key, rootIndex: result.rootIndex, mode: result.mode,
+            confidence: result.confidence, margin: result.margin ?? null, top1: result.top1 ?? null, top2: result.top2 ?? null, bassAgreement: result.bassAgreement ?? null,
+            hasMusicalContent: result.hasMusicalContent ?? null, locked: true, ...(meta || {}) });
+        if (__aiKeyHistory.length > 20) __aiKeyHistory.shift();
+    } catch (e) {}
+}
+function aiRecordPluginSend(value, result, sourceLabel) {
+    try {
+        const k = __aiPluginSend.byKey[value] || (__aiPluginSend.byKey[value] = { attempts: 0, ok: 0, fail: 0, retriesAfterFail: 0, lastStatus: null });
+        const retry = k.fail > 0 && k.ok === 0; // thử lại cùng Key sau khi chưa từng thành công
+        k.attempts++; __aiPluginSend.total++;
+        if (retry) k.retriesAfterFail++;
+        if (result && result.ok) { k.ok++; __aiPluginSend.ok++; } else { k.fail++; __aiPluginSend.fail++; }
+        k.lastStatus = (result && result.status) || null;
+        __aiPluginSend.lastStatus = k.lastStatus; __aiPluginSend.lastDetail = (result && result.detail) || null;
+        if (typeof aiDiag === "function") aiDiag("PLUGIN_SEND", { key: value, ok: !!(result && result.ok), status: k.lastStatus, attempt: k.attempts, retry, caller: sourceLabel || null });
+    } catch (e) {}
+}
+window.__aiKeyHistory = () => __aiKeyHistory.slice();
+window.__aiPluginSendStats = () => JSON.parse(JSON.stringify(__aiPluginSend));
 // TASK AI-KEY-FAST-03 — trạng thái SỐNG (đọc trực tiếp tại thời điểm gọi, KHÔNG phải snapshot): dùng để biết luồng đứt ở đâu.
 // Chỉ đọc; không đổi hành vi. Gọi trong DevTools: JSON.stringify(window.__aiDiagStatus(), null, 2)
 window.__aiDiagStatus = () => {
@@ -1102,6 +1130,8 @@ window.__aiDiagStatus = () => {
     // TASK AI-KEY-FAST-05 — mức VU (analyser BPMEngine, cùng raw source node với KeyEngine) + thông tin track/AudioContext thật của SYSTEM_AUDIO.
     try { out.musicVuLevel = window.__aiLastLevel ? { ...window.__aiLastLevel, ageMs: Date.now() - window.__aiLastLevel.t } : null; } catch (e) {}
     try { out.sourceInfo = window.__systemAudioSource?.getDiagnostics?.() ?? null; } catch (e) {}
+    // TASK AI-KEY-FAST-07 — lịch sử Key đã khóa + thống kê gửi Plugin.
+    try { out.keyHistory = __aiKeyHistory.slice(-10); out.pluginSend = JSON.parse(JSON.stringify(__aiPluginSend)); } catch (e) {}
     try { const en = typeof getSetting === "function" ? getSetting("aiDiagLogEnabled", true) : true; out.aiDiagEnabled = !(en === false || en === "false"); } catch (e) {}
     return out;
 };
@@ -1186,7 +1216,8 @@ function startAiRealtimeLoop() {
             // TASK AI-KEY-FAST-06 — stack rút gọn tại thời điểm có kết quả (phân biệt callback lồng nhau với vòng chạy song song) + số vòng đang chạy.
             let st = null; try { st = String(new Error().stack || "").split("\n").slice(1, 7).map((x) => x.trim().replace(/^at\s+/, "")); } catch (e) {}
             let loops = null; try { loops = KeyEngine.getDebugSnapshot().loopStats; } catch (e) {}
-            aiDiag("KEY_RESULT", { key: result.key, confidence: result.confidence, loops, stack: st });
+            aiDiag("KEY_RESULT", { key: result.key, confidence: result.confidence, margin: result.margin ?? null, bassAgreement: result.bassAgreement ?? null, locked: true, gen: cycleGen, epoch: window.__aiEngineEpoch ?? null, loops, stack: st });
+            if (typeof aiRecordKeyResult === "function") aiRecordKeyResult(result, { loops: loops ? { started: loops.started, stopped: loops.stopped, active: loops.active, maxActive: loops.maxActive } : null });
         }
 
         window.__keyDetectStopWatcher = null;
