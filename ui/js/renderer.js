@@ -1064,7 +1064,15 @@ function aiDiag(event, extra) {
             if (__aiDiagState.cur) __aiDiagState.history.push(__aiDiagState.cur);
             if (__aiDiagState.history.length > 30) __aiDiagState.history.shift();
             __aiDiagState.t0 = now;
-            __aiDiagState.cur = { gen: __aiCycleGen, song: __aiDiagState.song, triggers: 0, cancels: 0, staleDrops: 0, bpmUpdates: 0, keyResults: 0, firstKeyMs: null, firstBpmMs: null };
+            __aiDiagState.cur = { gen: __aiCycleGen, song: __aiDiagState.song, triggers: 0, cancels: 0, staleDrops: 0, bpmUpdates: 0, keyResults: 0, firstKeyMs: null, firstBpmMs: null,
+                // TASK AI-KEY-FAST-03 — chỉ chẩn đoán: nguồn lúc bắt đầu chu trình + số lần bind/giữ watcher/không chạy vì nguồn chưa RUNNING
+                srcStateAtStart: (extra && extra.source) || null, binds: 0, keptWatcher: 0, skippedNotRunning: 0 };
+        } else if (!__aiDiagState.cur) {
+            // Sự kiện xảy ra TRƯỚC chu trình NowPlaying đầu tiên (vd. bootstrap 2s sau khi mở app): trước đây bị bỏ rơi
+            // (không có bộ đếm) => report không thấy. Nay gom vào chu trình gen hiện tại (0) với song=null.
+            __aiDiagState.t0 = now;
+            __aiDiagState.cur = { gen: __aiCycleGen, song: null, triggers: 0, cancels: 0, staleDrops: 0, bpmUpdates: 0, keyResults: 0, firstKeyMs: null, firstBpmMs: null,
+                srcStateAtStart: null, binds: 0, keptWatcher: 0, skippedNotRunning: 0 };
         }
         const c = __aiDiagState.cur, dt = __aiDiagState.t0 === null ? null : Math.round(now - __aiDiagState.t0);
         if (c) {
@@ -1073,11 +1081,27 @@ function aiDiag(event, extra) {
             else if (event === "KEY_RESULT_STALE_DROPPED") c.staleDrops++;
             else if (event === "KEY_RESULT") { c.keyResults++; if (c.firstKeyMs === null) c.firstKeyMs = dt; }
             else if (event === "BPM_UPDATE") { c.bpmUpdates++; if (c.firstBpmMs === null) c.firstBpmMs = dt; }
+            else if (event === "ENGINE_BIND") c.binds++;
+            else if (event === "KEY_TRIGGER_KEPT_VALID_WATCHER") c.keptWatcher++;
+            else if (event === "NP_RESTART_SKIPPED_SOURCE_NOT_RUNNING") c.skippedNotRunning++;
         }
         console.log(`[AI-DIAG] cycle=${__aiCycleGen} song="${__aiDiagState.song}" +${dt}ms ${event}`, extra === undefined ? "" : extra);
     } catch (e) { /* diagnostics không bao giờ được làm hỏng luồng AI */ }
 }
 window.__aiDiagReport = () => [...__aiDiagState.history, ...(__aiDiagState.cur ? [__aiDiagState.cur] : [])];
+// TASK AI-KEY-FAST-03 — trạng thái SỐNG (đọc trực tiếp tại thời điểm gọi, KHÔNG phải snapshot): dùng để biết luồng đứt ở đâu.
+// Chỉ đọc; không đổi hành vi. Gọi trong DevTools: JSON.stringify(window.__aiDiagStatus(), null, 2)
+window.__aiDiagStatus = () => {
+    const out = { cycleGen: __aiCycleGen, engineEpoch: window.__aiEngineEpoch ?? null, hasEngineSrc: !!window.__aiEngineSrc,
+        watcherActive: !!window.__keyDetectStopWatcher, watcherMeta: window.__keyWatcherMeta ? { ...window.__keyWatcherMeta, src: window.__keyWatcherMeta.src ? "[node]" : null } : null,
+        metaMatchesCurrent: !!(window.__keyWatcherMeta && window.__keyWatcherMeta.gen === __aiCycleGen && window.__keyWatcherMeta.epoch === window.__aiEngineEpoch && window.__keyWatcherMeta.src === window.__aiEngineSrc),
+        systemAudioExists: !!window.__systemAudioSource, systemAudioState: null, audioMonitorStarted: typeof audioMonitorStarted !== "undefined" ? audioMonitorStarted : null,
+        keyEngineFrames: null, keyEngineHasMusicalContent: null, aiDiagEnabled: null };
+    try { out.systemAudioState = window.__systemAudioSource?.getState?.() ?? null; } catch (e) {}
+    try { const d = typeof KeyEngine !== "undefined" && KeyEngine.getDebugSnapshot ? KeyEngine.getDebugSnapshot() : null; if (d) { out.keyEngineFrames = d.frameCounter; out.keyEngineHasMusicalContent = d.hasMusicalContent; } } catch (e) {}
+    try { const en = typeof getSetting === "function" ? getSetting("aiDiagLogEnabled", true) : true; out.aiDiagEnabled = !(en === false || en === "false"); } catch (e) {}
+    return out;
+};
 
 function restartAiForNewSong(songKey) {
     __aiCycleGen++; // vô hiệu hoá mọi callback/timer của bài trước
@@ -1091,6 +1115,7 @@ function restartAiForNewSong(songKey) {
     } else {
         // Chưa có nguồn/frame: chỉ về trạng thái chờ, KHÔNG giả lập Key/BPM. Khi SYSTEM_AUDIO RUNNING,
         // bindAiEnginesToSystemAudio() tự khởi động lại việc dò như cũ.
+        aiDiag("NP_RESTART_SKIPPED_SOURCE_NOT_RUNNING", { source: sys?.getState?.() ?? (sys ? "?" : "no-source-yet") }); // TASK AI-KEY-FAST-03 (chỉ log)
         resetAiDisplaysToListening();
         if (window.__keyDetectStopWatcher) { window.__keyDetectStopWatcher(); window.__keyDetectStopWatcher = null; }
         if (typeof ModEngine !== "undefined") ModEngine.stop();
@@ -1897,6 +1922,7 @@ function bindAiEnginesToSystemAudio(systemAudio) {
         // watcher tạo trước đó (epoch/nguồn cũ) bị triggerAiKeyDetect() coi là không còn hợp lệ.
         window.__aiEngineEpoch = (window.__aiEngineEpoch || 0) + 1;
         window.__aiEngineSrc = source;
+        if (typeof aiDiag === "function") aiDiag("ENGINE_BIND", { epoch: window.__aiEngineEpoch }); // TASK AI-KEY-FAST-03 (chỉ log)
 
         if (!__systemAudioListenersRegistered) {
             __systemAudioListenersRegistered = true;
