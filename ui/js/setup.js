@@ -15,7 +15,8 @@
 loadSetup?.();
 
 function saveSetting(key, value) {
-    setSetting(key, value);
+    // TASK A-SETUP: trả về kết quả lưu THẬT (true/false) — caller cũ bỏ qua giá trị trả về nên không bị ảnh hưởng.
+    return setSetting(key, value);
 }
 
 function loadSetting(key, fallback = "Chưa chọn") {
@@ -1452,6 +1453,11 @@ function initLinkProSection() {
         }
 
         try {
+            // TASK A78: backup phải chứa bản MỚI NHẤT, không phải state cũ trong bộ nhớ cửa sổ Setup.
+            if (refreshFromSharedFile?.() === false) {
+                alert("Không đọc được cài đặt mới nhất — chưa tạo Backup");
+                return;
+            }
             const path = await window.electronAPI.exportBackup(appSettings);
             if (path) alert("Đã backup vào:\n" + path);
         } catch (err) {
@@ -1475,8 +1481,26 @@ function initLinkProSection() {
                 return;
             }
 
+            // TASK A-SETUP: file restore phải là object thường; lưu thất bại thì hoàn tác + báo lỗi,
+            // KHÔNG reload như thể đã thành công.
+            if (data === null || typeof data !== "object" || Array.isArray(data)) {
+                alert("File backup không hợp lệ");
+                return;
+            }
+            // TASK A78 — hợp đồng HIỆN TẠI của Restore (theo code): MERGE — chỉ ghi các trường có trong
+            // file backup, giữ các trường khác (dù hộp thoại ghi "ghi đè toàn bộ"). Không đổi hành vi
+            // sản phẩm; chỉ bảo đảm merge trên bản MỚI NHẤT trong file, không phải state cũ trong bộ nhớ.
+            if (refreshFromSharedFile?.() === false) {
+                alert("Không đọc được cài đặt mới nhất — chưa Restore để tránh ghi đè");
+                return;
+            }
+            const previous = appSettings;
             appSettings = { ...appSettings, ...data };
-            saveSetup?.();
+            if (saveSetup?.(Object.keys(data)) === false) {
+                appSettings = previous;
+                alert("Restore thất bại (không ghi được file cài đặt)");
+                return;
+            }
             notifySetupChanged();
 
             // Nạp lại trang để mọi ô hiển thị (radio, checkbox, input...) đồng bộ với dữ liệu vừa restore
@@ -1631,26 +1655,36 @@ function isSetupComplete() {
     return isSetupFullyComplete();
 }
 
+// TASK A-SETUP — Preset: danh sách trường được lưu/nạp. Giữ NGUYÊN 10 trường cũ (preset cũ vẫn nạp
+// được) và thêm các trường cấu hình thiết bị/đường dẫn thật đang có trong appSettings.
+const PRESET_FIELDS = [
+    "selectedDAW", "selectedAutoKey", "selectedAutoTune", "selectedBrowser", "selectedSoundcard",
+    "autokey1", "autokey2", "autotunekey", "chromatic", "launchDAW",
+    // bổ sung (preset cũ thiếu các trường này vẫn nạp bình thường — chỉ áp những trường có mặt)
+    "selectedSoundcardId", "selectedSystemAudioDeviceId", "selectedMicDeviceId",
+    "selectedAudioOutputDeviceId", "midiOutputPort", "selectedBrowserPath", "selectedDAWPath"
+];
+
 function savePreset() {
     if (typeof appSettings === "undefined") {
         console.warn("appSettings chưa sẵn sàng");
         return;
     }
 
-    appSettings.autoMenuPreset = {
-        selectedDAW: getSetting("selectedDAW"),
-        selectedAutoKey: getSetting("selectedAutoKey"),
-        selectedAutoTune: getSetting("selectedAutoTune"),
-        selectedBrowser: getSetting("selectedBrowser"),
-        selectedSoundcard: getSetting("selectedSoundcard"),
-        autokey1: getSetting("autokey1"),
-        autokey2: getSetting("autokey2"),
-        autotunekey: getSetting("autotunekey"),
-        chromatic: getSetting("chromatic"),
-        launchDAW: getSetting("launchDAW")
-    };
+    if (refreshFromSharedFile?.() === false) {
+        alert("Không đọc được cài đặt mới nhất — chưa lưu Preset để tránh ghi đè");
+        return;
+    }
 
-    saveSetup?.();
+    const preset = {};
+    PRESET_FIELDS.forEach((key) => { preset[key] = getSetting(key); });
+    appSettings.autoMenuPreset = preset;
+
+    // TASK A-SETUP: chỉ báo "Đã lưu" khi ghi file THẬT sự thành công.
+    if (saveSetup?.(["autoMenuPreset"]) === false) {
+        alert("Lưu Preset thất bại (không ghi được file cài đặt)");
+        return;
+    }
     alert("Đã lưu Preset");
 }
 
@@ -1660,23 +1694,50 @@ function loadPreset() {
         return;
     }
 
+    if (refreshFromSharedFile?.() === false) {
+        alert("Không đọc được cài đặt mới nhất — chưa tải Preset để tránh ghi đè");
+        return;
+    }
     const preset = appSettings.autoMenuPreset;
 
     if (!preset) {
         alert("Chưa có Preset");
         return;
     }
+    if (typeof preset !== "object" || Array.isArray(preset)) {
+        alert("Preset bị hỏng, không thể tải");
+        return;
+    }
 
-    Object.keys(preset).forEach((key) => {
-        if (preset[key]) {
-            appSettings[key] = preset[key];
-        }
+    // Chỉ áp các trường thuộc danh sách; bỏ qua undefined/null/"" (không xoá cấu hình hiện có khi
+    // preset thiếu giá trị) nhưng áp cả boolean false (trước đây launchDAW=false KHÔNG bao giờ được nạp).
+    const before = {};
+    const changes = {};
+    PRESET_FIELDS.forEach((key) => {
+        if (!Object.prototype.hasOwnProperty.call(preset, key)) return;
+        const v = preset[key];
+        if (v === undefined || v === null || v === "") return;
+        if (v !== appSettings[key]) { before[key] = appSettings[key]; changes[key] = v; }
     });
 
-    saveSetup?.();
+    const keys = Object.keys(changes);
+    if (keys.length === 0) {
+        alert("Preset trùng cấu hình hiện tại — không có gì thay đổi");
+        return;
+    }
+
+    keys.forEach((key) => { appSettings[key] = changes[key]; });
+
+    if (saveSetup?.(keys) === false) {
+        keys.forEach((key) => { appSettings[key] = before[key]; }); // hoàn tác, không để bộ nhớ lệch file
+        alert("Tải Preset thất bại (không ghi được file cài đặt)");
+        return;
+    }
+
     updateSetupStatus();
     updateSetupProgress();
-    alert("Đã tải Preset");
+    notifySetupChanged();
+    alert("Đã tải Preset (" + keys.length + " mục thay đổi). Mở lại Setup để thấy các ô được cập nhật.");
 }
 
 /* ==========================================================
@@ -1778,9 +1839,12 @@ if (typeof getSetting === "function" && !window._setupMidiPatched) {
         const dawPath = dawPathEl ? dawPathEl.value.trim() : "";
         const autoLaunch = autoLaunchToggle ? autoLaunchToggle.checked : true;
 
-        saveSetting("loopMidiPath", loopPath);
-        saveSetting("dawExePath", dawPath);
-        saveSetting("autoLaunchEnabled", autoLaunch);
+        // TASK A-SETUP: trước đây luôn hiện "✅ Đã lưu" kể cả khi ghi file thất bại (báo thành công giả).
+        const saveOk = [
+          saveSetting("loopMidiPath", loopPath),
+          saveSetting("dawExePath", dawPath),
+          saveSetting("autoLaunchEnabled", autoLaunch)
+        ].every((r) => r !== false);
 
         // Cập nhật tiến độ
         if (typeof updateSetupStatus === "function") updateSetupStatus();
@@ -1789,7 +1853,7 @@ if (typeof getSetting === "function" && !window._setupMidiPatched) {
 
         // Phản hồi trực quan
         const originalText = savePathsBtn.textContent;
-        savePathsBtn.textContent = "✅ Đã lưu";
+        savePathsBtn.textContent = saveOk ? "✅ Đã lưu" : "❌ Lưu thất bại";
         savePathsBtn.disabled = true;
         setTimeout(() => {
           savePathsBtn.textContent = originalText;

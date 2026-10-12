@@ -104,6 +104,16 @@ const LEGACY_JSON_KEYS = new Set([
 
 let appSettings = { ...DEFAULT_APP_SETTINGS };
 
+// TASK A78 — "baseline" = bản cài đặt lần cuối ĐỒNG BỘ với file dùng chung (lúc nạp/lưu thành công).
+// saveSetup() so appSettings với baseline để biết cửa sổ NÀY thực sự đổi key nào, rồi chỉ áp đúng các
+// key đó lên bản MỚI NHẤT trong file (merge 3 chiều) thay vì ghi đè toàn bộ bằng state cũ.
+// null = chưa đồng bộ với file (không chạy trong Electron / chưa nạp được) -> hành vi cũ (ghi toàn bộ).
+let __settingsBaseline = null;
+
+function __cloneSettings(obj) {
+    try { return JSON.parse(JSON.stringify(obj)); } catch { return { ...obj }; }
+}
+
 function parseLegacyValue(key, raw) {
     if (!LEGACY_JSON_KEYS.has(key)) {
         return raw;
@@ -135,14 +145,25 @@ function migrateLegacyStorage() {
     }
 }
 
+// TASK A-SETUP — dữ liệu đọc từ file/localStorage chỉ được coi là hợp lệ khi là object thường
+// (không phải mảng/chuỗi/số). Trước đây một file chứa `[]` hoặc `"x"` vẫn bị spread vào appSettings.
+function isPlainSettingsObject(v) {
+    return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
 function loadSetup() {
     // 1) Ưu tiên đọc từ file dùng chung (qua main process) — chia sẻ được giữa
     //    main window và setup window, không bị cô lập như localStorage.
     try {
         const fromFile = window.electronAPI?.loadSettingsSync?.();
-        if (fromFile) {
+        if (isPlainSettingsObject(fromFile)) {
             appSettings = { ...DEFAULT_APP_SETTINGS, ...fromFile };
+            __settingsBaseline = __cloneSettings(appSettings);
             return appSettings;
+        }
+        if (typeof window.electronAPI?.loadSettingsSync === "function") {
+            // Đọc được nhưng chưa có file (lần chạy đầu) hoặc file hỏng đã được main.js sao lưu .corrupt-*.
+            __settingsBaseline = __cloneSettings(DEFAULT_APP_SETTINGS);
         }
     } catch (err) {
         console.error("loadSetup (file dùng chung) lỗi:", err);
@@ -170,14 +191,39 @@ function loadSetup() {
 // NGUYÊN 100% hành vi cũ (early-return ngay khi có electronAPI, không rơi xuống localStorage
 // dự phòng) — chỉ thêm việc TRẢ VỀ kết quả thật. Các caller cũ (không đọc giá trị trả về) hoàn
 // toàn không bị ảnh hưởng.
-function saveSetup() {
+// TASK A78 — Merge 3 chiều khi lưu. Trả về true/false như cũ (caller cũ không đổi).
+//  - Đọc bản MỚI NHẤT trong file; NẾU KHÔNG ĐỌC ĐƯỢC (IPC ném lỗi) -> KHÔNG ghi, trả false
+//    (tuyệt đối không âm thầm ghi cả state cũ đè lên dữ liệu có thể mới hơn).
+//  - Chỉ áp lên bản mới nhất những key mà cửa sổ này thật sự đổi so với baseline (+ forceKeys do
+//    setSetting truyền vào, để việc người dùng chủ động đặt 1 key luôn thắng dù giá trị trùng baseline).
+//  - Ghi thất bại -> appSettings/baseline giữ nguyên để caller hoàn tác được.
+function saveSetup(forceKeys) {
     try {
         if (window.electronAPI?.saveSettingsSync) {
-            const ok = window.electronAPI.saveSettingsSync(appSettings);
-            return ok !== false; // sendSync qua kênh lỗi hiếm khi trả undefined -> chỉ coi là fail khi rõ ràng false
+            let toWrite = appSettings;
+            let merged = null;
+            if (__settingsBaseline && typeof window.electronAPI.loadSettingsSync === "function") {
+                const latest = window.electronAPI.loadSettingsSync(); // có thể ném -> catch bên dưới, KHÔNG ghi
+                const base = isPlainSettingsObject(latest) ? latest : {};
+                merged = { ...DEFAULT_APP_SETTINGS, ...base };
+                const force = new Set(Array.isArray(forceKeys) ? forceKeys : []);
+                Object.keys(appSettings).forEach((k) => {
+                    const changed = force.has(k) ||
+                        JSON.stringify(appSettings[k]) !== JSON.stringify(__settingsBaseline[k]);
+                    if (changed) merged[k] = appSettings[k];
+                });
+                toWrite = merged;
+            }
+            const ok = window.electronAPI.saveSettingsSync(toWrite);
+            if (ok === false) return false; // sendSync qua kênh lỗi hiếm khi trả undefined -> chỉ coi là fail khi rõ ràng false
+            if (merged) {
+                appSettings = merged;
+                __settingsBaseline = __cloneSettings(merged);
+            }
+            return true;
         }
     } catch (err) {
-        console.error("saveSetup (file dùng chung) lỗi:", err);
+        console.error("saveSetup (file dùng chung) lỗi — KHÔNG ghi để tránh đè dữ liệu:", err);
         return false;
     }
 
@@ -198,9 +244,28 @@ function getSetting(key, fallback = "") {
 
 // TASK A55: cũng trả về kết quả saveSetup() thật (trước đây bỏ qua) — giữ nguyên chữ ký/hành
 // vi ghi appSettings[key], chỉ thêm return.
+// TASK A-SETUP/A78 — LỖI GỐC "ghi đè bằng state cũ": mainWin và setupWin mỗi cửa sổ giữ 1 bản
+// appSettings riêng; Setup sống lâu (chỉ hide/show) nên bản của nó cũ dần. Việc chống ghi đè nằm
+// trong saveSetup() (merge theo key đã đổi). setSetting() chỉ đánh dấu key này là "chủ động đổi".
 function setSetting(key, value) {
     appSettings[key] = value;
-    return saveSetup();
+    return saveSetup([key]);
+}
+
+// Nạp lại bản mới nhất từ file dùng chung trước các thao tác người dùng cần dữ liệu ĐÚNG HIỆN TẠI
+// (Preset, Backup). Trả về false nếu KHÔNG đọc được (caller phải dừng, không được đoán). Không có
+// electronAPI (chạy ngoài Electron) -> trả true, giữ state hiện tại.
+function refreshFromSharedFile() {
+    if (typeof window.electronAPI?.loadSettingsSync !== "function") return true;
+    try {
+        const latest = window.electronAPI.loadSettingsSync();
+        appSettings = { ...DEFAULT_APP_SETTINGS, ...(isPlainSettingsObject(latest) ? latest : {}) };
+        __settingsBaseline = __cloneSettings(appSettings);
+        return true;
+    } catch (err) {
+        console.error("refreshFromSharedFile lỗi (không đọc được bản mới nhất):", err);
+        return false;
+    }
 }
 
 // ===== TASK A55 — Startup & Paths: getter/setter dùng CHUNG cơ chế getSetting/setSetting đã

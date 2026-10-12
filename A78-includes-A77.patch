@@ -1,0 +1,664 @@
+diff --git a/app/main.js b/app/main.js
+index 60147d1..2a7033c 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -14,14 +14,37 @@ let setupWin = null;
+ const SETTINGS_FILE = path.join(app.getPath("userData"), "app-settings.json");
+ 
+ function readSettingsFile() {
++    // TASK A78: file tồn tại nhưng KHÔNG dùng được (JSON hỏng, hoặc hợp lệ nhưng không phải object —
++    // vd `[]`, `"x"`, `null`) -> trả null (app dùng mặc định) và giữ 1 bản sao `.corrupt-*` để lần lưu
++    // kế tiếp không làm mất hẳn dữ liệu cũ. Việc sao lưu là best-effort, KHÔNG BAO GIỜ làm app lỗi/không khởi động.
++    let raw;
+     try {
+         if (!fs.existsSync(SETTINGS_FILE)) {
+             return null;
+         }
+-        const raw = fs.readFileSync(SETTINGS_FILE, "utf-8");
+-        return JSON.parse(raw);
++        raw = fs.readFileSync(SETTINGS_FILE, "utf-8");
++        const parsed = JSON.parse(raw);
++        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
++            throw new Error("app-settings.json không phải object");
++        }
++        return parsed;
+     } catch (err) {
+         console.error("readSettingsFile lỗi:", err);
++        if (typeof raw === "string") {
++            try {
++                // Không tạo bản sao trùng nội dung cho mỗi lần đọc (nhiều cửa sổ/module đọc lặp lại trước lần lưu kế tiếp).
++                const sep = Math.max(SETTINGS_FILE.lastIndexOf("/"), SETTINGS_FILE.lastIndexOf("\\"));
++                const dir = SETTINGS_FILE.slice(0, sep + 1);
++                const base = SETTINGS_FILE.slice(sep + 1) + ".corrupt-";
++                const dup = fs.readdirSync(dir || ".").some((n) => {
++                    if (n.indexOf(base) !== 0) return false;
++                    try { return fs.readFileSync(dir + n, "utf-8") === raw; } catch { return false; }
++                });
++                if (!dup) fs.writeFileSync(SETTINGS_FILE + ".corrupt-" + Date.now() + "-" + Math.floor(Math.random() * 1e6), raw, "utf-8");
++            } catch (e2) {
++                console.error("Không sao lưu được file settings hỏng (bỏ qua):", e2);
++            }
++        }
+         return null;
+     }
+ }
+diff --git a/tests/unit/SetupCompletionA77.verify.js b/tests/unit/SetupCompletionA77.verify.js
+new file mode 100644
+index 0000000..da2bef5
+--- /dev/null
++++ b/tests/unit/SetupCompletionA77.verify.js
+@@ -0,0 +1,120 @@
++/**
++ * SetupCompletionA77.verify.js — Task A: Setup persistence / Preset / Backup truthfulness.
++ * Chạy: node tests/unit/SetupCompletionA77.verify.js
++ * Mức bằng chứng: chạy mã thật (appSettings.js, setup.js trích hàm) trong vm với electronAPI GIẢ LẬP
++ * (file settings giả = biến bộ nhớ). KHÔNG phải runtime Electron/Windows.
++ */
++'use strict';
++const fs = require('fs'), path = require('path'), vm = require('vm'), os = require('os');
++const root = path.join(__dirname, '..', '..');
++let pass = 0, fail = 0;
++const ok = (c, l) => { if (c) { pass++; console.log('  OK  ', l); } else { fail++; console.error('  FAIL ', l); } };
++
++const appSrc = fs.readFileSync(path.join(root, 'ui/js/appSettings.js'), 'utf8');
++const setupSrc = fs.readFileSync(path.join(root, 'ui/js/setup.js'), 'utf8');
++function extractFn(src, name) {
++    const s = src.indexOf(`function ${name}(`); if (s < 0) throw new Error(name);
++    let i = src.indexOf('{', src.indexOf(')', s)), d = 0;
++    for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) break; }
++    return src.slice(s, i + 1);
++}
++function extractConstArr(src, name) { const s = src.indexOf(`const ${name}`); return src.slice(s, src.indexOf('];', s) + 2); }
++
++function makeEnv(initialFile, opts = {}) {
++    const env = { file: initialFile, alerts: [], writeOk: true, notified: 0 };
++    const sandbox = {
++        console, localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
++        navigator: {}, alert: (m) => env.alerts.push(m), confirm: () => true,
++        window: {
++            electronAPI: {
++                loadSettingsSync: () => (env.file === undefined ? null : JSON.parse(JSON.stringify(env.file))),
++                saveSettingsSync: (d) => { if (!env.writeOk) return false; env.file = JSON.parse(JSON.stringify(d)); return true; },
++                notifySetupChanged: () => { env.notified++; }
++            }
++        }
++    };
++    sandbox.window.window = sandbox.window;
++    vm.createContext(sandbox);
++    const setupBits = [
++        extractFn(setupSrc, 'saveSetting'), extractFn(setupSrc, 'notifySetupChanged'),
++        extractConstArr(setupSrc, 'PRESET_FIELDS'), extractFn(setupSrc, 'savePreset'), extractFn(setupSrc, 'loadPreset'),
++        'function updateSetupStatus(){} function updateSetupProgress(){}'
++    ].join('\n');
++    vm.runInContext(appSrc + '\n' + setupBits + '\nthis.__get=()=>appSettings;', sandbox);
++    sandbox.window.loadSettingsSync = null;
++    vm.runInContext('loadSetup()', sandbox);
++    env.run = (code) => vm.runInContext(code, sandbox);
++    env.sb = sandbox;
++    return env;
++}
++
++console.log('== 1. loadSetup bỏ qua dữ liệu không phải object ==');
++{ const e = makeEnv(['bad']); ok(Array.isArray(e.run('appSettings')) === false && e.run('appSettings.launchDAW') === false, 'file chứa mảng -> dùng mặc định, không spread mảng'); }
++
++console.log('== 2. Stale-overwrite: setSetting không ghi đè giá trị mới hơn trong file ==');
++{
++    const e = makeEnv({ selectedDAW: 'Cubase', autoMenuData: { knobs: [{ id: 'musicKnob', value: 10 }] } });
++    // cửa sổ khác (Menu) cập nhật knob trong file sau khi Setup đã nạp
++    e.file.autoMenuData = { knobs: [{ id: 'musicKnob', value: 77 }] };
++    e.run('setSetting("selectedBrowser","Brave")');
++    ok(e.file.selectedBrowser === 'Brave', 'key vừa đổi được lưu');
++    ok(e.file.autoMenuData.knobs[0].value === 77, 'giá trị Menu lưu sau đó (knob=77) KHÔNG bị ghi đè bằng bản cũ (10)');
++    ok(e.file.selectedDAW === 'Cubase', 'key khác giữ nguyên');
++}
++
++console.log('== 3. setSetting trả false khi ghi thất bại ==');
++{ const e = makeEnv({}); e.writeOk = false; ok(e.run('setSetting("selectedDAW","X")') === false, 'trả false'); }
++
++console.log('== 4. savePreset: lưu đủ trường + không báo thành công giả ==');
++{
++    const e = makeEnv({ selectedDAW: 'Studio One', selectedSystemAudioDeviceId: 'sys1', selectedMicDeviceId: 'mic1', midiOutputPort: 'loopMIDI', launchDAW: false });
++    e.run('savePreset()');
++    ok(e.alerts.pop() === 'Đã lưu Preset', 'ghi OK -> báo Đã lưu');
++    const p = e.file.autoMenuPreset;
++    ok(p.selectedSystemAudioDeviceId === 'sys1' && p.selectedMicDeviceId === 'mic1' && p.midiOutputPort === 'loopMIDI', 'preset chứa device id + cổng MIDI');
++    const e2 = makeEnv({ selectedDAW: 'A' }); e2.writeOk = false; e2.run('savePreset()');
++    ok(/thất bại/.test(e2.alerts.pop()), 'ghi lỗi -> báo thất bại, KHÔNG "Đã lưu"');
++}
++
++console.log('== 5. loadPreset ==');
++{
++    const preset = { selectedDAW: 'Cubase', launchDAW: false, selectedBrowser: '', selectedSystemAudioDeviceId: 'sysP' };
++    const e = makeEnv({ selectedDAW: 'Studio One', launchDAW: true, selectedBrowser: 'Brave', autoMenuPreset: preset });
++    e.run('loadPreset()');
++    ok(e.file.selectedDAW === 'Cubase', 'áp selectedDAW');
++    ok(e.file.launchDAW === false, 'áp được boolean false (trước đây bị bỏ qua)');
++    ok(e.file.selectedBrowser === 'Brave', 'trường rỗng trong preset KHÔNG xoá cấu hình hiện có');
++    ok(e.file.selectedSystemAudioDeviceId === 'sysP', 'áp trường mới');
++    ok(e.notified === 1, 'báo cho Menu nạp lại');
++
++    const e2 = makeEnv({ selectedDAW: 'Cubase', autoMenuPreset: { selectedDAW: 'Cubase' } }); e2.run('loadPreset()');
++    ok(/không có gì thay đổi/.test(e2.alerts.pop()), 'preset trùng -> không báo "đã tải" giả');
++
++    const e3 = makeEnv({ selectedDAW: 'Old', autoMenuPreset: { selectedDAW: 'New' } }); e3.writeOk = false; e3.run('loadPreset()');
++    ok(/thất bại/.test(e3.alerts.pop()) && e3.run('appSettings.selectedDAW') === 'Old', 'ghi lỗi -> hoàn tác bộ nhớ + báo thất bại');
++
++    const e4 = makeEnv({ autoMenuPreset: 'junk' }); e4.run('loadPreset()');
++    ok(/hỏng/.test(e4.alerts.pop()), 'preset hỏng -> báo lỗi, không crash');
++    const e5 = makeEnv({}); e5.run('loadPreset()');
++    ok(e5.alerts.pop() === 'Chưa có Preset', 'chưa có preset');
++}
++
++console.log('== 6. Preset cũ (10 trường) vẫn nạp được ==');
++{
++    const old = { selectedDAW: 'Cubase', selectedAutoKey: 'AK', selectedAutoTune: 'AT', selectedBrowser: 'Brave', selectedSoundcard: 'Mix', autokey1: '', autokey2: '', autotunekey: '', chromatic: '', launchDAW: true };
++    const e = makeEnv({ autoMenuPreset: old }); e.run('loadPreset()');
++    ok(e.file.selectedDAW === 'Cubase' && e.file.launchDAW === true && e.file.selectedSoundcard === 'Mix', 'tương thích ngược');
++}
++
++console.log('== 7. readSettingsFile giữ bản sao khi file hỏng ==');
++{
++    const mainSrc = fs.readFileSync(path.join(root, 'app/main.js'), 'utf8');
++    const code = extractFn(mainSrc, 'readSettingsFile');
++    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a77-')); const f = path.join(dir, 'app-settings.json');
++    fs.writeFileSync(f, '{broken'); const sb = { console, fs, SETTINGS_FILE: f }; vm.createContext(sb); vm.runInContext(code, sb);
++    ok(sb.readSettingsFile() === null, 'file hỏng -> null, không throw');
++    ok(fs.readdirSync(dir).some((n) => n.startsWith('app-settings.json.corrupt-')), 'đã giữ bản sao .corrupt-*');
++}
++
++console.log(`\nKết quả: ${pass} PASS, ${fail} FAIL`);
++process.exit(fail ? 1 : 0);
+diff --git a/tests/unit/SetupHardeningA78.verify.js b/tests/unit/SetupHardeningA78.verify.js
+new file mode 100644
+index 0000000..c6ed84d
+--- /dev/null
++++ b/tests/unit/SetupHardeningA78.verify.js
+@@ -0,0 +1,179 @@
++/**
++ * SetupHardeningA78.verify.js — Task A78: chống ghi đè Settings giữa 2 cửa sổ, Restore/Backup/Preset, file hỏng.
++ * Chạy: node tests/unit/SetupHardeningA78.verify.js
++ * Mức bằng chứng: MÔ PHỎNG (vm + electronAPI giả, "file" là biến bộ nhớ; riêng mục 8 dùng file thật trên đĩa tạm).
++ * KHÔNG phải runtime Electron/Windows. Mỗi "cửa sổ" có sandbox + appSettings RIÊNG, dùng chung 1 file giả.
++ */
++'use strict';
++const fs = require('fs'), path = require('path'), vm = require('vm'), os = require('os');
++const root = path.join(__dirname, '..', '..');
++let pass = 0, fail = 0;
++const ok = (c, l) => { if (c) { pass++; console.log('  OK  ', l); } else { fail++; console.error('  FAIL ', l); } };
++const appSrc = fs.readFileSync(path.join(root, 'ui/js/appSettings.js'), 'utf8');
++const setupSrc = fs.readFileSync(path.join(root, 'ui/js/setup.js'), 'utf8');
++const mainSrc = fs.readFileSync(path.join(root, 'app/main.js'), 'utf8');
++function extractFn(src, name) {
++    const s = src.indexOf(`function ${name}(`); if (s < 0) throw new Error(name);
++    let i = src.indexOf('{', src.indexOf(')', s)), d = 0;
++    for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) break; }
++    return src.slice(s, i + 1);
++}
++function extractConstArr(src, name) { const s = src.indexOf(`const ${name}`); return src.slice(s, src.indexOf('];', s) + 2); }
++
++// shared = { file, readThrows, writeOk, writes }
++function newWindow(shared) {
++    const w = { alerts: [], notified: 0 };
++    const sb = {
++        console: { log() {}, warn() {}, error() {} }, localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, navigator: {},
++        alert: (m) => w.alerts.push(m), confirm: () => true,
++        window: { electronAPI: {
++            loadSettingsSync: () => { if (shared.readThrows) throw new Error('IPC fail'); return shared.file === undefined ? null : JSON.parse(JSON.stringify(shared.file)); },
++            saveSettingsSync: (d) => { shared.writes++; if (!shared.writeOk) return false; shared.file = JSON.parse(JSON.stringify(d)); return true; },
++            notifySetupChanged: () => { w.notified++; },
++            exportBackup: async (d) => { w.exported = JSON.parse(JSON.stringify(d)); return 'x.json'; },
++            importBackup: async () => shared.importData
++        } }
++    };
++    sb.window.window = sb.window; vm.createContext(sb);
++    const bits = [extractFn(setupSrc, 'saveSetting'), extractFn(setupSrc, 'notifySetupChanged'), extractConstArr(setupSrc, 'PRESET_FIELDS'),
++        extractFn(setupSrc, 'savePreset'), extractFn(setupSrc, 'loadPreset'), 'function updateSetupStatus(){} function updateSetupProgress(){}'].join('\n');
++    vm.runInContext(appSrc + '\n' + bits, sb);
++    vm.runInContext('loadSetup()', sb);
++    w.run = (c) => vm.runInContext(c, sb);
++    return w;
++}
++const mk = (file) => ({ file, readThrows: false, writeOk: true, writes: 0 });
++
++console.log('== 1. Menu & Setup có appSettings RIÊNG; Menu đổi sau, Setup lưu sau KHÔNG đè ==');
++{
++    const sh = mk({ selectedDAW: 'Cubase', autoMenuData: { knobs: [{ id: 'musicKnob', value: 10 }] } });
++    const menu = newWindow(sh), setup = newWindow(sh);
++    ok(menu.run('appSettings') !== setup.run('appSettings'), 'hai cửa sổ có đối tượng appSettings độc lập');
++    menu.run('appSettings.autoMenuData = {knobs:[{id:"musicKnob",value:77}]}; saveSetup()');
++    setup.run('setSetting("selectedBrowser","Brave")');
++    ok(sh.file.autoMenuData.knobs[0].value === 77, 'knob=77 do Menu lưu KHÔNG bị Setup (state cũ) đè');
++    ok(sh.file.selectedBrowser === 'Brave' && sh.file.selectedDAW === 'Cubase', 'thay đổi của Setup + dữ liệu cũ đều còn');
++    // Menu lưu trực tiếp (saveSetup không qua setSetting) khi Setup đã đổi trước
++    setup.run('setSetting("selectedAutoKey","AK")');
++    menu.run('appSettings.autoMenuData = {knobs:[{id:"musicKnob",value:55}]}; saveSetup()');
++    ok(sh.file.selectedAutoKey === 'AK' && sh.file.autoMenuData.knobs[0].value === 55, 'Menu lưu sau Setup cũng không làm mất selectedAutoKey của Setup');
++}
++
++console.log('== 2. Người dùng chủ động đặt lại đúng giá trị baseline vẫn thắng giá trị cửa sổ khác ==');
++{
++    const sh = mk({ selectedDAW: 'X' }); const a = newWindow(sh), b = newWindow(sh);
++    b.run('setSetting("selectedDAW","Y")');
++    a.run('setSetting("selectedDAW","X")'); // a chủ động chọn X (baseline của a cũng là X)
++    ok(sh.file.selectedDAW === 'X', 'setSetting ép key chủ động đổi');
++}
++
++console.log('== 3. KHÔNG đọc được Settings mới nhất -> KHÔNG ghi, trả false ==');
++{
++    const sh = mk({ selectedDAW: 'Cubase' }); const w = newWindow(sh);
++    sh.readThrows = true; const before = sh.writes;
++    ok(w.run('setSetting("selectedDAW","Z")') === false, 'setSetting trả false');
++    ok(sh.writes === before && sh.file.selectedDAW === 'Cubase', 'không có lần ghi nào, file giữ nguyên');
++    w.run('savePreset()'); ok(/Không đọc được/.test(w.alerts.pop()) && sh.writes === before, 'savePreset dừng, không ghi');
++    w.run('loadPreset()'); ok(/Không đọc được/.test(w.alerts.pop()) && sh.writes === before, 'loadPreset dừng, không ghi');
++}
++
++console.log('== 4. Ghi thất bại: trả false, bộ nhớ/baseline không lệch, lần lưu sau vẫn đúng ==');
++{
++    const sh = mk({ selectedDAW: 'A' }); const w = newWindow(sh);
++    sh.writeOk = false; ok(w.run('setSetting("selectedDAW","B")') === false, 'trả false khi ghi lỗi');
++    sh.writeOk = true; w.run('setSetting("selectedBrowser","Brave")');
++    ok(sh.file.selectedBrowser === 'Brave', 'lần lưu sau thành công');
++}
++
++const restoreBody = setupSrc.slice(setupSrc.indexOf('const data = await window.electronAPI.importBackup();'), setupSrc.indexOf('location.reload();'));
++// Chạy ĐÚNG đoạn mã Restore thật của setup.js (bỏ location.reload) trong cửa sổ w.
++const runRestore = (w, sh, data) => { sh.importData = data; return w.run('(async()=>{ ' + restoreBody + ' })()'); };
++
++(async () => {
++    console.log('== 5. Restore: hợp lệ / sai kiểu / ghi lỗi / không đọc được / không đè dữ liệu mới hơn ==');
++    {
++        const sh = mk({ selectedDAW: 'Old', selectedBrowser: 'Brave' }); const w = newWindow(sh);
++        sh.file.selectedBrowser = 'Edge'; // đổi mới hơn ở cửa sổ khác, w chưa biết
++        await runRestore(w, sh, { selectedDAW: 'FromBackup' });
++        ok(sh.file.selectedDAW === 'FromBackup', 'Restore hợp lệ áp trường có trong backup');
++        ok(sh.file.selectedBrowser === 'Edge', 'Restore KHÔNG ghi mất thay đổi mới hơn (selectedBrowser=Edge)');
++        ok(w.notified === 1, 'báo Menu nạp lại sau khi lưu thành công');
++
++        for (const [bad, name] of [[[], 'mảng'], ['str', 'chuỗi'], [42, 'số'], [true, 'boolean']]) {
++            const s2 = mk({ selectedDAW: 'Keep' }); const w2 = newWindow(s2);
++            await runRestore(w2, s2, bad);
++            ok(/không hợp lệ/.test(w2.alerts.pop() || '') && s2.file.selectedDAW === 'Keep' && s2.writes === 0, 'backup kiểu ' + name + ' bị từ chối, không ghi');
++        }
++        const s3 = mk({ selectedDAW: 'Keep' }); const w3 = newWindow(s3);
++        await runRestore(w3, s3, null);
++        ok(w3.alerts.length === 0 && s3.writes === 0, 'importBackup trả null (huỷ/JSON sai cú pháp đã bị main.js chặn) -> không làm gì, không ghi');
++
++        const s4 = mk({ selectedDAW: 'Old' }); const w4 = newWindow(s4); s4.writeOk = false;
++        await runRestore(w4, s4, { selectedDAW: 'New' });
++        ok(/thất bại/.test(w4.alerts.pop()) && w4.run('appSettings.selectedDAW') === 'Old' && w4.notified === 0, 'ghi lỗi -> báo thất bại, rollback đúng trạng thái trước, KHÔNG notify/reload');
++
++        const s5 = mk({ selectedDAW: 'Old' }); const w5 = newWindow(s5); s5.readThrows = true;
++        await runRestore(w5, s5, { selectedDAW: 'New' });
++        ok(/Không đọc được/.test(w5.alerts.pop()) && s5.file.selectedDAW === 'Old' && s5.writes === 0, 'không đọc được bản mới nhất -> Restore dừng, không ghi');
++    }
++
++    console.log('== 6. Backup chứa bản MỚI NHẤT, không phải state cũ của cửa sổ ==');
++    {
++        const sh = mk({ selectedDAW: 'A' }); const w = newWindow(sh);
++        sh.file.selectedDAW = 'Newer';
++        const body = setupSrc.slice(setupSrc.indexOf('// TASK A78: backup phải chứa'), setupSrc.indexOf('if (path) alert("Đã backup vào'));
++        await w.run('(async()=>{ ' + body + ' })()');
++        ok(w.exported && w.exported.selectedDAW === 'Newer', 'file backup có selectedDAW=Newer');
++        const sh2 = mk({}); const w2 = newWindow(sh2); sh2.readThrows = true;
++        await w2.run('(async()=>{ ' + body + ' })()');
++        ok(!w2.exported && /Không đọc được/.test(w2.alerts.pop()), 'không đọc được -> không tạo backup lệch');
++    }
++
++    console.log('== 7. Preset: false, 0, trường thiếu, không đè cửa sổ khác ==');
++    {
++        const sh = mk({ launchDAW: true, selectedSoundcardId: 'dev9', selectedDAW: 'Keep', autoMenuPreset: { launchDAW: false, selectedSoundcardId: 0, selectedDAW: '' } });
++        const w = newWindow(sh);
++        w.run('loadPreset()');
++        ok(sh.file.launchDAW === false, 'false được áp');
++        ok(sh.file.selectedSoundcardId === 0, '0 được áp (không bị coi là rỗng)');
++        ok(sh.file.selectedDAW === 'Keep', 'trường rỗng/thiếu không xoá giá trị hiện hành');
++        const sh2 = mk({ selectedDAW: 'A', autoMenuPreset: { selectedDAW: 'B' } }); const a = newWindow(sh2), b = newWindow(sh2);
++        b.run('setSetting("selectedBrowser","Brave")'); // cửa sổ khác lưu sau khi a đã nạp
++        a.run('loadPreset()');
++        ok(sh2.file.selectedDAW === 'B' && sh2.file.selectedBrowser === 'Brave', 'Load Preset không làm mất Settings cửa sổ khác lưu trước đó');
++        const sh3 = mk({ selectedDAW: 'A' }); const c = newWindow(sh3), d = newWindow(sh3);
++        d.run('setSetting("selectedBrowser","Edge")');
++        c.run('savePreset()');
++        ok(sh3.file.selectedBrowser === 'Edge' && sh3.file.autoMenuPreset.selectedBrowser === 'Edge', 'Save Preset thấy + giữ Settings mới nhất');
++        const sh4 = mk({ selectedDAW: 'A', autoMenuPreset: { selectedDAW: 'A' } }); const e = newWindow(sh4); e.run('loadPreset()');
++        ok(/không có gì thay đổi/.test(e.alerts.pop()), 'thông báo "không có thay đổi" đúng khi trùng');
++    }
++
++    console.log('== 8. File settings hỏng (file thật trên đĩa tạm, mã readSettingsFile thật) ==');
++    {
++        const code = extractFn(mainSrc, 'readSettingsFile');
++        const cases = [['JSON sai cú pháp', '{broken'], ['mảng', '[1,2]'], ['chuỗi', '"x"'], ['null', 'null'], ['số', '7']];
++        for (const [name, content] of cases) {
++            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a78-')); const f = path.join(dir, 'app-settings.json');
++            fs.writeFileSync(f, content);
++            const sb = { console: { error() {} }, fs, SETTINGS_FILE: f }; vm.createContext(sb); vm.runInContext(code, sb);
++            let threw = false, r; try { r = sb.readSettingsFile(); r = sb.readSettingsFile(); r = sb.readSettingsFile(); } catch { threw = true; }
++            const copies = fs.readdirSync(dir).filter((n) => n.startsWith('app-settings.json.corrupt-'));
++            ok(!threw && r === null, name + ': trả null, không throw');
++            ok(copies.length === 1 && fs.readFileSync(path.join(dir, copies[0]), 'utf8') === content, name + ': đúng 1 bản .corrupt-* giống hệt gốc dù đọc 3 lần');
++            ok(fs.readFileSync(f, 'utf8') === content, name + ': file gốc KHÔNG bị sửa/xoá khi đọc (không tự ghi đè)');
++        }
++        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a78-')); const f = path.join(dir, 'app-settings.json');
++        const sb = { console: { error() {} }, fs, SETTINGS_FILE: f }; vm.createContext(sb); vm.runInContext(code, sb);
++        ok(sb.readSettingsFile() === null && fs.readdirSync(dir).length === 0, 'file chưa tồn tại: null, không tạo bản .corrupt');
++        fs.writeFileSync(f, '{"a":1}'); ok(sb.readSettingsFile().a === 1 && fs.readdirSync(dir).length === 1, 'file hợp lệ: đọc đúng, không tạo bản sao');
++        // thư mục không ghi được/ lỗi sao lưu không làm app lỗi
++        const sb2 = { console: { error() {} }, fs: { existsSync: () => true, readFileSync: () => '{bad', readdirSync: () => { throw new Error('EACCES'); }, writeFileSync: () => { throw new Error('EACCES'); } }, SETTINGS_FILE: path.join(os.tmpdir(), 'x.json') };
++        vm.createContext(sb2); vm.runInContext(code, sb2);
++        let t2 = false, r2; try { r2 = sb2.readSettingsFile(); } catch { t2 = true; }
++        ok(!t2 && r2 === null, 'sao lưu thất bại (EACCES) -> vẫn trả null, KHÔNG làm app lỗi/không khởi động');
++    }
++
++    console.log(`\nKết quả: ${pass} PASS, ${fail} FAIL`);
++    process.exit(fail ? 1 : 0);
++})().catch((e) => { console.error(e); process.exit(1); });
+diff --git a/ui/js/appSettings.js b/ui/js/appSettings.js
+index 9cb9895..f6fcb5b 100644
+--- a/ui/js/appSettings.js
++++ b/ui/js/appSettings.js
+@@ -104,6 +104,16 @@ const LEGACY_JSON_KEYS = new Set([
+ 
+ let appSettings = { ...DEFAULT_APP_SETTINGS };
+ 
++// TASK A78 — "baseline" = bản cài đặt lần cuối ĐỒNG BỘ với file dùng chung (lúc nạp/lưu thành công).
++// saveSetup() so appSettings với baseline để biết cửa sổ NÀY thực sự đổi key nào, rồi chỉ áp đúng các
++// key đó lên bản MỚI NHẤT trong file (merge 3 chiều) thay vì ghi đè toàn bộ bằng state cũ.
++// null = chưa đồng bộ với file (không chạy trong Electron / chưa nạp được) -> hành vi cũ (ghi toàn bộ).
++let __settingsBaseline = null;
++
++function __cloneSettings(obj) {
++    try { return JSON.parse(JSON.stringify(obj)); } catch { return { ...obj }; }
++}
++
+ function parseLegacyValue(key, raw) {
+     if (!LEGACY_JSON_KEYS.has(key)) {
+         return raw;
+@@ -135,15 +145,26 @@ function migrateLegacyStorage() {
+     }
+ }
+ 
++// TASK A-SETUP — dữ liệu đọc từ file/localStorage chỉ được coi là hợp lệ khi là object thường
++// (không phải mảng/chuỗi/số). Trước đây một file chứa `[]` hoặc `"x"` vẫn bị spread vào appSettings.
++function isPlainSettingsObject(v) {
++    return v !== null && typeof v === "object" && !Array.isArray(v);
++}
++
+ function loadSetup() {
+     // 1) Ưu tiên đọc từ file dùng chung (qua main process) — chia sẻ được giữa
+     //    main window và setup window, không bị cô lập như localStorage.
+     try {
+         const fromFile = window.electronAPI?.loadSettingsSync?.();
+-        if (fromFile) {
++        if (isPlainSettingsObject(fromFile)) {
+             appSettings = { ...DEFAULT_APP_SETTINGS, ...fromFile };
++            __settingsBaseline = __cloneSettings(appSettings);
+             return appSettings;
+         }
++        if (typeof window.electronAPI?.loadSettingsSync === "function") {
++            // Đọc được nhưng chưa có file (lần chạy đầu) hoặc file hỏng đã được main.js sao lưu .corrupt-*.
++            __settingsBaseline = __cloneSettings(DEFAULT_APP_SETTINGS);
++        }
+     } catch (err) {
+         console.error("loadSetup (file dùng chung) lỗi:", err);
+     }
+@@ -170,14 +191,39 @@ function loadSetup() {
+ // NGUYÊN 100% hành vi cũ (early-return ngay khi có electronAPI, không rơi xuống localStorage
+ // dự phòng) — chỉ thêm việc TRẢ VỀ kết quả thật. Các caller cũ (không đọc giá trị trả về) hoàn
+ // toàn không bị ảnh hưởng.
+-function saveSetup() {
++// TASK A78 — Merge 3 chiều khi lưu. Trả về true/false như cũ (caller cũ không đổi).
++//  - Đọc bản MỚI NHẤT trong file; NẾU KHÔNG ĐỌC ĐƯỢC (IPC ném lỗi) -> KHÔNG ghi, trả false
++//    (tuyệt đối không âm thầm ghi cả state cũ đè lên dữ liệu có thể mới hơn).
++//  - Chỉ áp lên bản mới nhất những key mà cửa sổ này thật sự đổi so với baseline (+ forceKeys do
++//    setSetting truyền vào, để việc người dùng chủ động đặt 1 key luôn thắng dù giá trị trùng baseline).
++//  - Ghi thất bại -> appSettings/baseline giữ nguyên để caller hoàn tác được.
++function saveSetup(forceKeys) {
+     try {
+         if (window.electronAPI?.saveSettingsSync) {
+-            const ok = window.electronAPI.saveSettingsSync(appSettings);
+-            return ok !== false; // sendSync qua kênh lỗi hiếm khi trả undefined -> chỉ coi là fail khi rõ ràng false
++            let toWrite = appSettings;
++            let merged = null;
++            if (__settingsBaseline && typeof window.electronAPI.loadSettingsSync === "function") {
++                const latest = window.electronAPI.loadSettingsSync(); // có thể ném -> catch bên dưới, KHÔNG ghi
++                const base = isPlainSettingsObject(latest) ? latest : {};
++                merged = { ...DEFAULT_APP_SETTINGS, ...base };
++                const force = new Set(Array.isArray(forceKeys) ? forceKeys : []);
++                Object.keys(appSettings).forEach((k) => {
++                    const changed = force.has(k) ||
++                        JSON.stringify(appSettings[k]) !== JSON.stringify(__settingsBaseline[k]);
++                    if (changed) merged[k] = appSettings[k];
++                });
++                toWrite = merged;
++            }
++            const ok = window.electronAPI.saveSettingsSync(toWrite);
++            if (ok === false) return false; // sendSync qua kênh lỗi hiếm khi trả undefined -> chỉ coi là fail khi rõ ràng false
++            if (merged) {
++                appSettings = merged;
++                __settingsBaseline = __cloneSettings(merged);
++            }
++            return true;
+         }
+     } catch (err) {
+-        console.error("saveSetup (file dùng chung) lỗi:", err);
++        console.error("saveSetup (file dùng chung) lỗi — KHÔNG ghi để tránh đè dữ liệu:", err);
+         return false;
+     }
+ 
+@@ -198,9 +244,28 @@ function getSetting(key, fallback = "") {
+ 
+ // TASK A55: cũng trả về kết quả saveSetup() thật (trước đây bỏ qua) — giữ nguyên chữ ký/hành
+ // vi ghi appSettings[key], chỉ thêm return.
++// TASK A-SETUP/A78 — LỖI GỐC "ghi đè bằng state cũ": mainWin và setupWin mỗi cửa sổ giữ 1 bản
++// appSettings riêng; Setup sống lâu (chỉ hide/show) nên bản của nó cũ dần. Việc chống ghi đè nằm
++// trong saveSetup() (merge theo key đã đổi). setSetting() chỉ đánh dấu key này là "chủ động đổi".
+ function setSetting(key, value) {
+     appSettings[key] = value;
+-    return saveSetup();
++    return saveSetup([key]);
++}
++
++// Nạp lại bản mới nhất từ file dùng chung trước các thao tác người dùng cần dữ liệu ĐÚNG HIỆN TẠI
++// (Preset, Backup). Trả về false nếu KHÔNG đọc được (caller phải dừng, không được đoán). Không có
++// electronAPI (chạy ngoài Electron) -> trả true, giữ state hiện tại.
++function refreshFromSharedFile() {
++    if (typeof window.electronAPI?.loadSettingsSync !== "function") return true;
++    try {
++        const latest = window.electronAPI.loadSettingsSync();
++        appSettings = { ...DEFAULT_APP_SETTINGS, ...(isPlainSettingsObject(latest) ? latest : {}) };
++        __settingsBaseline = __cloneSettings(appSettings);
++        return true;
++    } catch (err) {
++        console.error("refreshFromSharedFile lỗi (không đọc được bản mới nhất):", err);
++        return false;
++    }
+ }
+ 
+ // ===== TASK A55 — Startup & Paths: getter/setter dùng CHUNG cơ chế getSetting/setSetting đã
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index 16d7477..f508e57 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -15,7 +15,8 @@
+ loadSetup?.();
+ 
+ function saveSetting(key, value) {
+-    setSetting(key, value);
++    // TASK A-SETUP: trả về kết quả lưu THẬT (true/false) — caller cũ bỏ qua giá trị trả về nên không bị ảnh hưởng.
++    return setSetting(key, value);
+ }
+ 
+ function loadSetting(key, fallback = "Chưa chọn") {
+@@ -1452,6 +1453,11 @@ function initLinkProSection() {
+         }
+ 
+         try {
++            // TASK A78: backup phải chứa bản MỚI NHẤT, không phải state cũ trong bộ nhớ cửa sổ Setup.
++            if (refreshFromSharedFile?.() === false) {
++                alert("Không đọc được cài đặt mới nhất — chưa tạo Backup");
++                return;
++            }
+             const path = await window.electronAPI.exportBackup(appSettings);
+             if (path) alert("Đã backup vào:\n" + path);
+         } catch (err) {
+@@ -1475,8 +1481,26 @@ function initLinkProSection() {
+                 return;
+             }
+ 
++            // TASK A-SETUP: file restore phải là object thường; lưu thất bại thì hoàn tác + báo lỗi,
++            // KHÔNG reload như thể đã thành công.
++            if (data === null || typeof data !== "object" || Array.isArray(data)) {
++                alert("File backup không hợp lệ");
++                return;
++            }
++            // TASK A78 — hợp đồng HIỆN TẠI của Restore (theo code): MERGE — chỉ ghi các trường có trong
++            // file backup, giữ các trường khác (dù hộp thoại ghi "ghi đè toàn bộ"). Không đổi hành vi
++            // sản phẩm; chỉ bảo đảm merge trên bản MỚI NHẤT trong file, không phải state cũ trong bộ nhớ.
++            if (refreshFromSharedFile?.() === false) {
++                alert("Không đọc được cài đặt mới nhất — chưa Restore để tránh ghi đè");
++                return;
++            }
++            const previous = appSettings;
+             appSettings = { ...appSettings, ...data };
+-            saveSetup?.();
++            if (saveSetup?.(Object.keys(data)) === false) {
++                appSettings = previous;
++                alert("Restore thất bại (không ghi được file cài đặt)");
++                return;
++            }
+             notifySetupChanged();
+ 
+             // Nạp lại trang để mọi ô hiển thị (radio, checkbox, input...) đồng bộ với dữ liệu vừa restore
+@@ -1631,26 +1655,36 @@ function isSetupComplete() {
+     return isSetupFullyComplete();
+ }
+ 
++// TASK A-SETUP — Preset: danh sách trường được lưu/nạp. Giữ NGUYÊN 10 trường cũ (preset cũ vẫn nạp
++// được) và thêm các trường cấu hình thiết bị/đường dẫn thật đang có trong appSettings.
++const PRESET_FIELDS = [
++    "selectedDAW", "selectedAutoKey", "selectedAutoTune", "selectedBrowser", "selectedSoundcard",
++    "autokey1", "autokey2", "autotunekey", "chromatic", "launchDAW",
++    // bổ sung (preset cũ thiếu các trường này vẫn nạp bình thường — chỉ áp những trường có mặt)
++    "selectedSoundcardId", "selectedSystemAudioDeviceId", "selectedMicDeviceId",
++    "selectedAudioOutputDeviceId", "midiOutputPort", "selectedBrowserPath", "selectedDAWPath"
++];
++
+ function savePreset() {
+     if (typeof appSettings === "undefined") {
+         console.warn("appSettings chưa sẵn sàng");
+         return;
+     }
+ 
+-    appSettings.autoMenuPreset = {
+-        selectedDAW: getSetting("selectedDAW"),
+-        selectedAutoKey: getSetting("selectedAutoKey"),
+-        selectedAutoTune: getSetting("selectedAutoTune"),
+-        selectedBrowser: getSetting("selectedBrowser"),
+-        selectedSoundcard: getSetting("selectedSoundcard"),
+-        autokey1: getSetting("autokey1"),
+-        autokey2: getSetting("autokey2"),
+-        autotunekey: getSetting("autotunekey"),
+-        chromatic: getSetting("chromatic"),
+-        launchDAW: getSetting("launchDAW")
+-    };
++    if (refreshFromSharedFile?.() === false) {
++        alert("Không đọc được cài đặt mới nhất — chưa lưu Preset để tránh ghi đè");
++        return;
++    }
++
++    const preset = {};
++    PRESET_FIELDS.forEach((key) => { preset[key] = getSetting(key); });
++    appSettings.autoMenuPreset = preset;
+ 
+-    saveSetup?.();
++    // TASK A-SETUP: chỉ báo "Đã lưu" khi ghi file THẬT sự thành công.
++    if (saveSetup?.(["autoMenuPreset"]) === false) {
++        alert("Lưu Preset thất bại (không ghi được file cài đặt)");
++        return;
++    }
+     alert("Đã lưu Preset");
+ }
+ 
+@@ -1660,23 +1694,50 @@ function loadPreset() {
+         return;
+     }
+ 
++    if (refreshFromSharedFile?.() === false) {
++        alert("Không đọc được cài đặt mới nhất — chưa tải Preset để tránh ghi đè");
++        return;
++    }
+     const preset = appSettings.autoMenuPreset;
+ 
+     if (!preset) {
+         alert("Chưa có Preset");
+         return;
+     }
++    if (typeof preset !== "object" || Array.isArray(preset)) {
++        alert("Preset bị hỏng, không thể tải");
++        return;
++    }
+ 
+-    Object.keys(preset).forEach((key) => {
+-        if (preset[key]) {
+-            appSettings[key] = preset[key];
+-        }
++    // Chỉ áp các trường thuộc danh sách; bỏ qua undefined/null/"" (không xoá cấu hình hiện có khi
++    // preset thiếu giá trị) nhưng áp cả boolean false (trước đây launchDAW=false KHÔNG bao giờ được nạp).
++    const before = {};
++    const changes = {};
++    PRESET_FIELDS.forEach((key) => {
++        if (!Object.prototype.hasOwnProperty.call(preset, key)) return;
++        const v = preset[key];
++        if (v === undefined || v === null || v === "") return;
++        if (v !== appSettings[key]) { before[key] = appSettings[key]; changes[key] = v; }
+     });
+ 
+-    saveSetup?.();
++    const keys = Object.keys(changes);
++    if (keys.length === 0) {
++        alert("Preset trùng cấu hình hiện tại — không có gì thay đổi");
++        return;
++    }
++
++    keys.forEach((key) => { appSettings[key] = changes[key]; });
++
++    if (saveSetup?.(keys) === false) {
++        keys.forEach((key) => { appSettings[key] = before[key]; }); // hoàn tác, không để bộ nhớ lệch file
++        alert("Tải Preset thất bại (không ghi được file cài đặt)");
++        return;
++    }
++
+     updateSetupStatus();
+     updateSetupProgress();
+-    alert("Đã tải Preset");
++    notifySetupChanged();
++    alert("Đã tải Preset (" + keys.length + " mục thay đổi). Mở lại Setup để thấy các ô được cập nhật.");
+ }
+ 
+ /* ==========================================================
+@@ -1778,9 +1839,12 @@ if (typeof getSetting === "function" && !window._setupMidiPatched) {
+         const dawPath = dawPathEl ? dawPathEl.value.trim() : "";
+         const autoLaunch = autoLaunchToggle ? autoLaunchToggle.checked : true;
+ 
+-        saveSetting("loopMidiPath", loopPath);
+-        saveSetting("dawExePath", dawPath);
+-        saveSetting("autoLaunchEnabled", autoLaunch);
++        // TASK A-SETUP: trước đây luôn hiện "✅ Đã lưu" kể cả khi ghi file thất bại (báo thành công giả).
++        const saveOk = [
++          saveSetting("loopMidiPath", loopPath),
++          saveSetting("dawExePath", dawPath),
++          saveSetting("autoLaunchEnabled", autoLaunch)
++        ].every((r) => r !== false);
+ 
+         // Cập nhật tiến độ
+         if (typeof updateSetupStatus === "function") updateSetupStatus();
+@@ -1789,7 +1853,7 @@ if (typeof getSetting === "function" && !window._setupMidiPatched) {
+ 
+         // Phản hồi trực quan
+         const originalText = savePathsBtn.textContent;
+-        savePathsBtn.textContent = "✅ Đã lưu";
++        savePathsBtn.textContent = saveOk ? "✅ Đã lưu" : "❌ Lưu thất bại";
+         savePathsBtn.disabled = true;
+         setTimeout(() => {
+           savePathsBtn.textContent = originalText;

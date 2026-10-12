@@ -14,14 +14,37 @@ let setupWin = null;
 const SETTINGS_FILE = path.join(app.getPath("userData"), "app-settings.json");
 
 function readSettingsFile() {
+    // TASK A78: file tồn tại nhưng KHÔNG dùng được (JSON hỏng, hoặc hợp lệ nhưng không phải object —
+    // vd `[]`, `"x"`, `null`) -> trả null (app dùng mặc định) và giữ 1 bản sao `.corrupt-*` để lần lưu
+    // kế tiếp không làm mất hẳn dữ liệu cũ. Việc sao lưu là best-effort, KHÔNG BAO GIỜ làm app lỗi/không khởi động.
+    let raw;
     try {
         if (!fs.existsSync(SETTINGS_FILE)) {
             return null;
         }
-        const raw = fs.readFileSync(SETTINGS_FILE, "utf-8");
-        return JSON.parse(raw);
+        raw = fs.readFileSync(SETTINGS_FILE, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("app-settings.json không phải object");
+        }
+        return parsed;
     } catch (err) {
         console.error("readSettingsFile lỗi:", err);
+        if (typeof raw === "string") {
+            try {
+                // Không tạo bản sao trùng nội dung cho mỗi lần đọc (nhiều cửa sổ/module đọc lặp lại trước lần lưu kế tiếp).
+                const sep = Math.max(SETTINGS_FILE.lastIndexOf("/"), SETTINGS_FILE.lastIndexOf("\\"));
+                const dir = SETTINGS_FILE.slice(0, sep + 1);
+                const base = SETTINGS_FILE.slice(sep + 1) + ".corrupt-";
+                const dup = fs.readdirSync(dir || ".").some((n) => {
+                    if (n.indexOf(base) !== 0) return false;
+                    try { return fs.readFileSync(dir + n, "utf-8") === raw; } catch { return false; }
+                });
+                if (!dup) fs.writeFileSync(SETTINGS_FILE + ".corrupt-" + Date.now() + "-" + Math.floor(Math.random() * 1e6), raw, "utf-8");
+            } catch (e2) {
+                console.error("Không sao lưu được file settings hỏng (bỏ qua):", e2);
+            }
+        }
         return null;
     }
 }
