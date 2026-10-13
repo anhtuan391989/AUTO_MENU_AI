@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Python Bridge",
+  "version": "1.0",
+  "description": "Gắn ID và thời gian vào tiêu đề tab YouTube cho Python đọc.",
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
