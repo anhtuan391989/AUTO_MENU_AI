@@ -1701,6 +1701,20 @@ function updateModInfo(timeString, oldKey, newKey, semitones) {
 // đúng giá trị nào, thay vì ép cứng về 0.
 let aiSemitoneOffset = 0;
 
+// TASK AI-ALG-03 (D6) — CHUỖI TRẠNG THÁI modulation -> hành động, CHỈ để quan sát/chẩn đoán (không đổi UI, không đổi lệnh gửi).
+// Các mức tách biệt: MODULATION_DETECTED (ModEngine thấy) -> ACTION_REQUESTED (renderer định gửi lệnh) ->
+// ACTION_SENT_UNCONFIRMED (API gửi không ném lỗi; KHÔNG chứng minh đích đã áp dụng) | ACTION_FAILED |
+// ACTION_DEFERRED_MANUAL | ACTION_DELEGATED_AI_CONTROL. KHÔNG có mức "APPLIED": Menu không có cách xác nhận phía Auto-Tune/SoundShifter.
+const modPipelineLog = [];
+window.__modPipeline = modPipelineLog;
+function recordModStage(stage, info) {
+    try {
+        modPipelineLog.push({ stage, t: Date.now(), ...(info || {}) });
+        if (modPipelineLog.length > 50) modPipelineLog.shift();
+        if (typeof aiDiag === "function") aiDiag("MOD_STAGE", { stage, ...(info || {}) });
+    } catch (e) { /* chẩn đoán không bao giờ được làm hỏng luồng MOD */ }
+}
+
 function isManualOverrideActive() {
     return !!(modPowerBtn && modPowerBtn.classList.contains("active"));
 }
@@ -1739,6 +1753,7 @@ async function applyModEvent(data) {
         // này để tránh đánh nhau với lệnh tay đang chủ động điều khiển Auto-Tune. Giá trị
         // này sẽ được áp khi người dùng tắt ghi đè tay (xem turnManualOverrideOff).
         console.log(`[MOD-AI] Muốn dịch ${data.semitone} bán cung (${data.time}) nhưng đang bị ghi đè tay, tạm hoãn.`);
+        recordModStage("ACTION_DEFERRED_MANUAL", { semitone: data.semitone });
         return;
     }
 
@@ -1748,16 +1763,19 @@ async function applyModEvent(data) {
         // AIContext ở trên (reportAiResult). Việc gửi thật để dành cho Workflow ->
         // PluginController -> Bridge (xem onPluginCommand ở cuối file).
         console.log(`[ControlSource] AI_CONTROL — bỏ qua gửi Mod trực tiếp (${data.semitone} bán cung), chờ Bridge từ Core.`);
+        recordModStage("ACTION_DELEGATED_AI_CONTROL", { semitone: data.semitone });
         setStatus("dot-mod", "online");
         return;
 
     }
 
     setStatus("dot-mod", "pending"); // cam: AI đang gửi lệnh dịch tone theo modulation thật dò được
+    recordModStage("ACTION_REQUESTED", { semitone: data.semitone });
     const result = await sendToneStep(data.semitone);
+    recordModStage(result.ok ? "ACTION_SENT_UNCONFIRMED" : "ACTION_FAILED", { semitone: data.semitone, driverUsed: result.driverUsed ?? null, confirmation: result.confirmation ?? null, detail: result.ok ? undefined : result.detail });
 
     if (result.ok) {
-        setStatus("dot-mod", "online"); // xanh: AI đã gửi thành công
+        setStatus("dot-mod", "online"); // xanh: AI đã GỬI lệnh (chưa phải "đã áp dụng" — xem recordModStage ở trên)
     } else {
         setStatus("dot-mod", "offline"); // đỏ: LỖI thật sự, không phải "đã tắt"
         const modStatusEl = document.getElementById("modStatus");
@@ -1837,11 +1855,17 @@ function startModulationWatcher() {
     if (modStatusEl) modStatusEl.textContent = "LISTENING";
     if (modTimelineEl) modTimelineEl.textContent = "";
 
+    // TASK AI-ALG-03 — truyền mode của Key gốc để ModEngine phân biệt đổi mode / giọng tương đối / modulation thật.
+    // Không parse được mode (định dạng lạ) => undefined => ModEngine chạy đúng hành vi cũ (root-only).
+    const originalMode = /minor/i.test(originalKey) ? "Minor" : (/major/i.test(originalKey) ? "Major" : null);
     ModEngine.start(originalRootIndex, (data) => {
         const mins = String(Math.floor(songSeconds / 60)).padStart(2, "0");
         const secs = String(songSeconds % 60).padStart(2, "0");
         applyModEvent({ time: `${mins}:${secs}`, semitone: data.semitone });
-    }, isManualOverrideActive);
+    }, isManualOverrideActive, (state, payload) => {
+        // Chỉ ghi nhận (không điều khiển gì). KEY_LABEL_CHANGED = đổi nhãn Key/mode, KHÔNG có lệnh dịch pitch.
+        if (state === "MODULATION_DETECTED" || state === "KEY_LABEL_CHANGED") recordModStage(state, { semitone: payload?.semitone, kind: payload?.kind, from: payload?.from, to: payload?.to ?? payload?.targetKey });
+    }, originalMode ? { originalMode } : undefined);
 }
 
 let songSeconds = 0;

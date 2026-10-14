@@ -72,7 +72,18 @@ const ModEngine = (() => {
         }
     }
 
-    function start(originalRootIndex, onModulation, isManualOverrideActiveFn, onStateChange) {
+    /**
+     * TASK AI-ALG-03 (D2/D3) — tham số TUỲ CHỌN thứ 5 `options = { originalMode: "Major"|"Minor" }`.
+     * - KHÔNG truyền (caller cũ): hành vi CŨ giữ nguyên 100% (so sánh theo rootIndex).
+     * - CÓ truyền: ModEngine phân loại thay đổi theo NHÃN (root+mode):
+     *     MODULATION   = tonic đổi, không phải giọng tương đối  -> onModulation(modData) như cũ (semitone tính theo root, KHÔNG đổi),
+     *                    modData cộng thêm: kind:"MODULATION", mode.
+     *     MODE_CHANGE  = cùng tonic, đổi Major<->Minor           -> CHỈ state "KEY_LABEL_CHANGED" {kind:"MODE_CHANGE", pitchShift:false}
+     *     RELATIVE_KEY = giọng tương đối (cùng tập nốt, vd C Major<->A Minor) -> CHỈ state "KEY_LABEL_CHANGED" {kind:"RELATIVE_KEY", pitchShift:false}
+     *   Hai loại sau KHÔNG gọi onModulation => không có lệnh dịch pitch nào được tạo ra từ chúng.
+     *   (Menu hiện chưa có kênh điều khiển "mode" xuống Auto-Tune — chỉ gửi root — nên MODE_CHANGE là sự kiện quan sát, chưa có hành động; xem báo cáo AI-ALG-03.)
+     */
+    function start(originalRootIndex, onModulation, isManualOverrideActiveFn, onStateChange, options) {
         stop(); // tránh chạy trùng nhiều watcher
 
         // Task B16 — "tap" tuỳ chọn, không throw ra ngoài poll loop nếu caller lỡ truyền callback lỗi.
@@ -82,8 +93,14 @@ const ModEngine = (() => {
         };
 
         lastFiredRoot = null;
-        let pendingRoot = null;   // root MỚI đang "chờ xác nhận" (chưa đủ streak để báo thật)
+        let pendingRoot = null;   // root MỚI đang "chờ xác nhận" (chưa đủ streak để báo thật). AI-ALG-03: ở chế độ nhãn (labelMode) giá trị này là chuỗi "root-mode".
         let pendingStreak = 0;
+
+        // TASK AI-ALG-03 — chế độ phân loại theo NHÃN, chỉ bật khi caller truyền originalMode hợp lệ.
+        const labelMode = !!(options && (options.originalMode === "Major" || options.originalMode === "Minor"));
+        let baseline = labelMode ? { root: originalRootIndex, mode: options.originalMode } : null; // nhãn đang được coi là "hiện hành"
+        const relativeMajorRoot = (k) => (k.mode === "Minor" ? (k.root + 3) % 12 : k.root); // tonic của giọng trưởng có cùng tập nốt
+        const labelOf = (k) => `${KeyEngine.NOTE_NAMES[k.root]} ${k.mode}`;
 
         emitState("LISTENING", { timestamp: Date.now() }); // trạng thái mặc định lúc bắt đầu theo dõi
 
@@ -101,9 +118,57 @@ const ModEngine = (() => {
                 pendingRoot = null; pendingStreak = 0; return; // không đủ tin cậy -> không tính vào streak, tránh nhiễu
             }
 
-            const baseline = lastFiredRoot === null ? originalRootIndex : lastFiredRoot; // đã mod trước đó thì so với key ĐANG áp dụng, không so lại key gốc ban đầu
+            if (labelMode) {
+                // ---- AI-ALG-03: phân loại theo nhãn (root+mode). Debounce/streak/confidence GIỮ NGUYÊN như đường cũ. ----
+                const cur = { root: result.rootIndex, mode: result.mode };
+                if (cur.root === baseline.root && cur.mode === baseline.mode) {
+                    if (pendingRoot !== null) emitState("LISTENING", { timestamp: Date.now(), reason: "returned_to_baseline" });
+                    pendingRoot = null; pendingStreak = 0; return;
+                }
+                const curKey = `${cur.root}-${cur.mode}`;
+                if (curKey === pendingRoot) {
+                    pendingStreak++;
+                } else {
+                    pendingRoot = curKey; pendingStreak = 1;
+                    sendModTelemetry({ event: "MOD_CANDIDATE", candidate: labelOf(cur), confidence: result.confidence, persistence: pendingStreak, sustainRequired: SUSTAIN_REQUIRED, timestamp: Date.now() });
+                    emitState("MOD_CANDIDATE", { candidateRoot: cur.root, candidateLabel: labelOf(cur), confidence: result.confidence, streakCount: pendingStreak, sustainRequired: SUSTAIN_REQUIRED, timestamp: Date.now() });
+                }
+                if (pendingStreak < SUSTAIN_REQUIRED) return;
 
-            if (result.rootIndex === baseline) {
+                const kind = cur.root === baseline.root ? "MODE_CHANGE"
+                    : (relativeMajorRoot(cur) === relativeMajorRoot(baseline) ? "RELATIVE_KEY" : "MODULATION");
+                const fromLabel = labelOf(baseline);
+                baseline = cur; pendingRoot = null; pendingStreak = 0;
+
+                if (kind !== "MODULATION") {
+                    // Đổi mode cùng tonic / giọng tương đối: KHÔNG tạo lệnh dịch pitch (không gọi onModulation).
+                    const labelData = { kind, from: fromLabel, to: labelOf(cur), pitchShift: false, confidence: result.confidence, timestamp: Date.now() };
+                    sendModTelemetry({ event: "KEY_LABEL_CHANGED", ...labelData, persistence: SUSTAIN_REQUIRED });
+                    emitState("KEY_LABEL_CHANGED", labelData);
+                    return;
+                }
+
+                const deltaL = KeyEngine.shortestSemitoneDelta(originalRootIndex, cur.root);
+                lastFiredRoot = cur.root;
+                if (deltaL === 0) return; // hành vi cũ giữ nguyên (xem mục Remaining Defects D10 trong báo cáo AI-ALG-03)
+                const modDataL = {
+                    semitone: deltaL,
+                    originalKey: `${KeyEngine.NOTE_NAMES[originalRootIndex]}`,
+                    targetKey: labelOf(cur),
+                    confidence: result.confidence,
+                    stable: true,
+                    timestamp: Date.now(),
+                    kind: "MODULATION", mode: cur.mode, // AI-ALG-03: field cộng thêm, field cũ không đổi
+                };
+                sendModTelemetry({ event: "MOD_CONFIRMED", ...modDataL, persistence: SUSTAIN_REQUIRED });
+                emitState("MODULATION_DETECTED", modDataL);
+                onModulation(modDataL);
+                return;
+            }
+
+            const baseline_legacy = lastFiredRoot === null ? originalRootIndex : lastFiredRoot; // đã mod trước đó thì so với key ĐANG áp dụng, không so lại key gốc ban đầu
+
+            if (result.rootIndex === baseline_legacy) {
                 // Về lại đúng key hiện hành (gốc hoặc đã mod trước đó) -> không phải chuyển giọng,
                 // reset hẳn streak đang chờ (tránh cộng dồn qua các lần dao động qua lại).
                 if (pendingRoot !== null) emitState("LISTENING", { timestamp: Date.now(), reason: "returned_to_baseline" });

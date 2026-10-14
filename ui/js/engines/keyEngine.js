@@ -49,6 +49,24 @@ const KeyEngine = (() => {
 
     let bassRootVotes = new Array(12).fill(0);
 
+    // === TASK AI-ALG-03 (D1) — BÙ TUNING: ước lượng độ lệch tuning (cent) rồi dời lưới tần số nốt tương ứng. ===
+    // Vấn đề đã đo (AI-ALG-02/03, nhạc tổng hợp): lưới nốt cố định A4=440 Hz + nội suy ±1 bin làm mất đỉnh khi nhạc lệch tuning
+    // -> Key sai Major/Minor (baseline chỉ 3–5/8 đúng ở lệch 10–45 cent). Phương pháp: chọn offset (cent) làm CỰC ĐẠI năng lượng đỉnh
+    // tại lưới nốt (hài 1–3, MIDI 45–84), có thiên lệch về 0 (chỉ đổi khi tốt hơn offset 0 ≥12%), bỏ phiếu theo thời gian.
+    // CHỈ dùng ứng viên -40..+40: ±50 cent là biên mơ hồ (lưới +50 và -50 khác nhau đúng 1 bán cung -> nhận nhầm Key lệch nửa cung,
+    // lỗi đã tái hiện ở prototype AI-ALG-02 và đã giải thích).
+    // Tắt nhanh/hoàn nguyên: đặt TUNING_COMPENSATION_ENABLED = false (hành vi trở về đúng như trước AI-ALG-03).
+    const TUNING_COMPENSATION_ENABLED = true;
+    const TUNING_CANDIDATES_CENTS = [-40, -30, -20, -10, 0, 10, 20, 30, 40];
+    const TUNING_ESTIMATE_EVERY_FRAMES = 30;
+    const TUNING_MIN_MIDI = 45; // bỏ nốt trầm (độ phân giải bin quá thô)
+    const TUNING_ZERO_BIAS = 1.12; // AI-ALG-03: 1.05 làm test A32 (phổ đỉnh-đơn) chọn nhầm -10 cent -> nâng lên 1.12
+    const TUNING_VOTE_DECAY = 0.9;
+    const TUNING_VOTE_MIN = 3;
+    let tuningCents = 0;
+    let tuningVotes = {};
+    let tuningFrame = 0;
+
     let lastTop1Key = null;
     let lastTop1Label = null;
     let lastTop1ChangedAt = null;
@@ -111,6 +129,7 @@ const KeyEngine = (() => {
         contentEnergyEMA = 0;
         hasMusicalContent = false;
         bassRootVotes = new Array(12).fill(0);
+        tuningCents = 0; tuningVotes = {}; tuningFrame = 0; // AI-ALG-03: reset theo nguồn mới
         lastTop1Key = null;
         lastTop1Label = null;
         lastTop1ChangedAt = null;
@@ -135,6 +154,30 @@ const KeyEngine = (() => {
         return (((Math.round(midi) % 12) + 12) % 12);
     }
 
+    function estimateTuningCents(binHz, binCount) {
+        // Năng lượng tại ĐÚNG tần số (nội suy tuyến tính giữa 2 bin, cùng cách chroma đang tính) — KHÔNG dùng max ±1 bin vì
+        // cửa sổ đó rộng ~±6 Hz (48 kHz/FFT 8192) nên không phân biệt nổi vài chục cent ở nốt trầm (đã đo: chọn nhầm trên phổ thưa).
+        let bestOff = 0, bestE = -1, zeroE = 0;
+        for (const off of TUNING_CANDIDATES_CENTS) {
+            let e = 0;
+            for (let midi = TUNING_MIN_MIDI; midi <= 84; midi++) {
+                for (let h = 1; h <= 3; h++) {
+                    const x = (A4_HZ * Math.pow(2, (midi - 69) / 12 + off / 1200) * h) / binHz;
+                    const b0 = Math.floor(x);
+                    if (b0 < 1 || b0 + 1 >= binCount) continue;
+                    const frac = x - b0;
+                    const amp0 = Math.pow(10, Math.max(-100, chromaDataArray[b0]) / 20);
+                    const amp1 = Math.pow(10, Math.max(-100, chromaDataArray[b0 + 1]) / 20);
+                    e += (amp0 * (1 - frac) + amp1 * frac) / h;
+                }
+            }
+            if (off === 0) zeroE = e;
+            if (e > bestE) { bestE = e; bestOff = off; }
+        }
+        if (bestOff !== 0 && bestE < zeroE * TUNING_ZERO_BIAS) bestOff = 0;
+        return bestOff;
+    }
+
     function updateChromaVector() {
         if (!chromaAnalyser || !chromaDataArray) return;
         chromaAnalyser.getFloatFrequencyData(chromaDataArray);
@@ -142,12 +185,20 @@ const KeyEngine = (() => {
         const sampleRate = audioCtxRef?.sampleRate || 48000;
         const binHz = sampleRate / chromaAnalyser.fftSize;
         const binCount = chromaDataArray.length;
+        if (TUNING_COMPENSATION_ENABLED && (tuningFrame++ % TUNING_ESTIMATE_EVERY_FRAMES) === 0) {
+            const off = estimateTuningCents(binHz, binCount);
+            tuningVotes[off] = (tuningVotes[off] || 0) * TUNING_VOTE_DECAY + 1;
+            for (const k in tuningVotes) if (+k !== off) tuningVotes[k] *= TUNING_VOTE_DECAY;
+            let bk = 0, bv = -1;
+            for (const k in tuningVotes) if (tuningVotes[k] > bv) { bv = tuningVotes[k]; bk = +k; }
+            if (bv >= TUNING_VOTE_MIN) tuningCents = bk;
+        }
         const frame = new Array(12).fill(0);
         const bassFrame = new Array(12).fill(0);
 
         for (let midi = 21; midi <= 108; midi++) {
             const pc = ((midi % 12) + 12) % 12;
-            const fFun = A4_HZ * Math.pow(2, (midi - 69) / 12);
+            const fFun = A4_HZ * Math.pow(2, (midi - 69) / 12 + tuningCents / 1200);
             if (fFun < 27 || fFun > 6000) continue;
             let energy = 0;
             for (let h = 0; h < HARMONIC_AMP.length; h++) {
@@ -713,7 +764,7 @@ const KeyEngine = (() => {
 
     function getDebugSnapshot() {
         return {
-            chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice(),
+            chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice(), tuningCents,
             frameCounter, hasMusicalContent, contentEnergyEMA, inputProbe: { ...inputProbe }, loopStats: { ...loopStats },
             firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
         };

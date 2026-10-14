@@ -176,7 +176,8 @@ async function sendToneStep(semitoneDelta) {
             if (!sent) { allSent = false; break; }
             await delay(CLICK_STEP_DELAY_MS);
         }
-        if (allSent) return { ok: true, driverUsed: "midi" };
+        // TASK AI-ALG-03 (D6) — allSent=true chỉ nghĩa là API Web MIDI không ném lỗi: ghi rõ UNCONFIRMED, giống sendKeyToAutotune (MIDI-01).
+        if (allSent) return { ok: true, driverUsed: "midi", confirmation: "MIDI_SENT_UNCONFIRMED" };
     }
 
     // --- 2) Fallback: click nút ▲/▼ đã capture ở "chromatic", lặp theo số bước ---
@@ -197,7 +198,7 @@ async function sendToneStep(semitoneDelta) {
             if (!result.ok) return { ok: false, driverUsed: "mouse", detail: result.detail };
             await delay(CLICK_STEP_DELAY_MS);
         }
-        return { ok: true, driverUsed: "mouse" };
+        return { ok: true, driverUsed: "mouse", confirmation: "CLICK_SENT_UNCONFIRMED" };
     }
 
     return {

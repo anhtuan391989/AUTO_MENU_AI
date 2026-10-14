@@ -1,0 +1,689 @@
+From 1aa94d08d0ae6250e3ea2d085f4212334576c2c1 Mon Sep 17 00:00:00 2001
+From: Claude A <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 07:31:22 +0000
+Subject: [PATCH 1/3] =?UTF-8?q?AI-ALG-03=20D2/D3/D6:=20ModEngine=20ph?=
+ =?UTF-8?q?=C3=A2n=20lo=E1=BA=A1i=20theo=20nh=C3=A3n=20(=C4=91=E1=BB=95i?=
+ =?UTF-8?q?=20mode/gi=E1=BB=8Dng=20t=C6=B0=C6=A1ng=20=C4=91=E1=BB=91i=20kh?=
+ =?UTF-8?q?=C3=B4ng=20d=E1=BB=8Bch=20pitch),=20ghi=20chu=E1=BB=97i=20tr?=
+ =?UTF-8?q?=E1=BA=A1ng=20th=C3=A1i=20MOD,=20confirmation=20cho=20sendToneS?=
+ =?UTF-8?q?tep?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01FrhXxWK5TMfTR3qNCGmEyc
+---
+ tests/unit/ModEngineA03.verify.js   | 80 +++++++++++++++++++++++++++++
+ tests/unit/ModPipelineA03.verify.js | 57 ++++++++++++++++++++
+ ui/js/engines/modEngine.js          | 73 ++++++++++++++++++++++++--
+ ui/js/renderer.js                   | 28 +++++++++-
+ ui/js/vocalCommandRouter.js         |  5 +-
+ 5 files changed, 235 insertions(+), 8 deletions(-)
+ create mode 100644 tests/unit/ModEngineA03.verify.js
+ create mode 100644 tests/unit/ModPipelineA03.verify.js
+
+diff --git a/tests/unit/ModEngineA03.verify.js b/tests/unit/ModEngineA03.verify.js
+new file mode 100644
+index 0000000..bdea2a3
+--- /dev/null
++++ b/tests/unit/ModEngineA03.verify.js
+@@ -0,0 +1,80 @@
++/**
++ * AI-ALG-03 — ModEngine: D2 (đổi mode cùng tonic bị bỏ sót) + D3 (giọng tương đối thành -3 bán cung giả).
++ * Chạy: node tests/unit/ModEngineA03.verify.js
++ * KeyEngine được STUB (đầu vào xác định) để kiểm đúng LOGIC phân loại của ModEngine; khớp-với-KeyEngine-thật đã có ở ModEngineV2.verify.js.
++ * Đây là kiểm thử PHẦN MỀM (mô phỏng), không phải kiểm thử phần cứng/nhạc thật.
++ */
++"use strict";
++const fs = require("fs"), path = require("path"), vm = require("vm");
++let fail = 0;
++function check(c, m) { if (c) console.log("  ✅ " + m); else { fail++; console.log("  ❌ " + m); } }
++
++const SRC = fs.readFileSync(path.resolve(__dirname, "../../ui/js/engines/modEngine.js"), "utf8");
++const NOTES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
++
++function rig(startArgs) {
++    let t = 0; const ints = [];
++    const sb = { console: { log() {}, warn() {}, error() {} }, Date: { now: () => t },
++        setInterval: (f, m) => { ints.push({ f, m }); return ints.length; }, clearInterval: () => { ints.length = 0; } };
++    sb.window = sb;
++    const feed = { root: 0, mode: "Major", conf: 0.9 };
++    sb.KeyEngine = { MIN_CONFIDENCE: 0.35, NOTE_NAMES: NOTES,
++        shortestSemitoneDelta: (a, b) => { let d = (b - a + 12) % 12; return d > 6 ? d - 12 : d; },
++        estimateKeyFromChroma: () => ({ rootIndex: feed.root, mode: feed.mode, confidence: feed.conf }) };
++    vm.createContext(sb);
++    vm.runInContext(SRC + "\nthis.ModEngine = ModEngine;", sb);
++    const mods = [], states = [];
++    const opts = startArgs && startArgs.legacy ? undefined : { originalMode: (startArgs && startArgs.mode) || "Major" };
++    sb.ModEngine.start(0, (d) => mods.push(d), () => !!(startArgs && startArgs.manual), (s, p) => states.push({ s, p }), opts);
++    const tick = (n) => { for (let i = 0; i < n; i++) { t += 1000; ints.forEach((x) => x.f()); } };
++    const set = (root, mode, conf) => { feed.root = root; feed.mode = mode; if (conf !== undefined) feed.conf = conf; };
++    const labelEvents = () => states.filter((x) => x.s === "KEY_LABEL_CHANGED").map((x) => x.p);
++    return { set, tick, mods, states, labelEvents };
++}
++
++console.log("T1 D2: C Major -> C Minor (cùng tonic, đổi mode), 10 s");
++{ const r = rig(); r.set(0, "Minor"); r.tick(10);
++  check(r.mods.length === 0, "KHÔNG phát onModulation (không dịch pitch)");
++  const ev = r.labelEvents(); check(ev.length === 1 && ev[0].kind === "MODE_CHANGE" && ev[0].from === "C Major" && ev[0].to === "C Minor" && ev[0].pitchShift === false, "phát đúng 1 sự kiện KEY_LABEL_CHANGED kind=MODE_CHANGE (không bị bỏ sót)"); }
++
++console.log("T2 D3: C Major -> A Minor (giọng tương đối, cùng tập nốt), 10 s");
++{ const r = rig(); r.set(9, "Minor"); r.tick(10);
++  check(r.mods.length === 0, "KHÔNG phát onModulation -3 bán cung giả");
++  const ev = r.labelEvents(); check(ev.length === 1 && ev[0].kind === "RELATIVE_KEY" && ev[0].pitchShift === false, "chỉ ghi nhận KEY_LABEL_CHANGED kind=RELATIVE_KEY"); }
++
++console.log("T3: C Major -> G Major (đổi tonic thật), 10 s");
++{ const r = rig(); r.set(7, "Major"); r.tick(10);
++  check(r.mods.length === 1 && r.mods[0].semitone === -5, "phát đúng 1 modulation, semitone=-5 (hành vi cũ giữ nguyên: bán cung ngắn nhất theo root)");
++  check(r.mods[0].kind === "MODULATION" && r.mods[0].targetKey === "G Major", "payload cộng thêm kind + targetKey, field cũ giữ nguyên");
++  check(r.states.some((x) => x.s === "MODULATION_DETECTED"), "vẫn phát state MODULATION_DETECTED"); }
++
++console.log("T4: Key ổn định (C Major) 30 s");
++{ const r = rig(); r.tick(30); check(r.mods.length === 0 && r.labelEvents().length === 0, "0 sự kiện"); }
++
++console.log("T5: confidence thấp (C Minor, conf 0.2) 15 s");
++{ const r = rig(); r.set(0, "Minor", 0.2); r.tick(15); check(r.mods.length === 0 && r.labelEvents().length === 0, "không tính vào streak, 0 sự kiện"); }
++
++console.log("T6: dao động ngắn G Major 2 tick rồi về C Major");
++{ const r = rig(); r.set(7, "Major"); r.tick(2); r.set(0, "Major"); r.tick(10); check(r.mods.length === 0 && r.labelEvents().length === 0, "không báo (chưa đủ liên tiếp)"); }
++
++console.log("T7: đổi tonic nhưng không đủ bằng chứng (2 tick)");
++{ const r = rig(); r.set(2, "Major"); r.tick(2); check(r.mods.length === 0, "chưa báo modulation"); }
++
++console.log("T8: Manual override đang bật");
++{ const r = rig({ manual: true }); r.set(7, "Major"); r.tick(10); check(r.mods.length === 0 && r.labelEvents().length === 0, "không phát gì"); }
++
++console.log("T9: tonic đổi nhưng mode xen kẽ (G Major/G Minor luân phiên) — không đủ streak theo NHÃN");
++{ const r = rig(); for (let i = 0; i < 6; i++) { r.set(7, i % 2 ? "Minor" : "Major"); r.tick(1); } check(r.mods.length === 0, "không báo modulation từ nhãn dao động"); }
++
++console.log("T10: modulation rồi về giọng tương đối của giọng MỚI (C Major -> G Major -> E Minor)");
++{ const r = rig(); r.set(7, "Major"); r.tick(5); r.set(4, "Minor"); r.tick(10);
++  check(r.mods.length === 1, "chỉ 1 modulation (G Major); E Minor là giọng tương đối của G Major => không dịch thêm");
++  check(r.labelEvents().some((e) => e.kind === "RELATIVE_KEY" && e.to === "E Minor"), "E Minor ghi nhận RELATIVE_KEY so với baseline G Major"); }
++
++console.log("T11: tương thích ngược — gọi start() KHÔNG truyền options (caller cũ)");
++{ const r = rig({ legacy: true }); r.set(7, "Major"); r.tick(10);
++  check(r.mods.length === 1 && r.mods[0].semitone === -5, "hành vi cũ giữ nguyên 100% (root-only)");
++  check(r.labelEvents().length === 0, "không phát state mới khi không có originalMode"); }
++
++console.log(fail === 0 ? "\nPASS ModEngineA03" : `\nFAIL ModEngineA03 (${fail} lỗi)`);
++process.exit(fail === 0 ? 0 : 1);
+diff --git a/tests/unit/ModPipelineA03.verify.js b/tests/unit/ModPipelineA03.verify.js
+new file mode 100644
+index 0000000..49cda18
+--- /dev/null
++++ b/tests/unit/ModPipelineA03.verify.js
+@@ -0,0 +1,57 @@
++/**
++ * AI-ALG-03 (D6) — phân biệt "đã gửi lệnh" với "đã xác nhận áp dụng" trong sendToneStep() (đường MOD -> MIDI/chuột).
++ * Chạy: node tests/unit/ModPipelineA03.verify.js   (biến môi trường AUTOMENU_ROOT để chạy trên bản khác, ví dụ HEAD cũ)
++ * Kiểm thử PHẦN MỀM với MIDI/chuột giả (stub) — KHÔNG phải kiểm thử phần cứng Windows.
++ */
++"use strict";
++const fs = require("fs"), path = require("path"), vm = require("vm");
++const ROOT = process.env.AUTOMENU_ROOT || path.resolve(__dirname, "../..");
++let fail = 0, known = 0;
++function check(c, m) { if (c) console.log("  ✅ " + m); else { fail++; console.log("  ❌ " + m); } }
++const SRC = fs.readFileSync(path.join(ROOT, "ui/js/vocalCommandRouter.js"), "utf8");
++
++function load({ port = "loopMIDI", midiOk = () => true, point = null, mouseAllowed = true }) {
++    const sent = [], clicks = [];
++    const sb = { console: { log() {}, warn() {}, error() {} },
++        setTimeout: (f) => { f(); return 0; }, Promise, Array, Math, Number, JSON, parseInt,
++        getSetting: (k) => (k === "midiOutputPort" ? port : k === "mouseControlEnabled" ? mouseAllowed : undefined),
++        getCoordinate: (k) => (k === "chromatic" ? point : ""),
++        sendMidiCC: async (cc, v) => { const ok = midiOk(sent.length); if (ok) sent.push({ cc, v }); return ok; },
++        sendMidiNotePulse: async () => true };
++    sb.window = sb; sb.electronAPI = { clickAtPoint: async (p) => { clicks.push(p); return { ok: true }; } };
++    vm.createContext(sb);
++    vm.runInContext(SRC + "\nthis.sendToneStep = sendToneStep;", sb);
++    return { sendToneStep: sb.sendToneStep, sent, clicks };
++}
++
++(async () => {
++    console.log("P1: MIDI gửi OK (+3)");
++    { const r = load({}); const res = await r.sendToneStep(3);
++      check(res.ok === true && res.driverUsed === "midi" && r.sent.length === 3, "ok=true, driverUsed=midi, 3 CC đã gọi");
++      check(res.confirmation === "MIDI_SENT_UNCONFIRMED", "confirmation=MIDI_SENT_UNCONFIRMED (đã GỬI, chưa xác nhận áp dụng)"); }
++
++    console.log("P2: MIDI gửi lỗi, không có tọa độ chuột");
++    { const r = load({ midiOk: () => false }); const res = await r.sendToneStep(2);
++      check(res.ok === false && !res.confirmation, "ok=false, không có confirmation"); }
++
++    console.log("P3: chưa cấu hình MIDI và tọa độ");
++    { const r = load({ port: "" }); const res = await r.sendToneStep(2);
++      check(res.ok === false && /Chưa cấu hình/.test(res.detail || ""), "ok=false + detail rõ ràng"); }
++
++    console.log("P4: không có MIDI, fallback chuột");
++    { const r = load({ port: "", point: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }); const res = await r.sendToneStep(-2);
++      check(res.ok === true && res.driverUsed === "mouse" && r.clicks.length === 2, "ok=true, driverUsed=mouse, 2 click");
++      check(res.confirmation === "CLICK_SENT_UNCONFIRMED", "confirmation=CLICK_SENT_UNCONFIRMED"); }
++
++    console.log("P5: semitone=0 không gửi gì");
++    { const r = load({}); const res = await r.sendToneStep(0); check(res.ok === true && res.driverUsed === "none" && r.sent.length === 0 && r.clicks.length === 0, "no-op"); }
++
++    console.log("P6 [LỖI ĐÃ BIẾT D9 — chưa sửa, chỉ tái hiện]: MIDI gửi được 1/3 rồi lỗi, có fallback chuột");
++    { const r = load({ midiOk: (n) => n < 1, point: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }); const res = await r.sendToneStep(3);
++      const total = r.sent.length + r.clicks.length;
++      console.log(`  ℹ️ MIDI đã gửi ${r.sent.length} bước + chuột ${r.clicks.length} click = ${total} bước (yêu cầu 3) → ${total > 3 ? "DỊCH DƯ" : "đúng"}`);
++      if (total > 3) known++; }
++
++    console.log(fail === 0 ? `\nPASS ModPipelineA03 (known defects reproduced: ${known})` : `\nFAIL ModPipelineA03 (${fail} lỗi)`);
++    process.exit(fail === 0 ? 0 : 1);
++})();
+diff --git a/ui/js/engines/modEngine.js b/ui/js/engines/modEngine.js
+index 0b9f074..16e85da 100644
+--- a/ui/js/engines/modEngine.js
++++ b/ui/js/engines/modEngine.js
+@@ -72,7 +72,18 @@ const ModEngine = (() => {
+         }
+     }
+ 
+-    function start(originalRootIndex, onModulation, isManualOverrideActiveFn, onStateChange) {
++    /**
++     * TASK AI-ALG-03 (D2/D3) — tham số TUỲ CHỌN thứ 5 `options = { originalMode: "Major"|"Minor" }`.
++     * - KHÔNG truyền (caller cũ): hành vi CŨ giữ nguyên 100% (so sánh theo rootIndex).
++     * - CÓ truyền: ModEngine phân loại thay đổi theo NHÃN (root+mode):
++     *     MODULATION   = tonic đổi, không phải giọng tương đối  -> onModulation(modData) như cũ (semitone tính theo root, KHÔNG đổi),
++     *                    modData cộng thêm: kind:"MODULATION", mode.
++     *     MODE_CHANGE  = cùng tonic, đổi Major<->Minor           -> CHỈ state "KEY_LABEL_CHANGED" {kind:"MODE_CHANGE", pitchShift:false}
++     *     RELATIVE_KEY = giọng tương đối (cùng tập nốt, vd C Major<->A Minor) -> CHỈ state "KEY_LABEL_CHANGED" {kind:"RELATIVE_KEY", pitchShift:false}
++     *   Hai loại sau KHÔNG gọi onModulation => không có lệnh dịch pitch nào được tạo ra từ chúng.
++     *   (Menu hiện chưa có kênh điều khiển "mode" xuống Auto-Tune — chỉ gửi root — nên MODE_CHANGE là sự kiện quan sát, chưa có hành động; xem báo cáo AI-ALG-03.)
++     */
++    function start(originalRootIndex, onModulation, isManualOverrideActiveFn, onStateChange, options) {
+         stop(); // tránh chạy trùng nhiều watcher
+ 
+         // Task B16 — "tap" tuỳ chọn, không throw ra ngoài poll loop nếu caller lỡ truyền callback lỗi.
+@@ -82,9 +93,15 @@ const ModEngine = (() => {
+         };
+ 
+         lastFiredRoot = null;
+-        let pendingRoot = null;   // root MỚI đang "chờ xác nhận" (chưa đủ streak để báo thật)
++        let pendingRoot = null;   // root MỚI đang "chờ xác nhận" (chưa đủ streak để báo thật). AI-ALG-03: ở chế độ nhãn (labelMode) giá trị này là chuỗi "root-mode".
+         let pendingStreak = 0;
+ 
++        // TASK AI-ALG-03 — chế độ phân loại theo NHÃN, chỉ bật khi caller truyền originalMode hợp lệ.
++        const labelMode = !!(options && (options.originalMode === "Major" || options.originalMode === "Minor"));
++        let baseline = labelMode ? { root: originalRootIndex, mode: options.originalMode } : null; // nhãn đang được coi là "hiện hành"
++        const relativeMajorRoot = (k) => (k.mode === "Minor" ? (k.root + 3) % 12 : k.root); // tonic của giọng trưởng có cùng tập nốt
++        const labelOf = (k) => `${KeyEngine.NOTE_NAMES[k.root]} ${k.mode}`;
++
+         emitState("LISTENING", { timestamp: Date.now() }); // trạng thái mặc định lúc bắt đầu theo dõi
+ 
+         pollTimerId = setInterval(() => {
+@@ -101,9 +118,57 @@ const ModEngine = (() => {
+                 pendingRoot = null; pendingStreak = 0; return; // không đủ tin cậy -> không tính vào streak, tránh nhiễu
+             }
+ 
+-            const baseline = lastFiredRoot === null ? originalRootIndex : lastFiredRoot; // đã mod trước đó thì so với key ĐANG áp dụng, không so lại key gốc ban đầu
++            if (labelMode) {
++                // ---- AI-ALG-03: phân loại theo nhãn (root+mode). Debounce/streak/confidence GIỮ NGUYÊN như đường cũ. ----
++                const cur = { root: result.rootIndex, mode: result.mode };
++                if (cur.root === baseline.root && cur.mode === baseline.mode) {
++                    if (pendingRoot !== null) emitState("LISTENING", { timestamp: Date.now(), reason: "returned_to_baseline" });
++                    pendingRoot = null; pendingStreak = 0; return;
++                }
++                const curKey = `${cur.root}-${cur.mode}`;
++                if (curKey === pendingRoot) {
++                    pendingStreak++;
++                } else {
++                    pendingRoot = curKey; pendingStreak = 1;
++                    sendModTelemetry({ event: "MOD_CANDIDATE", candidate: labelOf(cur), confidence: result.confidence, persistence: pendingStreak, sustainRequired: SUSTAIN_REQUIRED, timestamp: Date.now() });
++                    emitState("MOD_CANDIDATE", { candidateRoot: cur.root, candidateLabel: labelOf(cur), confidence: result.confidence, streakCount: pendingStreak, sustainRequired: SUSTAIN_REQUIRED, timestamp: Date.now() });
++                }
++                if (pendingStreak < SUSTAIN_REQUIRED) return;
++
++                const kind = cur.root === baseline.root ? "MODE_CHANGE"
++                    : (relativeMajorRoot(cur) === relativeMajorRoot(baseline) ? "RELATIVE_KEY" : "MODULATION");
++                const fromLabel = labelOf(baseline);
++                baseline = cur; pendingRoot = null; pendingStreak = 0;
++
++                if (kind !== "MODULATION") {
++                    // Đổi mode cùng tonic / giọng tương đối: KHÔNG tạo lệnh dịch pitch (không gọi onModulation).
++                    const labelData = { kind, from: fromLabel, to: labelOf(cur), pitchShift: false, confidence: result.confidence, timestamp: Date.now() };
++                    sendModTelemetry({ event: "KEY_LABEL_CHANGED", ...labelData, persistence: SUSTAIN_REQUIRED });
++                    emitState("KEY_LABEL_CHANGED", labelData);
++                    return;
++                }
++
++                const deltaL = KeyEngine.shortestSemitoneDelta(originalRootIndex, cur.root);
++                lastFiredRoot = cur.root;
++                if (deltaL === 0) return; // hành vi cũ giữ nguyên (xem mục Remaining Defects D10 trong báo cáo AI-ALG-03)
++                const modDataL = {
++                    semitone: deltaL,
++                    originalKey: `${KeyEngine.NOTE_NAMES[originalRootIndex]}`,
++                    targetKey: labelOf(cur),
++                    confidence: result.confidence,
++                    stable: true,
++                    timestamp: Date.now(),
++                    kind: "MODULATION", mode: cur.mode, // AI-ALG-03: field cộng thêm, field cũ không đổi
++                };
++                sendModTelemetry({ event: "MOD_CONFIRMED", ...modDataL, persistence: SUSTAIN_REQUIRED });
++                emitState("MODULATION_DETECTED", modDataL);
++                onModulation(modDataL);
++                return;
++            }
++
++            const baseline_legacy = lastFiredRoot === null ? originalRootIndex : lastFiredRoot; // đã mod trước đó thì so với key ĐANG áp dụng, không so lại key gốc ban đầu
+ 
+-            if (result.rootIndex === baseline) {
++            if (result.rootIndex === baseline_legacy) {
+                 // Về lại đúng key hiện hành (gốc hoặc đã mod trước đó) -> không phải chuyển giọng,
+                 // reset hẳn streak đang chờ (tránh cộng dồn qua các lần dao động qua lại).
+                 if (pendingRoot !== null) emitState("LISTENING", { timestamp: Date.now(), reason: "returned_to_baseline" });
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index af539f8..c827b03 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -1701,6 +1701,20 @@ function updateModInfo(timeString, oldKey, newKey, semitones) {
+ // đúng giá trị nào, thay vì ép cứng về 0.
+ let aiSemitoneOffset = 0;
+ 
++// TASK AI-ALG-03 (D6) — CHUỖI TRẠNG THÁI modulation -> hành động, CHỈ để quan sát/chẩn đoán (không đổi UI, không đổi lệnh gửi).
++// Các mức tách biệt: MODULATION_DETECTED (ModEngine thấy) -> ACTION_REQUESTED (renderer định gửi lệnh) ->
++// ACTION_SENT_UNCONFIRMED (API gửi không ném lỗi; KHÔNG chứng minh đích đã áp dụng) | ACTION_FAILED |
++// ACTION_DEFERRED_MANUAL | ACTION_DELEGATED_AI_CONTROL. KHÔNG có mức "APPLIED": Menu không có cách xác nhận phía Auto-Tune/SoundShifter.
++const modPipelineLog = [];
++window.__modPipeline = modPipelineLog;
++function recordModStage(stage, info) {
++    try {
++        modPipelineLog.push({ stage, t: Date.now(), ...(info || {}) });
++        if (modPipelineLog.length > 50) modPipelineLog.shift();
++        if (typeof aiDiag === "function") aiDiag("MOD_STAGE", { stage, ...(info || {}) });
++    } catch (e) { /* chẩn đoán không bao giờ được làm hỏng luồng MOD */ }
++}
++
+ function isManualOverrideActive() {
+     return !!(modPowerBtn && modPowerBtn.classList.contains("active"));
+ }
+@@ -1739,6 +1753,7 @@ async function applyModEvent(data) {
+         // này để tránh đánh nhau với lệnh tay đang chủ động điều khiển Auto-Tune. Giá trị
+         // này sẽ được áp khi người dùng tắt ghi đè tay (xem turnManualOverrideOff).
+         console.log(`[MOD-AI] Muốn dịch ${data.semitone} bán cung (${data.time}) nhưng đang bị ghi đè tay, tạm hoãn.`);
++        recordModStage("ACTION_DEFERRED_MANUAL", { semitone: data.semitone });
+         return;
+     }
+ 
+@@ -1748,16 +1763,19 @@ async function applyModEvent(data) {
+         // AIContext ở trên (reportAiResult). Việc gửi thật để dành cho Workflow ->
+         // PluginController -> Bridge (xem onPluginCommand ở cuối file).
+         console.log(`[ControlSource] AI_CONTROL — bỏ qua gửi Mod trực tiếp (${data.semitone} bán cung), chờ Bridge từ Core.`);
++        recordModStage("ACTION_DELEGATED_AI_CONTROL", { semitone: data.semitone });
+         setStatus("dot-mod", "online");
+         return;
+ 
+     }
+ 
+     setStatus("dot-mod", "pending"); // cam: AI đang gửi lệnh dịch tone theo modulation thật dò được
++    recordModStage("ACTION_REQUESTED", { semitone: data.semitone });
+     const result = await sendToneStep(data.semitone);
++    recordModStage(result.ok ? "ACTION_SENT_UNCONFIRMED" : "ACTION_FAILED", { semitone: data.semitone, driverUsed: result.driverUsed ?? null, confirmation: result.confirmation ?? null, detail: result.ok ? undefined : result.detail });
+ 
+     if (result.ok) {
+-        setStatus("dot-mod", "online"); // xanh: AI đã gửi thành công
++        setStatus("dot-mod", "online"); // xanh: AI đã GỬI lệnh (chưa phải "đã áp dụng" — xem recordModStage ở trên)
+     } else {
+         setStatus("dot-mod", "offline"); // đỏ: LỖI thật sự, không phải "đã tắt"
+         const modStatusEl = document.getElementById("modStatus");
+@@ -1837,11 +1855,17 @@ function startModulationWatcher() {
+     if (modStatusEl) modStatusEl.textContent = "LISTENING";
+     if (modTimelineEl) modTimelineEl.textContent = "";
+ 
++    // TASK AI-ALG-03 — truyền mode của Key gốc để ModEngine phân biệt đổi mode / giọng tương đối / modulation thật.
++    // Không parse được mode (định dạng lạ) => undefined => ModEngine chạy đúng hành vi cũ (root-only).
++    const originalMode = /minor/i.test(originalKey) ? "Minor" : (/major/i.test(originalKey) ? "Major" : null);
+     ModEngine.start(originalRootIndex, (data) => {
+         const mins = String(Math.floor(songSeconds / 60)).padStart(2, "0");
+         const secs = String(songSeconds % 60).padStart(2, "0");
+         applyModEvent({ time: `${mins}:${secs}`, semitone: data.semitone });
+-    }, isManualOverrideActive);
++    }, isManualOverrideActive, (state, payload) => {
++        // Chỉ ghi nhận (không điều khiển gì). KEY_LABEL_CHANGED = đổi nhãn Key/mode, KHÔNG có lệnh dịch pitch.
++        if (state === "MODULATION_DETECTED" || state === "KEY_LABEL_CHANGED") recordModStage(state, { semitone: payload?.semitone, kind: payload?.kind, from: payload?.from, to: payload?.to ?? payload?.targetKey });
++    }, originalMode ? { originalMode } : undefined);
+ }
+ 
+ let songSeconds = 0;
+diff --git a/ui/js/vocalCommandRouter.js b/ui/js/vocalCommandRouter.js
+index 1004a9d..f436af5 100644
+--- a/ui/js/vocalCommandRouter.js
++++ b/ui/js/vocalCommandRouter.js
+@@ -176,7 +176,8 @@ async function sendToneStep(semitoneDelta) {
+             if (!sent) { allSent = false; break; }
+             await delay(CLICK_STEP_DELAY_MS);
+         }
+-        if (allSent) return { ok: true, driverUsed: "midi" };
++        // TASK AI-ALG-03 (D6) — allSent=true chỉ nghĩa là API Web MIDI không ném lỗi: ghi rõ UNCONFIRMED, giống sendKeyToAutotune (MIDI-01).
++        if (allSent) return { ok: true, driverUsed: "midi", confirmation: "MIDI_SENT_UNCONFIRMED" };
+     }
+ 
+     // --- 2) Fallback: click nút ▲/▼ đã capture ở "chromatic", lặp theo số bước ---
+@@ -197,7 +198,7 @@ async function sendToneStep(semitoneDelta) {
+             if (!result.ok) return { ok: false, driverUsed: "mouse", detail: result.detail };
+             await delay(CLICK_STEP_DELAY_MS);
+         }
+-        return { ok: true, driverUsed: "mouse" };
++        return { ok: true, driverUsed: "mouse", confirmation: "CLICK_SENT_UNCONFIRMED" };
+     }
+ 
+     return {
+-- 
+2.43.0
+
+
+From a9d637aa7d2eff2d09f9ec2edbaca4082a3a1749 Mon Sep 17 00:00:00 2001
+From: Claude A <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 07:31:23 +0000
+Subject: [PATCH 2/3] =?UTF-8?q?AI-ALG-03=20D1:=20b=C3=B9=20tuning=20(?=
+ =?UTF-8?q?=C6=B0=E1=BB=9Bc=20l=C6=B0=E1=BB=A3ng=20-40..+40=20cent,=20n?=
+ =?UTF-8?q?=E1=BB=99i=20suy),=20c=C3=B4ng=20t=E1=BA=AFc=20TUNING=5FCOMPENS?=
+ =?UTF-8?q?ATION=5FENABLED?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01FrhXxWK5TMfTR3qNCGmEyc
+---
+ ui/js/engines/keyEngine.js | 55 ++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 53 insertions(+), 2 deletions(-)
+
+diff --git a/ui/js/engines/keyEngine.js b/ui/js/engines/keyEngine.js
+index a878f25..f766d57 100644
+--- a/ui/js/engines/keyEngine.js
++++ b/ui/js/engines/keyEngine.js
+@@ -49,6 +49,24 @@ const KeyEngine = (() => {
+ 
+     let bassRootVotes = new Array(12).fill(0);
+ 
++    // === TASK AI-ALG-03 (D1) — BÙ TUNING: ước lượng độ lệch tuning (cent) rồi dời lưới tần số nốt tương ứng. ===
++    // Vấn đề đã đo (AI-ALG-02/03, nhạc tổng hợp): lưới nốt cố định A4=440 Hz + nội suy ±1 bin làm mất đỉnh khi nhạc lệch tuning
++    // -> Key sai Major/Minor (baseline chỉ 3–5/8 đúng ở lệch 10–45 cent). Phương pháp: chọn offset (cent) làm CỰC ĐẠI năng lượng đỉnh
++    // tại lưới nốt (hài 1–3, MIDI 45–84), có thiên lệch về 0 (chỉ đổi khi tốt hơn offset 0 ≥12%), bỏ phiếu theo thời gian.
++    // CHỈ dùng ứng viên -40..+40: ±50 cent là biên mơ hồ (lưới +50 và -50 khác nhau đúng 1 bán cung -> nhận nhầm Key lệch nửa cung,
++    // lỗi đã tái hiện ở prototype AI-ALG-02 và đã giải thích).
++    // Tắt nhanh/hoàn nguyên: đặt TUNING_COMPENSATION_ENABLED = false (hành vi trở về đúng như trước AI-ALG-03).
++    const TUNING_COMPENSATION_ENABLED = true;
++    const TUNING_CANDIDATES_CENTS = [-40, -30, -20, -10, 0, 10, 20, 30, 40];
++    const TUNING_ESTIMATE_EVERY_FRAMES = 30;
++    const TUNING_MIN_MIDI = 45; // bỏ nốt trầm (độ phân giải bin quá thô)
++    const TUNING_ZERO_BIAS = 1.12; // AI-ALG-03: 1.05 làm test A32 (phổ đỉnh-đơn) chọn nhầm -10 cent -> nâng lên 1.12
++    const TUNING_VOTE_DECAY = 0.9;
++    const TUNING_VOTE_MIN = 3;
++    let tuningCents = 0;
++    let tuningVotes = {};
++    let tuningFrame = 0;
++
+     let lastTop1Key = null;
+     let lastTop1Label = null;
+     let lastTop1ChangedAt = null;
+@@ -111,6 +129,7 @@ const KeyEngine = (() => {
+         contentEnergyEMA = 0;
+         hasMusicalContent = false;
+         bassRootVotes = new Array(12).fill(0);
++        tuningCents = 0; tuningVotes = {}; tuningFrame = 0; // AI-ALG-03: reset theo nguồn mới
+         lastTop1Key = null;
+         lastTop1Label = null;
+         lastTop1ChangedAt = null;
+@@ -135,6 +154,30 @@ const KeyEngine = (() => {
+         return (((Math.round(midi) % 12) + 12) % 12);
+     }
+ 
++    function estimateTuningCents(binHz, binCount) {
++        // Năng lượng tại ĐÚNG tần số (nội suy tuyến tính giữa 2 bin, cùng cách chroma đang tính) — KHÔNG dùng max ±1 bin vì
++        // cửa sổ đó rộng ~±6 Hz (48 kHz/FFT 8192) nên không phân biệt nổi vài chục cent ở nốt trầm (đã đo: chọn nhầm trên phổ thưa).
++        let bestOff = 0, bestE = -1, zeroE = 0;
++        for (const off of TUNING_CANDIDATES_CENTS) {
++            let e = 0;
++            for (let midi = TUNING_MIN_MIDI; midi <= 84; midi++) {
++                for (let h = 1; h <= 3; h++) {
++                    const x = (A4_HZ * Math.pow(2, (midi - 69) / 12 + off / 1200) * h) / binHz;
++                    const b0 = Math.floor(x);
++                    if (b0 < 1 || b0 + 1 >= binCount) continue;
++                    const frac = x - b0;
++                    const amp0 = Math.pow(10, Math.max(-100, chromaDataArray[b0]) / 20);
++                    const amp1 = Math.pow(10, Math.max(-100, chromaDataArray[b0 + 1]) / 20);
++                    e += (amp0 * (1 - frac) + amp1 * frac) / h;
++                }
++            }
++            if (off === 0) zeroE = e;
++            if (e > bestE) { bestE = e; bestOff = off; }
++        }
++        if (bestOff !== 0 && bestE < zeroE * TUNING_ZERO_BIAS) bestOff = 0;
++        return bestOff;
++    }
++
+     function updateChromaVector() {
+         if (!chromaAnalyser || !chromaDataArray) return;
+         chromaAnalyser.getFloatFrequencyData(chromaDataArray);
+@@ -142,12 +185,20 @@ const KeyEngine = (() => {
+         const sampleRate = audioCtxRef?.sampleRate || 48000;
+         const binHz = sampleRate / chromaAnalyser.fftSize;
+         const binCount = chromaDataArray.length;
++        if (TUNING_COMPENSATION_ENABLED && (tuningFrame++ % TUNING_ESTIMATE_EVERY_FRAMES) === 0) {
++            const off = estimateTuningCents(binHz, binCount);
++            tuningVotes[off] = (tuningVotes[off] || 0) * TUNING_VOTE_DECAY + 1;
++            for (const k in tuningVotes) if (+k !== off) tuningVotes[k] *= TUNING_VOTE_DECAY;
++            let bk = 0, bv = -1;
++            for (const k in tuningVotes) if (tuningVotes[k] > bv) { bv = tuningVotes[k]; bk = +k; }
++            if (bv >= TUNING_VOTE_MIN) tuningCents = bk;
++        }
+         const frame = new Array(12).fill(0);
+         const bassFrame = new Array(12).fill(0);
+ 
+         for (let midi = 21; midi <= 108; midi++) {
+             const pc = ((midi % 12) + 12) % 12;
+-            const fFun = A4_HZ * Math.pow(2, (midi - 69) / 12);
++            const fFun = A4_HZ * Math.pow(2, (midi - 69) / 12 + tuningCents / 1200);
+             if (fFun < 27 || fFun > 6000) continue;
+             let energy = 0;
+             for (let h = 0; h < HARMONIC_AMP.length; h++) {
+@@ -713,7 +764,7 @@ const KeyEngine = (() => {
+ 
+     function getDebugSnapshot() {
+         return {
+-            chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice(),
++            chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice(), tuningCents,
+             frameCounter, hasMusicalContent, contentEnergyEMA, inputProbe: { ...inputProbe }, loopStats: { ...loopStats },
+             firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
+         };
+-- 
+2.43.0
+
+
+From d46c530a905092b6426216d963da15268a1ad996 Mon Sep 17 00:00:00 2001
+From: Claude A <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 07:31:23 +0000
+Subject: [PATCH 3/3] =?UTF-8?q?AI-ALG-03:=20c=C3=B4ng=20c=E1=BB=A5=20bench?=
+ =?UTF-8?q?mark=20offline=20tools/algbench?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01FrhXxWK5TMfTR3qNCGmEyc
+---
+ tools/algbench/README.txt       |   8 +++
+ tools/algbench/bench.js         | 109 ++++++++++++++++++++++++++++++++
+ tools/algbench/modtest.js       |  10 +++
+ tools/algbench/summarize_bpm.py |  18 ++++++
+ 4 files changed, 145 insertions(+)
+ create mode 100644 tools/algbench/README.txt
+ create mode 100644 tools/algbench/bench.js
+ create mode 100644 tools/algbench/modtest.js
+ create mode 100644 tools/algbench/summarize_bpm.py
+
+diff --git a/tools/algbench/README.txt b/tools/algbench/README.txt
+new file mode 100644
+index 0000000..daa7c6c
+--- /dev/null
++++ b/tools/algbench/README.txt
+@@ -0,0 +1,8 @@
++AI-ALG-02/03 benchmark offline (chạy mã engine THẬT bằng vm; đầu vào tổng hợp; đồng hồ ảo). KHÔNG phải đo runtime Windows / nhạc thật.
++  node tools/algbench/bench.js <repoRoot> key   out.json   # 36 ca Key (12 root x major/minor/popLoop)
++  node tools/algbench/bench.js <repoRoot> hard  out.json   # nhiễu / không bass / lệch tuning +40, -45
++  node tools/algbench/bench.js <repoRoot> hard2 out.json   # lệch tuning -45..+45 cent (88 ca, ~5 phút)
++  node tools/algbench/bench.js <repoRoot> bpm2  out.json [every,nohat,kick2,eighths,sparse,sync]   # 14 BPM x kiểu trống
++  python3 tools/algbench/summarize_bpm.py out.json
++  node tools/algbench/modtest.js <repoRoot>                # ModEngine với KeyEngine giả
++Không sửa file nào trong ui/ app/ core/.
+diff --git a/tools/algbench/bench.js b/tools/algbench/bench.js
+new file mode 100644
+index 0000000..1035369
+--- /dev/null
++++ b/tools/algbench/bench.js
+@@ -0,0 +1,109 @@
++'use strict';
++// Benchmark offline: chạy keyEngine.js / bpmEngine.js THẬT (nạp bằng vm) trên PCM tổng hợp có đáp án.
++const fs=require('fs'),path=require('path'),vm=require('vm');
++const REPO=process.argv[2];
++const {render}=require(path.join(REPO,'tests/helpers/synthMusic.js'));
++function fft(re,im){const n=re.length;for(let i=1,j=0;i<n;i++){let b=n>>1;for(;j&b;b>>=1)j^=b;j^=b;if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]];}}
++for(let l=2;l<=n;l<<=1){const a=-2*Math.PI/l,wr=Math.cos(a),wi=Math.sin(a);for(let i=0;i<n;i+=l){let cr=1,ci=0;for(let k=0;k<l/2;k++){const u=i+k,v=i+k+l/2;const tr=re[v]*cr-im[v]*ci,ti=re[v]*ci+im[v]*cr;re[v]=re[u]-tr;im[v]=im[u]-ti;re[u]+=tr;im[u]+=ti;const t=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=t;}}}}
++function mkAnalyser(pcm,sr,fftSize,clock,t0){
++  const win=new Float32Array(fftSize);for(let i=0;i<fftSize;i++)win[i]=0.42-0.5*Math.cos(2*Math.PI*i/fftSize)+0.08*Math.cos(4*Math.PI*i/fftSize);
++  const re=new Float64Array(fftSize),im=new Float64Array(fftSize);
++  function frame(){const end=Math.floor((clock.t-t0)/1000*sr);const st=Math.max(0,end-fftSize);for(let i=0;i<fftSize;i++){const k=st+i;re[i]=(k<pcm.length?pcm[k]:0)*win[i];im[i]=0;}fft(re,im);}
++  return {fftSize,frequencyBinCount:fftSize/2,smoothingTimeConstant:0,_prevMag:null,
++    getFloatFrequencyData(a){frame();for(let i=0;i<fftSize/2;i++){const m=Math.hypot(re[i],im[i])/fftSize;a[i]=m>0?20*Math.log10(m):-Infinity;}},
++    getByteFrequencyData(a){frame();const N=fftSize/2;if(!this._prevMag)this._prevMag=new Float64Array(N);for(let i=0;i<N;i++){const m=Math.hypot(re[i],im[i])/fftSize;this._prevMag[i]=0.8*this._prevMag[i]+0.2*m;const db=this._prevMag[i]>0?20*Math.log10(this._prevMag[i]):-100;a[i]=Math.max(0,Math.min(255,Math.floor(255*(db+100)/70)));}},
++    getByteTimeDomainData(a){const end=Math.floor((clock.t-t0)/1000*sr);for(let i=0;i<a.length;i++){const k=end-a.length+i;a[i]=Math.max(0,Math.min(255,Math.round(128+128*(k>=0&&k<pcm.length?pcm[k]:0))));}}};
++}
++function sandbox(clock,analyserFactory,sr){
++  const raf=[],ints=[];let iid=0;
++  const sb={console:{log(){},warn(){},error(){}},Math,Array,Float32Array,Uint8Array,Object,Number,JSON,Date:{now:()=>clock.t},
++   requestAnimationFrame:cb=>{raf.push(cb);return raf.length},cancelAnimationFrame:()=>{},
++   setInterval:(fn,ms)=>{ints.push({id:++iid,fn,ms,next:clock.t+ms});return iid},clearInterval:id=>{const i=ints.findIndex(x=>x.id===id);if(i>=0)ints.splice(i,1)},
++   setTimeout:(fn,ms)=>{ints.push({id:++iid,fn,ms,next:clock.t+ms,once:1});return iid},clearTimeout:()=>{},performance:{now:()=>clock.t}};
++  sb.window=sb;vm.createContext(sb);
++  const ctx={sampleRate:sr,createAnalyser:()=>analyserFactory()};
++  return {sb,ctx,raf,ints,step(ms,frameMs=1000/60){const end=clock.t+ms;let acc=0;while(clock.t<end){clock.t+=1;acc+=1;if(acc>=frameMs){acc-=frameMs;raf.splice(0).forEach(cb=>cb());}
++     for(const it of ints.slice()){if(it.next<=clock.t&&ints.includes(it)){if(it.once)ints.splice(ints.indexOf(it),1);else it.next+=it.ms;it.fn();}}}}};
++}
++const load=(sb,f,name)=>vm.runInContext(fs.readFileSync(path.join(REPO,'ui/js/engines',f),'utf8')+`\nthis.${name}=${name};`,sb);
++const NOTE=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
++function runKey(spec,secs){
++  const sr=22050,r=render(Object.assign({sr,seconds:secs+2},spec));const clock={t:1000};
++  let an;const S=sandbox(clock,()=>an=mkAnalyser(r.pcm,sr,8192,clock,1000),sr);load(S.sb,'keyEngine.js','KeyEngine');
++  const K=S.sb.KeyEngine;K.init(S.ctx,{connect(){}});
++  let lock=null,lockT=null;K.watchContinuous(res=>{if(!lock){lock=res.key;lockT=(clock.t-1000)/1000;}});
++  const snaps=[];
++  for(let s=0;s<secs;s+=1){S.step(1000);if(s===4||s===9||s===secs-1){const e=K.estimateKeyFromChroma();snaps.push(e.key+'@'+(s+1)+'s');}}
++  const fin=K.estimateKeyFromChroma();K.stop();
++  return {truth:`${NOTE[r.truth.root]} ${r.truth.mode==='minor'?'Minor':'Major'}`,final:fin.key,lock,lockT,margin:fin.margin,snaps};
++}
++function runBpm(spec,secs){
++  const sr=22050,r=render(Object.assign({sr,seconds:secs+2},spec));const clock={t:1000};
++  const S=sandbox(clock,()=>mkAnalyser(r.pcm,sr,2048,clock,1000),sr);load(S.sb,'bpmEngine.js','BPMEngine');
++  const B=S.sb.BPMEngine;B.init(S.ctx,{connect(){}});let first=null;const ups=[];
++  B.onUpdate(b=>{if(first===null)first=(clock.t-1000)/1000;ups.push(b);});
++  S.step(secs*1000);const cur=B.getCurrentBpm(),cand=B.getCandidateBpm(),conf=B.getConfidence();B.stop();
++  return {truth:spec.bpm,confirmed:cur,cand,firstConfirmS:first,nUpdates:ups.length,distinct:[...new Set(ups)].slice(0,6),cv:conf?+conf.intervalCV.toFixed(3):null};
++}
++const mode=process.argv[3];
++if(mode==='key'){
++  const cases=[];for(const prog of ['major','minor','popLoop'])for(let root=0;root<12;root+=1)cases.push({prog,root,seed:root+1});
++  const out=[];let ok=0,rel=0,par=0,fifth=0,none=0;
++  for(const c of cases){const t0=Date.now();const x=runKey(c,25);const truthKey=x.truth;const f=x.final;
++    // popLoop: nhãn "tonic" của synth = C-type progression Am F C G: chấp nhận C Major hoặc A Minor (tương đối) → ghi nhận riêng
++    out.push({prog:c.prog,root:c.root,truth:truthKey,final:f,lock:x.lock,lockT:x.lockT,snaps:x.snaps.join(' '),ms:Date.now()-t0});}
++  fs.writeFileSync(process.argv[4],JSON.stringify(out,null,1));console.log('done',out.length);
++}else if(mode==='bpm'){
++  const out=[];for(const bpm of [70,80,90,100,110,120,128,140,150,160,170,180]){for(const drums of [true]){const x=runBpm({bpm,drums,prog:'major',root:0,seed:3},40);out.push(x);}}
++  // nhịp yếu: nhiễu cao
++  for(const bpm of [90,120,140]){out.push(Object.assign({note:'noise0.05'},runBpm({bpm,drums:true,noise:0.05,seed:5},40)));}
++  fs.writeFileSync(process.argv[4],JSON.stringify(out,null,1));console.log('done',out.length);
++}
++if(mode==='hard'){
++  const conds={tune40:{tuningCents:40},tune_m45:{tuningCents:-45},noise08:{noise:0.08},nobass:{bass:false},noise08_nobass:{noise:0.08,bass:false}};
++  const N2=NOTE;const rows=[];
++  for(const [cn,co] of Object.entries(conds))for(const prog of ['major','minor'])for(const root of [0,3,6,9]){
++    const x=runKey(Object.assign({prog,root,seed:root+7},co),20);rows.push({cond:cn,prog,truth:x.truth,final:x.final,lock:x.lock,lockT:x.lockT});}
++  fs.writeFileSync(process.argv[4],JSON.stringify(rows,null,1));
++  const g={};rows.forEach(r=>{g[r.cond]=g[r.cond]||{n:0,ok:0,lockedWrong:0,bad:[]};g[r.cond].n++;if(r.final===r.truth)g[r.cond].ok++;else g[r.cond].bad.push(r.truth+'->'+r.final);if(r.lock&&r.lock!==r.truth)g[r.cond].lockedWrong++;});
++  console.log(JSON.stringify(g,null,1));
++}
++// ===== AI-ALG-03: BPM pattern benchmark =====
++function drumTrack(pcm,sr,bpm,pattern,seed){
++  const R=(function(){let s=seed>>>0;return()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296}})();
++  const beat=60/bpm,N=pcm.length,secs=N/sr;
++  const kick=(t,a)=>{const i0=Math.floor(t*sr);for(let i=0;i<0.12*sr&&i0+i<N;i++){const tt=i/sr;pcm[i0+i]+=a*Math.sin(2*Math.PI*(55+80*Math.exp(-tt*40))*tt)*Math.exp(-tt*25);}};
++  const snare=(t,a)=>{const i0=Math.floor(t*sr);for(let i=0;i<0.1*sr&&i0+i<N;i++){const tt=i/sr;pcm[i0+i]+=a*(R()*2-1)*Math.exp(-tt*30);}};
++  const hat=(t,a)=>{const i0=Math.floor(t*sr);for(let i=0;i<0.03*sr&&i0+i<N;i++){const tt=i/sr;pcm[i0+i]+=a*(R()*2-1)*Math.exp(-tt*120);}};
++  const nb=Math.floor(secs/beat);
++  for(let b=0;b<nb;b++){const t=b*beat;
++    if(pattern==='every'){ if(b%2===0)kick(t,0.5); else snare(t,0.25); hat(t+beat/2,0.1); }
++    else if(pattern==='kick2'){ if(b%2===0)kick(t,0.5); }
++    else if(pattern==='nohat'){ if(b%2===0)kick(t,0.5); else snare(t,0.25); }
++    else if(pattern==='eighths'){ if(b%4===0)kick(t,0.5); hat(t,0.3); hat(t+beat/2,0.3); }          // xung 8th mạnh, kick chỉ 1/bar
++    else if(pattern==='sparse'){ if(b%2===0)kick(t,0.5); else snare(t,0.12); hat(t+beat/2,0.05); }   // kick mỗi 2 beat, snare/hat nhẹ
++    else if(pattern==='sync'){ const m=b%4; if(m===0||m===3)kick(t,0.5); if(m===1)snare(t,0.25); hat(t+beat/2,0.1); } // bất đồng bộ nhẹ
++  }
++}
++function runBpm2(bpm,pattern,secs,noise){
++  const sr=22050;const r=render({sr,seconds:secs+2,bpm,drums:false,prog:'major',root:0,seed:3});
++  drumTrack(r.pcm,sr,bpm,pattern,7); if(noise){let s=11;for(let i=0;i<r.pcm.length;i++){s=(s*1664525+1013904223)>>>0;r.pcm[i]+=noise*(s/4294967296*2-1);}}
++  let mx=0;for(let i=0;i<r.pcm.length;i++)mx=Math.max(mx,Math.abs(r.pcm[i]));if(mx>0.95)for(let i=0;i<r.pcm.length;i++)r.pcm[i]*=0.95/mx;
++  const clock={t:1000};const S=sandbox(clock,()=>mkAnalyser(r.pcm,sr,2048,clock,1000),sr);load(S.sb,'bpmEngine.js','BPMEngine');
++  const B=S.sb.BPMEngine;B.init(S.ctx,{connect(){}});let first=null;const ups=[];B.onUpdate(b=>{if(first===null)first=(clock.t-1000)/1000;ups.push(b);});
++  S.step(secs*1000);const cur=B.getCurrentBpm(),cand=B.getCandidateBpm();B.stop();
++  return {bpm,pattern,confirmed:cur,cand,firstS:first,n:ups.length};
++}
++if(mode==='bpm2'){
++  const BPMS=[60,70,80,89,90,100,120,140,160,170,179,180,200,240];const pats=(process.argv[5]||'every,eighths,sparse,sync').split(',');
++  const rows=[];for(const p of pats)for(const b of BPMS)rows.push(runBpm2(b,p,40,0));
++  fs.writeFileSync(process.argv[4],JSON.stringify(rows,null,1));console.log('done',rows.length);
++}
++
++if(mode==='hard2'){
++  const tunes=[-45,-40,-30,-20,-10,0,10,20,30,40,45];const rows=[];
++  for(const tc of tunes)for(const prog of ['major','minor'])for(const root of [0,3,6,9]){const x=runKey({prog,root,seed:root+7,tuningCents:tc},20);rows.push({tc,prog,truth:x.truth,final:x.final,lock:x.lock});}
++  const g={};rows.forEach(r=>{g[r.tc]=g[r.tc]||{n:0,ok:0,lockedWrong:0};g[r.tc].n++;if(r.final===r.truth)g[r.tc].ok++;if(r.lock&&r.lock!==r.truth)g[r.tc].lockedWrong++;});
++  fs.writeFileSync(process.argv[4],JSON.stringify(rows));console.log(Object.entries(g).map(([k,v])=>`${k}c: ${v.ok}/${v.n} lockSai=${v.lockedWrong}`).join(' | '));
++}
++if(mode==='cost'){const t0=process.hrtime.bigint();for(let i=0;i<4;i++)runKey({prog:'major',root:i,seed:i+1},20);const ms=Number(process.hrtime.bigint()-t0)/1e6;console.log((ms/4).toFixed(0)+' ms / 20 s audio (gồm cả FFT mô phỏng)');}
+diff --git a/tools/algbench/modtest.js b/tools/algbench/modtest.js
+new file mode 100644
+index 0000000..0de9427
+--- /dev/null
++++ b/tools/algbench/modtest.js
+@@ -0,0 +1,10 @@
++const fs=require('fs'),vm=require('vm');const R=process.argv[2];
++let t=0;const ints=[];const sb={console,Date:{now:()=>t},setInterval:(f,m)=>{ints.push({f,m,n:m});return ints.length},clearInterval:()=>{}};sb.window=sb;
++const feed={root:0,mode:'Major',conf:0.9};
++sb.KeyEngine={MIN_CONFIDENCE:0.35,NOTE_NAMES:["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"],shortestSemitoneDelta:(a,b)=>{let d=(b-a+12)%12;return d>6?d-12:d},estimateKeyFromChroma:()=>({rootIndex:feed.root,mode:feed.mode,confidence:feed.conf})};
++vm.createContext(sb);vm.runInContext(fs.readFileSync(R+'/ui/js/engines/modEngine.js','utf8')+'\nthis.ModEngine=ModEngine;',sb);
++const ev=[];sb.ModEngine.start(0,d=>ev.push(d),()=>false,(s,p)=>ev.push('STATE:'+s));
++function run(sec){for(let i=0;i<sec;i++){t+=1000;ints.forEach(x=>x.f());}}
++console.log('A) C Major -> C Minor (cùng tonic, đổi mode) 10s'); feed.mode='Minor'; run(10); console.log('   sự kiện:',JSON.stringify(ev.filter(e=>typeof e!=='string'||e.includes('DETECTED'))));
++ev.length=0; sb.ModEngine.start(0,d=>ev.push(d),()=>false,(s,p)=>ev.push('STATE:'+s)); feed.mode='Major';feed.root=9; feed.mode='Minor';
++console.log('B) C Major -> A Minor (tương đối, cùng nốt) 10s'); run(10); console.log('   sự kiện:',JSON.stringify(ev.filter(e=>typeof e!=='string'||e.includes('DETECTED')).map(e=>e.semitone!==undefined?{semitone:e.semitone,targetKey:e.targetKey}:e)));
+diff --git a/tools/algbench/summarize_bpm.py b/tools/algbench/summarize_bpm.py
+new file mode 100644
+index 0000000..a5b4701
+--- /dev/null
++++ b/tools/algbench/summarize_bpm.py
+@@ -0,0 +1,18 @@
++import json,sys
++rows=json.load(open(sys.argv[1]))
++def cls(r):
++    t=r['bpm']; c=r['confirmed']
++    if c is None: return 'none'
++    if abs(c-t)<=1: return 'ok'
++    if abs(c-2*t)<=2: return 'x2'
++    if abs(c-t/2)<=2: return '/2'
++    return 'other'
++pats=sorted({r['pattern'] for r in rows},key=lambda x:['every','nohat','kick2','eighths','sparse','sync'].index(x))
++for p in pats:
++    rs=[r for r in rows if r['pattern']==p]
++    line=' '.join(f"{r['bpm']}->{r['confirmed']}" for r in rs)
++    cnt={}
++    for r in rs: cnt[cls(r)]=cnt.get(cls(r),0)+1
++    errs=[abs(r['confirmed']-r['bpm']) for r in rs if r['confirmed'] is not None and cls(r)=='ok']
++    print(f"[{p}] {cnt}  meanAbsErr(ok)={sum(errs)/len(errs):.2f}" if errs else f"[{p}] {cnt}")
++    print('   ',line)
+-- 
+2.43.0
+
