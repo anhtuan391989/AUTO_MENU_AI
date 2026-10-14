@@ -155,54 +155,111 @@ async function sendKeyToAutotune(keyName) {
     };
 }
 
+// ---------------------------------------------------------
+// TASK AI-ALG-04 (D8/D9) — TRẠNG THÁI TONE NỘI BỘ + sendToneStep an toàn khi lỗi giữa chừng.
+// QUY ƯỚC: sendToneStep(delta) là lệnh TƯƠNG ĐỐI (nhấn ▲/▼ `delta` lần). toneState.applied = ƯỚC LƯỢNG (nội bộ) tổng số bước
+// đã GỬI tới Auto-Tune (+ = lên) — KHÔNG phải trạng thái phần cứng đã xác nhận (Menu không đọc lại được Auto-Tune).
+// sendToneTarget(offset) nhận độ lệch TUYỆT ĐỐI so với Key gốc (cùng quy ước với data.semitone của ModEngine) và tự tính
+// delta = offset - toneState.applied, nên modulation nối tiếp / quay về Key gốc / khởi động lại watcher không bị cộng dồn sai.
+// ---------------------------------------------------------
+const toneState = { applied: 0, uncertain: false, lastReason: null, chain: Promise.resolve() }; // chain: hàng đợi tuần tự hoá
+function getToneState() { return { applied: toneState.applied, uncertain: toneState.uncertain, lastReason: toneState.lastReason }; }
+function resetToneState(reason) { toneState.applied = 0; toneState.uncertain = false; toneState.lastReason = reason || "RESET"; }
+// Tuần tự hoá: 2 lệnh dịch tone không bao giờ chạy chồng lên nhau
+function _enqueueTone(fn) { const p = toneState.chain.then(fn, fn); toneState.chain = p.then(() => {}, () => {}); return p; }
+
 /**
- * Dịch tone hiện tại đi `semitoneDelta` nấc (dương = tăng, âm = giảm).
- * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string}>}
+ * Dịch tone hiện tại đi `semitoneDelta` nấc (dương = tăng, âm = giảm) — TƯƠNG ĐỐI.
+ * Kết quả luôn có stepsRequested/stepsSent/stepsRemaining (số bước ĐÃ GỬI, không phải đã xác nhận áp dụng) và uncertain.
+ * Quy tắc D9: bước nào đã gửi thì KHÔNG bao giờ gửi lại; fallback chuột chỉ làm phần CÒN LẠI; nếu không biết chắc 1 bước
+ * đã tới hay chưa (ngoại lệ) thì DỪNG, báo uncertain, không fallback.
+ * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string, stepsRequested: number, stepsSent: number, stepsRemaining: number, uncertain: boolean}>}
  */
-async function sendToneStep(semitoneDelta) {
-    if (!semitoneDelta) return { ok: true, driverUsed: "none" };
+function sendToneStep(semitoneDelta) { return _enqueueTone(() => _sendToneStepNow(semitoneDelta)); }
+
+async function _sendToneStepNow(semitoneDelta) {
+    if (!semitoneDelta) return { ok: true, driverUsed: "none", stepsRequested: 0, stepsSent: 0, stepsRemaining: 0, uncertain: false };
 
     const steps = Math.abs(semitoneDelta);
     const goingUp = semitoneDelta > 0;
+    const dir = goingUp ? 1 : -1;
+    let sentMidi = 0, sentMouse = 0, uncertain = false;
+    const finish = (res) => {
+        const sent = sentMidi + sentMouse;
+        toneState.applied += dir * sent; // chỉ cộng đúng số bước ĐÃ gửi (kể cả khi thất bại 1 phần)
+        if (uncertain) { toneState.uncertain = true; toneState.lastReason = "TONE_STATE_UNCERTAIN"; }
+        return { ...res, stepsRequested: steps, stepsSent: sent, stepsRemaining: steps - sent, uncertain };
+    };
 
     // --- 1) Ưu tiên MIDI: gửi 1 nốt/CC đại diện cho hướng, lặp theo số bước ---
     const midiPort = getSetting("midiOutputPort");
     if (midiPort) {
         // CC 20 tăng / CC 21 giảm là VÍ DỤ — đổi theo đúng mapping MIDI Learn thật của plugin bạn.
         const ccNumber = goingUp ? 20 : 21;
-        let allSent = true;
+        let failedDefinite = false;
         for (let i = 0; i < steps; i++) {
-            const sent = await sendMidiCC(ccNumber, 127);
-            if (!sent) { allSent = false; break; }
-            await delay(CLICK_STEP_DELAY_MS);
+            let sent;
+            try { sent = await sendMidiCC(ccNumber, 127); }
+            catch (e) { uncertain = true; break; } // ngoại lệ: KHÔNG biết bước này đã tới hay chưa -> dừng, không fallback
+            if (!sent) { failedDefinite = true; break; } // sendMidiCC trả false = chắc chắn KHÔNG gửi (cổng đóng / send ném lỗi)
+            sentMidi++;
+            try { await delay(CLICK_STEP_DELAY_MS); } catch (e) { /* bước đã tính là đã gửi */ }
         }
-        // TASK AI-ALG-03 (D6) — allSent=true chỉ nghĩa là API Web MIDI không ném lỗi: ghi rõ UNCONFIRMED, giống sendKeyToAutotune (MIDI-01).
-        if (allSent) return { ok: true, driverUsed: "midi", confirmation: "MIDI_SENT_UNCONFIRMED" };
+        if (sentMidi === steps) {
+            // allSent=true chỉ nghĩa là API Web MIDI không ném lỗi: UNCONFIRMED (TASK AI-ALG-03 D6).
+            return finish({ ok: true, driverUsed: "midi", confirmation: "MIDI_SENT_UNCONFIRMED" });
+        }
+        if (uncertain) {
+            return finish({ ok: false, driverUsed: "midi", status: "TONE_STATE_UNCERTAIN", detail: `MIDI lỗi ở bước ${sentMidi + 1}/${steps} (không rõ đã gửi hay chưa) — KHÔNG fallback để tránh dịch dư; trạng thái tone không chắc chắn.` });
+        }
+        // failedDefinite: tiếp tục xuống fallback CHỈ cho phần còn lại (steps - sentMidi)
     }
 
-    // --- 2) Fallback: click nút ▲/▼ đã capture ở "chromatic", lặp theo số bước ---
+    // --- 2) Fallback: click nút ▲/▼ đã capture ở "chromatic", CHỈ cho số bước còn lại ---
+    const remaining = steps - sentMidi;
     const points = parseCapturedPoint(getCoordinate("chromatic"));
     const point = Array.isArray(points) ? points[goingUp ? CHROMATIC_UP_INDEX : CHROMATIC_DOWN_INDEX] : null;
+    const partialMidi = sentMidi > 0;
 
     if (point && window.electronAPI?.clickAtPoint) {
         if (!isMouseFallbackAllowed()) {
-            return {
+            return finish({
                 ok: false,
-                driverUsed: "mouse",
-                status: "MOUSE_DISABLED",
-                detail: 'Mouse Control đang TẮT (Setup > Calibration) — không tự click chuột để dịch tone. Bật lại Mouse Control hoặc cấu hình MIDI (Setup > MIDI) để MOD tiếp tục gửi tự động.',
-            };
+                driverUsed: partialMidi ? "midi" : "mouse",
+                status: partialMidi ? "PARTIAL_MIDI_MOUSE_DISABLED" : "MOUSE_DISABLED",
+                detail: 'Mouse Control đang TẮT (Setup > Calibration) — không tự click chuột để dịch tone. Bật lại Mouse Control hoặc cấu hình MIDI (Setup > MIDI) để MOD tiếp tục gửi tự động.'
+                    + (partialMidi ? ` MIDI đã gửi ${sentMidi}/${steps} bước, còn ${remaining} bước CHƯA gửi.` : ""),
+            });
         }
-        for (let i = 0; i < steps; i++) {
-            const result = await window.electronAPI.clickAtPoint(point);
-            if (!result.ok) return { ok: false, driverUsed: "mouse", detail: result.detail };
+        for (let i = 0; i < remaining; i++) {
+            let result;
+            try { result = await window.electronAPI.clickAtPoint(point); }
+            catch (e) { uncertain = true; return finish({ ok: false, driverUsed: "mouse", status: "TONE_STATE_UNCERTAIN", detail: "Click chuột ném lỗi (không rõ đã click hay chưa) — dừng, trạng thái tone không chắc chắn." }); }
+            if (!result || !result.ok) return finish({ ok: false, driverUsed: partialMidi ? "midi+mouse" : "mouse", status: "PARTIAL_SENT", detail: result && result.detail });
+            sentMouse++;
             await delay(CLICK_STEP_DELAY_MS);
         }
-        return { ok: true, driverUsed: "mouse", confirmation: "CLICK_SENT_UNCONFIRMED" };
+        return finish({ ok: true, driverUsed: partialMidi ? "midi+mouse" : "mouse", confirmation: partialMidi ? "MIXED_SENT_UNCONFIRMED" : "CLICK_SENT_UNCONFIRMED" });
     }
 
-    return {
+    return finish({
         ok: false,
-        detail: 'Chưa cấu hình cổng MIDI hoặc toạ độ "Chromatic" (Setup > Lấy tọa độ).',
-    };
+        driverUsed: partialMidi ? "midi" : undefined,
+        status: partialMidi ? "PARTIAL_MIDI_NO_FALLBACK" : undefined,
+        detail: 'Chưa cấu hình cổng MIDI hoặc toạ độ "Chromatic" (Setup > Lấy tọa độ).'
+            + (partialMidi ? ` MIDI đã gửi ${sentMidi}/${steps} bước, còn ${remaining} bước CHƯA gửi.` : ""),
+    });
+}
+
+/**
+ * Đưa tone về độ lệch TUYỆT ĐỐI `targetOffset` so với Key gốc (0 = Key gốc). delta = target - toneState.applied.
+ * Gọi lại với cùng target khi đã đạt => không gửi gì (idempotent). Tính delta TRONG hàng đợi nên không đua với lệnh khác.
+ */
+function sendToneTarget(targetOffset) {
+    return _enqueueTone(async () => {
+        const appliedBefore = toneState.applied;
+        const delta = targetOffset - appliedBefore;
+        const res = await _sendToneStepNow(delta);
+        return { ...res, targetOffset, appliedBefore, delta, appliedAfter: toneState.applied, toneStateUncertain: toneState.uncertain };
+    });
 }

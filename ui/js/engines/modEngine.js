@@ -93,6 +93,12 @@ const ModEngine = (() => {
         };
 
         lastFiredRoot = null;
+        // TASK AI-ALG-04 (D10) — Key gốc CHƯA xác nhận / không hợp lệ (vd "LISTENING" => rootIndex -1): KHÔNG theo dõi, KHÔNG phát bất kỳ
+        // sự kiện dịch/reset nào (nếu không, delta tính từ chỉ số rác sẽ tạo lệnh dịch pitch sai).
+        if (!Number.isInteger(originalRootIndex) || originalRootIndex < 0 || originalRootIndex > 11) {
+            emitState("LISTENING", { timestamp: Date.now(), reason: "original_key_unconfirmed" });
+            return;
+        }
         let pendingRoot = null;   // root MỚI đang "chờ xác nhận" (chưa đủ streak để báo thật). AI-ALG-03: ở chế độ nhãn (labelMode) giá trị này là chuỗi "root-mode".
         let pendingStreak = 0;
 
@@ -148,9 +154,24 @@ const ModEngine = (() => {
                     return;
                 }
 
-                const deltaL = KeyEngine.shortestSemitoneDelta(originalRootIndex, cur.root);
+                // TASK AI-ALG-04 (D8/D10) — QUY ƯỚC: `semitone` = độ lệch TUYỆT ĐỐI so với Key GỐC (0 = đang ở Key gốc), KHÔNG phải delta so với
+                // lần modulation trước. Giọng tương đối CỦA KEY GỐC (cùng tập nốt, vd gốc C Major -> A Minor) = vẫn ở Key gốc => 0, không phải -3.
+                const origLabel = { root: originalRootIndex, mode: options.originalMode };
+                const sameSetAsOriginal = relativeMajorRoot(cur) === relativeMajorRoot(origLabel);
+                const deltaL = sameSetAsOriginal ? 0 : KeyEngine.shortestSemitoneDelta(originalRootIndex, cur.root);
                 lastFiredRoot = cur.root;
-                if (deltaL === 0) return; // hành vi cũ giữ nguyên (xem mục Remaining Defects D10 trong báo cáo AI-ALG-03)
+                if (deltaL === 0) {
+                    // D10 — QUAY VỀ Key gốc: phát sự kiện reset RÕ RÀNG (không phải "không có gì xảy ra"). Consumer phải đưa offset về 0.
+                    const retL = {
+                        semitone: 0, kind: "RETURN_TO_ORIGINAL", resetOffset: true,
+                        originalKey: `${KeyEngine.NOTE_NAMES[originalRootIndex]}`, targetKey: labelOf(cur), mode: cur.mode,
+                        confidence: result.confidence, stable: true, timestamp: Date.now(),
+                    };
+                    sendModTelemetry({ event: "MOD_RETURN_TO_ORIGINAL", ...retL, persistence: SUSTAIN_REQUIRED });
+                    emitState("MODULATION_DETECTED", retL);
+                    onModulation(retL);
+                    return;
+                }
                 const modDataL = {
                     semitone: deltaL,
                     originalKey: `${KeyEngine.NOTE_NAMES[originalRootIndex]}`,
@@ -201,7 +222,20 @@ const ModEngine = (() => {
             pendingRoot = null;
             pendingStreak = 0;
 
-            if (delta === 0) return; // trùng key gốc theo bán cung ngắn nhất (hiếm khi xảy ra ở đây, phòng hờ)
+            if (delta === 0) {
+                // TASK AI-ALG-04 (D10) — đến đây nghĩa là ĐÃ modulation trước đó (baseline_legacy != gốc) rồi nay QUAY VỀ root gốc:
+                // phát sự kiện reset rõ ràng (semitone 0 = Key gốc, TUYỆT ĐỐI), thay vì im lặng làm consumer giữ offset cũ.
+                const retData = {
+                    semitone: 0, kind: "RETURN_TO_ORIGINAL", resetOffset: true,
+                    originalKey: `${KeyEngine.NOTE_NAMES[originalRootIndex]}`,
+                    targetKey: `${KeyEngine.NOTE_NAMES[result.rootIndex]} ${result.mode}`,
+                    confidence: result.confidence, stable: true, timestamp: Date.now(),
+                };
+                sendModTelemetry({ event: "MOD_RETURN_TO_ORIGINAL", ...retData, persistence: SUSTAIN_REQUIRED });
+                emitState("MODULATION_DETECTED", retData);
+                onModulation(retData);
+                return;
+            }
 
             // MOD Output Contract (Section XI) — field CŨ `semitone` giữ nguyên 100% (renderer.js/
             // vocalCommandRouter.js đang đọc field này, không đổi gì ở đó). Các field MỚI chỉ CỘNG

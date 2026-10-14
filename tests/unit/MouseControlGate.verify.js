@@ -57,10 +57,13 @@ const code = [
     extractConst('CHROMATIC_UP_INDEX'),
     extractConst('CHROMATIC_DOWN_INDEX'),
     extractConst('CLICK_STEP_DELAY_MS'),
+    extractConst('toneState'), // AI-ALG-04: sendToneStep nay dùng toneState + hàng đợi (chỉ bổ sung SETUP trích hàm, assertion không đổi)
     extractFn('delay'),
     extractFn('parseCapturedPoint'),
     extractFn('isMouseFallbackAllowed'),
     extractFn('sendKeyToAutotune'),
+    extractFn('_enqueueTone'),
+    extractFn('_sendToneStepNow'),
     extractFn('sendToneStep'),
 ].join('\n\n');
 

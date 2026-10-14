@@ -46,11 +46,11 @@ function load({ port = "loopMIDI", midiOk = () => true, point = null, mouseAllow
     console.log("P5: semitone=0 không gửi gì");
     { const r = load({}); const res = await r.sendToneStep(0); check(res.ok === true && res.driverUsed === "none" && r.sent.length === 0 && r.clicks.length === 0, "no-op"); }
 
-    console.log("P6 [LỖI ĐÃ BIẾT D9 — chưa sửa, chỉ tái hiện]: MIDI gửi được 1/3 rồi lỗi, có fallback chuột");
+    console.log("P6 [D9 — đã sửa ở AI-ALG-04, nay là kiểm chứng]: MIDI gửi được 1/3 rồi lỗi, có fallback chuột");
     { const r = load({ midiOk: (n) => n < 1, point: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }); const res = await r.sendToneStep(3);
       const total = r.sent.length + r.clicks.length;
       console.log(`  ℹ️ MIDI đã gửi ${r.sent.length} bước + chuột ${r.clicks.length} click = ${total} bước (yêu cầu 3) → ${total > 3 ? "DỊCH DƯ" : "đúng"}`);
-      if (total > 3) known++; }
+      check(total === 3, "tổng bước = 3 (không dịch dư)"); if (total > 3) known++; }
 
     console.log(fail === 0 ? `\nPASS ModPipelineA03 (known defects reproduced: ${known})` : `\nFAIL ModPipelineA03 (${fail} lỗi)`);
     process.exit(fail === 0 ? 0 : 1);

@@ -1626,7 +1626,7 @@ function turnManualOverrideOff() {
     // này (aiSemitoneOffset, mục 12) — KHÔNG ép cứng về 0.
     Promise.all([
         setSoundShifterPower(false),
-        sendToneStep(aiSemitoneOffset),
+        sendToneTarget(aiSemitoneOffset), // TASK AI-ALG-04 (D8): aiSemitoneOffset là TUYỆT ĐỐI so với Key gốc -> đưa Auto-Tune về đúng offset, không gửi tương đối sai
     ]).then(([shifterResult, autotuneResult]) => {
         const newKey = transposeKey(originalKey, aiSemitoneOffset);
         const currentKeyElLocal = document.getElementById("currentKey");
@@ -1770,9 +1770,16 @@ async function applyModEvent(data) {
     }
 
     setStatus("dot-mod", "pending"); // cam: AI đang gửi lệnh dịch tone theo modulation thật dò được
-    recordModStage("ACTION_REQUESTED", { semitone: data.semitone });
-    const result = await sendToneStep(data.semitone);
-    recordModStage(result.ok ? "ACTION_SENT_UNCONFIRMED" : "ACTION_FAILED", { semitone: data.semitone, driverUsed: result.driverUsed ?? null, confirmation: result.confirmation ?? null, detail: result.ok ? undefined : result.detail });
+    // TASK AI-ALG-04 (D8/D10) — data.semitone = độ lệch TUYỆT ĐỐI so với Key gốc (0 = quay về Key gốc). sendToneTarget() tự tính số bước
+    // cần gửi = target - tone đã gửi trước đó (toneState), nên modulation nối tiếp / quay về gốc / khởi động lại watcher không dịch dư.
+    recordModStage("ACTION_REQUESTED", { semitone: data.semitone, kind: data.kind ?? null });
+    const result = await sendToneTarget(data.semitone);
+    recordModStage(result.ok ? "ACTION_SENT_UNCONFIRMED" : "ACTION_FAILED", {
+        semitone: data.semitone, kind: data.kind ?? null, driverUsed: result.driverUsed ?? null, confirmation: result.confirmation ?? null,
+        appliedBefore: result.appliedBefore, delta: result.delta, stepsRequested: result.stepsRequested, stepsSent: result.stepsSent,
+        appliedAfter: result.appliedAfter, uncertain: result.uncertain || result.toneStateUncertain || false, status: result.status ?? null,
+        detail: result.ok ? undefined : result.detail,
+    });
 
     if (result.ok) {
         setStatus("dot-mod", "online"); // xanh: AI đã GỬI lệnh (chưa phải "đã áp dụng" — xem recordModStage ở trên)
@@ -2672,7 +2679,7 @@ window.electronAPI?.onPluginCommand?.(async (message) => {
             // xác nhận. Vá bằng ĐÚNG semantics Manual đang dùng: cùng delta, chạy song song,
             // không coi là thành công nếu 1 trong 2 lỗi (không báo giả tạo).
             const [autotuneResult, soundshifterResult] = await Promise.all([
-                sendToneStep(delta),
+                sendToneStep(delta), // (AI-ALG-04: KHÔNG đổi — delta ở đây là tuyệt đối so với Key gốc nhưng gửi như tương đối; cùng lớp lỗi D8, chờ quyết định, xem báo cáo D12)
                 sendToneStepToSoundShifter(delta),
             ]);
             console.log("[Bridge] sendToneStep() ->", autotuneResult, "(delta =", delta, ")");

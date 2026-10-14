@@ -1,0 +1,545 @@
+diff --git a/tests/helpers/toneRig.js b/tests/helpers/toneRig.js
+new file mode 100644
+index 0000000..bfa2d51
+--- /dev/null
++++ b/tests/helpers/toneRig.js
+@@ -0,0 +1,44 @@
++/**
++ * AI-ALG-04 — giàn kiểm thử dùng chung: nạp vocalCommandRouter.js THẬT với MIDI/chuột GIẢ và một MÔ HÌNH TONE có trạng thái
++ * (tone.offset = tổng số bước ▲/▼ thật sự được "gửi tới plugin giả"). Đây là mô phỏng PHẦN MỀM, KHÔNG phải phần cứng Windows/Auto-Tune.
++ * Biến môi trường AUTOMENU_ROOT cho phép chạy cùng bài test trên bản code khác (vd HEAD cũ) để lấy số liệu "trước sửa".
++ */
++"use strict";
++const fs = require("fs"), path = require("path"), vm = require("vm");
++const ROOT = process.env.AUTOMENU_ROOT || path.resolve(__dirname, "../..");
++
++function loadRouter(o = {}) {
++    const tone = { offset: 0, midi: 0, clicks: 0, midiCalls: 0 };
++    const src = fs.readFileSync(path.join(ROOT, "ui/js/vocalCommandRouter.js"), "utf8");
++    const sb = {
++        console: { log() {}, warn() {}, error() {} }, Promise, Array, Math, Number, JSON, parseInt, Error,
++        setTimeout: (f) => { f(); return 0; },
++        getSetting: (k) => (k === "midiOutputPort" ? (o.port === undefined ? "loopMIDI" : o.port) : k === "mouseControlEnabled" ? (o.mouseAllowed === undefined ? true : o.mouseAllowed) : undefined),
++        getCoordinate: (k) => (k === "chromatic" ? (o.point === undefined ? null : o.point) : ""),
++        // midiMode(callIndex, cc) -> "ok" | "fail" (trả false, KHÔNG gửi) | "throw" (ném lỗi, không rõ đã gửi hay chưa) | "sent-then-throw" (ĐÃ gửi rồi mới ném)
++        sendMidiCC: async (cc, v) => {
++            const i = tone.midiCalls++; const mode = o.midiMode ? o.midiMode(i, cc) : "ok";
++            if (mode === "fail") return false;
++            if (mode === "throw") throw new Error("MIDI boom");
++            tone.offset += cc === 20 ? 1 : -1; tone.midi++;
++            if (mode === "sent-then-throw") throw new Error("MIDI response boom");
++            return true;
++        },
++        sendMidiNotePulse: async () => true,
++    };
++    sb.window = sb;
++    sb.electronAPI = o.noMouse ? undefined : {
++        clickAtPoint: async (p) => {
++            const j = tone.clicks; const mode = o.clickMode ? o.clickMode(j, p) : "ok";
++            if (mode === "fail") return { ok: false, detail: "click fail" };
++            if (mode === "throw") throw new Error("click boom");
++            tone.clicks++; tone.offset += (p && p.__dir) || 0; return { ok: true };
++        },
++    };
++    vm.createContext(sb);
++    vm.runInContext(src + "\nthis.sendToneStep = sendToneStep; this.sendToneTarget = typeof sendToneTarget==='function'?sendToneTarget:undefined; this.getToneState = typeof getToneState==='function'?getToneState:undefined; this.resetToneState = typeof resetToneState==='function'?resetToneState:undefined;", sb);
++    return { sb, tone, sendToneStep: sb.sendToneStep, sendToneTarget: sb.sendToneTarget, getToneState: sb.getToneState, resetToneState: sb.resetToneState };
++}
++// Toạ độ chuột giả: hàm parseCapturedPoint của router nhận mảng điểm; mỗi điểm mang __dir để mô hình tone biết ▲(+1)/▼(-1).
++const POINTS = [{ x: 1, y: 1, __dir: 1 }, { x: 2, y: 2, __dir: -1 }];
++module.exports = { loadRouter, POINTS, ROOT };
+diff --git a/tests/unit/ModPipelineA03.verify.js b/tests/unit/ModPipelineA03.verify.js
+index 49cda18..c9e4c4c 100644
+--- a/tests/unit/ModPipelineA03.verify.js
++++ b/tests/unit/ModPipelineA03.verify.js
+@@ -46,11 +46,11 @@ function load({ port = "loopMIDI", midiOk = () => true, point = null, mouseAllow
+     console.log("P5: semitone=0 không gửi gì");
+     { const r = load({}); const res = await r.sendToneStep(0); check(res.ok === true && res.driverUsed === "none" && r.sent.length === 0 && r.clicks.length === 0, "no-op"); }
+ 
+-    console.log("P6 [LỖI ĐÃ BIẾT D9 — chưa sửa, chỉ tái hiện]: MIDI gửi được 1/3 rồi lỗi, có fallback chuột");
++    console.log("P6 [D9 — đã sửa ở AI-ALG-04, nay là kiểm chứng]: MIDI gửi được 1/3 rồi lỗi, có fallback chuột");
+     { const r = load({ midiOk: (n) => n < 1, point: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }); const res = await r.sendToneStep(3);
+       const total = r.sent.length + r.clicks.length;
+       console.log(`  ℹ️ MIDI đã gửi ${r.sent.length} bước + chuột ${r.clicks.length} click = ${total} bước (yêu cầu 3) → ${total > 3 ? "DỊCH DƯ" : "đúng"}`);
+-      if (total > 3) known++; }
++      check(total === 3, "tổng bước = 3 (không dịch dư)"); if (total > 3) known++; }
+ 
+     console.log(fail === 0 ? `\nPASS ModPipelineA03 (known defects reproduced: ${known})` : `\nFAIL ModPipelineA03 (${fail} lỗi)`);
+     process.exit(fail === 0 ? 0 : 1);
+diff --git a/tests/unit/ModPipelineA04.verify.js b/tests/unit/ModPipelineA04.verify.js
+new file mode 100644
+index 0000000..4cedb6b
+--- /dev/null
++++ b/tests/unit/ModPipelineA04.verify.js
+@@ -0,0 +1,116 @@
++/**
++ * AI-ALG-04 (D8 + D10) — pipeline MOD đầu-cuối trong MÔ PHỎNG: ModEngine THẬT (KeyEngine stub) -> applyModEvent THẬT (trích từ renderer.js)
++ * -> vocalCommandRouter THẬT (MIDI/chuột giả) -> MÔ HÌNH TONE có trạng thái. Kiểm TỔNG DỊCH THỰC TẾ của tone, không chỉ payload sự kiện.
++ * Chạy: node tests/unit/ModPipelineA04.verify.js   (AUTOMENU_ROOT=<code cũ> để lấy số liệu "trước sửa")
++ * PHẦN MỀM/MÔ PHỎNG — KHÔNG phải phần cứng Windows/Auto-Tune/nhạc thật.
++ */
++"use strict";
++const fs = require("fs"), path = require("path"), vm = require("vm");
++const { loadRouter, POINTS, ROOT } = require("../helpers/toneRig");
++let fail = 0; const table = [];
++function check(c, m) { if (c) console.log("  ✅ " + m); else { fail++; console.log("  ❌ " + m); } }
++const MOD_SRC = fs.readFileSync(path.join(ROOT, "ui/js/engines/modEngine.js"), "utf8");
++const REN = fs.readFileSync(path.join(ROOT, "ui/js/renderer.js"), "utf8");
++const NOTES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
++const a = REN.indexOf("async function applyModEvent(data) {"); const b = REN.indexOf("\n}\n", a) + 3;
++const APPLY_SRC = REN.slice(a, b);
++if (a < 0) { console.log("❌ không trích được applyModEvent"); process.exit(1); }
++
++// Mỗi "phiên" = 1 router + 1 ModEngine + applyModEvent thật dùng chung 1 sandbox (chung window.*, chung tone).
++function session(o = {}) {
++    const r = loadRouter(o); const sb = r.sb;
++    let t = 0; const ints = []; const stages = [];
++    sb.Date = { now: () => t };
++    sb.setInterval = (f, m) => { ints.push({ f, m }); return ints.length; }; sb.clearInterval = () => { ints.length = 0; };
++    sb.document = { getElementById: () => null };
++    sb.electronAPI.reportAiResult = () => {};
++    sb.originalKey = o.originalKey || "C Major"; sb.aiSemitoneOffset = 0;
++    sb.transposeKey = (k, s) => k + "+" + s; sb.updateModInfo = () => {}; sb.setStatus = () => {};
++    sb.isManualOverrideActive = () => false; sb.isAiControlActive = () => false;
++    sb.recordModStage = (stage, info) => stages.push({ stage, ...(info || {}) });
++    const feed = { root: 0, mode: "Major", conf: 0.9 };
++    sb.KeyEngine = { MIN_CONFIDENCE: 0.35, NOTE_NAMES: NOTES,
++        shortestSemitoneDelta: (x, y) => { let d = (y - x + 12) % 12; return d > 6 ? d - 12 : d; },
++        estimateKeyFromChroma: () => ({ rootIndex: feed.root, mode: feed.mode, confidence: feed.conf }) };
++    vm.createContext; // (sb đã là context)
++    vm.runInContext(MOD_SRC + "\nthis.ModEngine = ModEngine;\n" + APPLY_SRC + "\nthis.applyModEvent = applyModEvent;", sb);
++    const events = []; const pending = [];
++    const startMod = (rootIdx, withMode) => sb.ModEngine.start(rootIdx === undefined ? 0 : rootIdx,
++        (d) => { events.push(d); pending.push(sb.applyModEvent({ time: "00:00", semitone: d.semitone, kind: d.kind })); },
++        () => false, undefined, withMode === false ? undefined : { originalMode: /minor/i.test(sb.originalKey) ? "Minor" : "Major" });
++    const hold = async (root, mode, ticks = 10, conf) => { feed.root = root; feed.mode = mode; if (conf !== undefined) feed.conf = conf;
++        for (let i = 0; i < ticks; i++) { t += 1000; ints.slice().forEach((x) => x.f()); }
++        await Promise.all(pending.splice(0)); };
++    return { r, sb, startMod, hold, events, stages, tone: r.tone, state: () => (r.getToneState ? r.getToneState() : null) };
++}
++const C = 0, D = 2, F = 5, G = 7, A = 9;
++function report(name, s, expectOffset, extra) { table.push(`${name} | payload: [${s.events.map((e) => e.semitone).join(", ")}] | tone thật dịch ${s.tone.offset} (mong đợi ${expectOffset})${extra || ""}`); }
++
++(async () => {
++    console.log("D8-1: C → G → D");
++    { const s = session(); s.startMod(); await s.hold(G, "Major"); await s.hold(D, "Major"); report("C→G→D", s, 2);
++      check(s.tone.offset === 2, `tone thật = +2 (thực tế ${s.tone.offset})`); }
++    console.log("D8-2/D10-1: C → G → C (quay về Key gốc)");
++    { const s = session(); s.startMod(); await s.hold(G, "Major"); await s.hold(C, "Major"); report("C→G→C", s, 0);
++      check(s.events.length === 2 && s.events[1].semitone === 0, "ModEngine PHÁT sự kiện thứ 2 (reset về gốc), không im lặng");
++      check(s.events[1] && s.events[1].kind === "RETURN_TO_ORIGINAL" && s.events[1].resetOffset === true, "sự kiện mang kind=RETURN_TO_ORIGINAL, resetOffset=true (không phải 'no-op semitone:0')");
++      check(s.tone.offset === 0, `tone thật về 0 (thực tế ${s.tone.offset})`); }
++    console.log("D8-3: C → G → F");
++    { const s = session(); s.startMod(); await s.hold(G, "Major"); await s.hold(F, "Major"); report("C→G→F", s, 5);
++      check(s.tone.offset === 5, `tone thật = +5 (thực tế ${s.tone.offset})`); }
++    console.log("D8-4: C → G → A minor (giọng tương đối CỦA KEY GỐC = vẫn ở Key gốc)");
++    { const s = session(); s.startMod(); await s.hold(G, "Major"); await s.hold(A, "Minor"); report("C→G→Am", s, 0);
++      check(s.tone.offset === 0, `tone thật = 0, không phải -3 (thực tế ${s.tone.offset})`); }
++    console.log("D8-5: modulation lặp lại cùng một Key (G giữ lâu, rồi rời G và quay lại G)");
++    { const s = session(); s.startMod(); await s.hold(G, "Major", 30); report("C→G(30s)", s, -5);
++      check(s.events.length === 1 && s.tone.offset === -5, `1 sự kiện, tone -5 (thực tế ${s.events.length}/${s.tone.offset})`);
++      await s.hold(D, "Major"); await s.hold(G, "Major"); report("…→D→G", s, -5);
++      check(s.tone.offset === -5, `sau G→D→G tone vẫn đúng -5 (thực tế ${s.tone.offset})`); }
++    console.log("D8-6: ngược chiều F (+5) → G (-5)");
++    { const s = session(); s.startMod(); await s.hold(F, "Major"); await s.hold(G, "Major"); report("C→F→G", s, -5);
++      check(s.tone.offset === -5, `tone thật = -5 (thực tế ${s.tone.offset})`); }
++    console.log("D8-7: MIDI thất bại giữa chuỗi (modulation 2 mất MIDI, không fallback) rồi modulation 3 đồng bộ lại");
++    { let failPhase = false; const s = session({ midiMode: () => (failPhase ? "fail" : "ok") }); s.startMod();
++      await s.hold(G, "Major"); failPhase = true; await s.hold(D, "Major"); const mid = s.tone.offset; failPhase = false; await s.hold(F, "Major"); report("C→G→D(MIDI lỗi)→F", s, 5, ` | giữa chừng ${mid}`);
++      check(mid === -5, `khi MIDI lỗi hoàn toàn: tone đứng yên ở -5 (thực tế ${mid})`);
++      check(s.stages.some((x) => x.stage === "ACTION_FAILED"), "ghi ACTION_FAILED");
++      check(s.tone.offset === 5, `modulation kế tiếp đồng bộ lại đúng: +5 (thực tế ${s.tone.offset})`); }
++    console.log("D8-7b: MIDI đứt GIỮA 1 lệnh nhiều bước (G=-5 gửi được 2/5), không fallback, rồi modulation kế tiếp");
++    { let n = 0; const s = session({ midiMode: () => (n++ < 2 ? "ok" : "fail") }); s.startMod();
++      await s.hold(G, "Major"); const mid = s.tone.offset; report("C→G(đứt 2/5)", s, -5, ` | giữa chừng ${mid}`);
++      check(mid === -2, `tone thật -2 (đã gửi 2/5) (thực tế ${mid})`);
++      check(s.state() === null || s.state().applied === -2, "tracker ghi đúng -2 (đã gửi 2/5), không coi là -5");
++      const f = s.stages.filter((x) => x.stage === "ACTION_FAILED")[0]; check(f && (f.stepsSent === undefined || f.stepsSent === 2), "log ghi stepsSent=2"); }
++    console.log("D8-8: khởi động lại watcher khi đã có offset trước đó (Auto Detect / key AI nhận lại cùng Key gốc)");
++    { const s = session(); s.startMod(); await s.hold(G, "Major"); const before = s.tone.offset;
++      s.startMod(); await s.hold(G, "Major"); report("restart watcher", s, -5);
++      check(before === -5 && s.tone.offset === -5, `sau restart tone vẫn -5, không thành -10 (thực tế ${s.tone.offset})`); }
++
++    console.log("D10-2: C → G → C → F");
++    { const s = session(); s.startMod(); await s.hold(G, "Major"); await s.hold(C, "Major"); await s.hold(F, "Major"); report("C→G→C→F", s, 5);
++      check(s.tone.offset === 5, `tone thật = +5 (thực tế ${s.tone.offset})`); }
++    console.log("D10-3: C → G → C khi MIDI lỗi ở lệnh quay về (không fallback)");
++    { let failPhase = false; const s = session({ midiMode: () => (failPhase ? "fail" : "ok") }); s.startMod();
++      await s.hold(G, "Major"); failPhase = true; await s.hold(C, "Major"); report("C→G→C(MIDI lỗi)", s, -5);
++      check(s.tone.offset === -5 && s.stages.some((x) => x.stage === "ACTION_FAILED"), "tone giữ -5, ghi ACTION_FAILED (không tuyên bố đã về gốc)");
++      failPhase = false; await s.hold(F, "Major"); check(s.tone.offset === 5, `lệnh kế tiếp (F) đồng bộ lại đúng +5 (thực tế ${s.tone.offset})`); }
++    console.log("D10-4: C → G → C khi chỉ có chuột (không MIDI)");
++    { const s = session({ port: "", point: POINTS }); s.startMod(); await s.hold(G, "Major"); await s.hold(C, "Major"); report("C→G→C (chuột)", s, 0);
++      check(s.tone.offset === 0 && s.tone.midi === 0, `tone thật về 0 chỉ bằng chuột (thực tế ${s.tone.offset})`); }
++    console.log("D10-5: C ổn định, không phát reset dư");
++    { const s = session(); s.startMod(); await s.hold(C, "Major", 40); report("C ổn định", s, 0);
++      check(s.events.length === 0 && s.tone.offset === 0 && s.tone.midiCalls === 0, "0 sự kiện, 0 lệnh gửi"); }
++    console.log("D10-6: hai sự kiện reset liên tiếp (consumer nhận 2 lần semitone:0)");
++    { const s = session(); s.startMod(); await s.hold(G, "Major"); const p1 = s.sb.applyModEvent({ time: "0", semitone: 0, kind: "RETURN_TO_ORIGINAL" }); const p2 = s.sb.applyModEvent({ time: "0", semitone: 0, kind: "RETURN_TO_ORIGINAL" }); await Promise.all([p1, p2]);
++      report("reset ×2", s, 0); check(s.tone.offset === 0, `tone về 0 đúng 1 lần, không dịch ngoài ý muốn (thực tế ${s.tone.offset})`); }
++    console.log("D10-7: Key gốc chưa xác nhận (rootIndex -1) hoặc confidence thấp lúc quay về");
++    { const s = session(); s.startMod(-1); await s.hold(G, "Major", 20); check(s.events.length === 0 && s.tone.offset === 0, "gốc không hợp lệ → không phát sự kiện, không dịch");
++      const s2 = session(); s2.startMod(); await s2.hold(G, "Major"); await s2.hold(C, "Major", 20, 0.2); check(s2.events.length === 1 && s2.tone.offset === -5, "về gốc nhưng confidence thấp → không reset"); }
++    console.log("Legacy (không truyền originalMode): C → G → C vẫn phải reset được");
++    { const s = session(); s.startMod(0, false); await s.hold(G, "Major"); await s.hold(C, "Major"); report("legacy C→G→C", s, 0);
++      check(s.tone.offset === 0, `tone thật 0 (thực tế ${s.tone.offset})`); }
++
++    console.log("\nBẢNG:"); table.forEach((x) => console.log("  " + x));
++    console.log(fail === 0 ? "\nPASS ModPipelineA04" : `\nFAIL ModPipelineA04 (${fail} lỗi)`);
++    process.exit(fail === 0 ? 0 : 1);
++})();
+diff --git a/tests/unit/MouseControlGate.verify.js b/tests/unit/MouseControlGate.verify.js
+index ef566c1..fd3f774 100644
+--- a/tests/unit/MouseControlGate.verify.js
++++ b/tests/unit/MouseControlGate.verify.js
+@@ -57,10 +57,13 @@ const code = [
+     extractConst('CHROMATIC_UP_INDEX'),
+     extractConst('CHROMATIC_DOWN_INDEX'),
+     extractConst('CLICK_STEP_DELAY_MS'),
++    extractConst('toneState'), // AI-ALG-04: sendToneStep nay dùng toneState + hàng đợi (chỉ bổ sung SETUP trích hàm, assertion không đổi)
+     extractFn('delay'),
+     extractFn('parseCapturedPoint'),
+     extractFn('isMouseFallbackAllowed'),
+     extractFn('sendKeyToAutotune'),
++    extractFn('_enqueueTone'),
++    extractFn('_sendToneStepNow'),
+     extractFn('sendToneStep'),
+ ].join('\n\n');
+ 
+diff --git a/tests/unit/ToneStepA04.verify.js b/tests/unit/ToneStepA04.verify.js
+new file mode 100644
+index 0000000..58d14ae
+--- /dev/null
++++ b/tests/unit/ToneStepA04.verify.js
+@@ -0,0 +1,84 @@
++/**
++ * AI-ALG-04 (D9) — sendToneStep(): MIDI lỗi giữa chừng KHÔNG được làm dịch tone dư khi fallback chuột.
++ * Mô hình tone có trạng thái: tone.offset = tổng số bước thật sự "tới plugin giả". Kiểm tra TỔNG DỊCH THỰC TẾ, không chỉ payload.
++ * Chạy: node tests/unit/ToneStepA04.verify.js   (AUTOMENU_ROOT=<thư mục khác> để chạy trên bản code cũ lấy số liệu "trước sửa")
++ * Kiểm thử PHẦN MỀM với MIDI/chuột giả — KHÔNG phải phần cứng Windows/Auto-Tune.
++ */
++"use strict";
++const { loadRouter, POINTS } = require("../helpers/toneRig");
++let fail = 0; const rows = [];
++function check(c, m) { if (c) console.log("  ✅ " + m); else { fail++; console.log("  ❌ " + m); } }
++function row(name, req, tone, res) { rows.push(`${name} | yêu cầu ${req} | tone thật dịch ${tone.offset} (MIDI ${tone.midi}, chuột ${tone.clicks}) | ok=${res.ok}`); }
++
++(async () => {
++    console.log("1. MIDI gửi đủ 3 bước");
++    { const r = loadRouter(); const res = await r.sendToneStep(3); row("1", 3, r.tone, res);
++      check(r.tone.offset === 3 && res.ok === true && res.driverUsed === "midi", "tone +3, ok, driver=midi");
++      check(res.stepsSent === undefined || res.stepsSent === 3, "stepsSent=3 (nếu có báo)"); }
++
++    console.log("2. MIDI lỗi ngay bước đầu, có fallback chuột");
++    { const r = loadRouter({ midiMode: () => "fail", point: POINTS }); const res = await r.sendToneStep(3); row("2", 3, r.tone, res);
++      check(r.tone.offset === 3 && r.tone.clicks === 3 && res.ok === true, "chuột gửi đủ 3 (chưa có bước nào gửi trước) → tone +3"); }
++
++    console.log("3. MIDI lỗi sau 1 bước, có fallback chuột  (= P6 của ModPipelineA03)");
++    { const r = loadRouter({ midiMode: (i) => (i < 1 ? "ok" : "fail"), point: POINTS }); const res = await r.sendToneStep(3); row("3", 3, r.tone, res);
++      check(r.tone.offset === 3, `tone thật = +3 (thực tế ${r.tone.offset}) — KHÔNG dịch dư`);
++      check(r.tone.midi + r.tone.clicks === 3, `tổng bước đã gửi = 3 (thực tế ${r.tone.midi + r.tone.clicks})`);
++      check(res.ok === true, "ok=true vì đủ 3 bước tới nơi"); }
++
++    console.log("4. MIDI lỗi sau 2 bước, có fallback chuột");
++    { const r = loadRouter({ midiMode: (i) => (i < 2 ? "ok" : "fail"), point: POINTS }); const res = await r.sendToneStep(3); row("4", 3, r.tone, res);
++      check(r.tone.offset === 3 && r.tone.midi + r.tone.clicks === 3, `tone thật = +3, tổng bước 3 (thực tế ${r.tone.offset}/${r.tone.midi + r.tone.clicks})`); }
++
++    console.log("4b. Hướng âm: MIDI lỗi sau 1 bước (-3)");
++    { const r = loadRouter({ midiMode: (i) => (i < 1 ? "ok" : "fail"), point: POINTS }); const res = await r.sendToneStep(-3); row("4b", -3, r.tone, res);
++      check(r.tone.offset === -3, `tone thật = -3 (thực tế ${r.tone.offset})`); }
++
++    console.log("5a. MIDI: bước thứ 3 ném lỗi (không rõ đã gửi hay chưa) → KHÔNG được fallback, báo không chắc chắn");
++    { const r = loadRouter({ midiMode: (i) => (i < 2 ? "ok" : "throw"), point: POINTS }); const res = await r.sendToneStep(3); row("5a", 3, r.tone, res);
++      check(r.tone.clicks === 0, "không click chuột (tránh dịch dư)");
++      check(res.ok === false, "ok=false (không tuyên bố thành công)");
++      check(res.uncertain === true || res.status === "TONE_STATE_UNCERTAIN", "đánh dấu trạng thái tone KHÔNG CHẮC CHẮN"); }
++
++    console.log("5b. MIDI gửi xong cả 3 bước rồi lỗi ở giai đoạn phản hồi (bước 3 đã tới plugin rồi mới ném)");
++    { const r = loadRouter({ midiMode: (i) => (i < 2 ? "ok" : "sent-then-throw"), point: POINTS }); const res = await r.sendToneStep(3); row("5b", 3, r.tone, res);
++      check(r.tone.offset === 3 && r.tone.clicks === 0, `tone thật +3 và KHÔNG click thêm (thực tế ${r.tone.offset}, click ${r.tone.clicks})`);
++      check(res.ok === false || res.uncertain === true, "không báo 'đã chắc chắn' khi phản hồi lỗi"); }
++
++    console.log("6a. Fallback chuột THÀNH CÔNG sau lỗi MIDI giữa chừng → đã kiểm ở 3/4");
++    console.log("6b. Fallback chuột THẤT BẠI giữa chừng (MIDI gửi 1, chuột gửi 1 rồi lỗi)");
++    { const r = loadRouter({ midiMode: (i) => (i < 1 ? "ok" : "fail"), point: POINTS, clickMode: (j) => (j < 1 ? "ok" : "fail") }); const res = await r.sendToneStep(3); row("6b", 3, r.tone, res);
++      check(res.ok === false, "ok=false");
++      check(r.tone.offset === 2, `tone thật = +2 (1 MIDI + 1 chuột), không click lại (thực tế ${r.tone.offset})`);
++      check(res.stepsSent === undefined || res.stepsSent === 2, "báo đúng số bước đã gửi = 2 (nếu có báo)"); }
++
++    console.log("6c. Chuột ném lỗi (ngoại lệ) giữa chừng");
++    { const r = loadRouter({ port: "", point: POINTS, clickMode: (j) => (j < 1 ? "ok" : "throw") }); let res, threw = false;
++      try { res = await r.sendToneStep(2); } catch (e) { threw = true; }
++      row("6c", 2, r.tone, res || { ok: "THROW" });
++      check(!threw, "sendToneStep không ném ngoại lệ ra ngoài (trả kết quả rõ ràng)");
++      check(res && res.ok === false, "ok=false"); }
++
++    console.log("7. Không có fallback (MIDI lỗi sau 1 bước, không có tọa độ chuột)");
++    { const r = loadRouter({ midiMode: (i) => (i < 1 ? "ok" : "fail") }); const res = await r.sendToneStep(3); row("7", 3, r.tone, res);
++      check(res.ok === false && r.tone.offset === 1, `ok=false, tone thật +1 (thực tế ${r.tone.offset})`);
++      check(res.stepsSent === undefined || res.stepsSent === 1, "báo stepsSent=1 (nếu có báo)"); }
++
++    console.log("7b. Mouse Control TẮT sau khi MIDI đã gửi 1 bước → không click");
++    { const r = loadRouter({ midiMode: (i) => (i < 1 ? "ok" : "fail"), point: POINTS, mouseAllowed: false }); const res = await r.sendToneStep(3); row("7b", 3, r.tone, res);
++      check(res.ok === false && r.tone.clicks === 0 && r.tone.offset === 1, "ok=false, không click, tone +1"); }
++
++    console.log("8. Không có bước nào bị lặp ngoài dự kiến (quét mọi điểm lỗi MIDI 0..3, hai hướng, có/không fallback)");
++    { let bad = 0, total = 0;
++      for (const dir of [1, -1]) for (let failAt = 0; failAt <= 3; failAt++) for (const fb of [true, false]) {
++          const r = loadRouter({ midiMode: (i) => (i < failAt ? "ok" : "fail"), point: fb ? POINTS : undefined });
++          const res = await r.sendToneStep(3 * dir); total++;
++          const delivered = Math.abs(r.tone.offset);
++          if (delivered > 3 || (fb && delivered !== 3) || (!fb && failAt < 3 && delivered !== failAt)) { bad++; console.log(`    ✗ dir=${dir} failAt=${failAt} fb=${fb} → tone ${r.tone.offset}`); }
++      }
++      check(bad === 0, `${total - bad}/${total} tổ hợp không dịch dư/thiếu`); }
++
++    console.log("\nBẢNG (tone thật dịch bao nhiêu):"); rows.forEach((x) => console.log("  " + x));
++    console.log(fail === 0 ? "\nPASS ToneStepA04" : `\nFAIL ToneStepA04 (${fail} lỗi)`);
++    process.exit(fail === 0 ? 0 : 1);
++})();
+diff --git a/ui/js/engines/modEngine.js b/ui/js/engines/modEngine.js
+index 16e85da..398d154 100644
+--- a/ui/js/engines/modEngine.js
++++ b/ui/js/engines/modEngine.js
+@@ -93,6 +93,12 @@ const ModEngine = (() => {
+         };
+ 
+         lastFiredRoot = null;
++        // TASK AI-ALG-04 (D10) — Key gốc CHƯA xác nhận / không hợp lệ (vd "LISTENING" => rootIndex -1): KHÔNG theo dõi, KHÔNG phát bất kỳ
++        // sự kiện dịch/reset nào (nếu không, delta tính từ chỉ số rác sẽ tạo lệnh dịch pitch sai).
++        if (!Number.isInteger(originalRootIndex) || originalRootIndex < 0 || originalRootIndex > 11) {
++            emitState("LISTENING", { timestamp: Date.now(), reason: "original_key_unconfirmed" });
++            return;
++        }
+         let pendingRoot = null;   // root MỚI đang "chờ xác nhận" (chưa đủ streak để báo thật). AI-ALG-03: ở chế độ nhãn (labelMode) giá trị này là chuỗi "root-mode".
+         let pendingStreak = 0;
+ 
+@@ -148,9 +154,24 @@ const ModEngine = (() => {
+                     return;
+                 }
+ 
+-                const deltaL = KeyEngine.shortestSemitoneDelta(originalRootIndex, cur.root);
++                // TASK AI-ALG-04 (D8/D10) — QUY ƯỚC: `semitone` = độ lệch TUYỆT ĐỐI so với Key GỐC (0 = đang ở Key gốc), KHÔNG phải delta so với
++                // lần modulation trước. Giọng tương đối CỦA KEY GỐC (cùng tập nốt, vd gốc C Major -> A Minor) = vẫn ở Key gốc => 0, không phải -3.
++                const origLabel = { root: originalRootIndex, mode: options.originalMode };
++                const sameSetAsOriginal = relativeMajorRoot(cur) === relativeMajorRoot(origLabel);
++                const deltaL = sameSetAsOriginal ? 0 : KeyEngine.shortestSemitoneDelta(originalRootIndex, cur.root);
+                 lastFiredRoot = cur.root;
+-                if (deltaL === 0) return; // hành vi cũ giữ nguyên (xem mục Remaining Defects D10 trong báo cáo AI-ALG-03)
++                if (deltaL === 0) {
++                    // D10 — QUAY VỀ Key gốc: phát sự kiện reset RÕ RÀNG (không phải "không có gì xảy ra"). Consumer phải đưa offset về 0.
++                    const retL = {
++                        semitone: 0, kind: "RETURN_TO_ORIGINAL", resetOffset: true,
++                        originalKey: `${KeyEngine.NOTE_NAMES[originalRootIndex]}`, targetKey: labelOf(cur), mode: cur.mode,
++                        confidence: result.confidence, stable: true, timestamp: Date.now(),
++                    };
++                    sendModTelemetry({ event: "MOD_RETURN_TO_ORIGINAL", ...retL, persistence: SUSTAIN_REQUIRED });
++                    emitState("MODULATION_DETECTED", retL);
++                    onModulation(retL);
++                    return;
++                }
+                 const modDataL = {
+                     semitone: deltaL,
+                     originalKey: `${KeyEngine.NOTE_NAMES[originalRootIndex]}`,
+@@ -201,7 +222,20 @@ const ModEngine = (() => {
+             pendingRoot = null;
+             pendingStreak = 0;
+ 
+-            if (delta === 0) return; // trùng key gốc theo bán cung ngắn nhất (hiếm khi xảy ra ở đây, phòng hờ)
++            if (delta === 0) {
++                // TASK AI-ALG-04 (D10) — đến đây nghĩa là ĐÃ modulation trước đó (baseline_legacy != gốc) rồi nay QUAY VỀ root gốc:
++                // phát sự kiện reset rõ ràng (semitone 0 = Key gốc, TUYỆT ĐỐI), thay vì im lặng làm consumer giữ offset cũ.
++                const retData = {
++                    semitone: 0, kind: "RETURN_TO_ORIGINAL", resetOffset: true,
++                    originalKey: `${KeyEngine.NOTE_NAMES[originalRootIndex]}`,
++                    targetKey: `${KeyEngine.NOTE_NAMES[result.rootIndex]} ${result.mode}`,
++                    confidence: result.confidence, stable: true, timestamp: Date.now(),
++                };
++                sendModTelemetry({ event: "MOD_RETURN_TO_ORIGINAL", ...retData, persistence: SUSTAIN_REQUIRED });
++                emitState("MODULATION_DETECTED", retData);
++                onModulation(retData);
++                return;
++            }
+ 
+             // MOD Output Contract (Section XI) — field CŨ `semitone` giữ nguyên 100% (renderer.js/
+             // vocalCommandRouter.js đang đọc field này, không đổi gì ở đó). Các field MỚI chỉ CỘNG
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index c827b03..61eb66a 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -1626,7 +1626,7 @@ function turnManualOverrideOff() {
+     // này (aiSemitoneOffset, mục 12) — KHÔNG ép cứng về 0.
+     Promise.all([
+         setSoundShifterPower(false),
+-        sendToneStep(aiSemitoneOffset),
++        sendToneTarget(aiSemitoneOffset), // TASK AI-ALG-04 (D8): aiSemitoneOffset là TUYỆT ĐỐI so với Key gốc -> đưa Auto-Tune về đúng offset, không gửi tương đối sai
+     ]).then(([shifterResult, autotuneResult]) => {
+         const newKey = transposeKey(originalKey, aiSemitoneOffset);
+         const currentKeyElLocal = document.getElementById("currentKey");
+@@ -1770,9 +1770,16 @@ async function applyModEvent(data) {
+     }
+ 
+     setStatus("dot-mod", "pending"); // cam: AI đang gửi lệnh dịch tone theo modulation thật dò được
+-    recordModStage("ACTION_REQUESTED", { semitone: data.semitone });
+-    const result = await sendToneStep(data.semitone);
+-    recordModStage(result.ok ? "ACTION_SENT_UNCONFIRMED" : "ACTION_FAILED", { semitone: data.semitone, driverUsed: result.driverUsed ?? null, confirmation: result.confirmation ?? null, detail: result.ok ? undefined : result.detail });
++    // TASK AI-ALG-04 (D8/D10) — data.semitone = độ lệch TUYỆT ĐỐI so với Key gốc (0 = quay về Key gốc). sendToneTarget() tự tính số bước
++    // cần gửi = target - tone đã gửi trước đó (toneState), nên modulation nối tiếp / quay về gốc / khởi động lại watcher không dịch dư.
++    recordModStage("ACTION_REQUESTED", { semitone: data.semitone, kind: data.kind ?? null });
++    const result = await sendToneTarget(data.semitone);
++    recordModStage(result.ok ? "ACTION_SENT_UNCONFIRMED" : "ACTION_FAILED", {
++        semitone: data.semitone, kind: data.kind ?? null, driverUsed: result.driverUsed ?? null, confirmation: result.confirmation ?? null,
++        appliedBefore: result.appliedBefore, delta: result.delta, stepsRequested: result.stepsRequested, stepsSent: result.stepsSent,
++        appliedAfter: result.appliedAfter, uncertain: result.uncertain || result.toneStateUncertain || false, status: result.status ?? null,
++        detail: result.ok ? undefined : result.detail,
++    });
+ 
+     if (result.ok) {
+         setStatus("dot-mod", "online"); // xanh: AI đã GỬI lệnh (chưa phải "đã áp dụng" — xem recordModStage ở trên)
+@@ -2672,7 +2679,7 @@ window.electronAPI?.onPluginCommand?.(async (message) => {
+             // xác nhận. Vá bằng ĐÚNG semantics Manual đang dùng: cùng delta, chạy song song,
+             // không coi là thành công nếu 1 trong 2 lỗi (không báo giả tạo).
+             const [autotuneResult, soundshifterResult] = await Promise.all([
+-                sendToneStep(delta),
++                sendToneStep(delta), // (AI-ALG-04: KHÔNG đổi — delta ở đây là tuyệt đối so với Key gốc nhưng gửi như tương đối; cùng lớp lỗi D8, chờ quyết định, xem báo cáo D12)
+                 sendToneStepToSoundShifter(delta),
+             ]);
+             console.log("[Bridge] sendToneStep() ->", autotuneResult, "(delta =", delta, ")");
+diff --git a/ui/js/vocalCommandRouter.js b/ui/js/vocalCommandRouter.js
+index f436af5..6fcd53d 100644
+--- a/ui/js/vocalCommandRouter.js
++++ b/ui/js/vocalCommandRouter.js
+@@ -155,54 +155,111 @@ async function sendKeyToAutotune(keyName) {
+     };
+ }
+ 
++// ---------------------------------------------------------
++// TASK AI-ALG-04 (D8/D9) — TRẠNG THÁI TONE NỘI BỘ + sendToneStep an toàn khi lỗi giữa chừng.
++// QUY ƯỚC: sendToneStep(delta) là lệnh TƯƠNG ĐỐI (nhấn ▲/▼ `delta` lần). toneState.applied = ƯỚC LƯỢNG (nội bộ) tổng số bước
++// đã GỬI tới Auto-Tune (+ = lên) — KHÔNG phải trạng thái phần cứng đã xác nhận (Menu không đọc lại được Auto-Tune).
++// sendToneTarget(offset) nhận độ lệch TUYỆT ĐỐI so với Key gốc (cùng quy ước với data.semitone của ModEngine) và tự tính
++// delta = offset - toneState.applied, nên modulation nối tiếp / quay về Key gốc / khởi động lại watcher không bị cộng dồn sai.
++// ---------------------------------------------------------
++const toneState = { applied: 0, uncertain: false, lastReason: null, chain: Promise.resolve() }; // chain: hàng đợi tuần tự hoá
++function getToneState() { return { applied: toneState.applied, uncertain: toneState.uncertain, lastReason: toneState.lastReason }; }
++function resetToneState(reason) { toneState.applied = 0; toneState.uncertain = false; toneState.lastReason = reason || "RESET"; }
++// Tuần tự hoá: 2 lệnh dịch tone không bao giờ chạy chồng lên nhau
++function _enqueueTone(fn) { const p = toneState.chain.then(fn, fn); toneState.chain = p.then(() => {}, () => {}); return p; }
++
+ /**
+- * Dịch tone hiện tại đi `semitoneDelta` nấc (dương = tăng, âm = giảm).
+- * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string}>}
++ * Dịch tone hiện tại đi `semitoneDelta` nấc (dương = tăng, âm = giảm) — TƯƠNG ĐỐI.
++ * Kết quả luôn có stepsRequested/stepsSent/stepsRemaining (số bước ĐÃ GỬI, không phải đã xác nhận áp dụng) và uncertain.
++ * Quy tắc D9: bước nào đã gửi thì KHÔNG bao giờ gửi lại; fallback chuột chỉ làm phần CÒN LẠI; nếu không biết chắc 1 bước
++ * đã tới hay chưa (ngoại lệ) thì DỪNG, báo uncertain, không fallback.
++ * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string, stepsRequested: number, stepsSent: number, stepsRemaining: number, uncertain: boolean}>}
+  */
+-async function sendToneStep(semitoneDelta) {
+-    if (!semitoneDelta) return { ok: true, driverUsed: "none" };
++function sendToneStep(semitoneDelta) { return _enqueueTone(() => _sendToneStepNow(semitoneDelta)); }
++
++async function _sendToneStepNow(semitoneDelta) {
++    if (!semitoneDelta) return { ok: true, driverUsed: "none", stepsRequested: 0, stepsSent: 0, stepsRemaining: 0, uncertain: false };
+ 
+     const steps = Math.abs(semitoneDelta);
+     const goingUp = semitoneDelta > 0;
++    const dir = goingUp ? 1 : -1;
++    let sentMidi = 0, sentMouse = 0, uncertain = false;
++    const finish = (res) => {
++        const sent = sentMidi + sentMouse;
++        toneState.applied += dir * sent; // chỉ cộng đúng số bước ĐÃ gửi (kể cả khi thất bại 1 phần)
++        if (uncertain) { toneState.uncertain = true; toneState.lastReason = "TONE_STATE_UNCERTAIN"; }
++        return { ...res, stepsRequested: steps, stepsSent: sent, stepsRemaining: steps - sent, uncertain };
++    };
+ 
+     // --- 1) Ưu tiên MIDI: gửi 1 nốt/CC đại diện cho hướng, lặp theo số bước ---
+     const midiPort = getSetting("midiOutputPort");
+     if (midiPort) {
+         // CC 20 tăng / CC 21 giảm là VÍ DỤ — đổi theo đúng mapping MIDI Learn thật của plugin bạn.
+         const ccNumber = goingUp ? 20 : 21;
+-        let allSent = true;
++        let failedDefinite = false;
+         for (let i = 0; i < steps; i++) {
+-            const sent = await sendMidiCC(ccNumber, 127);
+-            if (!sent) { allSent = false; break; }
+-            await delay(CLICK_STEP_DELAY_MS);
++            let sent;
++            try { sent = await sendMidiCC(ccNumber, 127); }
++            catch (e) { uncertain = true; break; } // ngoại lệ: KHÔNG biết bước này đã tới hay chưa -> dừng, không fallback
++            if (!sent) { failedDefinite = true; break; } // sendMidiCC trả false = chắc chắn KHÔNG gửi (cổng đóng / send ném lỗi)
++            sentMidi++;
++            try { await delay(CLICK_STEP_DELAY_MS); } catch (e) { /* bước đã tính là đã gửi */ }
++        }
++        if (sentMidi === steps) {
++            // allSent=true chỉ nghĩa là API Web MIDI không ném lỗi: UNCONFIRMED (TASK AI-ALG-03 D6).
++            return finish({ ok: true, driverUsed: "midi", confirmation: "MIDI_SENT_UNCONFIRMED" });
+         }
+-        // TASK AI-ALG-03 (D6) — allSent=true chỉ nghĩa là API Web MIDI không ném lỗi: ghi rõ UNCONFIRMED, giống sendKeyToAutotune (MIDI-01).
+-        if (allSent) return { ok: true, driverUsed: "midi", confirmation: "MIDI_SENT_UNCONFIRMED" };
++        if (uncertain) {
++            return finish({ ok: false, driverUsed: "midi", status: "TONE_STATE_UNCERTAIN", detail: `MIDI lỗi ở bước ${sentMidi + 1}/${steps} (không rõ đã gửi hay chưa) — KHÔNG fallback để tránh dịch dư; trạng thái tone không chắc chắn.` });
++        }
++        // failedDefinite: tiếp tục xuống fallback CHỈ cho phần còn lại (steps - sentMidi)
+     }
+ 
+-    // --- 2) Fallback: click nút ▲/▼ đã capture ở "chromatic", lặp theo số bước ---
++    // --- 2) Fallback: click nút ▲/▼ đã capture ở "chromatic", CHỈ cho số bước còn lại ---
++    const remaining = steps - sentMidi;
+     const points = parseCapturedPoint(getCoordinate("chromatic"));
+     const point = Array.isArray(points) ? points[goingUp ? CHROMATIC_UP_INDEX : CHROMATIC_DOWN_INDEX] : null;
++    const partialMidi = sentMidi > 0;
+ 
+     if (point && window.electronAPI?.clickAtPoint) {
+         if (!isMouseFallbackAllowed()) {
+-            return {
++            return finish({
+                 ok: false,
+-                driverUsed: "mouse",
+-                status: "MOUSE_DISABLED",
+-                detail: 'Mouse Control đang TẮT (Setup > Calibration) — không tự click chuột để dịch tone. Bật lại Mouse Control hoặc cấu hình MIDI (Setup > MIDI) để MOD tiếp tục gửi tự động.',
+-            };
++                driverUsed: partialMidi ? "midi" : "mouse",
++                status: partialMidi ? "PARTIAL_MIDI_MOUSE_DISABLED" : "MOUSE_DISABLED",
++                detail: 'Mouse Control đang TẮT (Setup > Calibration) — không tự click chuột để dịch tone. Bật lại Mouse Control hoặc cấu hình MIDI (Setup > MIDI) để MOD tiếp tục gửi tự động.'
++                    + (partialMidi ? ` MIDI đã gửi ${sentMidi}/${steps} bước, còn ${remaining} bước CHƯA gửi.` : ""),
++            });
+         }
+-        for (let i = 0; i < steps; i++) {
+-            const result = await window.electronAPI.clickAtPoint(point);
+-            if (!result.ok) return { ok: false, driverUsed: "mouse", detail: result.detail };
++        for (let i = 0; i < remaining; i++) {
++            let result;
++            try { result = await window.electronAPI.clickAtPoint(point); }
++            catch (e) { uncertain = true; return finish({ ok: false, driverUsed: "mouse", status: "TONE_STATE_UNCERTAIN", detail: "Click chuột ném lỗi (không rõ đã click hay chưa) — dừng, trạng thái tone không chắc chắn." }); }
++            if (!result || !result.ok) return finish({ ok: false, driverUsed: partialMidi ? "midi+mouse" : "mouse", status: "PARTIAL_SENT", detail: result && result.detail });
++            sentMouse++;
+             await delay(CLICK_STEP_DELAY_MS);
+         }
+-        return { ok: true, driverUsed: "mouse", confirmation: "CLICK_SENT_UNCONFIRMED" };
++        return finish({ ok: true, driverUsed: partialMidi ? "midi+mouse" : "mouse", confirmation: partialMidi ? "MIXED_SENT_UNCONFIRMED" : "CLICK_SENT_UNCONFIRMED" });
+     }
+ 
+-    return {
++    return finish({
+         ok: false,
+-        detail: 'Chưa cấu hình cổng MIDI hoặc toạ độ "Chromatic" (Setup > Lấy tọa độ).',
+-    };
++        driverUsed: partialMidi ? "midi" : undefined,
++        status: partialMidi ? "PARTIAL_MIDI_NO_FALLBACK" : undefined,
++        detail: 'Chưa cấu hình cổng MIDI hoặc toạ độ "Chromatic" (Setup > Lấy tọa độ).'
++            + (partialMidi ? ` MIDI đã gửi ${sentMidi}/${steps} bước, còn ${remaining} bước CHƯA gửi.` : ""),
++    });
++}
++
++/**
++ * Đưa tone về độ lệch TUYỆT ĐỐI `targetOffset` so với Key gốc (0 = Key gốc). delta = target - toneState.applied.
++ * Gọi lại với cùng target khi đã đạt => không gửi gì (idempotent). Tính delta TRONG hàng đợi nên không đua với lệnh khác.
++ */
++function sendToneTarget(targetOffset) {
++    return _enqueueTone(async () => {
++        const appliedBefore = toneState.applied;
++        const delta = targetOffset - appliedBefore;
++        const res = await _sendToneStepNow(delta);
++        return { ...res, targetOffset, appliedBefore, delta, appliedAfter: toneState.applied, toneStateUncertain: toneState.uncertain };
++    });
+ }
