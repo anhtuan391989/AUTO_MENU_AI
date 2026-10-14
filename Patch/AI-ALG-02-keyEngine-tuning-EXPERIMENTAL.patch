@@ -1,0 +1,70 @@
+--- a/ui/js/engines/keyEngine.js
++++ b/ui/js/engines/keyEngine.js
+@@ -48,6 +48,10 @@
+     let contentEnergyEMA = 0;
+ 
+     let bassRootVotes = new Array(12).fill(0);
++    // [PROTO A-ALG-02] ước lượng độ lệch tuning (cent) — phương pháp công khai (tìm offset cực đại hoá năng lượng đỉnh tại lưới nốt)
++    let tuningCents = 0; let tuningVotes = {}; let tuningFrame = 0;
++    const TUNING_ENABLED = (typeof globalThis!=='undefined' && globalThis.__TUNING_OFF__) ? false : true;
++    const TUNING_CANDIDATES = [-50,-40,-30,-20,-10,0,10,20,30,40,50];
+ 
+     let lastTop1Key = null;
+     let lastTop1Label = null;
+@@ -111,6 +115,7 @@
+         contentEnergyEMA = 0;
+         hasMusicalContent = false;
+         bassRootVotes = new Array(12).fill(0);
++        tuningCents = 0; tuningVotes = {}; tuningFrame = 0;
+         lastTop1Key = null;
+         lastTop1Label = null;
+         lastTop1ChangedAt = null;
+@@ -135,6 +140,28 @@
+         return (((Math.round(midi) % 12) + 12) % 12);
+     }
+ 
++
++    function estimateTuning(binHz, binCount) {
++        // năng lượng đỉnh (bin gần nhất ±1) tại lưới nốt cho từng offset; chỉ dùng hài 1–3, midi 36–84
++        let bestOff = 0, bestE = -1, zeroE = 0; const es = {};
++        for (const off of TUNING_CANDIDATES) {
++            let e = 0;
++            for (let midi = 36; midi <= 84; midi++) {
++                for (let h = 1; h <= 3; h++) {
++                    const f = A4_HZ * Math.pow(2, (midi - 69) / 12 + off / 1200) * h;
++                    const b = Math.round(f / binHz); if (b + 1 >= binCount || b < 1) continue;
++                    const d = Math.max(chromaDataArray[b - 1], chromaDataArray[b], chromaDataArray[b + 1]);
++                    if (d > -100) e += Math.pow(10, d / 20) / h;
++                }
++            }
++            es[off] = e; if (off === 0) zeroE = e;
++            if (e > bestE) { bestE = e; bestOff = off; }
++        }
++        // thiên lệch về 0: chỉ đổi khi tốt hơn offset 0 ít nhất 5%
++        if (bestOff !== 0 && bestE < zeroE * 1.05) bestOff = 0;
++        return bestOff;
++    }
++
+     function updateChromaVector() {
+         if (!chromaAnalyser || !chromaDataArray) return;
+         chromaAnalyser.getFloatFrequencyData(chromaDataArray);
+@@ -142,12 +169,18 @@
+         const sampleRate = audioCtxRef?.sampleRate || 48000;
+         const binHz = sampleRate / chromaAnalyser.fftSize;
+         const binCount = chromaDataArray.length;
++        if (TUNING_ENABLED && (tuningFrame++ % 30) === 0) {
++            const off = estimateTuning(binHz, binCount);
++            tuningVotes[off] = (tuningVotes[off] || 0) * 0.9 + 1; for (const k in tuningVotes) if (+k !== off) tuningVotes[k] *= 0.9;
++            let bk = 0, bv = -1; for (const k in tuningVotes) if (tuningVotes[k] > bv) { bv = tuningVotes[k]; bk = +k; }
++            if (bv >= 3) tuningCents = bk;
++        }
+         const frame = new Array(12).fill(0);
+         const bassFrame = new Array(12).fill(0);
+ 
+         for (let midi = 21; midi <= 108; midi++) {
+             const pc = ((midi % 12) + 12) % 12;
+-            const fFun = A4_HZ * Math.pow(2, (midi - 69) / 12);
++            const fFun = A4_HZ * Math.pow(2, (midi - 69) / 12 + tuningCents / 1200);
+             if (fFun < 27 || fFun > 6000) continue;
+             let energy = 0;
+             for (let h = 0; h < HARMONIC_AMP.length; h++) {
