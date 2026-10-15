@@ -67,6 +67,38 @@ const KeyEngine = (() => {
     let tuningVotes = {};
     let tuningFrame = 0;
 
+    // === TASK AI-ALG-05 — BẰNG CHỨNG KEY DÀI HẠN (chống "nghe theo hợp âm thay vì theo giọng") ===
+    // Nguyên nhân gốc (đo trên log nhạc thật 07–10/2026 + benchmark pop tổng hợp): chromaVector(Fast) chỉ nhớ ~0.1–0.4 s nên top1 BÁM THEO HỢP ÂM
+    // đang chơi (Am→F→C→G ... => khoá đổi liên tục, Major/Minor margin ~0.01); fast-path khoá chỉ sau 3 tick x 400 ms. Key là thuộc tính của CẢ đoạn nhạc
+    // => cần tích luỹ chroma ~10–30 s. Hai bộ tích luỹ (chuẩn hoá TỪNG KHUNG để đoạn ồn không lấn át): Long (τ=LONG_TAU_S) dùng để khoá Key,
+    // Mid (τ=MID_TAU_S) dùng cho ModEngine (phát hiện chuyển điệu thật, không báo giả theo hợp âm).
+    // Tắt/hoàn nguyên: LONG_EVIDENCE_ENABLED = false (hành vi trở về như trước AI-ALG-05).
+    const LONG_EVIDENCE_ENABLED = true;
+    const LONG_TAU_S = 20;
+    const MID_TAU_S = 6;
+    const LONG_WARM_S = 1.0;          // chưa tích luỹ đủ thì không chặn (giữ hành vi cũ ở giây đầu)
+    const LONG_CHANGE_TICKS = 3;      // đổi Key đã khoá: Key dài hạn mới phải dẫn đầu liên tục ≥ 3 tick (400 ms)
+    const LONG_REL_FACTOR = 3;        // đổi giữa 2 Key relative (cùng bộ nốt): gấp 3 biên/thời gian
+    const LONG_CHANGE_GAP = 0.01;     // ... và hơn điểm của Key đang khoá ≥ 0.01 (cosine, thang 0..1)
+    const LONG_LOCK_TICKS = 10;       // khoá thẳng theo Key dài hạn khi nó dẫn đầu liên tục ≥ 10 tick (4 s) ...
+    const LONG_LOCK_MIN_S = 4;        // ... và đã tích luỹ ≥ 4 s nhạc
+    const SHORT_TAU_S = 1.5;          // bộ tích luỹ ngắn: đo "năng lượng ngoài thang của Key dài hạn" + làm điểm neo khi Key thật sự đổi
+    const OOK_RATIO = 0.25;           // ≥ 25% năng lượng ngoài thang âm của Key dài hạn ...
+    const OOK_TICKS = 4;              // ... liên tục ≥ 4 tick (1.6 s) => nghi chuyển điệu thật: neo lại bộ tích luỹ dài hạn vào đoạn ngắn
+    const LONG_ANCHOR_MASS_S = 2;     // "khối lượng" bằng chứng của điểm neo (giây tương đương) — dữ liệu mới lấn át điểm neo sau vài giây
+    const LONG_LOCK_MIN_MODAL = 0.2;  // khoá thẳng theo dài hạn chỉ khi có bằng chứng quãng 3 rõ (hợp âm thiếu quãng 3 = mập mờ Major/Minor, không khoá)
+    const LONG_FIRST_LOCK_S = 8;      // khoá LẦN ĐẦU: chờ ≥ 8 s nhạc, trừ khi tín hiệu "đứng yên" (1 hợp âm giữ lâu: ngắn ≈ dài)
+    const LONG_STATIONARY_COS = 0.97; // cosine(ngắn, dài) ≥ 0.97 => không có gì để lấy trung bình, khoá sớm vẫn đúng
+    const LONG_BASS_WEIGHT = 0.05;    // trọng số bass khi xếp hạng Key dài hạn (mặc định cũ 0.5 làm lệch về gốc hợp âm thường gặp nhất — xem báo cáo AI-ALG-05)
+    let chromaVectorLong = new Array(12).fill(0); // = longSum/longMass (hướng chroma dài hạn)
+    let longSum = new Array(12).fill(0), longMass = 0;
+    let chromaVectorShort = new Array(12).fill(0);
+    let ookStreak = 0;
+    let chromaVectorMid = new Array(12).fill(0);
+    let longSeconds = 0;
+    let lastLongAt = null;
+    const longState = { key: null, streak: 0, result: null, stationary: false };
+
     let lastTop1Key = null;
     let lastTop1Label = null;
     let lastTop1ChangedAt = null;
@@ -130,6 +162,7 @@ const KeyEngine = (() => {
         hasMusicalContent = false;
         bassRootVotes = new Array(12).fill(0);
         tuningCents = 0; tuningVotes = {}; tuningFrame = 0; // AI-ALG-03: reset theo nguồn mới
+        chromaVectorLong = new Array(12).fill(0); longSum = new Array(12).fill(0); longMass = 0; chromaVectorShort = new Array(12).fill(0); ookStreak = 0; chromaVectorMid = new Array(12).fill(0); longSeconds = 0; lastLongAt = null; longState.key = null; longState.streak = 0; longState.result = null; // AI-ALG-05
         lastTop1Key = null;
         lastTop1Label = null;
         lastTop1ChangedAt = null;
@@ -260,6 +293,25 @@ const KeyEngine = (() => {
             }
         }
 
+        // TASK AI-ALG-05 — tích luỹ dài hạn theo THỜI GIAN THỰC (dt), chuẩn hoá từng khung (power-law 0.67 + L2) rồi EMA.
+        {
+            const nowMs = Date.now();
+            const dtS = lastLongAt === null ? 0 : Math.min(0.25, Math.max(0.005, (nowMs - lastLongAt) / 1000));
+            lastLongAt = nowMs;
+            if (LONG_EVIDENCE_ENABLED && hasMusicalContent && dtS > 0) {
+                const fn = powerLawNormalize(frame);
+                const dL = Math.exp(-dtS / LONG_TAU_S), dM = Math.exp(-dtS / MID_TAU_S), dS = Math.exp(-dtS / SHORT_TAU_S);
+                longMass = longMass * dL + dtS;
+                for (let i = 0; i < 12; i++) {
+                    longSum[i] = longSum[i] * dL + fn[i] * dtS;
+                    chromaVectorLong[i] = longSum[i] / longMass;
+                    chromaVectorMid[i] = chromaVectorMid[i] * dM + fn[i] * (1 - dM);
+                    chromaVectorShort[i] = chromaVectorShort[i] * dS + fn[i] * (1 - dS);
+                }
+                longSeconds += dtS;
+            }
+        }
+
         let winnerPc = -1, winnerVal = 0;
         for (let i = 0; i < 12; i++) {
             if (bassFrame[i] > winnerVal) { winnerVal = bassFrame[i]; winnerPc = i; }
@@ -350,8 +402,9 @@ const KeyEngine = (() => {
         return newMargin > avgMarginHistory * MODULATION_MARGIN_GAIN;
     }
 
-    function estimateKeyFromChroma(sourceVector) {
+    function estimateKeyFromChroma(sourceVector, opts) {
         const vector = sourceVector || chromaVector;
+        const bassW = opts && typeof opts.bassWeight === "number" ? opts.bassWeight : BASS_ROOT_BOOST_WEIGHT; // AI-ALG-05: mặc định = cũ
         const maxBassVotes = Math.max(...bassRootVotes, 1e-9);
         const chromaNorm = powerLawNormalize(vector);
 
@@ -363,7 +416,7 @@ const KeyEngine = (() => {
             // === TASK A35 — Bass Boost có điều kiện ===
             const bassSupport = chromaNorm[root];
             const bassBoost = bassSupport >= MIN_CHROMA_EVIDENCE
-                ? bassAgreement * BASS_ROOT_BOOST_WEIGHT
+                ? bassAgreement * bassW
                 : 0; // Không hỗ trợ chroma → không được cộng điểm bass
 
             // === TASK A35 — Modal Evidence tính và điều chỉnh điểm ===
@@ -400,6 +453,7 @@ const KeyEngine = (() => {
             hasMusicalContent,
             top1,
             top2,
+            all: opts && opts.withAll ? allScores : undefined, // AI-ALG-05: 24 điểm (chỉ khi yêu cầu)
             margin,
             bassAgreement: top1.bassAgreement,
             modalEvidence: best.modalEvidence // Thêm bằng chứng modal vào kết quả
@@ -421,6 +475,65 @@ const KeyEngine = (() => {
     const FAST_PATH_MIN_ELAPSED_MS = 1200;
     const FAST_PATH_STREAK_REQUIRED = 3;
     const FAST_PATH_MIN_CONFIDENCE = ADAPTIVE_LOCK_CONFIDENCE;
+
+    // === TASK AI-ALG-05 — ước lượng Key dài hạn + cổng đồng thuận ===
+    function estimateKeyLong() { return estimateKeyFromChroma(chromaVectorLong, { bassWeight: LONG_BASS_WEIGHT, withAll: true }); }
+    function estimateKeyMid() { return estimateKeyFromChroma(chromaVectorMid, { bassWeight: LONG_BASS_WEIGHT }); }
+    // Tỷ lệ năng lượng (bộ tích luỹ ngắn τ≈1.5 s) nằm NGOÀI thang âm của Key (root, mode). Trưởng = 7 nốt trưởng; thứ = 7 nốt thứ tự nhiên + âm dẫn.
+    function outOfScaleRatio(rootIndex, mode, window) {
+        const src = window === "mid" ? chromaVectorMid : chromaVectorShort;
+        if (!Number.isInteger(rootIndex) || rootIndex < 0 || rootIndex > 11) return null;
+        const offs = mode === "Major" ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10, 11];
+        const inScale = new Array(12).fill(false);
+        for (const o of offs) inScale[(rootIndex + o) % 12] = true;
+        let tot = 0, out = 0;
+        for (let i = 0; i < 12; i++) { const e = src[i] * src[i]; tot += e; if (!inScale[i]) out += e; }
+        return tot > 0 ? out / tot : null;
+    }
+    function updateLongState() {
+        if (!LONG_EVIDENCE_ENABLED || longSeconds < LONG_WARM_S) { longState.key = null; longState.streak = 0; longState.result = null; return; }
+        const r = estimateKeyLong();
+        const k = `${r.rootIndex}-${r.mode}`;
+        { let d = 0, na = 0, nb = 0; for (let i = 0; i < 12; i++) { d += chromaVectorShort[i] * chromaVectorLong[i]; na += chromaVectorShort[i] ** 2; nb += chromaVectorLong[i] ** 2; } longState.stationary = na > 0 && nb > 0 && d / Math.sqrt(na * nb) >= LONG_STATIONARY_COS; }
+        longState.streak = (k === longState.key) ? longState.streak + 1 : 1;
+        longState.key = k; longState.result = r;
+
+        // Phát hiện chuyển điệu THẬT: năng lượng ngắn hạn nằm NGOÀI thang âm của Key dài hạn kéo dài (hợp âm đổi TRONG cùng giọng thì vẫn nằm trong thang).
+        // Thang: trưởng = 7 nốt trưởng; thứ = 7 nốt thứ tự nhiên + âm dẫn (nốt 7 nâng, hoà âm thứ phổ biến).
+        const scaleOffsets = r.mode === "Major" ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10, 11];
+        const inScale = new Array(12).fill(false);
+        for (const o of scaleOffsets) inScale[(r.rootIndex + o) % 12] = true;
+        let tot = 0, out = 0;
+        for (let i = 0; i < 12; i++) { const e = chromaVectorShort[i] * chromaVectorShort[i]; tot += e; if (!inScale[i]) out += e; }
+        ookStreak = (tot > 0 && out / tot >= OOK_RATIO) ? ookStreak + 1 : 0;
+        if (ookStreak >= OOK_TICKS) {
+            // neo lại: bằng chứng dài hạn = đoạn ngắn hiện tại (khối lượng nhỏ để dữ liệu mới lấn át nhanh)
+            let mag = Math.sqrt(chromaVectorShort.reduce((a, v) => a + v * v, 0)) || 1;
+            for (let i = 0; i < 12; i++) { longSum[i] = (chromaVectorShort[i] / mag) * LONG_ANCHOR_MASS_S; chromaVectorLong[i] = longSum[i] / LONG_ANCHOR_MASS_S; }
+            longMass = LONG_ANCHOR_MASS_S; ookStreak = 0;
+            sendTelemetry({ event: "LONG_REANCHOR", from: `${NOTE_NAMES[r.rootIndex]} ${r.mode}`, longSeconds: +longSeconds.toFixed(1) });
+            const r2 = estimateKeyLong(); longState.key = `${r2.rootIndex}-${r2.mode}`; longState.result = r2; longState.streak = 1;
+        }
+    }
+    function longScoreOf(fullKey) {
+        const r = longState.result; if (!r || !r.all) return null;
+        const e = r.all.find((x) => `${x.root}-${x.mode}` === fullKey); return e ? e.score : null;
+    }
+    // Cho phép khoá candidate (Key đang xét, dạng "root-mode") không? lockedKey = Key đang khoá hoặc null.
+    function longEvidenceAllows(candidateFullKey, lockedKey) {
+        if (!LONG_EVIDENCE_ENABLED || longSeconds < LONG_WARM_S || !longState.key) return { ok: true, reason: "long-not-warm" };
+        if (longState.key !== candidateFullKey) return { ok: false, reason: "long-disagrees" };
+        if (!lockedKey && longSeconds < LONG_FIRST_LOCK_S && !longState.stationary) return { ok: false, reason: "long-first-lock-wait" }; // nhạc đang thay đổi hợp âm: chưa đủ để nói Key của cả đoạn
+        if (lockedKey && lockedKey !== candidateFullKey) {
+            // ĐỔI Key đã khoá: cần Key dài hạn dẫn đầu ổn định + hơn Key đang khoá đủ biên (chống dao động theo hợp âm)
+            // Cặp relative (vd C Major <-> A Minor) có cùng bộ nốt: bằng chứng rất sát nhau nên cần biên + thời gian lớn hơn để không dao động.
+            const isRel = (() => { const [ra, ma] = String(candidateFullKey).split("-"), [rb, mb] = String(lockedKey).split("-"); if (ma === mb) return false; const maj = ma === "Major" ? +ra : +rb, min = ma === "Major" ? +rb : +ra; return (maj + 9) % 12 === min; })();
+            if (longState.streak < LONG_CHANGE_TICKS * (isRel ? LONG_REL_FACTOR : 1)) return { ok: false, reason: "long-streak" };
+            const sNew = longScoreOf(candidateFullKey), sOld = longScoreOf(lockedKey);
+            if (sNew !== null && sOld !== null && sNew - sOld < LONG_CHANGE_GAP * (isRel ? LONG_REL_FACTOR : 1)) return { ok: false, reason: "long-gap" };
+        }
+        return { ok: true, reason: "long-agrees" };
+    }
 
     function formatElapsedSeconds(ms) {
         return (ms / 1000).toFixed(1);
@@ -535,9 +648,30 @@ const KeyEngine = (() => {
             if (!loopStopped) { loopStopped = true; loopStats.stopped++; loopStats.active--; }
         }
 
+        let longLockFiredKey = null;
         const fastTimer = setInterval(() => {
             const elapsed = Date.now() - startedAt;
             if (elapsed < FAST_PATH_MIN_ELAPSED_MS) return;
+
+            // TASK AI-ALG-05 — cập nhật Key dài hạn; nếu nó dẫn đầu ổn định mà Key chưa khoá/khác Key đang khoá -> khoá theo bằng chứng dài hạn
+            // (cần khi hợp âm đang chơi không bao giờ trùng Key của cả đoạn — nếu không sẽ không bao giờ khoá được).
+            updateLongState();
+            if (LONG_EVIDENCE_ENABLED && hasMusicalContent && longState.key && longState.streak >= LONG_LOCK_TICKS && longSeconds >= LONG_LOCK_MIN_S
+                && longState.key !== lastLockedKey && longState.key !== longLockFiredKey && longState.result.confidence >= MIN_CONFIDENCE
+                && longState.result.modalEvidence && longState.result.modalEvidence.modalConfidence >= LONG_LOCK_MIN_MODAL) {
+                const gate = longEvidenceAllows(longState.key, lastLockedKey);
+                if (gate.ok) {
+                    const lr = longState.result;
+                    longLockFiredKey = longState.key; fastPathLastFiredKey = longState.key; lastLockedKey = longState.key;
+                    sendTelemetry({
+                        event: "LOCK", time: parseFloat(formatElapsedSeconds(elapsed)), key: lr.key, decisionScore: lr.confidence, reason: "long-term",
+                        longSeconds: +longSeconds.toFixed(1), margin: lr.margin, frame: frameCounter, framesToStable: frameCounter,
+                        firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
+                    });
+                    onWinner(lr, longState.streak, stopBoth);
+                    return;
+                }
+            }
 
             const result = estimateKeyFromChroma(chromaVectorFast);
 
@@ -579,6 +713,9 @@ const KeyEngine = (() => {
             if (!modulationOk) {
                 return; // Coi là dao động, không đổi Key
             }
+
+            // TASK AI-ALG-05 — cổng bằng chứng dài hạn: chỉ khoá khi Key dài hạn ĐỒNG THUẬN (+ hysteresis khi đổi Key đã khoá)
+            if (!longEvidenceAllows(currentFullKey, lastLockedKey).ok) return;
 
             if (candidateKey === fastPathLastFiredKey) return;
             fastPathLastFiredKey = candidateKey;
@@ -678,8 +815,10 @@ const KeyEngine = (() => {
             const isNewKey = lastLockedKey !== bestKey;
             const modulationOk = !isNewKey || isTrueModulation(lastLockedKey, bestKey, result.margin, avgMargin);
 
-            const willLock = (willLockByVote || willLockByAdaptive) && modulationOk;
-            const lockReason = !modulationOk ? "delay-stability" : willLockByAdaptive && !willLockByVote ? "adaptive" : "vote-window";
+            // TASK AI-ALG-05 — cùng cổng bằng chứng dài hạn cho đường chậm
+            const longGate = longEvidenceAllows(bestKey, lastLockedKey);
+            const willLock = (willLockByVote || willLockByAdaptive) && modulationOk && longGate.ok;
+            const lockReason = !modulationOk ? "delay-stability" : !longGate.ok ? "long-evidence" : willLockByAdaptive && !willLockByVote ? "adaptive" : "vote-window";
 
             if (willLock && modulationOk) {
                 lastLockedKey = bestKey;
@@ -764,14 +903,14 @@ const KeyEngine = (() => {
 
     function getDebugSnapshot() {
         return {
-            chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice(), tuningCents,
+            chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), chromaVectorLong: chromaVectorLong.slice(), longSeconds, longKey: longState.key, longStreak: longState.streak, bassRootVotes: bassRootVotes.slice(), tuningCents,
             frameCounter, hasMusicalContent, contentEnergyEMA, inputProbe: { ...inputProbe }, loopStats: { ...loopStats },
             firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
         };
     }
 
     return {
-        init, stop, detectOnce, watchContinuous, estimateKeyFromChroma,
+        init, stop, detectOnce, watchContinuous, estimateKeyFromChroma, estimateKeyLong, estimateKeyMid, outOfScaleRatio,
         shortestSemitoneDelta, onLevel, onProvisionalEstimate, NOTE_NAMES, MIN_CONFIDENCE, getDebugSnapshot,
     };
 })();

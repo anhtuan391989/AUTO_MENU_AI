@@ -70,6 +70,11 @@ const ACTIONS = Object.freeze({
     // khuôn Beat/Master (B6): sẵn sàng dispatch, KHÔNG tự đặt CC, chờ user cấu hình qua Setup.
     RETUNE_SPEED_MIC1: "RETUNE_SPEED_MIC1",
     RETUNE_SPEED_MIC2: "RETUNE_SPEED_MIC2",
+    // TASK AI-FX-01 — FX = các Send (track giọng hát -> bus Reverb / Delay) trên DAW. Khai báo theo khuôn
+    // "trước, KHÔNG mapping mặc định": repo KHÔNG chứa bất kỳ CC/Note nào của Send, nên KHÔNG tự đặt —
+    // user cấu hình trong Setup (MIDI Output Mapping). MONITOR_FX cũ vẫn giữ làm mapping Send đơn (tương thích).
+    FX_SEND_REVERB: "FX_SEND_REVERB",
+    FX_SEND_DELAY: "FX_SEND_DELAY",
     // TASK B6 (Beat/Master) — khai báo trước, KHÔNG mapping mặc định, cùng khuôn với
     // MONITOR_* ở trên. QUAN TRỌNG: 2 action này CỐ Ý tách biệt, KHÔNG gộp thành 1 tên
     // "VOLUME" chung — đúng yêu cầu "Beat = INPUT MUSIC LEVEL, Master = FINAL DAW OUTPUT

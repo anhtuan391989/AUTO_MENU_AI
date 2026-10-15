@@ -460,6 +460,18 @@ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2"
     document.getElementById(id)?.addEventListener("click", (e) => {
         e.target.classList.toggle("active");
         saveData();
+        if (id === "fxBtn") {
+            window.__fxAuto?.notifyManual(); // AI-FX-01: bấm tay => Auto nhường quyền tới lần chuyển nhạc/im lặng kế tiếp
+            // Nếu đã cấu hình Send Reverb/Delay: bấm tay cũng điều khiển ĐÚNG các Send đó (nhất quán với Auto) thay vì
+            // chỉ MONITOR_FX cũ. Chưa cấu hình => hành vi cũ giữ NGUYÊN (rơi xuống executeAction MONITOR_FX bên dưới).
+            const grp = window.__fxSendGroup;
+            if (grp && grp.managed().some((n) => n !== "MONITOR_FX")) {
+                grp.apply(e.target.classList.contains("active"), { force: true })
+                    .then((r) => { if (!r.ok) console.warn("[FX] Bấm tay: một số Send gửi lỗi — trạng thái DAW có thể chưa đồng bộ:", r); })
+                    .catch((err) => console.error("[FX] Bấm tay lỗi:", err));
+                return;
+            }
+        }
         // MIDI-MASTER-01 / MENU-CONTROL-01 — nối SONG SONG tới executeAction() (không thay
         // thế toggle CSS). Chưa có audio-routing backend thật (BACKEND_MISSING — xem báo cáo),
         // nên executeAction() sẽ trả NOT_CONFIGURED trừ khi user tự gán MIDI/mouse trong Setup.
@@ -470,6 +482,50 @@ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2"
         }
     });
 });
+
+// ==========================================================
+// TASK AI-FX-01 — AUTO FX/SEND theo NHẠC (SYSTEM_AUDIO, KHÔNG dùng MIC).
+// Logic phát hiện + máy trạng thái nằm ở AudioSource.createFxAutoController (audioSource.js).
+// Ở đây chỉ nối: (1) mức dBFS từ BPMEngine.onLevel (cùng nguồn Music VU), (2) trạng thái SYSTEM_AUDIO,
+// (3) applyFx -> ActionRegistry.executeAction(MONITOR_FX) — ĐƯỜNG GỬI MIDI DUY NHẤT sẵn có.
+// Không có feedback từ DAW => UI chỉ đổi khi lệnh gửi ok (SEND_SENT_UNCONFIRMED), lỗi thì giữ nguyên UI.
+// Cờ tắt khẩn cấp (không có UI): setting "fxAutoEnabled" = false. Chế độ MIDI: "fxAutoMidiMode" =
+// "toggle" (mặc định: gửi đúng message như bấm tay) hoặc "absolute" (CC: BẬT=value đã map, TẮT=0).
+// ==========================================================
+function createFxAutoWiring() {
+    if (window.__fxAuto || typeof AudioSource === "undefined" || !AudioSource.createFxAutoController) return window.__fxAuto || null;
+    const fxBtn = document.getElementById("fxBtn");
+    const AR0 = () => window.ActionRegistry;
+    const group = AudioSource.createFxSendGroup({
+        actions: ["FX_SEND_REVERB", "FX_SEND_DELAY"],
+        legacyAction: "MONITOR_FX",
+        isConfigured: (n) => { const AR = AR0(); const m = AR?.getMidiOutMapping?.(AR.ACTIONS[n]); return !!(m && m.kind && Number.isFinite(m.number)) || !!AR?.getMouseCoordinate?.(AR.ACTIONS[n]); },
+        execute: async (n, target) => {
+            const AR = AR0(); if (!AR?.executeAction) return { ok: false, reason: "NO_ACTION_REGISTRY" };
+            const ctx = { reason: "fx-send" };
+            const map = AR.getMidiOutMapping?.(AR.ACTIONS[n]);
+            if (getSetting("fxAutoMidiMode", "toggle") === "absolute" && map && map.kind === "cc") ctx.value = target ? (map.value ?? 127) : 0;
+            return AR.executeAction(AR.ACTIONS[n], ctx);
+        },
+    });
+    group.seed(!!fxBtn?.classList.contains("active")); // trạng thái khởi động = trạng thái UI đã lưu (không có feedback DAW)
+    window.__fxSendGroup = group;
+    const ctl = AudioSource.createFxAutoController({
+        getFxState: () => !!fxBtn?.classList.contains("active"),
+        applyFx: async (target) => {
+            if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
+            const res = await group.apply(target);
+            if (res && res.ok) { fxBtn?.classList.toggle("active", target); saveData(); }
+            else console.warn("[FX-AUTO] Gửi lệnh Send FX thất bại/một phần — UI giữ nguyên, DAW có thể chưa đồng bộ:", res);
+            return res;
+        },
+        onState: (info) => { window.__fxAutoInfo = info; },
+    });
+    window.__fxAuto = ctl;
+    setInterval(() => { if (getSetting("fxAutoEnabled", true) !== false) ctl.tick(); }, 500); // ĐÚNG 1 interval cho cả vòng đời trang
+    return ctl;
+}
+createFxAutoWiring();
 
 /* ==========================================================
    5. PLAY BUTTONS (Logic chuyển đổi PLAY/PLAYING)
@@ -2057,6 +2113,7 @@ function bindAiEnginesToSystemAudio(systemAudio) {
                 (window.__aiLastLevel = window.__aiLastLevel || {}); Object.assign(window.__aiLastLevel, { rms, dbfs, peak, vuPercent, maxByte, bassFlux: bassEnergy, t: Date.now() });
                 // TASK B58 — Music VU: RMS/dBFS toàn dải của SYSTEM_AUDIO (vuPercent, KHÔNG đổi
                 // nguồn số liệu so với #vu-fill cũ — chỉ đổi element đích sang #vu-music-fill).
+                window.__fxAuto?.feedLevel(dbfs); // AI-FX-01: mức nhạc thật của SYSTEM_AUDIO
                 const musicMeter = document.getElementById("vu-music-fill");
                 if (musicMeter) musicMeter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
 
@@ -2208,6 +2265,7 @@ async function startAudioMonitor() {
     systemAudio.onStateChange((state) => {
         window.electronAPI?.reportSystemAudioState?.({ state });
         __aiState.sysState = state; updateAiSourceStateLabel(); // TASK A74-02
+        window.__fxAuto?.setSourceState(state === AudioSourceState.RUNNING); // AI-FX-01
         if (state === AudioSourceState.NO_DEVICE) {
             setSystemAudioVuNoData(true);
             if (typeof BPMEngine !== "undefined") BPMEngine.stop();

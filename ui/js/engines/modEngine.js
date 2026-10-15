@@ -50,6 +50,9 @@ const ModEngine = (() => {
     // Số lần đo LIÊN TỤC phải cùng 1 root MỚI (khác root hiện tại) mới coi là modulation thật —
     // đây chính là "Sustained Transition" theo đúng yêu cầu, thay vì tin ngay 1 lần đo lẻ.
     const SUSTAIN_REQUIRED = 3;
+    // TASK AI-ALG-05 — tỷ lệ năng lượng ngắn hạn NGOÀI thang âm của Key hiện hành tối thiểu để xác nhận chuyển điệu/đổi mode (chỉ áp ở chế độ nhãn).
+    const MOD_MIN_OUT_OF_SCALE = 0.15;
+    const LONGMOD_SUSTAIN = 4; // đường 2: Key dài hạn khác Key hiện hành liên tục ≥ 4 tick (poll 1 s)
 
     /**
      * @param {number} originalRootIndex  Chỉ số nốt gốc (0-11) của Key đã chốt lúc đầu bài
@@ -101,6 +104,7 @@ const ModEngine = (() => {
         }
         let pendingRoot = null;   // root MỚI đang "chờ xác nhận" (chưa đủ streak để báo thật). AI-ALG-03: ở chế độ nhãn (labelMode) giá trị này là chuỗi "root-mode".
         let pendingStreak = 0;
+        let longPendKey = null, longPendCount = 0; // AI-ALG-05 (đường 2)
 
         // TASK AI-ALG-03 — chế độ phân loại theo NHÃN, chỉ bật khi caller truyền originalMode hợp lệ.
         const labelMode = !!(options && (options.originalMode === "Major" || options.originalMode === "Minor"));
@@ -117,7 +121,7 @@ const ModEngine = (() => {
                 pendingRoot = null; pendingStreak = 0; return; // đang bị ghi đè tay -> không tranh lệnh, reset streak đang chờ
             }
 
-            const result = KeyEngine.estimateKeyFromChroma(); // mặc định dùng chromaVector (ổn định), KHÔNG dùng bản "nhanh"/tạm
+            let result = KeyEngine.estimateKeyFromChroma(); // mặc định dùng chromaVector (ổn định), KHÔNG dùng bản "nhanh"/tạm
 
             if (result.confidence < KeyEngine.MIN_CONFIDENCE) {
                 if (pendingRoot !== null) emitState("LISTENING", { timestamp: Date.now(), reason: "low_confidence" });
@@ -125,6 +129,17 @@ const ModEngine = (() => {
             }
 
             if (labelMode) {
+                // ---- TASK AI-ALG-05: ĐƯỜNG 2 — Key DÀI HẠN. Bộ đo tức thời bám theo hợp âm nên có thể không bao giờ cho "Key mới" đủ 3 lần liên tiếp trong nhạc pop
+                // dù đã chuyển điệu thật (hợp âm chủ của giọng mới chỉ xuất hiện thoáng qua). Khi Key dài hạn (đã neo lại khi có năng lượng ngoài thang) khác Key hiện hành
+                // liên tục ≥ LONGMOD_SUSTAIN tick VÀ có bằng chứng ngoài thang (cổng bên dưới) => coi là Key mới đã xác nhận. KeyEngine không có API => bỏ qua (hành vi cũ). ----
+                if (typeof KeyEngine.estimateKeyLong === "function") {
+                    const L = KeyEngine.estimateKeyLong();
+                    const lk = L && L.confidence >= KeyEngine.MIN_CONFIDENCE ? `${L.rootIndex}-${L.mode}` : null;
+                    if (lk && lk !== `${baseline.root}-${baseline.mode}`) {
+                        longPendKey === lk ? longPendCount++ : (longPendKey = lk, longPendCount = 1);
+                        if (longPendCount >= LONGMOD_SUSTAIN) { result = { rootIndex: L.rootIndex, mode: L.mode, confidence: L.confidence }; pendingRoot = lk; pendingStreak = SUSTAIN_REQUIRED; }
+                    } else { longPendKey = null; longPendCount = 0; }
+                }
                 // ---- AI-ALG-03: phân loại theo nhãn (root+mode). Debounce/streak/confidence GIỮ NGUYÊN như đường cũ. ----
                 const cur = { root: result.rootIndex, mode: result.mode };
                 if (cur.root === baseline.root && cur.mode === baseline.mode) {
@@ -141,10 +156,20 @@ const ModEngine = (() => {
                 }
                 if (pendingStreak < SUSTAIN_REQUIRED) return;
 
+                // TASK AI-ALG-05 — CỔNG "NGOÀI THANG ÂM": chromaVector tức thời BÁM THEO HỢP ÂM nên hợp âm đổi TRONG cùng giọng (vd C Major: Am, Dm, G...) bị đọc
+                // thành "Key khác" => báo chuyển điệu/đổi nhãn GIẢ (đo: 12/16 bài giữ nguyên Key vẫn có báo giả; log nhạc thật có MOD_CONFIRMED ±2 liên tục).
+                // Chuyển điệu/đổi mode THẬT thì có năng lượng NGOÀI thang âm của Key hiện hành. KeyEngine không có hàm (stub/phiên bản cũ) => không chặn (hành vi cũ).
+                if (typeof KeyEngine.outOfScaleRatio === "function") {
+                    const ratio = KeyEngine.outOfScaleRatio(baseline.root, baseline.mode, "mid"); // trung hạn (τ≈6 s): bền qua các hợp âm của giọng mới
+                    if (typeof ratio === "number" && ratio < MOD_MIN_OUT_OF_SCALE) {
+                        pendingStreak = SUSTAIN_REQUIRED - 1; // chưa đủ bằng chứng NGOÀI thang: giữ ứng viên, kiểm lại ở tick sau (không báo, không đếm thừa)
+                        return;
+                    }
+                }
                 const kind = cur.root === baseline.root ? "MODE_CHANGE"
                     : (relativeMajorRoot(cur) === relativeMajorRoot(baseline) ? "RELATIVE_KEY" : "MODULATION");
                 const fromLabel = labelOf(baseline);
-                baseline = cur; pendingRoot = null; pendingStreak = 0;
+                baseline = cur; pendingRoot = null; pendingStreak = 0; longPendKey = null; longPendCount = 0;
 
                 if (kind !== "MODULATION") {
                     // Đổi mode cùng tonic / giọng tương đối: KHÔNG tạo lệnh dịch pitch (không gọi onModulation).
@@ -158,7 +183,9 @@ const ModEngine = (() => {
                 // lần modulation trước. Giọng tương đối CỦA KEY GỐC (cùng tập nốt, vd gốc C Major -> A Minor) = vẫn ở Key gốc => 0, không phải -3.
                 const origLabel = { root: originalRootIndex, mode: options.originalMode };
                 const sameSetAsOriginal = relativeMajorRoot(cur) === relativeMajorRoot(origLabel);
-                const deltaL = sameSetAsOriginal ? 0 : KeyEngine.shortestSemitoneDelta(originalRootIndex, cur.root);
+                // TASK AI-ALG-05 — độ dịch theo TẬP NỐT (khoá nhạc): so tonic của giọng trưởng tương ứng. Cùng mode với Key gốc => đúng bằng chênh tonic (như cũ);
+                // khác mode (vd gốc C Major, nhận "B Minor" = tương đối của D Major) => +2 (đúng tập nốt) thay vì -1 (sai 3 bán cung). Nhầm Major/Minor TƯƠNG ĐỐI là lỗi phổ biến nhất của dò Key.
+                const deltaL = sameSetAsOriginal ? 0 : KeyEngine.shortestSemitoneDelta(relativeMajorRoot(origLabel), relativeMajorRoot(cur));
                 lastFiredRoot = cur.root;
                 if (deltaL === 0) {
                     // D10 — QUAY VỀ Key gốc: phát sự kiện reset RÕ RÀNG (không phải "không có gì xảy ra"). Consumer phải đưa offset về 0.

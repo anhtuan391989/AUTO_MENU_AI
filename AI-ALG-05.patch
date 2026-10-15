@@ -1,0 +1,761 @@
+diff --git a/tests/helpers/synthPop.js b/tests/helpers/synthPop.js
+new file mode 100644
+index 0000000..ab211b3
+--- /dev/null
++++ b/tests/helpers/synthPop.js
+@@ -0,0 +1,95 @@
++/**
++ * AI-ALG-05 — bộ tạo nhạc pop TỔNG HỢP "khó hơn" synthMusic.js: có giai điệu giọng hát (vibrato), hợp âm đảo, hợp âm 7, bass đi theo bass-line,
++ * intro chỉ có bass+trống hoặc 1 hợp âm, nhiễu, lệch tuning. Đáp án (tonic/mode) có SẴN theo cách tạo — nhưng đây KHÔNG phải nhạc thật,
++ * không thay thế được đo trên bản thu thật có nhãn do người xác nhận. Dùng để tái hiện CƠ CHẾ lỗi (nghe theo hợp âm thay vì theo giọng).
++ */
++'use strict';
++function rng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
++// hợp âm: [độ lệch tonic (bán cung), chất, đảo]  chất: M m 7 m7 ; đảo: 0 gốc, 1 đảo 1 (bass = quãng 3), 2 đảo 2 (bass = quãng 5)
++const CH = { M: [0, 4, 7], m: [0, 3, 7], "7": [0, 4, 7, 10], m7: [0, 3, 7, 10], M7: [0, 4, 7, 11] };
++const PROGS = {
++    major: {
++        "I-V-vi-IV": [[0, "M"], [7, "M", 1], [9, "m"], [5, "M"]],
++        "I-vi-IV-V": [[0, "M"], [9, "m"], [5, "M"], [7, "7"]],
++        "I-IV-V-I": [[0, "M"], [5, "M", 2], [7, "M"], [0, "M"]],
++        "I-iii-IV-V": [[0, "M"], [4, "m", 1], [5, "M"], [7, "M"]],
++    },
++    minor: {
++        "i-VI-III-VII": [[0, "m"], [8, "M"], [3, "M", 1], [10, "M"]],
++        "i-iv-V-i": [[0, "m"], [5, "m"], [7, "7"], [0, "m"]],
++        "i-VII-VI-V": [[0, "m"], [10, "M"], [8, "M", 1], [7, "M"]],
++        "i-iv-VII-III": [[0, "m", 0], [5, "m", 1], [10, "M"], [3, "M"]],
++    },
++};
++// vòng lặp mơ hồ tương đối (cùng tập nốt): nhãn chấp nhận cả giọng trưởng lẫn giọng thứ tương đối — dùng riêng
++const AMBIG = { "vi-IV-I-V": { chords: [[9, "m"], [5, "M"], [0, "M"], [7, "M"]], major: 0, minor: 9 } };
++const SCALE_MAJ = [0, 2, 4, 5, 7, 9, 11], SCALE_MIN = [0, 2, 3, 5, 7, 8, 10];
++
++function render(o0) {
++    const o = Object.assign({ sr: 22050, seconds: 40, bpm: 90, root: 0, mode: "major", prog: "I-V-vi-IV", chordBeats: 4, seed: 1, tuningCents: 0,
++        melody: true, bass: true, drums: true, noise: 0, introSec: 0, introType: "bassdrum", padAmp: 0.1, bassAmp: 0.2, melAmp: 0.16 }, o0);
++    const { sr } = o, N = Math.floor(sr * o.seconds), x = new Float32Array(N), R = rng(o.seed);
++    const beat = 60 / o.bpm, tune = Math.pow(2, o.tuningCents / 1200);
++    const f = (m) => 440 * Math.pow(2, (m - 69) / 12) * tune;
++    const chords = o.chords || PROGS[o.mode][o.prog];
++    const partial = (midiF, t0, t1, amp, nH, vib, rolloff) => {
++        const fr0 = midiF;
++        for (let k = 1; k <= nH; k++) {
++            const fr = fr0 * k; if (fr > sr / 2 - 200) break;
++            const a = amp / Math.pow(k, rolloff || 1), w0 = 2 * Math.PI * fr / sr;
++            let ph = R() * 6.28;
++            for (let i = Math.floor(t0 * sr); i < Math.min(N, Math.floor(t1 * sr)); i++) {
++                const tt = (i / sr) - t0, env = Math.min(1, tt * 30) * Math.min(1, (t1 - t0 - tt) * 30 + 0.2) * Math.exp(-tt * 0.35);
++                const vv = vib ? 1 + (Math.pow(2, (vib * Math.sin(2 * Math.PI * 5.5 * tt)) / 1200) - 1) : 1;
++                ph += w0 * vv; x[i] += a * env * Math.sin(ph);
++            }
++        }
++    };
++    const nChords = Math.ceil(o.seconds / (beat * o.chordBeats));
++    const scale = (o.mode === "minor" ? SCALE_MIN : SCALE_MAJ);
++    for (let c = 0; c < nChords; c++) {
++        const [deg, q, inv] = chords[c % chords.length]; const qual = CH[q];
++        const t0 = c * beat * o.chordBeats, t1 = Math.min(o.seconds, t0 + beat * o.chordBeats);
++        const inIntro = t0 < o.introSec;
++        const rootMidi = 48 + o.root + deg;
++        // nốt hợp âm (vùng C4), đảo
++        let notes = qual.map((iv) => rootMidi + 12 + iv);
++        if (inv) { for (let r = 0; r < inv; r++) { const n0 = notes.shift(); notes.push(n0 + 12); } notes = notes.map((n) => n - 12 * (n > rootMidi + 24 ? 1 : 0)); }
++        const bassNote = (inv ? notes.slice().sort((a, b) => a - b)[0] - 12 : rootMidi - 12) - (inv ? 0 : 0);
++        const introOnlyRhythm = inIntro && o.introType === "bassdrum";
++        const introOneChord = inIntro && o.introType === "onechord";
++        if (!introOnlyRhythm) {
++            const useNotes = introOneChord ? [rootMidi + 12, rootMidi + 12 + qual[2]] : notes; // chỉ gốc+quãng 5 (power chord) ở intro "onechord"
++            for (const m of useNotes) partial(f(m), t0, t1, o.padAmp, 5, 0, 1.2);
++        }
++        if (o.bass) partial(f(introOneChord ? rootMidi - 12 : bassNote), t0, t1, o.bassAmp, 3, 0, 1);
++    }
++    // giai điệu giọng hát: đi bộ ngẫu nhiên trên thang âm của Key, ưu tiên nốt hợp âm khi rơi vào phách mạnh
++    if (o.melody) {
++        let deg = 4, t = Math.max(o.introSec, 0) + 0.5;
++        while (t < o.seconds - 0.3) {
++            const dur = beat * (R() < 0.5 ? 1 : (R() < 0.5 ? 0.5 : 2));
++            const step = Math.floor(R() * 5) - 2; deg = Math.max(0, Math.min(13, deg + step));
++            const semis = scale[deg % 7] + 12 * Math.floor(deg / 7);
++            // thỉnh thoảng nốt ngoài thang (chromatic passing): 8%
++            const midi = 60 + o.root + semis + (R() < 0.08 ? 1 : 0);
++            partial(f(midi), t, Math.min(o.seconds, t + dur * 0.92), o.melAmp, 7, 25, 1.1);
++            t += dur + (R() < 0.25 ? beat * 0.5 : 0);
++        }
++    }
++    if (o.drums) {
++        const nb = Math.floor(o.seconds / beat);
++        for (let b = 0; b < nb; b++) {
++            const t = b * beat, i0 = Math.floor(t * sr);
++            if (b % 2 === 0) for (let i = 0; i < 0.12 * sr && i0 + i < N; i++) { const tt = i / sr; x[i0 + i] += 0.45 * Math.sin(2 * Math.PI * (55 + 80 * Math.exp(-tt * 40)) * tt) * Math.exp(-tt * 25); }
++            else for (let i = 0; i < 0.1 * sr && i0 + i < N; i++) { const tt = i / sr; x[i0 + i] += 0.22 * (R() * 2 - 1) * Math.exp(-tt * 30); }
++            const i1 = Math.floor((t + beat / 2) * sr);
++            for (let i = 0; i < 0.03 * sr && i1 + i < N; i++) { const tt = i / sr; x[i1 + i] += 0.1 * (R() * 2 - 1) * Math.exp(-tt * 120); }
++        }
++    }
++    if (o.noise > 0) for (let i = 0; i < N; i++) x[i] += o.noise * (R() * 2 - 1);
++    let mx = 0; for (let i = 0; i < N; i++) mx = Math.max(mx, Math.abs(x[i]));
++    if (mx > 0.95) for (let i = 0; i < N; i++) x[i] *= 0.95 / mx;
++    return { pcm: x, sr, truth: { root: o.root, mode: o.mode } };
++}
++module.exports = { render, PROGS, AMBIG };
+diff --git a/tests/unit/KeyLongEvidenceA05.verify.js b/tests/unit/KeyLongEvidenceA05.verify.js
+new file mode 100644
+index 0000000..9e2faf3
+--- /dev/null
++++ b/tests/unit/KeyLongEvidenceA05.verify.js
+@@ -0,0 +1,28 @@
++/**
++ * AI-ALG-05 — Kiểm chứng bằng chứng Key dài hạn (nhạc pop TỔNG HỢP, KHÔNG phải nhạc thật).
++ * Chạy: node tests/unit/KeyLongEvidenceA05.verify.js
++ * Engine thật trong vm + đồng hồ ảo. Kiểm: (1) khoá ổn định (ít lần đổi), (2) cuối bài đúng tonic,
++ * (3) outOfScaleRatio phân biệt nốt trong/ngoài thang, (4) estimateKeyLong có mặt.
++ */
++const path = require('path');
++const REPO = path.resolve(__dirname, '../..');
++const { render, PROGS } = require(path.join(REPO, 'tests/helpers/synthPop.js'));
++const { mkAnalyser, sandbox, loadEngine } = require(path.join(REPO, 'tools/algbench/lib.js'));
++let fail = 0; const ok = (c, m) => { console.log(`  ${c ? '✅' : '❌'} ${m}`); if (!c) fail++; };
++function run(mode, prog, root, secs) {
++    const sr = 22050, r = render({ sr, seconds: secs + 1, mode, prog, root, seed: root * 13 + prog.length + 5 }); const clock = { t: 1000 };
++    const S = sandbox(clock, () => mkAnalyser(r.pcm, sr, 8192, clock, 1000), sr); loadEngine(REPO, S.sb, 'keyEngine.js', 'KeyEngine');
++    const K = S.sb.KeyEngine; K.init(S.ctx, { connect() {} }); const locks = [];
++    K.watchContinuous((res) => locks.push(res.key)); S.step(secs * 1000);
++    const out = { locks, last: K.estimateKeyFromChroma(), long: typeof K.estimateKeyLong === 'function' ? K.estimateKeyLong() : null, K, root: r.truth.root };
++    return out;
++}
++console.log('=== KeyLongEvidenceA05 (synthetic) ===');
++const prog = 'I-V-vi-IV'; // chuỗi hợp âm pop phổ biến; trước thay đổi dao động C Major <-> A Minor (8 lần/40 s)
++const a = run('major', prog, 0, 40);
++ok(typeof a.K.estimateKeyLong === 'function' && typeof a.K.outOfScaleRatio === 'function', 'API estimateKeyLong/outOfScaleRatio có mặt');
++ok(a.locks.length <= 3, `số lần đổi khoá ≤ 3 trong 40 s (thực tế ${a.locks.length}: ${a.locks.join(' > ')})`);
++ok(!!a.long && (a.long.rootIndex === 0 || a.long.rootIndex === 9), `Key dài hạn đúng tonic hoặc relative (root=${a.long && a.long.rootIndex})`);
++const inS = a.K.outOfScaleRatio(0, 'Major', 'short'), outS = a.K.outOfScaleRatio(1, 'Major', 'short');
++ok(inS !== null && outS !== null && inS < outS, `ngoài-thang(C major)=${inS && inS.toFixed(3)} < ngoài-thang(C# major)=${outS && outS.toFixed(3)}`);
++console.log(fail ? `❌ ${fail} FAIL` : '✅ TẤT CẢ PASS'); process.exit(fail ? 1 : 0);
+diff --git a/tools/algbench/analyze_audio.js b/tools/algbench/analyze_audio.js
+new file mode 100644
+index 0000000..6680b30
+--- /dev/null
++++ b/tools/algbench/analyze_audio.js
+@@ -0,0 +1,26 @@
++'use strict';
++// AI-ALG-05 — Phân tích file audio THẬT offline bằng KeyEngine thật (vm + đồng hồ ảo). Cần ffmpeg.
++// Dùng: node tools/algbench/analyze_audio.js <audio> [truthKey vd "A Minor"] [maxSeconds=90]
++// In timeline khoá + kết quả cuối so với đáp án (nếu có). Đáp án phải do người dùng cung cấp; script KHÔNG tự đoán đúng/sai.
++const { spawnSync } = require('child_process'); const path = require('path');
++const REPO = path.resolve(__dirname, '../..');
++const { mkAnalyser, sandbox, loadEngine } = require('./lib.js');
++const [file, truth, maxS] = [process.argv[2], process.argv[3], +(process.argv[4] || 90)];
++if (!file) { console.error('Thiếu file audio'); process.exit(2); }
++const sr = 22050;
++const p = spawnSync('ffmpeg', ['-v', 'error', '-i', file, '-t', String(maxS), '-ac', '1', '-ar', String(sr), '-f', 'f32le', '-'], { maxBuffer: 1 << 29 });
++if (p.status !== 0) { console.error('ffmpeg lỗi:', String(p.stderr).slice(0, 300)); process.exit(3); }
++const pcm = new Float32Array(p.stdout.buffer, p.stdout.byteOffset, Math.floor(p.stdout.length / 4));
++const secs = Math.floor(pcm.length / sr); const clock = { t: 1000 };
++const S = sandbox(clock, () => mkAnalyser(pcm, sr, 8192, clock, 1000), sr); loadEngine(REPO, S.sb, 'keyEngine.js', 'KeyEngine');
++const K = S.sb.KeyEngine; K.init(S.ctx, { connect() {} }); const locks = [];
++K.watchContinuous((r) => locks.push({ t: +((clock.t - 1000) / 1000).toFixed(1), key: r.key }));
++const snaps = [];
++for (let s = 1; s <= secs; s++) { S.step(1000); if (s % 10 === 0) snaps.push({ t: s, est: K.estimateKeyFromChroma().key }); }
++K.stop();
++console.log(`Audio: ${file} (${secs}s) — KHÔNG phải kết quả mặc định đúng; so với đáp án người dùng cung cấp`);
++console.log('Timeline khoá:', locks.map((l) => `${l.t}s:${l.key}`).join(' | ') || '(chưa khoá)');
++console.log('Ước lượng tức thời mỗi 10 s:', snaps.map((x) => `${x.t}s:${x.est}`).join(' | '));
++const fin = locks.length ? locks[locks.length - 1].key : null;
++console.log('Khoá cuối:', fin, '| số lần đổi:', Math.max(0, locks.length - 1), '| thời điểm khoá đầu:', locks[0] ? locks[0].t + 's' : 'n/a');
++if (truth) console.log('Đáp án:', truth, '→', fin === null ? 'CHƯA KHOÁ (ước lượng cuối: ' + snaps[snaps.length - 1].est + ')' : (fin === truth ? 'KHỚP' : 'KHÔNG KHỚP'));
+diff --git a/tools/algbench/lib.js b/tools/algbench/lib.js
+new file mode 100644
+index 0000000..bd07243
+--- /dev/null
++++ b/tools/algbench/lib.js
+@@ -0,0 +1,29 @@
++'use strict';
++// Thư viện dùng chung cho benchmark offline: FFT + AnalyserNode giả + sandbox vm với đồng hồ ảo (copy từ bench.js, không đổi hành vi).
++const fs=require('fs'),path=require('path'),vm=require('vm');
++function fft(re,im){const n=re.length;for(let i=1,j=0;i<n;i++){let b=n>>1;for(;j&b;b>>=1)j^=b;j^=b;if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]];}}
++for(let l=2;l<=n;l<<=1){const a=-2*Math.PI/l,wr=Math.cos(a),wi=Math.sin(a);for(let i=0;i<n;i+=l){let cr=1,ci=0;for(let k=0;k<l/2;k++){const u=i+k,v=i+k+l/2;const tr=re[v]*cr-im[v]*ci,ti=re[v]*ci+im[v]*cr;re[v]=re[u]-tr;im[v]=im[u]-ti;re[u]+=tr;im[u]+=ti;const t=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=t;}}}}
++function mkAnalyser(pcm,sr,fftSize,clock,t0){
++  const win=new Float32Array(fftSize);for(let i=0;i<fftSize;i++)win[i]=0.42-0.5*Math.cos(2*Math.PI*i/fftSize)+0.08*Math.cos(4*Math.PI*i/fftSize);
++  const re=new Float64Array(fftSize),im=new Float64Array(fftSize);
++  function frame(){const end=Math.floor((clock.t-t0)/1000*sr);const st=Math.max(0,end-fftSize);for(let i=0;i<fftSize;i++){const k=st+i;re[i]=(k<pcm.length?pcm[k]:0)*win[i];im[i]=0;}fft(re,im);}
++  return {fftSize,frequencyBinCount:fftSize/2,smoothingTimeConstant:0,_prevMag:null,
++    getFloatFrequencyData(a){frame();for(let i=0;i<fftSize/2;i++){const m=Math.hypot(re[i],im[i])/fftSize;a[i]=m>0?20*Math.log10(m):-Infinity;}},
++    getByteFrequencyData(a){frame();const N=fftSize/2;if(!this._prevMag)this._prevMag=new Float64Array(N);for(let i=0;i<N;i++){const m=Math.hypot(re[i],im[i])/fftSize;this._prevMag[i]=0.8*this._prevMag[i]+0.2*m;const db=this._prevMag[i]>0?20*Math.log10(this._prevMag[i]):-100;a[i]=Math.max(0,Math.min(255,Math.floor(255*(db+100)/70)));}},
++    getByteTimeDomainData(a){const end=Math.floor((clock.t-t0)/1000*sr);for(let i=0;i<a.length;i++){const k=end-a.length+i;a[i]=Math.max(0,Math.min(255,Math.round(128+128*(k>=0&&k<pcm.length?pcm[k]:0))));}}};
++}
++function sandbox(clock,analyserFactory,sr){
++  const raf=[],ints=[];let iid=0;
++  const sb={console:{log(){},warn(){},error(){}},Math,Array,Float32Array,Uint8Array,Object,Number,JSON,Date:{now:()=>clock.t},
++   requestAnimationFrame:cb=>{raf.push(cb);return raf.length},cancelAnimationFrame:()=>{},
++   setInterval:(fn,ms)=>{ints.push({id:++iid,fn,ms,next:clock.t+ms});return iid},clearInterval:id=>{const i=ints.findIndex(x=>x.id===id);if(i>=0)ints.splice(i,1)},
++   setTimeout:(fn,ms)=>{ints.push({id:++iid,fn,ms,next:clock.t+ms,once:1});return iid},clearTimeout:()=>{},performance:{now:()=>clock.t}};
++  sb.window=sb;vm.createContext(sb);
++  const ctx={sampleRate:sr,createAnalyser:()=>analyserFactory()};
++  return {sb,ctx,raf,ints,step(ms,frameMs=1000/60){const end=clock.t+ms;let acc=0;while(clock.t<end){clock.t+=1;acc+=1;if(acc>=frameMs){acc-=frameMs;raf.splice(0).forEach(cb=>cb());}
++     for(const it of ints.slice()){if(it.next<=clock.t&&ints.includes(it)){if(it.once)ints.splice(ints.indexOf(it),1);else it.next+=it.ms;it.fn();}}}}};
++}
++
++
++const loadEngine=(REPO,sb,f,name)=>vm.runInContext(fs.readFileSync(path.join(REPO,'ui/js/engines',f),'utf8')+`\nthis.${name}=${name};`,sb);
++module.exports={fft,mkAnalyser,sandbox,loadEngine};
+diff --git a/tools/algbench/modbench.js b/tools/algbench/modbench.js
+new file mode 100644
+index 0000000..9ab5c27
+--- /dev/null
++++ b/tools/algbench/modbench.js
+@@ -0,0 +1,38 @@
++'use strict';
++// AI-ALG-05 — benchmark KeyEngine + ModEngine THẬT trên nhạc pop tổng hợp: (a) giữ nguyên Key => số báo chuyển điệu GIẢ; (b) chuyển điệu thật => độ trễ phát hiện.
++// node tools/algbench/modbench.js <REPO> <out.json> [shard] [nshards]
++const fs = require('fs'), path = require('path');
++const REPO = path.resolve(process.argv[2]); const OUT = process.argv[3]; const shard = +(process.argv[4] || 0), nsh = +(process.argv[5] || 1);
++const { render, PROGS } = require(path.join(REPO, 'tests/helpers/synthPop.js')); const { mkAnalyser, sandbox, loadEngine } = require('./lib.js');
++const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
++function song(spec, secs, modAt, shift) {
++    const sr = 22050;
++    const a = render(Object.assign({ sr, seconds: secs + 1 }, spec));
++    if (!modAt) return { pcm: a.pcm, sr };
++    const b = render(Object.assign({ sr, seconds: secs + 1 }, spec, { root: (spec.root + shift + 12) % 12 }));
++    const pcm = new Float32Array(a.pcm.length); const cut = Math.floor(modAt * sr), xf = Math.floor(0.2 * sr);
++    for (let i = 0; i < pcm.length; i++) { if (i < cut - xf) pcm[i] = a.pcm[i]; else if (i >= cut) pcm[i] = b.pcm[i]; else { const w = (i - (cut - xf)) / xf; pcm[i] = a.pcm[i] * (1 - w) + b.pcm[i] * w; } }
++    return { pcm, sr };
++}
++function run(spec, secs, modAt, shift) {
++    const { pcm, sr } = song(spec, secs, modAt, shift); const clock = { t: 1000 };
++    const S = sandbox(clock, () => mkAnalyser(pcm, sr, 8192, clock, 1000), sr); loadEngine(REPO, S.sb, 'keyEngine.js', 'KeyEngine'); loadEngine(REPO, S.sb, 'modEngine.js', 'ModEngine');
++    const K = S.sb.KeyEngine; K.init(S.ctx, { connect() {} });
++    const startRoot = spec.root, mode = spec.mode === 'minor' ? 'Minor' : 'Major';
++    const events = [];
++    // ModEngine bắt đầu sau khi Key gốc "đã chốt" (giả lập renderer: ~12 s đầu)
++    S.step(12000);
++    S.sb.ModEngine.start(startRoot, (d) => events.push({ t: (clock.t - 1000) / 1000, kind: d.kind || 'MODULATION', semitone: d.semitone, target: d.targetKey }), () => false,
++        (st, p) => { if (st === 'KEY_LABEL_CHANGED') events.push({ t: (clock.t - 1000) / 1000, kind: p.kind, label: true }); }, { originalMode: mode });
++    S.step((secs - 12) * 1000); S.sb.ModEngine.stop(); K.stop();
++    return events;
++}
++const cases = [];
++for (const mode of ['major', 'minor']) for (const prog of Object.keys(PROGS[mode])) for (const root of [0, 6]) cases.push({ mode, prog, root, seed: root * 13 + prog.length + 5 });
++const rows = [];
++cases.forEach((c, idx) => { if (idx % nsh !== shard) return;
++    const stat = run(c, 40, 0, 0);
++    const mod = run(c, 40, 24, 2);          // đổi giọng +2 bán cung lúc 24 s
++    rows.push({ mode: c.mode, prog: c.prog, root: c.root, staticEvents: stat, modEvents: mod });
++});
++fs.writeFileSync(OUT, JSON.stringify(rows)); console.log('done', rows.length);
+diff --git a/tools/algbench/modeval.js b/tools/algbench/modeval.js
+new file mode 100644
+index 0000000..ecc8e2b
+--- /dev/null
++++ b/tools/algbench/modeval.js
+@@ -0,0 +1,11 @@
++'use strict';
++const fs = require('fs'); const rows = process.argv.slice(2).flatMap((f) => JSON.parse(fs.readFileSync(f, 'utf8')));
++let n = rows.length, falseCases = 0, falseMod = 0, falseLabel = 0, det = 0, delays = [], wrongTarget = 0, extra = 0;
++for (const r of rows) {
++    const sm = r.staticEvents.filter((e) => !e.label), sl = r.staticEvents.filter((e) => e.label);
++    if (r.staticEvents.length) falseCases++; falseMod += sm.length; falseLabel += sl.length;
++    const m = r.modEvents.filter((e) => !e.label && e.kind === 'MODULATION' && e.t >= 24);
++    if (m.length) { det++; delays.push(m[0].t - 24); if (m[0].semitone !== 2) wrongTarget++; extra += m.length - 1; }
++}
++delays.sort((a, b) => a - b);
++console.log(`ca=${n} | static-key: ca có báo giả=${falseCases}/${n}, modulation giả=${falseMod}, nhãn đổi giả=${falseLabel} | chuyển điệu thật +2: phát hiện=${det}/${n}, độ trễ median=${delays.length ? delays[Math.floor(delays.length / 2)].toFixed(1) : '-'}s, sai bán cung=${wrongTarget}, báo thừa sau lần đầu=${extra}`);
+diff --git a/tools/algbench/offline.js b/tools/algbench/offline.js
+new file mode 100644
+index 0000000..390e88e
+--- /dev/null
++++ b/tools/algbench/offline.js
+@@ -0,0 +1,53 @@
++'use strict';
++// Thử nghiệm thuật toán quyết định Key NGOÀI engine trên chroma đã ghi (popdump). node offline.js dump0.json dump1.json
++const fs = require('fs');
++const MAIN = require.main === module;
++const cases = MAIN ? process.argv.slice(2).flatMap((f) => JSON.parse(fs.readFileSync(f, 'utf8'))) : [];
++const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
++const P = {
++    ENG_MAJ: [1.000, 0.065, 0.630, 0.088, 0.710, 0.568, 0.095, 0.851, 0.075, 0.688, 0.098, 0.425],
++    ENG_MIN: [1.000, 0.072, 0.573, 0.782, 0.082, 0.571, 0.082, 0.851, 0.608, 0.082, 0.629, 0.082],
++    KK_MAJ: [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
++    KK_MIN: [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
++    TMP_MAJ: [5.0, 2.0, 3.5, 2.0, 4.5, 4.0, 2.0, 4.5, 2.0, 3.5, 1.5, 4.0],
++    TMP_MIN: [5.0, 2.0, 3.5, 4.5, 2.0, 4.0, 2.0, 4.5, 3.5, 2.0, 1.5, 4.0],
++};
++const rot = (p, s) => p.slice(12 - s).concat(p.slice(0, 12 - s));
++function pearson(a, b) { const ma = a.reduce((x, y) => x + y) / 12, mb = b.reduce((x, y) => x + y) / 12; let n = 0, da = 0, db = 0; for (let i = 0; i < 12; i++) { n += (a[i] - ma) * (b[i] - mb); da += (a[i] - ma) ** 2; db += (b[i] - mb) ** 2; } return da && db ? n / Math.sqrt(da * db) : 0; }
++function cosine(a, b) { let d = 0, na = 0, nb = 0; for (let i = 0; i < 12; i++) { d += a[i] * b[i]; na += a[i] ** 2; nb += b[i] ** 2; } return na && nb ? d / Math.sqrt(na * nb) : 0; }
++function pl(v, e) { const o = v.map((x) => Math.pow(Math.max(0, x), e)); const n = Math.sqrt(o.reduce((s, x) => s + x * x, 0)) || 1; return o.map((x) => x / n); }
++function rank(vec, o) {
++    const v = pl(vec, o.pow); const sc = [];
++    for (let r = 0; r < 12; r++) for (const m of ['Major', 'Minor']) {
++        const pr = rot(P[o.prof + (m === 'Major' ? '_MAJ' : '_MIN')], r);
++        let s = o.sim === 'pearson' ? pearson(v, pr) : cosine(v, pr);
++        sc.push({ r, m, s });
++    }
++    sc.sort((a, b) => b.s - a.s); return sc;
++}
++function accum(c, tau, norm, upto) {
++    const acc = new Array(12).fill(0); let prevT = 0, w = 0;
++    for (const { t, v } of c.vecs) { if (t > upto) break; const dt = Math.max(0.01, t - prevT); prevT = t; const d = tau === Infinity ? 1 : Math.exp(-dt / tau);
++        let f = v; if (norm === 'frame') f = pl(v, 0.67); else if (norm === 'frame1') { const s = v.reduce((a, b) => a + b, 0) || 1; f = v.map((x) => x / s); }
++        for (let i = 0; i < 12; i++) acc[i] = acc[i] * d + f[i] * (tau === Infinity ? 1 : 1 - d); }
++    return acc;
++}
++module.exports = { P, rot, pearson, cosine, pl, accum, rank, NOTE };
++if (MAIN) {
++const T = [5, 10, 20, 40];
++function evalCfg(o) {
++    const res = {}; for (const t of T) res[t] = { n: 0, tonic: 0, mode: 0, full: 0, rel: 0, par: 0 };
++    for (const c of cases) { const [tn, tm] = c.truth.split(' '); const tr = NOTE.indexOf(tn);
++        for (const t of T) { const vec = accum(c, o.tau, o.norm, t); const top = rank(vec, o)[0]; const x = res[t]; x.n++; if (top.r === tr) x.tonic++; if (top.m === tm) x.mode++; if (top.r === tr && top.m === tm) x.full++;
++            const relRoot = tm === 'Major' ? (tr + 9) % 12 : (tr + 3) % 12; if (top.r === relRoot && top.m !== tm) x.rel++; if (top.r === tr && top.m !== tm) x.par++; } }
++    return res;
++}
++const out = [];
++const cfgs = [];
++for (const prof of ['ENG', 'KK', 'TMP']) for (const sim of ['cosine', 'pearson']) for (const tau of [4, 10, 20, Infinity]) for (const norm of ['raw', 'frame']) cfgs.push({ prof, sim, tau, norm, pow: 0.67 });
++for (const o of cfgs) { const r = evalCfg(o); out.push({ cfg: `${o.prof}/${o.sim}/tau${o.tau}/${o.norm}`, r }); }
++const pc = (a, n) => (100 * a / n).toFixed(0).padStart(3);
++console.log('cfg | full@5 @10 @20 @40 | tonic@10 @20 | mode@10 @20 | relErr@20 parErr@20');
++for (const x of out) { const r = x.r; console.log(`${x.cfg.padEnd(32)} | ${T.map((t) => pc(r[t].full, r[t].n)).join(' ')} | ${pc(r[10].tonic, r[10].n)} ${pc(r[20].tonic, r[20].n)} | ${pc(r[10].mode, r[10].n)} ${pc(r[20].mode, r[20].n)} | ${pc(r[20].rel, r[20].n)} ${pc(r[20].par, r[20].n)}`); }
++
++}
+diff --git a/tools/algbench/popbench.js b/tools/algbench/popbench.js
+new file mode 100644
+index 0000000..7221d0a
+--- /dev/null
++++ b/tools/algbench/popbench.js
+@@ -0,0 +1,39 @@
++'use strict';
++// AI-ALG-05 — benchmark KeyEngine trên nhạc pop TỔNG HỢP (tests/helpers/synthPop.js). Chạy engine THẬT trong vm, đồng hồ ảo.
++// Dùng: node tools/algbench/popbench.js <REPO> <out.json> [shard] [nshards] [quick]
++// Đo: thời gian tới kết quả đầu (provisional), thời gian tới khoá đầu, số lần đổi kết quả khoá, tonic/mode/full ở 10/20/30/40 s, khoá sai.
++const fs = require('fs'), path = require('path');
++const REPO = path.resolve(process.argv[2]); const OUT = process.argv[3];
++const shard = +(process.argv[4] || 0), nsh = +(process.argv[5] || 1), quick = process.argv[6] === 'quick';
++const { render, PROGS } = require(path.join(REPO, 'tests/helpers/synthPop.js'));
++const { mkAnalyser, sandbox, loadEngine } = require('./lib.js');
++const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
++const CONDS = {
++    vocal: {},
++    novocal: { melody: false },
++    tune25: { tuningCents: 25 },
++    nobass: { bass: false },
++    intro_bassdrum: { introSec: 10, introType: "bassdrum" },
++    intro_onechord: { introSec: 10, introType: "onechord" },
++    noisy: { noise: 0.05 },
++};
++function runCase(spec, secs) {
++    const sr = 22050, r = render(Object.assign({ sr, seconds: secs + 1 }, spec)); const clock = { t: 1000 };
++    const S = sandbox(clock, () => mkAnalyser(r.pcm, sr, 8192, clock, 1000), sr); loadEngine(REPO, S.sb, 'keyEngine.js', 'KeyEngine');
++    const K = S.sb.KeyEngine; K.init(S.ctx, { connect() {} });
++    const locks = []; let firstProv = null;
++    K.watchContinuous((res) => locks.push({ t: (clock.t - 1000) / 1000, key: res.key }));
++    K.onProvisionalEstimate((p) => { if (firstProv === null) firstProv = (clock.t - 1000) / 1000; });
++    const snaps = {}; const t0 = process.hrtime.bigint();
++    for (let s = 0; s < secs; s++) { S.step(1000); if ([10, 20, 30, 40].includes(s + 1)) { const e = K.estimateKeyFromChroma(); snaps[s + 1] = e.key; } }
++    const cpuMs = Number(process.hrtime.bigint() - t0) / 1e6; K.stop();
++    return { snaps, locks, firstProv, cpuMs, truth: `${NOTE[r.truth.root]} ${r.truth.mode === 'minor' ? 'Minor' : 'Major'}` };
++}
++const cases = [];
++const roots = quick ? [0, 6] : [0, 3, 6, 9];
++for (const [cn, co] of Object.entries(CONDS)) for (const mode of ['major', 'minor']) for (const prog of Object.keys(PROGS[mode])) for (const root of roots)
++    cases.push(Object.assign({ cond: cn, mode, prog, root, seed: root * 13 + prog.length + 5 }, co));
++const mine = cases.filter((_, i) => i % nsh === shard); const rows = [];
++for (const c of mine) { const x = runCase(c, 40); rows.push(Object.assign({ cond: c.cond, mode: c.mode, prog: c.prog, root: c.root }, x)); }
++fs.writeFileSync(OUT, JSON.stringify(rows));
++console.log('done', rows.length, 'of', cases.length, 'shard', shard);
+diff --git a/tools/algbench/popdump.js b/tools/algbench/popdump.js
+new file mode 100644
+index 0000000..c740a30
+--- /dev/null
++++ b/tools/algbench/popdump.js
+@@ -0,0 +1,20 @@
++'use strict';
++// Ghi chroma (engine THẬT, qua onLevel) + bassRootVotes theo thời gian cho từng ca pop, để thử nghiệm thuật toán quyết định NGOÀI engine.
++// node tools/algbench/popdump.js <REPO> <out.json> [shard] [nshards]
++const fs = require('fs'), path = require('path');
++const REPO = path.resolve(process.argv[2]); const OUT = process.argv[3]; const shard = +(process.argv[4] || 0), nsh = +(process.argv[5] || 1);
++const { render, PROGS } = require(path.join(REPO, 'tests/helpers/synthPop.js')); const { mkAnalyser, sandbox, loadEngine } = require('./lib.js');
++const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
++const CONDS = { vocal: {}, novocal: { melody: false }, tune25: { tuningCents: 25 }, nobass: { bass: false }, intro_bassdrum: { introSec: 10, introType: "bassdrum" }, intro_onechord: { introSec: 10, introType: "onechord" }, noisy: { noise: 0.05 } };
++const cases = []; for (const [cn, co] of Object.entries(CONDS)) for (const mode of ['major', 'minor']) for (const prog of Object.keys(PROGS[mode])) for (const root of [0, 6])
++    cases.push(Object.assign({ cond: cn, mode, prog, root, seed: root * 13 + prog.length + 5 }, co));
++const rows = [];
++cases.forEach((c, idx) => { if (idx % nsh !== shard) return;
++    const sr = 22050, secs = 40, r = render(Object.assign({ sr, seconds: secs + 1 }, c)); const clock = { t: 1000 };
++    const S = sandbox(clock, () => mkAnalyser(r.pcm, sr, 8192, clock, 1000), sr); loadEngine(REPO, S.sb, 'keyEngine.js', 'KeyEngine');
++    const K = S.sb.KeyEngine; K.init(S.ctx, { connect() {} }); const vecs = []; let n = 0;
++    K.onLevel((v) => { if ((n++ % 6) === 0) vecs.push({ t: (clock.t - 1000) / 1000, v: v.slice() }); });
++    const bass = []; for (let s = 0; s < secs; s++) { S.step(1000); bass.push(K.getDebugSnapshot().bassRootVotes); } K.stop();
++    rows.push({ cond: c.cond, mode: c.mode, prog: c.prog, root: c.root, truth: `${NOTE[c.root]} ${c.mode === 'minor' ? 'Minor' : 'Major'}`, vecs, bass });
++});
++fs.writeFileSync(OUT, JSON.stringify(rows)); console.log('done', rows.length);
+diff --git a/tools/algbench/poperr.js b/tools/algbench/poperr.js
+new file mode 100644
+index 0000000..211609b
+--- /dev/null
++++ b/tools/algbench/poperr.js
+@@ -0,0 +1,10 @@
++'use strict';
++// Phân loại sai của khoá cuối trong popbench: node poperr.js out*.json
++const fs = require('fs'); const rows = process.argv.slice(2).flatMap((f) => JSON.parse(fs.readFileSync(f, 'utf8')));
++const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
++const c = { cases: rows.length, noLock: 0, firstWrong: 0, finalOK: 0, relative: 0, parallel: 0, other: 0, tonicRight: 0, modeRight: 0 };
++for (const r of rows) { const L = r.locks; if (!L.length) { c.noLock++; continue; } if (L[0].key !== r.truth) c.firstWrong++;
++    const f = L[L.length - 1].key; const [tn, tm] = r.truth.split(' '), [fn, fm] = f.split(' '); const tr = NOTE.indexOf(tn), fr = NOTE.indexOf(fn);
++    if (fr === tr) c.tonicRight++; if (fm === tm) c.modeRight++;
++    if (f === r.truth) c.finalOK++; else { const rel = tm === 'Major' ? (tr + 9) % 12 : (tr + 3) % 12; if (fr === rel && fm !== tm) c.relative++; else if (fr === tr) c.parallel++; else c.other++; } }
++console.log(JSON.stringify(c));
+diff --git a/tools/algbench/popeval.js b/tools/algbench/popeval.js
+new file mode 100644
+index 0000000..31dc6c6
+--- /dev/null
++++ b/tools/algbench/popeval.js
+@@ -0,0 +1,21 @@
++'use strict';
++// Tổng hợp kết quả popbench: node tools/algbench/popeval.js out1.json [out2.json ...]
++const fs = require('fs');
++const rows = process.argv.slice(2).flatMap((f) => JSON.parse(fs.readFileSync(f, 'utf8')));
++const split = (k) => { const [r, m] = k.split(' '); return { r, m }; };
++const med = (a) => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
++function lockAt(locks, t) { let k = null; for (const l of locks) if (l.t <= t) k = l.key; return k; }
++const groups = {};
++for (const r of rows) { (groups[r.cond] = groups[r.cond] || []).push(r); (groups.ALL = groups.ALL || []).push(r); }
++const pct = (a, n) => (n ? (100 * a / n).toFixed(0) + '%' : '-');
++console.log('cond | n | firstProv(s) | firstLock(s) | lockChanges(med) | @20s tonic/mode/full (engine estimate) | locked-state full-correct @20s/@40s | time-correct 10-40s | wrongLockFrac');
++for (const [c, g] of Object.entries(groups)) {
++    const n = g.length; let t20 = 0, m20 = 0, f20 = 0, l20 = 0, l40 = 0, tc = 0, tcn = 0, wl = 0, tl = 0;
++    for (const r of g) {
++        const T = split(r.truth); const e = r.snaps['20']; if (e) { const E = split(e); if (E.r === T.r) t20++; if (E.m === T.m) m20++; if (e === r.truth) f20++; }
++        if (lockAt(r.locks, 20) === r.truth) l20++; if (lockAt(r.locks, 40) === r.truth) l40++;
++        for (let t = 10; t <= 40; t += 0.5) { tcn++; if (lockAt(r.locks, t) === r.truth) tc++; }
++        for (const l of r.locks) { tl++; if (l.key !== r.truth) wl++; }
++    }
++    console.log(`${c} | ${n} | ${med(g.map((r) => r.firstProv).filter((x) => x != null))} | ${med(g.map((r) => r.locks[0] && r.locks[0].t).filter((x) => x != null))} | ${med(g.map((r) => r.locks.length))} | ${pct(t20, n)}/${pct(m20, n)}/${pct(f20, n)} | ${pct(l20, n)}/${pct(l40, n)} | ${pct(tc, tcn)} | ${pct(wl, tl)} | cpu ${med(g.map((r) => r.cpuMs)).toFixed(0)}ms`);
++}
+diff --git a/ui/js/engines/keyEngine.js b/ui/js/engines/keyEngine.js
+index f766d57..b91d565 100644
+--- a/ui/js/engines/keyEngine.js
++++ b/ui/js/engines/keyEngine.js
+@@ -67,6 +67,38 @@ const KeyEngine = (() => {
+     let tuningVotes = {};
+     let tuningFrame = 0;
+ 
++    // === TASK AI-ALG-05 — BẰNG CHỨNG KEY DÀI HẠN (chống "nghe theo hợp âm thay vì theo giọng") ===
++    // Nguyên nhân gốc (đo trên log nhạc thật 07–10/2026 + benchmark pop tổng hợp): chromaVector(Fast) chỉ nhớ ~0.1–0.4 s nên top1 BÁM THEO HỢP ÂM
++    // đang chơi (Am→F→C→G ... => khoá đổi liên tục, Major/Minor margin ~0.01); fast-path khoá chỉ sau 3 tick x 400 ms. Key là thuộc tính của CẢ đoạn nhạc
++    // => cần tích luỹ chroma ~10–30 s. Hai bộ tích luỹ (chuẩn hoá TỪNG KHUNG để đoạn ồn không lấn át): Long (τ=LONG_TAU_S) dùng để khoá Key,
++    // Mid (τ=MID_TAU_S) dùng cho ModEngine (phát hiện chuyển điệu thật, không báo giả theo hợp âm).
++    // Tắt/hoàn nguyên: LONG_EVIDENCE_ENABLED = false (hành vi trở về như trước AI-ALG-05).
++    const LONG_EVIDENCE_ENABLED = true;
++    const LONG_TAU_S = 20;
++    const MID_TAU_S = 6;
++    const LONG_WARM_S = 1.0;          // chưa tích luỹ đủ thì không chặn (giữ hành vi cũ ở giây đầu)
++    const LONG_CHANGE_TICKS = 3;      // đổi Key đã khoá: Key dài hạn mới phải dẫn đầu liên tục ≥ 3 tick (400 ms)
++    const LONG_REL_FACTOR = 3;        // đổi giữa 2 Key relative (cùng bộ nốt): gấp 3 biên/thời gian
++    const LONG_CHANGE_GAP = 0.01;     // ... và hơn điểm của Key đang khoá ≥ 0.01 (cosine, thang 0..1)
++    const LONG_LOCK_TICKS = 10;       // khoá thẳng theo Key dài hạn khi nó dẫn đầu liên tục ≥ 10 tick (4 s) ...
++    const LONG_LOCK_MIN_S = 4;        // ... và đã tích luỹ ≥ 4 s nhạc
++    const SHORT_TAU_S = 1.5;          // bộ tích luỹ ngắn: đo "năng lượng ngoài thang của Key dài hạn" + làm điểm neo khi Key thật sự đổi
++    const OOK_RATIO = 0.25;           // ≥ 25% năng lượng ngoài thang âm của Key dài hạn ...
++    const OOK_TICKS = 4;              // ... liên tục ≥ 4 tick (1.6 s) => nghi chuyển điệu thật: neo lại bộ tích luỹ dài hạn vào đoạn ngắn
++    const LONG_ANCHOR_MASS_S = 2;     // "khối lượng" bằng chứng của điểm neo (giây tương đương) — dữ liệu mới lấn át điểm neo sau vài giây
++    const LONG_LOCK_MIN_MODAL = 0.2;  // khoá thẳng theo dài hạn chỉ khi có bằng chứng quãng 3 rõ (hợp âm thiếu quãng 3 = mập mờ Major/Minor, không khoá)
++    const LONG_FIRST_LOCK_S = 8;      // khoá LẦN ĐẦU: chờ ≥ 8 s nhạc, trừ khi tín hiệu "đứng yên" (1 hợp âm giữ lâu: ngắn ≈ dài)
++    const LONG_STATIONARY_COS = 0.97; // cosine(ngắn, dài) ≥ 0.97 => không có gì để lấy trung bình, khoá sớm vẫn đúng
++    const LONG_BASS_WEIGHT = 0.05;    // trọng số bass khi xếp hạng Key dài hạn (mặc định cũ 0.5 làm lệch về gốc hợp âm thường gặp nhất — xem báo cáo AI-ALG-05)
++    let chromaVectorLong = new Array(12).fill(0); // = longSum/longMass (hướng chroma dài hạn)
++    let longSum = new Array(12).fill(0), longMass = 0;
++    let chromaVectorShort = new Array(12).fill(0);
++    let ookStreak = 0;
++    let chromaVectorMid = new Array(12).fill(0);
++    let longSeconds = 0;
++    let lastLongAt = null;
++    const longState = { key: null, streak: 0, result: null, stationary: false };
++
+     let lastTop1Key = null;
+     let lastTop1Label = null;
+     let lastTop1ChangedAt = null;
+@@ -130,6 +162,7 @@ const KeyEngine = (() => {
+         hasMusicalContent = false;
+         bassRootVotes = new Array(12).fill(0);
+         tuningCents = 0; tuningVotes = {}; tuningFrame = 0; // AI-ALG-03: reset theo nguồn mới
++        chromaVectorLong = new Array(12).fill(0); longSum = new Array(12).fill(0); longMass = 0; chromaVectorShort = new Array(12).fill(0); ookStreak = 0; chromaVectorMid = new Array(12).fill(0); longSeconds = 0; lastLongAt = null; longState.key = null; longState.streak = 0; longState.result = null; // AI-ALG-05
+         lastTop1Key = null;
+         lastTop1Label = null;
+         lastTop1ChangedAt = null;
+@@ -260,6 +293,25 @@ const KeyEngine = (() => {
+             }
+         }
+ 
++        // TASK AI-ALG-05 — tích luỹ dài hạn theo THỜI GIAN THỰC (dt), chuẩn hoá từng khung (power-law 0.67 + L2) rồi EMA.
++        {
++            const nowMs = Date.now();
++            const dtS = lastLongAt === null ? 0 : Math.min(0.25, Math.max(0.005, (nowMs - lastLongAt) / 1000));
++            lastLongAt = nowMs;
++            if (LONG_EVIDENCE_ENABLED && hasMusicalContent && dtS > 0) {
++                const fn = powerLawNormalize(frame);
++                const dL = Math.exp(-dtS / LONG_TAU_S), dM = Math.exp(-dtS / MID_TAU_S), dS = Math.exp(-dtS / SHORT_TAU_S);
++                longMass = longMass * dL + dtS;
++                for (let i = 0; i < 12; i++) {
++                    longSum[i] = longSum[i] * dL + fn[i] * dtS;
++                    chromaVectorLong[i] = longSum[i] / longMass;
++                    chromaVectorMid[i] = chromaVectorMid[i] * dM + fn[i] * (1 - dM);
++                    chromaVectorShort[i] = chromaVectorShort[i] * dS + fn[i] * (1 - dS);
++                }
++                longSeconds += dtS;
++            }
++        }
++
+         let winnerPc = -1, winnerVal = 0;
+         for (let i = 0; i < 12; i++) {
+             if (bassFrame[i] > winnerVal) { winnerVal = bassFrame[i]; winnerPc = i; }
+@@ -350,8 +402,9 @@ const KeyEngine = (() => {
+         return newMargin > avgMarginHistory * MODULATION_MARGIN_GAIN;
+     }
+ 
+-    function estimateKeyFromChroma(sourceVector) {
++    function estimateKeyFromChroma(sourceVector, opts) {
+         const vector = sourceVector || chromaVector;
++        const bassW = opts && typeof opts.bassWeight === "number" ? opts.bassWeight : BASS_ROOT_BOOST_WEIGHT; // AI-ALG-05: mặc định = cũ
+         const maxBassVotes = Math.max(...bassRootVotes, 1e-9);
+         const chromaNorm = powerLawNormalize(vector);
+ 
+@@ -363,7 +416,7 @@ const KeyEngine = (() => {
+             // === TASK A35 — Bass Boost có điều kiện ===
+             const bassSupport = chromaNorm[root];
+             const bassBoost = bassSupport >= MIN_CHROMA_EVIDENCE
+-                ? bassAgreement * BASS_ROOT_BOOST_WEIGHT
++                ? bassAgreement * bassW
+                 : 0; // Không hỗ trợ chroma → không được cộng điểm bass
+ 
+             // === TASK A35 — Modal Evidence tính và điều chỉnh điểm ===
+@@ -400,6 +453,7 @@ const KeyEngine = (() => {
+             hasMusicalContent,
+             top1,
+             top2,
++            all: opts && opts.withAll ? allScores : undefined, // AI-ALG-05: 24 điểm (chỉ khi yêu cầu)
+             margin,
+             bassAgreement: top1.bassAgreement,
+             modalEvidence: best.modalEvidence // Thêm bằng chứng modal vào kết quả
+@@ -422,6 +476,65 @@ const KeyEngine = (() => {
+     const FAST_PATH_STREAK_REQUIRED = 3;
+     const FAST_PATH_MIN_CONFIDENCE = ADAPTIVE_LOCK_CONFIDENCE;
+ 
++    // === TASK AI-ALG-05 — ước lượng Key dài hạn + cổng đồng thuận ===
++    function estimateKeyLong() { return estimateKeyFromChroma(chromaVectorLong, { bassWeight: LONG_BASS_WEIGHT, withAll: true }); }
++    function estimateKeyMid() { return estimateKeyFromChroma(chromaVectorMid, { bassWeight: LONG_BASS_WEIGHT }); }
++    // Tỷ lệ năng lượng (bộ tích luỹ ngắn τ≈1.5 s) nằm NGOÀI thang âm của Key (root, mode). Trưởng = 7 nốt trưởng; thứ = 7 nốt thứ tự nhiên + âm dẫn.
++    function outOfScaleRatio(rootIndex, mode, window) {
++        const src = window === "mid" ? chromaVectorMid : chromaVectorShort;
++        if (!Number.isInteger(rootIndex) || rootIndex < 0 || rootIndex > 11) return null;
++        const offs = mode === "Major" ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10, 11];
++        const inScale = new Array(12).fill(false);
++        for (const o of offs) inScale[(rootIndex + o) % 12] = true;
++        let tot = 0, out = 0;
++        for (let i = 0; i < 12; i++) { const e = src[i] * src[i]; tot += e; if (!inScale[i]) out += e; }
++        return tot > 0 ? out / tot : null;
++    }
++    function updateLongState() {
++        if (!LONG_EVIDENCE_ENABLED || longSeconds < LONG_WARM_S) { longState.key = null; longState.streak = 0; longState.result = null; return; }
++        const r = estimateKeyLong();
++        const k = `${r.rootIndex}-${r.mode}`;
++        { let d = 0, na = 0, nb = 0; for (let i = 0; i < 12; i++) { d += chromaVectorShort[i] * chromaVectorLong[i]; na += chromaVectorShort[i] ** 2; nb += chromaVectorLong[i] ** 2; } longState.stationary = na > 0 && nb > 0 && d / Math.sqrt(na * nb) >= LONG_STATIONARY_COS; }
++        longState.streak = (k === longState.key) ? longState.streak + 1 : 1;
++        longState.key = k; longState.result = r;
++
++        // Phát hiện chuyển điệu THẬT: năng lượng ngắn hạn nằm NGOÀI thang âm của Key dài hạn kéo dài (hợp âm đổi TRONG cùng giọng thì vẫn nằm trong thang).
++        // Thang: trưởng = 7 nốt trưởng; thứ = 7 nốt thứ tự nhiên + âm dẫn (nốt 7 nâng, hoà âm thứ phổ biến).
++        const scaleOffsets = r.mode === "Major" ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10, 11];
++        const inScale = new Array(12).fill(false);
++        for (const o of scaleOffsets) inScale[(r.rootIndex + o) % 12] = true;
++        let tot = 0, out = 0;
++        for (let i = 0; i < 12; i++) { const e = chromaVectorShort[i] * chromaVectorShort[i]; tot += e; if (!inScale[i]) out += e; }
++        ookStreak = (tot > 0 && out / tot >= OOK_RATIO) ? ookStreak + 1 : 0;
++        if (ookStreak >= OOK_TICKS) {
++            // neo lại: bằng chứng dài hạn = đoạn ngắn hiện tại (khối lượng nhỏ để dữ liệu mới lấn át nhanh)
++            let mag = Math.sqrt(chromaVectorShort.reduce((a, v) => a + v * v, 0)) || 1;
++            for (let i = 0; i < 12; i++) { longSum[i] = (chromaVectorShort[i] / mag) * LONG_ANCHOR_MASS_S; chromaVectorLong[i] = longSum[i] / LONG_ANCHOR_MASS_S; }
++            longMass = LONG_ANCHOR_MASS_S; ookStreak = 0;
++            sendTelemetry({ event: "LONG_REANCHOR", from: `${NOTE_NAMES[r.rootIndex]} ${r.mode}`, longSeconds: +longSeconds.toFixed(1) });
++            const r2 = estimateKeyLong(); longState.key = `${r2.rootIndex}-${r2.mode}`; longState.result = r2; longState.streak = 1;
++        }
++    }
++    function longScoreOf(fullKey) {
++        const r = longState.result; if (!r || !r.all) return null;
++        const e = r.all.find((x) => `${x.root}-${x.mode}` === fullKey); return e ? e.score : null;
++    }
++    // Cho phép khoá candidate (Key đang xét, dạng "root-mode") không? lockedKey = Key đang khoá hoặc null.
++    function longEvidenceAllows(candidateFullKey, lockedKey) {
++        if (!LONG_EVIDENCE_ENABLED || longSeconds < LONG_WARM_S || !longState.key) return { ok: true, reason: "long-not-warm" };
++        if (longState.key !== candidateFullKey) return { ok: false, reason: "long-disagrees" };
++        if (!lockedKey && longSeconds < LONG_FIRST_LOCK_S && !longState.stationary) return { ok: false, reason: "long-first-lock-wait" }; // nhạc đang thay đổi hợp âm: chưa đủ để nói Key của cả đoạn
++        if (lockedKey && lockedKey !== candidateFullKey) {
++            // ĐỔI Key đã khoá: cần Key dài hạn dẫn đầu ổn định + hơn Key đang khoá đủ biên (chống dao động theo hợp âm)
++            // Cặp relative (vd C Major <-> A Minor) có cùng bộ nốt: bằng chứng rất sát nhau nên cần biên + thời gian lớn hơn để không dao động.
++            const isRel = (() => { const [ra, ma] = String(candidateFullKey).split("-"), [rb, mb] = String(lockedKey).split("-"); if (ma === mb) return false; const maj = ma === "Major" ? +ra : +rb, min = ma === "Major" ? +rb : +ra; return (maj + 9) % 12 === min; })();
++            if (longState.streak < LONG_CHANGE_TICKS * (isRel ? LONG_REL_FACTOR : 1)) return { ok: false, reason: "long-streak" };
++            const sNew = longScoreOf(candidateFullKey), sOld = longScoreOf(lockedKey);
++            if (sNew !== null && sOld !== null && sNew - sOld < LONG_CHANGE_GAP * (isRel ? LONG_REL_FACTOR : 1)) return { ok: false, reason: "long-gap" };
++        }
++        return { ok: true, reason: "long-agrees" };
++    }
++
+     function formatElapsedSeconds(ms) {
+         return (ms / 1000).toFixed(1);
+     }
+@@ -535,10 +648,31 @@ const KeyEngine = (() => {
+             if (!loopStopped) { loopStopped = true; loopStats.stopped++; loopStats.active--; }
+         }
+ 
++        let longLockFiredKey = null;
+         const fastTimer = setInterval(() => {
+             const elapsed = Date.now() - startedAt;
+             if (elapsed < FAST_PATH_MIN_ELAPSED_MS) return;
+ 
++            // TASK AI-ALG-05 — cập nhật Key dài hạn; nếu nó dẫn đầu ổn định mà Key chưa khoá/khác Key đang khoá -> khoá theo bằng chứng dài hạn
++            // (cần khi hợp âm đang chơi không bao giờ trùng Key của cả đoạn — nếu không sẽ không bao giờ khoá được).
++            updateLongState();
++            if (LONG_EVIDENCE_ENABLED && hasMusicalContent && longState.key && longState.streak >= LONG_LOCK_TICKS && longSeconds >= LONG_LOCK_MIN_S
++                && longState.key !== lastLockedKey && longState.key !== longLockFiredKey && longState.result.confidence >= MIN_CONFIDENCE
++                && longState.result.modalEvidence && longState.result.modalEvidence.modalConfidence >= LONG_LOCK_MIN_MODAL) {
++                const gate = longEvidenceAllows(longState.key, lastLockedKey);
++                if (gate.ok) {
++                    const lr = longState.result;
++                    longLockFiredKey = longState.key; fastPathLastFiredKey = longState.key; lastLockedKey = longState.key;
++                    sendTelemetry({
++                        event: "LOCK", time: parseFloat(formatElapsedSeconds(elapsed)), key: lr.key, decisionScore: lr.confidence, reason: "long-term",
++                        longSeconds: +longSeconds.toFixed(1), margin: lr.margin, frame: frameCounter, framesToStable: frameCounter,
++                        firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
++                    });
++                    onWinner(lr, longState.streak, stopBoth);
++                    return;
++                }
++            }
++
+             const result = estimateKeyFromChroma(chromaVectorFast);
+ 
+             if (!hasMusicalContent || result.confidence < MIN_CONFIDENCE) {
+@@ -580,6 +714,9 @@ const KeyEngine = (() => {
+                 return; // Coi là dao động, không đổi Key
+             }
+ 
++            // TASK AI-ALG-05 — cổng bằng chứng dài hạn: chỉ khoá khi Key dài hạn ĐỒNG THUẬN (+ hysteresis khi đổi Key đã khoá)
++            if (!longEvidenceAllows(currentFullKey, lastLockedKey).ok) return;
++
+             if (candidateKey === fastPathLastFiredKey) return;
+             fastPathLastFiredKey = candidateKey;
+             lastLockedKey = currentFullKey; // Cập nhật Key đã khóa
+@@ -678,8 +815,10 @@ const KeyEngine = (() => {
+             const isNewKey = lastLockedKey !== bestKey;
+             const modulationOk = !isNewKey || isTrueModulation(lastLockedKey, bestKey, result.margin, avgMargin);
+ 
+-            const willLock = (willLockByVote || willLockByAdaptive) && modulationOk;
+-            const lockReason = !modulationOk ? "delay-stability" : willLockByAdaptive && !willLockByVote ? "adaptive" : "vote-window";
++            // TASK AI-ALG-05 — cùng cổng bằng chứng dài hạn cho đường chậm
++            const longGate = longEvidenceAllows(bestKey, lastLockedKey);
++            const willLock = (willLockByVote || willLockByAdaptive) && modulationOk && longGate.ok;
++            const lockReason = !modulationOk ? "delay-stability" : !longGate.ok ? "long-evidence" : willLockByAdaptive && !willLockByVote ? "adaptive" : "vote-window";
+ 
+             if (willLock && modulationOk) {
+                 lastLockedKey = bestKey;
+@@ -764,14 +903,14 @@ const KeyEngine = (() => {
+ 
+     function getDebugSnapshot() {
+         return {
+-            chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), bassRootVotes: bassRootVotes.slice(), tuningCents,
++            chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), chromaVectorLong: chromaVectorLong.slice(), longSeconds, longKey: longState.key, longStreak: longState.streak, bassRootVotes: bassRootVotes.slice(), tuningCents,
+             frameCounter, hasMusicalContent, contentEnergyEMA, inputProbe: { ...inputProbe }, loopStats: { ...loopStats },
+             firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
+         };
+     }
+ 
+     return {
+-        init, stop, detectOnce, watchContinuous, estimateKeyFromChroma,
++        init, stop, detectOnce, watchContinuous, estimateKeyFromChroma, estimateKeyLong, estimateKeyMid, outOfScaleRatio,
+         shortestSemitoneDelta, onLevel, onProvisionalEstimate, NOTE_NAMES, MIN_CONFIDENCE, getDebugSnapshot,
+     };
+ })();
+diff --git a/ui/js/engines/modEngine.js b/ui/js/engines/modEngine.js
+index 398d154..f1ad9ed 100644
+--- a/ui/js/engines/modEngine.js
++++ b/ui/js/engines/modEngine.js
+@@ -50,6 +50,9 @@ const ModEngine = (() => {
+     // Số lần đo LIÊN TỤC phải cùng 1 root MỚI (khác root hiện tại) mới coi là modulation thật —
+     // đây chính là "Sustained Transition" theo đúng yêu cầu, thay vì tin ngay 1 lần đo lẻ.
+     const SUSTAIN_REQUIRED = 3;
++    // TASK AI-ALG-05 — tỷ lệ năng lượng ngắn hạn NGOÀI thang âm của Key hiện hành tối thiểu để xác nhận chuyển điệu/đổi mode (chỉ áp ở chế độ nhãn).
++    const MOD_MIN_OUT_OF_SCALE = 0.15;
++    const LONGMOD_SUSTAIN = 4; // đường 2: Key dài hạn khác Key hiện hành liên tục ≥ 4 tick (poll 1 s)
+ 
+     /**
+      * @param {number} originalRootIndex  Chỉ số nốt gốc (0-11) của Key đã chốt lúc đầu bài
+@@ -101,6 +104,7 @@ const ModEngine = (() => {
+         }
+         let pendingRoot = null;   // root MỚI đang "chờ xác nhận" (chưa đủ streak để báo thật). AI-ALG-03: ở chế độ nhãn (labelMode) giá trị này là chuỗi "root-mode".
+         let pendingStreak = 0;
++        let longPendKey = null, longPendCount = 0; // AI-ALG-05 (đường 2)
+ 
+         // TASK AI-ALG-03 — chế độ phân loại theo NHÃN, chỉ bật khi caller truyền originalMode hợp lệ.
+         const labelMode = !!(options && (options.originalMode === "Major" || options.originalMode === "Minor"));
+@@ -117,7 +121,7 @@ const ModEngine = (() => {
+                 pendingRoot = null; pendingStreak = 0; return; // đang bị ghi đè tay -> không tranh lệnh, reset streak đang chờ
+             }
+ 
+-            const result = KeyEngine.estimateKeyFromChroma(); // mặc định dùng chromaVector (ổn định), KHÔNG dùng bản "nhanh"/tạm
++            let result = KeyEngine.estimateKeyFromChroma(); // mặc định dùng chromaVector (ổn định), KHÔNG dùng bản "nhanh"/tạm
+ 
+             if (result.confidence < KeyEngine.MIN_CONFIDENCE) {
+                 if (pendingRoot !== null) emitState("LISTENING", { timestamp: Date.now(), reason: "low_confidence" });
+@@ -125,6 +129,17 @@ const ModEngine = (() => {
+             }
+ 
+             if (labelMode) {
++                // ---- TASK AI-ALG-05: ĐƯỜNG 2 — Key DÀI HẠN. Bộ đo tức thời bám theo hợp âm nên có thể không bao giờ cho "Key mới" đủ 3 lần liên tiếp trong nhạc pop
++                // dù đã chuyển điệu thật (hợp âm chủ của giọng mới chỉ xuất hiện thoáng qua). Khi Key dài hạn (đã neo lại khi có năng lượng ngoài thang) khác Key hiện hành
++                // liên tục ≥ LONGMOD_SUSTAIN tick VÀ có bằng chứng ngoài thang (cổng bên dưới) => coi là Key mới đã xác nhận. KeyEngine không có API => bỏ qua (hành vi cũ). ----
++                if (typeof KeyEngine.estimateKeyLong === "function") {
++                    const L = KeyEngine.estimateKeyLong();
++                    const lk = L && L.confidence >= KeyEngine.MIN_CONFIDENCE ? `${L.rootIndex}-${L.mode}` : null;
++                    if (lk && lk !== `${baseline.root}-${baseline.mode}`) {
++                        longPendKey === lk ? longPendCount++ : (longPendKey = lk, longPendCount = 1);
++                        if (longPendCount >= LONGMOD_SUSTAIN) { result = { rootIndex: L.rootIndex, mode: L.mode, confidence: L.confidence }; pendingRoot = lk; pendingStreak = SUSTAIN_REQUIRED; }
++                    } else { longPendKey = null; longPendCount = 0; }
++                }
+                 // ---- AI-ALG-03: phân loại theo nhãn (root+mode). Debounce/streak/confidence GIỮ NGUYÊN như đường cũ. ----
+                 const cur = { root: result.rootIndex, mode: result.mode };
+                 if (cur.root === baseline.root && cur.mode === baseline.mode) {
+@@ -141,10 +156,20 @@ const ModEngine = (() => {
+                 }
+                 if (pendingStreak < SUSTAIN_REQUIRED) return;
+ 
++                // TASK AI-ALG-05 — CỔNG "NGOÀI THANG ÂM": chromaVector tức thời BÁM THEO HỢP ÂM nên hợp âm đổi TRONG cùng giọng (vd C Major: Am, Dm, G...) bị đọc
++                // thành "Key khác" => báo chuyển điệu/đổi nhãn GIẢ (đo: 12/16 bài giữ nguyên Key vẫn có báo giả; log nhạc thật có MOD_CONFIRMED ±2 liên tục).
++                // Chuyển điệu/đổi mode THẬT thì có năng lượng NGOÀI thang âm của Key hiện hành. KeyEngine không có hàm (stub/phiên bản cũ) => không chặn (hành vi cũ).
++                if (typeof KeyEngine.outOfScaleRatio === "function") {
++                    const ratio = KeyEngine.outOfScaleRatio(baseline.root, baseline.mode, "mid"); // trung hạn (τ≈6 s): bền qua các hợp âm của giọng mới
++                    if (typeof ratio === "number" && ratio < MOD_MIN_OUT_OF_SCALE) {
++                        pendingStreak = SUSTAIN_REQUIRED - 1; // chưa đủ bằng chứng NGOÀI thang: giữ ứng viên, kiểm lại ở tick sau (không báo, không đếm thừa)
++                        return;
++                    }
++                }
+                 const kind = cur.root === baseline.root ? "MODE_CHANGE"
+                     : (relativeMajorRoot(cur) === relativeMajorRoot(baseline) ? "RELATIVE_KEY" : "MODULATION");
+                 const fromLabel = labelOf(baseline);
+-                baseline = cur; pendingRoot = null; pendingStreak = 0;
++                baseline = cur; pendingRoot = null; pendingStreak = 0; longPendKey = null; longPendCount = 0;
+ 
+                 if (kind !== "MODULATION") {
+                     // Đổi mode cùng tonic / giọng tương đối: KHÔNG tạo lệnh dịch pitch (không gọi onModulation).
+@@ -158,7 +183,9 @@ const ModEngine = (() => {
+                 // lần modulation trước. Giọng tương đối CỦA KEY GỐC (cùng tập nốt, vd gốc C Major -> A Minor) = vẫn ở Key gốc => 0, không phải -3.
+                 const origLabel = { root: originalRootIndex, mode: options.originalMode };
+                 const sameSetAsOriginal = relativeMajorRoot(cur) === relativeMajorRoot(origLabel);
+-                const deltaL = sameSetAsOriginal ? 0 : KeyEngine.shortestSemitoneDelta(originalRootIndex, cur.root);
++                // TASK AI-ALG-05 — độ dịch theo TẬP NỐT (khoá nhạc): so tonic của giọng trưởng tương ứng. Cùng mode với Key gốc => đúng bằng chênh tonic (như cũ);
++                // khác mode (vd gốc C Major, nhận "B Minor" = tương đối của D Major) => +2 (đúng tập nốt) thay vì -1 (sai 3 bán cung). Nhầm Major/Minor TƯƠNG ĐỐI là lỗi phổ biến nhất của dò Key.
++                const deltaL = sameSetAsOriginal ? 0 : KeyEngine.shortestSemitoneDelta(relativeMajorRoot(origLabel), relativeMajorRoot(cur));
+                 lastFiredRoot = cur.root;
+                 if (deltaL === 0) {
+                     // D10 — QUAY VỀ Key gốc: phát sự kiện reset RÕ RÀNG (không phải "không có gì xảy ra"). Consumer phải đưa offset về 0.

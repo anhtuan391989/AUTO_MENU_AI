@@ -384,12 +384,175 @@
         });
     }
 
+
+    /* ---------------------------------------------------------
+       TASK AI-FX-01 — Auto FX/Send theo sự hiện diện của NHẠC (SYSTEM_AUDIO).
+       Logic THUẦN (không DOM, không MIDI trực tiếp): nhận mẫu mức dBFS của SYSTEM_AUDIO (cùng
+       nguồn Music VU, KHÔNG phải MIC), xác nhận MUSIC_PRESENT / MUSIC_SILENT có hysteresis + thời
+       gian xác nhận, rồi gọi deps.applyFx(target) ĐÚNG 1 LẦN mỗi lần cần đổi trạng thái.
+       Không có feedback đọc ngược từ DAW => thành công chỉ là SEND_SENT_UNCONFIRMED, không bao giờ
+       "đã xác nhận". Tham số mặc định là GIÁ TRỊ KHỞI ĐẦU CHƯA hiệu chuẩn trên nguồn nhạc thật.
+       --------------------------------------------------------- */
+    const FX_AUTO_DEFAULTS = Object.freeze({
+        onDbfs: -45,            // trên ngưỡng này = "có tín hiệu hữu ích" (dBFS RMS)
+        offDbfs: -52,           // dưới ngưỡng này = "im lặng" (hysteresis 7 dB so với onDbfs)
+        confirmMusicMs: 800,    // cần tín hiệu liên tục gần như đủ trong khoảng này mới coi là có nhạc
+        confirmMusicRatio: 0.8, // tỷ lệ khung phải vượt onDbfs trong cửa sổ xác nhận có nhạc
+        confirmSilenceMs: 6000, // im lặng phải kéo dài thế này mới tắt (nhịp nghỉ/chuyển bài/fade-out ngắn hơn bị bỏ qua)
+        silenceMaxAboveRatio: 0.02, // tối đa 2% khung vượt offDbfs trong cửa sổ im lặng (chịu xung nhiễu lẻ)
+        staleMs: 2000,          // không có khung mới quá lâu => nguồn không khả dụng, ĐÓNG BĂNG (không bật/tắt)
+        retryMs: 5000,          // gửi lỗi: thử lại sau khoảng này, tối đa maxRetries lần cho cùng 1 mục tiêu
+        maxRetries: 2,
+    });
+    const FxMusicState = Object.freeze({ UNKNOWN: "UNKNOWN", MUSIC_PRESENT: "MUSIC_PRESENT", MUSIC_SILENT: "MUSIC_SILENT", SOURCE_UNAVAILABLE: "SOURCE_UNAVAILABLE" });
+    const FxActionState = Object.freeze({ IDLE: "IDLE", SEND_SENT_UNCONFIRMED: "SEND_SENT_UNCONFIRMED", FX_ACTION_FAILED: "FX_ACTION_FAILED", MANUAL_OVERRIDE: "MANUAL_OVERRIDE" });
+
+    function createFxAutoController(deps) {
+        const P = Object.assign({}, FX_AUTO_DEFAULTS, deps.params || {});
+        const now = deps.now || (() => Date.now());
+        const frames = []; // {t, db}
+        let musicState = FxMusicState.UNKNOWN;
+        let actionState = FxActionState.IDLE;
+        let sourceRunning = false, lastFrameAt = null, availableSince = null;
+        let manualOverride = false, inflight = false, retries = 0, retryAt = null, lastTarget = null;
+        let sentCount = 0, failedCount = 0;
+        const notify = () => { try { deps.onState && deps.onState(getInfo()); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } };
+
+        function getInfo() {
+            return { musicState, actionState, fxTarget: lastTarget, manualOverride, sentCount, failedCount, retries };
+        }
+        function prune(t) {
+            const keepFrom = t - Math.max(P.confirmSilenceMs, P.confirmMusicMs) - 500;
+            let i = 0; while (i < frames.length && frames[i].t < keepFrom) i++;
+            if (i > 0) frames.splice(0, i);
+        }
+        function feedLevel(dbfs, t) {
+            const tt = t === undefined ? now() : t;
+            if (availableSince === null) availableSince = tt;
+            lastFrameAt = tt;
+            frames.push({ t: tt, db: Number.isFinite(dbfs) ? dbfs : -Infinity });
+            prune(tt);
+        }
+        function setSourceState(running) {
+            const was = sourceRunning; sourceRunning = !!running;
+            if (!sourceRunning && was) { frames.length = 0; availableSince = null; lastFrameAt = null; }
+            if (sourceRunning && !was) { availableSince = null; }
+        }
+        // Đo trong cửa sổ [t-windowMs, t]; trả null nếu chưa đủ lịch sử để kết luận.
+        function windowStats(t, windowMs, thresholdDb) {
+            if (availableSince === null || t - availableSince < windowMs * 0.95) return null;
+            let n = 0, above = 0;
+            for (let i = frames.length - 1; i >= 0 && frames[i].t >= t - windowMs; i--) { n++; if (frames[i].db > thresholdDb) above++; }
+            return n >= 3 ? { n, ratio: above / n } : null;
+        }
+        function evaluate(t) {
+            if (!sourceRunning || lastFrameAt === null || t - lastFrameAt > P.staleMs) {
+                if (musicState !== FxMusicState.SOURCE_UNAVAILABLE) { musicState = FxMusicState.SOURCE_UNAVAILABLE; retryAt = null; notify(); }
+                return;
+            }
+            let next = musicState;
+            if (musicState === FxMusicState.SOURCE_UNAVAILABLE) next = FxMusicState.UNKNOWN;
+            if (next === FxMusicState.MUSIC_PRESENT) {
+                const st = windowStats(t, P.confirmSilenceMs, P.offDbfs);
+                if (st && st.ratio <= P.silenceMaxAboveRatio) next = FxMusicState.MUSIC_SILENT;
+            } else {
+                const st = windowStats(t, P.confirmMusicMs, P.onDbfs);
+                if (st && st.ratio >= P.confirmMusicRatio) next = FxMusicState.MUSIC_PRESENT;
+                else if (next === FxMusicState.UNKNOWN) {
+                    const ss = windowStats(t, P.confirmSilenceMs, P.offDbfs);
+                    if (ss && ss.ratio <= P.silenceMaxAboveRatio) next = FxMusicState.MUSIC_SILENT;
+                }
+            }
+            if (next !== musicState) {
+                const prev = musicState; musicState = next;
+                if (next === FxMusicState.MUSIC_PRESENT || next === FxMusicState.MUSIC_SILENT) {
+                    // Chuyển trạng thái nhạc đã xác nhận => kết thúc nhường quyền thủ công, tự động hoạt động lại.
+                    manualOverride = false; retries = 0; retryAt = null;
+                    if (actionState === FxActionState.MANUAL_OVERRIDE) actionState = FxActionState.IDLE;
+                }
+                notify();
+                if (prev !== next) reconcile(t);
+            } else if (retryAt !== null && t >= retryAt) { retryAt = null; reconcile(t); }
+        }
+        function desiredTarget() {
+            if (musicState === FxMusicState.MUSIC_PRESENT) return true;
+            if (musicState === FxMusicState.MUSIC_SILENT) return false;
+            return null;
+        }
+        async function reconcile(t) {
+            if (inflight || manualOverride) return;
+            const target = desiredTarget();
+            if (target === null) return;
+            if (deps.getFxState() === target) { if (actionState === FxActionState.FX_ACTION_FAILED) actionState = FxActionState.IDLE; return; } // đã đúng: KHÔNG gửi
+            if (lastTarget !== target) retries = 0;
+            lastTarget = target; inflight = true;
+            let res;
+            try { res = await deps.applyFx(target); } catch (e) { res = { ok: false, error: String(e) }; }
+            inflight = false;
+            if (res && res.ok) {
+                sentCount++; actionState = FxActionState.SEND_SENT_UNCONFIRMED; retryAt = null;
+            } else {
+                failedCount++; actionState = FxActionState.FX_ACTION_FAILED;
+                const nonRetryable = res && (res.reason === "NOT_CONFIGURED" || res.status === "NOT_CONFIGURED" || res.status === "MOUSE_DISABLED");
+                if (!nonRetryable && retries < P.maxRetries) { retries++; retryAt = now() + P.retryMs; } else { retryAt = null; }
+            }
+            notify();
+        }
+        // Người dùng bấm FX tay: nhường quyền cho tới lần chuyển trạng thái nhạc đã xác nhận kế tiếp.
+        function notifyManual() { manualOverride = true; retryAt = null; retries = 0; actionState = FxActionState.MANUAL_OVERRIDE; notify(); }
+        function tick(t) { evaluate(t === undefined ? now() : t); }
+        return { feedLevel, setSourceState, tick, notifyManual, getInfo, params: P };
+    }
+
+
+    // TASK AI-FX-01 — Nhóm Send do nút FX quản lý (Reverb + Delay). Logic thuần, inject deps để test được.
+    // Chỉ điều khiển những Send ĐÃ có mapping (không đoán). Theo dõi trạng thái "đã gửi" TỪNG Send (không có
+    // feedback DAW) để không gửi trùng và để thử lại CHỈ Send bị lỗi. Kết quả: ok chỉ khi MỌI Send đã cấu hình
+    // đều gửi được; nếu một phần => partial (không tuyên bố đồng bộ toàn bộ).
+    function createFxSendGroup(deps) {
+        const names = deps.actions;            // vd ["FX_SEND_REVERB","FX_SEND_DELAY"]
+        const sent = {};                       // action -> true/false/undefined (trạng thái đã GỬI, chưa xác nhận)
+        function managed() {
+            const cfg = names.filter((n) => deps.isConfigured(n));
+            if (cfg.length) return cfg;
+            return deps.isConfigured(deps.legacyAction) ? [deps.legacyAction] : [];
+        }
+        function seed(state) { names.concat([deps.legacyAction]).forEach((n) => { if (sent[n] === undefined) sent[n] = !!state; }); }
+        let chain = Promise.resolve(); // hàng đợi tuần tự: Auto + bấm tay không bao giờ chạy chồng nhau
+        function apply(target, opts = {}) {
+            const p = chain.then(() => applyNow(target, opts), () => applyNow(target, opts));
+            chain = p.catch(() => {});
+            return p;
+        }
+        async function applyNow(target, opts) {
+            const list = managed();
+            if (!list.length) return { ok: false, reason: "NOT_CONFIGURED", results: {} };
+            const results = {};
+            for (const n of list) {                      // tuần tự, không chồng lệnh
+                if (!opts.force && sent[n] === target) { results[n] = { ok: true, skipped: true }; continue; }
+                let r; try { r = await deps.execute(n, target); } catch (e) { r = { ok: false, error: String(e) }; }
+                results[n] = r;
+                if (r && r.ok) sent[n] = target;
+            }
+            const vals = Object.values(results);
+            const okAll = vals.every((r) => r.ok), okSome = vals.some((r) => r.ok && !r.skipped);
+            const nonRetry = vals.filter((r) => !r.ok).every((r) => r.reason === "NOT_CONFIGURED" || r.status === "NOT_CONFIGURED" || r.status === "MOUSE_DISABLED");
+            return { ok: okAll, partial: !okAll && (okSome || vals.some((r) => r.ok)), reason: okAll ? undefined : (nonRetry ? "NOT_CONFIGURED" : "SEND_FAILED"), results, sends: list.slice() };
+        }
+        // Bấm tay: đánh dấu các Send đã gửi theo kết quả thật (deps.execute đã được gọi bên ngoài).
+        function markSent(n, state) { sent[n] = state; }
+        return { apply, seed, markSent, managed, getSent: () => Object.assign({}, sent) };
+    }
+
     global.AudioSourceType = AudioSourceType;
     global.AudioSourceState = AudioSourceState;
     global.AudioSource = {
         createMicSource,
         createSystemAudioSource,
         createDawMasterSource,
+        createFxAutoController, // TASK AI-FX-01
+        createFxSendGroup,
+        FxMusicState, FxActionState, FX_AUTO_DEFAULTS,
         getSystemAudioDeviceId, // export để renderer.js dùng lại đúng 1 nguồn sự thật
         setSystemAudioDeviceId, // TASK A65 — cấu hình thủ công (DevTools) cho tới khi có Setup UI riêng
         getMicDeviceId, // TASK B71 — export để renderer.js (onSetupChanged) biết deviceId MIC mới nhất

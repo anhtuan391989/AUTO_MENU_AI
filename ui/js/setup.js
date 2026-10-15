@@ -637,6 +637,9 @@ const DAW_MIDI_ACTIONS = [
     { action: "MONITOR_BEAT_TOGGLE", label: "MONITOR BEAT" },
     { action: "RETUNE_SPEED_MIC1", label: "RETUNE SPEED MIC1" },
     { action: "RETUNE_SPEED_MIC2", label: "RETUNE SPEED MIC2" },
+    // TASK AI-FX-01 — 2 Send do nút FX quản lý (Auto theo nhạc nền). Không có CC mặc định.
+    { action: "FX_SEND_REVERB", label: "FX SEND REVERB" },
+    { action: "FX_SEND_DELAY", label: "FX SEND DELAY" },
 ];
 
 function isMouseControlEnabledLocal() {
