@@ -1,0 +1,112 @@
+From df0e1c9ca64edb44dd883c3da6bd8916b3caf011 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 16 Oct 2026 11:37:10 +0000
+Subject: [PATCH] AI-ALG-07: PDL research report + real-music manifest
+ (partial, no engine change)
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01FrhXxWK5TMfTR3qNCGmEyc
+---
+ .../AI-ALG-07-PDL-KEY-MOD-RESEARCH-REPORT.md  | 57 +++++++++++++++++++
+ .../manifest/real_music_manifest.json         | 25 ++++++++
+ 2 files changed, 82 insertions(+)
+ create mode 100644 AI_BOOT.md/AI-ALG-07-PDL-KEY-MOD-RESEARCH-REPORT.md
+ create mode 100644 tools/algbench/manifest/real_music_manifest.json
+
+diff --git a/AI_BOOT.md/AI-ALG-07-PDL-KEY-MOD-RESEARCH-REPORT.md b/AI_BOOT.md/AI-ALG-07-PDL-KEY-MOD-RESEARCH-REPORT.md
+new file mode 100644
+index 0000000..a135f41
+--- /dev/null
++++ b/AI_BOOT.md/AI-ALG-07-PDL-KEY-MOD-RESEARCH-REPORT.md
+@@ -0,0 +1,57 @@
++# AI-ALG-07 — PDL Key/Mod Research & Real-Music Accuracy (báo cáo)
++
++> Trạng thái: **PARTIAL**. Không có audio nhạc thật trong sandbox → mọi số liệu bên dưới là **SYNTHETIC**. Không tuyên bố cải thiện trên nhạc thật. Không tái tạo PDL.
++
++## 1. Phạm vi
++Nghiên cứu tĩnh PDL (metadata/chuỗi, không dịch ngược), tạo manifest nhạc thật, ablation thành phần KeyEngine trên chroma ghi sẵn, giữ nguyên engine (không có thay đổi nào được chứng minh trên nhạc thật).
++
++## 2. Bằng chứng PDL
++| Phát hiện | Nhãn |
++|---|---|
++| Key tính offline trên cả bài/đoạn (mean chroma), không phải realtime | PARTIAL |
++| chroma_cens + chroma_cqt octave thấp (bass) | INFERRED |
++| Tương quan Pearson với MAJOR/MINOR_PROFILE và Temperley, xoay 12 tonic | INFERRED |
++| bass_bonus → top1/top2 → is_relative → final_root | INFERRED |
++| Tempo qua beat_track; có tham số rms_energy | PARTIAL |
++| Không thấy bộ phát hiện modulation trong bài | INFERRED |
++| Công thức/trọng số/ngưỡng | UNKNOWN |
++| Bất kỳ điều gì đã tái tạo | VERIFIED: không có |
++Lưu ý: binary chứa chuỗi giống thông tin xác thực; không sao chép/không dùng.
++
++## 3. Manifest
++`tools/algbench/manifest/real_music_manifest.json`. Hiện 1 mục: "Thương Em" (nhãn người dùng: D major → Eb major tại 03:08, +1 semitone) = `UNVERIFIED_REFERENCE`, `NOT_TESTED_NO_AUDIO`. Chưa đủ 20 bản nhạc.
++
++## 4. Ablation (SYNTHETIC, 2 dump chroma, % chính xác; full = tonic+mode đúng)
++| Biến thể | full@10s | full@20s | full@40s | relErr@20 |
++|---|---|---|---|---|
++| ENG cosine τ4 raw | 49 | 50 | 50 | 32 |
++| ENG cosine τ20 frame-norm | 64 | 70 | 71 | 22 |
++| ENG cosine τ∞ frame-norm | 68 | 76 | 79 | 18 |
++| ENG Pearson (≈ cosine) | 68 | 76 | 79 | 18 |
++| KK cosine τ∞ frame | 70 | 71 | 79 | 20 |
++| Temperley τ∞ frame | 48 | 52 | 54 | 17 |
++Kết luận (synthetic): (a) chuẩn hóa theo frame và tích lũy dài (τ≥20 s) là yếu tố chính; (b) Pearson vs cosine gần như không khác; (c) Temperley kém hơn profile ENG ở mode; (d) lỗi chủ yếu là nhầm tương đối (relErr 18–32%), song song hiếm (0%). Engine hiện đã dùng tích lũy dài + hysteresis tương đối (AI-ALG-05/FIX-06).
++
++## 5. Thay đổi engine
++Không có trong task này (không đủ bằng chứng nhạc thật). Không đổi UI/HTML/MIDI/FX/preset.
++
++## 6. Modulation (trạng thái AI-FIX-06)
++Precision đã tăng nhưng recall/latency giảm (4/16 sự kiện, median ~15 s trên benchmark synthetic). Chưa sửa; đề xuất change-point trên timeline cục bộ, đánh giá khi có audio thật.
++
++## 7. Câu hỏi "Thương Em"
++NOT TESTED. Phỏng đoán (INFERRED, chưa kiểm chứng): B minor là tương đối của D major → lỗi kiểu relErr; modulation +1 semitone ít nốt ngoài thang nên bị cổng out-of-scale chặn.
++
++## 8. Rủi ro / việc còn lại
++- Cần clip audio + nhãn đã xác minh (≥20 bản, có nhóm đối chứng, chia dev/test).
++- Trạng thái NO_KEY_EVIDENCE/KEY_CANDIDATE/KEY_STABLE, schema sự kiện ModEngine (fromKey/toKey/evidenceWindow/dedupe), cờ tính năng: chưa làm.
++- Push GitHub bị 403; commit giữ local.
++
++## 9. Test
++94 file `tests/unit/*.verify.js` PASS; 2 fail nền sẵn có: MenuMinimizeRuntime, MusicAnalysis.
++
++---
++Claude A : Task A: AI-ALG-07
++1. File đã sửa: tạo `tools/algbench/manifest/real_music_manifest.json`, `AI_BOOT.md/AI-ALG-07-PDL-KEY-MOD-RESEARCH-REPORT.md`; không sửa mã engine.
++2. Vì sao: nghiên cứu + ablation + manifest; chưa có audio thật nên không đổi thuật toán.
++3. Ảnh hưởng module: không (không đổi runtime).
++4. Còn lại: audio + nhãn thật; ModEngine change-point; các trạng thái KeyEngine; schema sự kiện; cờ tính năng.
+diff --git a/tools/algbench/manifest/real_music_manifest.json b/tools/algbench/manifest/real_music_manifest.json
+new file mode 100644
+index 0000000..dfde299
+--- /dev/null
++++ b/tools/algbench/manifest/real_music_manifest.json
+@@ -0,0 +1,25 @@
++{
++  "schema": "AI-ALG-07/manifest/v1",
++  "note": "Nhãn do người dùng cung cấp = UNVERIFIED_REFERENCE. Không có audio trong repo. Không bịa nhãn.",
++  "pieces": [
++    {
++      "id": "thuong-em-yt-wHLNh9qFgU8",
++      "path": null,
++      "sha256": null,
++      "source_url": "https://www.youtube.com/watch?v=wHLNh9qFgU8",
++      "duration_s": null,
++      "sample_rate": null,
++      "label_source": "user_observation",
++      "label_confidence": "UNVERIFIED_REFERENCE",
++      "reference_key_start": { "tonic": "D", "mode": "major" },
++      "boundaries": [ { "t_s": 188, "key_before": "D major", "key_after": "Eb major", "semitone_delta": 1 } ],
++      "group": "modulation",
++      "split": "test",
++      "status": "NOT_TESTED_NO_AUDIO",
++      "notes": "Menu hiện báo B minor (quan hệ song song-tương đối của D major) và bỏ lỡ modulation 03:08. Cần clip audio + nhãn đã xác minh."
++    }
++  ],
++  "required_fields_for_new_pieces": ["id","path","sha256","duration_s","sample_rate","reference_key","stable_intervals","boundaries","key_before","key_after","semitone_delta","label_source","label_confidence","split","group","notes"],
++  "groups": ["modulation","control_no_modulation"],
++  "splits": ["dev","test"]
++}
+-- 
+2.43.0
+

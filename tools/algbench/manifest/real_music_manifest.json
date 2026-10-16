@@ -1,0 +1,25 @@
+{
+  "schema": "AI-ALG-07/manifest/v1",
+  "note": "Nhãn do người dùng cung cấp = UNVERIFIED_REFERENCE. Không có audio trong repo. Không bịa nhãn.",
+  "pieces": [
+    {
+      "id": "thuong-em-yt-wHLNh9qFgU8",
+      "path": null,
+      "sha256": null,
+      "source_url": "https://www.youtube.com/watch?v=wHLNh9qFgU8",
+      "duration_s": null,
+      "sample_rate": null,
+      "label_source": "user_observation",
+      "label_confidence": "UNVERIFIED_REFERENCE",
+      "reference_key_start": { "tonic": "D", "mode": "major" },
+      "boundaries": [ { "t_s": 188, "key_before": "D major", "key_after": "Eb major", "semitone_delta": 1 } ],
+      "group": "modulation",
+      "split": "test",
+      "status": "NOT_TESTED_NO_AUDIO",
+      "notes": "Menu hiện báo B minor (quan hệ song song-tương đối của D major) và bỏ lỡ modulation 03:08. Cần clip audio + nhãn đã xác minh."
+    }
+  ],
+  "required_fields_for_new_pieces": ["id","path","sha256","duration_s","sample_rate","reference_key","stable_intervals","boundaries","key_before","key_after","semitone_delta","label_source","label_confidence","split","group","notes"],
+  "groups": ["modulation","control_no_modulation"],
+  "splits": ["dev","test"]
+}
