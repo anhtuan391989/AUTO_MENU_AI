@@ -1,25 +1,17 @@
 {
-  "schema": "AI-ALG-07/manifest/v1",
-  "note": "Nhãn do người dùng cung cấp = UNVERIFIED_REFERENCE. Không có audio trong repo. Không bịa nhãn.",
-  "pieces": [
+  "schema": "AI-ALG-08/manifest/v2",
+  "note": "Nhãn người dùng cung cấp = UNVERIFIED_REFERENCE và KHÔNG được tính vào số liệu chính. Không bịa nhãn, không có audio trong repo. Xem tools/algbench/realbench/README.md để thêm bài.",
+  "tracks": [
     {
-      "id": "thuong-em-yt-wHLNh9qFgU8",
-      "path": null,
-      "sha256": null,
-      "source_url": "https://www.youtube.com/watch?v=wHLNh9qFgU8",
-      "duration_s": null,
-      "sample_rate": null,
-      "label_source": "user_observation",
-      "label_confidence": "UNVERIFIED_REFERENCE",
-      "reference_key_start": { "tonic": "D", "mode": "major" },
-      "boundaries": [ { "t_s": 188, "key_before": "D major", "key_after": "Eb major", "semitone_delta": 1 } ],
-      "group": "modulation",
-      "split": "test",
-      "status": "NOT_TESTED_NO_AUDIO",
-      "notes": "Menu hiện báo B minor (quan hệ song song-tương đối của D major) và bỏ lỡ modulation 03:08. Cần clip audio + nhãn đã xác minh."
+      "track_id": "thuong-em-yt-wHLNh9qFgU8",
+      "audio_reference": { "type": "url_reference_only", "path": null, "source_url": "https://www.youtube.com/watch?v=wHLNh9qFgU8", "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp." },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "annotator": "user_observation (Khói, chưa kiểm chứng độc lập)",
+      "segments": [],
+      "modulations": [ { "time": 188, "from_key": { "tonic": "D", "mode": "major" }, "to_key": { "tonic": "Eb", "mode": "major" } } ],
+      "annotation_notes": "Người dùng báo: tại 03:08 (188 s) chuyển D major lên Eb major (+1 bán cung). Chưa có ranh giới đoạn/key các phần khác nên segments để trống (không ép nhãn). KHÔNG giả định engine đang báo B minor cho đến khi có log thực tế trên audio.",
+      "split": "test"
     }
-  ],
-  "required_fields_for_new_pieces": ["id","path","sha256","duration_s","sample_rate","reference_key","stable_intervals","boundaries","key_before","key_after","semitone_delta","label_source","label_confidence","split","group","notes"],
-  "groups": ["modulation","control_no_modulation"],
-  "splits": ["dev","test"]
+  ]
 }

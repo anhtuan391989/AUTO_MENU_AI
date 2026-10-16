@@ -1,0 +1,563 @@
+From 880008dbf153a5ece10784cb1ef51bc5ac557612 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 16 Oct 2026 17:28:20 +0000
+Subject: [PATCH] AI-ALG-08: real-music benchmark pipeline (schema, metrics,
+ runner, tests); baseline BLOCKED_NO_AUDIO
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01FrhXxWK5TMfTR3qNCGmEyc
+---
+ .../AI-ALG-08-REAL-MUSIC-BENCHMARK-REPORT.md  |  67 ++++++++++++
+ tests/unit/RealBenchA08.verify.js             |  89 +++++++++++++++
+ .../manifest/real_music_manifest.json         |  34 +++---
+ tools/algbench/realbench/README.md            |  24 +++++
+ tools/algbench/realbench/engine_runner.js     |  28 +++++
+ tools/algbench/realbench/metrics.js           | 101 ++++++++++++++++++
+ tools/algbench/realbench/run.js               |  48 +++++++++
+ tools/algbench/realbench/schema.js            |  92 ++++++++++++++++
+ 8 files changed, 462 insertions(+), 21 deletions(-)
+ create mode 100644 AI_BOOT.md/AI-ALG-08-REAL-MUSIC-BENCHMARK-REPORT.md
+ create mode 100644 tests/unit/RealBenchA08.verify.js
+ create mode 100644 tools/algbench/realbench/README.md
+ create mode 100644 tools/algbench/realbench/engine_runner.js
+ create mode 100644 tools/algbench/realbench/metrics.js
+ create mode 100644 tools/algbench/realbench/run.js
+ create mode 100644 tools/algbench/realbench/schema.js
+
+diff --git a/AI_BOOT.md/AI-ALG-08-REAL-MUSIC-BENCHMARK-REPORT.md b/AI_BOOT.md/AI-ALG-08-REAL-MUSIC-BENCHMARK-REPORT.md
+new file mode 100644
+index 0000000..7572c5c
+--- /dev/null
++++ b/AI_BOOT.md/AI-ALG-08-REAL-MUSIC-BENCHMARK-REPORT.md
+@@ -0,0 +1,67 @@
++# AI-ALG-08 — Real-Music Benchmark & Key/Mod Ground-Truth Validation
++
++**Trạng thái: PIPELINE XONG — BASELINE `BLOCKED_NO_AUDIO`.** Không có audio nhạc thật nào trong môi trường (YouTube bị chặn; không tải/trích xuất trái phép). Không có số liệu nhạc thật; không tuyên bố tăng accuracy. Không số liệu synthetic nào được trình bày ở đây như kết quả thực.
++
++## 1. File tạo/sửa
++| File | Việc |
++|---|---|
++| `tools/algbench/realbench/schema.js` | Validator ground-truth (track_id, audio_reference, audio_hash sha256, reference_status, annotator, segments[], modulations[], annotation_notes, split); đoạn `undetermined`; chặn trùng id, chồng lấn, hash sai, rò rỉ dev/test (cùng hash ở 2 tập); kiểm tra audio theo đĩa (`AUDIO_OK`/`BLOCKED_NO_AUDIO`/`BLOCKED_NO_HASH`/`BLOCKED_HASH_MISMATCH`) |
++| `tools/algbench/realbench/metrics.js` | Metric Key (exact/tonic/mode, ma trận 24 lớp, relative/parallel error, theo cửa sổ, unknown rate) và Mod (P/R/F1, ghép 1-1, latency median/P90/histogram, FP vùng không modulation, theo loại chuyển tông, độ nhạy tolerance) |
++| `tools/algbench/realbench/engine_runner.js` | Chạy KeyEngine+ModEngine THẬT (vm, đồng hồ ảo) trên file audio qua ffmpeg (chưa đo trên nhạc thật) |
++| `tools/algbench/realbench/run.js` | CLI đánh giá; chỉ chấm track `VERIFIED_INDEPENDENT` + audio hợp lệ; test set cần `--final-test`; hỗ trợ `--predictions` |
++| `tools/algbench/realbench/README.md` | Hướng dẫn thêm bài, chạy, định nghĩa metric |
++| `tools/algbench/manifest/real_music_manifest.json` | Chuyển sang schema v2 (`tracks[]`); "Thương Em" giữ `UNVERIFIED_REFERENCE` |
++| `tests/unit/RealBenchA08.verify.js` | 11 nhóm test (schema, metric, pipeline; dữ liệu TEST_FIXTURE) |
++Không sửa runtime (`ui/`), UI, HTML, MIDI, FX, preset. Không dùng chuỗi/khóa từ binary.
++
++## 2. Quy tắc chấm (tóm tắt; chi tiết trong README)
++- Key: mốc 1 s trong đoạn có key xác định; engine không báo key = SAI + `unknown_rate`; đoạn undetermined bị loại và đếm riêng.
++- Mod: chỉ `kind=MODULATION`; khớp nếu `g.t−2s ≤ p.t ≤ g.t+tol`; tol do người chạy chọn (mặc định 10 s, KHÔNG phải chuẩn phổ quát) và luôn kèm bảng độ nhạy (2,5,10,15,20,30 s). Hai mức: khớp thời gian, và khớp thời gian + đúng độ lệch bán cung (strict).
++- Nhãn UNVERIFIED không vào số liệu chính; không dùng test để chỉnh tham số (`--final-test`).
++
++## 3. Lệnh chạy
++`node tools/algbench/realbench/run.js --audio-root <thư mục audio> [--split dev] [--out report.json] [--tol 10] [--tols 2,5,10,15,20,30]`
++Tập test: thêm `--final-test` (chỉ khi đã chốt tham số). Cần `ffmpeg`.
++
++## 4. Test đã chạy
++- `RealBenchA08.verify.js`: 11/11 OK. `node --check` các file mới OK; `git diff --check` sạch.
++- Toàn bộ `tests/unit/*.verify.js`: chỉ còn fail nền đã biết `MenuMinimizeRuntime`, `MusicAnalysis`; `AutoSongCollector`/`NowPlayingResolver` chỉ fail khi cây git chưa commit (test kiểm tra git status) — chạy lại sau commit.
++- Chạy `run.js` trên manifest thật: hợp lệ, `status=BLOCKED_NO_AUDIO`.
++- Chạy engine_runner trên `/tmp/cmaj.wav` (12 s, tổng hợp): chỉ kiểm tra đường ống, KHÔNG phải kết quả.
++
++## 5. Số lượng dữ liệu
++| Mục | Số |
++|---|---|
++| Bài trong manifest | 1 |
++| Bài có audio hợp lệ | 0 |
++| Bài có nhãn đã xác minh độc lập | 0 |
++| Bài đã đánh giá | 0 |
++Mục tiêu ≥20 bài chưa đạt; không tạo mẫu giả.
++
++## 6. Kết quả
++- Thực nghiệm (nhạc thật): **không có** (BLOCKED_NO_AUDIO).
++- Synthetic: không đưa vào báo cáo này (xem AI-ALG-05/07, nhãn riêng).
++
++## 7. Kết luận
++- **Đã xác nhận:** pipeline + schema + metric hoạt động và có test; manifest hợp lệ; các quy tắc chống rò rỉ dev/test, nhãn chưa xác minh, và test-set hoạt động đúng.
++- **Chưa xác nhận:** accuracy Key/Mod trên nhạc thật; engine báo gì cho "Thương Em" (không mặc định B minor); nhầm relative key, sai tonic hay sai thời điểm modulation tại 03:08.
++- **Bị chặn bởi thiếu dữ liệu:** mọi con số nhạc thật.
++
++## 8. Dữ liệu còn thiếu & cách bổ sung
++1. File audio hợp lệ (bạn có quyền dùng) của "Thương Em" + ít nhất 19 bài khác (đa dạng: có và không modulation, một bán cung/hai bán cung, major/minor).
++2. Nhãn key theo đoạn + mốc modulation, ghi nguồn xác minh độc lập (lead sheet / người chú thích thứ hai) → `VERIFIED_INDEPENDENT`.
++3. sha256 mỗi file; chia dev/test theo bài (khuyến nghị ~70/30, chốt trước khi chạy).
++Hướng dẫn từng bước: `tools/algbench/realbench/README.md`.
++
++## 9. Khuyến nghị cho AI-ALG-09
++Chưa sửa thuật toán dựa trên synthetic. Thứ tự: (1) có ≥20 bài + nhãn xác minh; (2) chạy baseline trên dev, ghi lại; (3) chốt tiêu chí thành công TRƯỚC (vd. exact accuracy, relative-error, recall/FP-per-min modulation ở tol đã chọn); (4) chỉ khi baseline chỉ ra nhóm lỗi cụ thể (relative key, trễ modulation…) mới thử biến thể có cờ tính năng, đánh giá trên dev rồi test một lần.
++
++## 10. Git
++Commit local (xem commit cuối trong chat/`git log`); push GitHub bị 403 (phiên không có quyền ghi) nên chưa push.
++
++---
++Claude A : Task A: AI-ALG-08
++1. File đã sửa: tạo `tools/algbench/realbench/{schema,metrics,engine_runner,run}.js`, `tools/algbench/realbench/README.md`, `tests/unit/RealBenchA08.verify.js`, báo cáo này; sửa `tools/algbench/manifest/real_music_manifest.json` (schema v2). Không sửa runtime.
++2. Vì sao: dựng pipeline kiểm chứng Key/Mod trên nhạc thật có ground-truth, tách nhãn chưa xác minh, tránh rò rỉ dev/test; baseline BLOCKED_NO_AUDIO vì chưa có audio.
++3. Ảnh hưởng module: không (chỉ công cụ offline + test; engine/UI/MIDI/FX/preset không đổi).
++4. Còn lại: audio + nhãn xác minh (≥20 bài, gồm "Thương Em"); chạy baseline dev/test; sau đó mới AI-ALG-09.
+diff --git a/tests/unit/RealBenchA08.verify.js b/tests/unit/RealBenchA08.verify.js
+new file mode 100644
+index 0000000..312fa9c
+--- /dev/null
++++ b/tests/unit/RealBenchA08.verify.js
+@@ -0,0 +1,89 @@
++'use strict';
++// AI-ALG-08 — test schema, metric, pipeline (dữ liệu TEST_FIXTURE tự dựng, KHÔNG phải nhạc thật).
++const assert = require('assert'), fs = require('fs'), os = require('os'), path = require('path');
++const R = path.resolve(__dirname, '../../tools/algbench/realbench');
++const S = require(R + '/schema.js'), M = require(R + '/metrics.js'), { evaluate } = require(R + '/run.js');
++let n = 0; const T = (name, fn) => { fn(); n++; console.log('ok', name); };
++const key = (tonic, mode) => ({ tonic, mode });
++const base = (o) => Object.assign({ track_id: 't1', audio_reference: { path: 'a.wav' }, audio_hash: null, reference_status: 'VERIFIED_INDEPENDENT', annotator: 'fixture', segments: [{ start_time: 0, end_time: 100, tonic: 'C', mode: 'major' }], modulations: [], annotation_notes: '', split: 'dev' }, o);
++
++T('manifest repo hợp lệ và Thương Em là UNVERIFIED, không audio', () => {
++    const m = JSON.parse(fs.readFileSync(R + '/../manifest/real_music_manifest.json', 'utf8')), v = S.validateManifest(m);
++    assert.deepStrictEqual(v.errors, []); const t = m.tracks[0];
++    assert.strictEqual(t.reference_status, 'UNVERIFIED_REFERENCE'); assert.strictEqual(S.audioStatus(t, '.').status, 'BLOCKED_NO_AUDIO');
++    const rep = evaluate(m, { audioRoot: '.', tol: 10, tols: [5, 10] }); assert.strictEqual(rep.status, 'BLOCKED_NO_AUDIO'); assert.strictEqual(rep.counts.evaluated, 0);
++});
++T('schema: tên nốt + bémol, mode undetermined', () => {
++    assert.strictEqual(S.pc('Eb'), 3); assert.strictEqual(S.pc('D#'), 3); assert.strictEqual(S.pc('H'), null);
++    assert.deepStrictEqual(S.parseKey({ mode: 'undetermined' }), { pc: null, mode: 'undetermined' }); assert.strictEqual(S.parseKey({ tonic: 'C', mode: 'dorian' }), null);
++});
++T('schema: bắt lỗi thiếu trường, chồng lấn, hash sai, from==to, rò rỉ dev/test', () => {
++    assert.ok(S.validateTrack(base({ split: 'x' }), 0).errors.length);
++    assert.ok(S.validateTrack(base({ segments: [{ start_time: 0, end_time: 10, tonic: 'C', mode: 'major' }, { start_time: 5, end_time: 20, tonic: 'D', mode: 'major' }] }), 0).errors.some((e) => /chồng lấn/.test(e)));
++    assert.ok(S.validateTrack(base({ audio_hash: 'abc' }), 0).errors.length);
++    assert.ok(S.validateTrack(base({ modulations: [{ time: 5, from_key: key('C', 'major'), to_key: key('C', 'major') }] }), 0).errors.length);
++    const h = 'a'.repeat(64), v = S.validateManifest({ tracks: [base({ track_id: 'a', audio_hash: h, split: 'dev' }), base({ track_id: 'b', audio_hash: h, split: 'test' })] });
++    assert.ok(v.errors.some((e) => /rò rỉ/.test(e)));
++    assert.ok(S.validateManifest({ tracks: [base(), base()] }).errors.some((e) => /trùng/.test(e)));
++});
++T('schema: audio_hash khớp / lệch / thiếu', () => {
++    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-')); fs.writeFileSync(path.join(d, 'a.wav'), 'xyz'); const h = S.sha256File(path.join(d, 'a.wav'));
++    assert.strictEqual(S.audioStatus(base({ audio_hash: h }), d).status, 'AUDIO_OK'); assert.strictEqual(S.audioStatus(base({ audio_hash: 'b'.repeat(64) }), d).status, 'BLOCKED_HASH_MISMATCH');
++    assert.strictEqual(S.audioStatus(base(), d).status, 'BLOCKED_NO_HASH');
++});
++T('metric: quan hệ key (exact/relative/parallel/other/none) và delta', () => {
++    const C = { pc: 0, mode: 'major' };
++    assert.strictEqual(M.relation(C, { pc: 0, mode: 'major' }), 'exact'); assert.strictEqual(M.relation(C, { pc: 9, mode: 'minor' }), 'relative');
++    assert.strictEqual(M.relation(C, { pc: 0, mode: 'minor' }), 'parallel'); assert.strictEqual(M.relation(C, { pc: 7, mode: 'major' }), 'other'); assert.strictEqual(M.relation(C, null), 'none');
++    assert.strictEqual(M.signedDelta(2, 3), 1); assert.strictEqual(M.signedDelta(3, 2), -1); assert.strictEqual(M.signedDelta(0, 11), -1); assert.strictEqual(M.signedDelta(0, 6), 6);
++});
++T('metric key: mẫu số, relative/parallel/unknown, loại đoạn undetermined, cửa sổ', () => {
++    const tr = base({ segments: [{ start_time: 0, end_time: 40, tonic: 'C', mode: 'major' }, { start_time: 40, end_time: 60, mode: 'undetermined', tonic: null }] });
++    // 0-10 chưa có key (none), 10-20 relative (A minor), 20-30 parallel (C minor), 30-40 exact
++    const pred = { key_timeline: [{ t: 10, pc: 9, mode: 'minor' }, { t: 20, pc: 0, mode: 'minor' }, { t: 30, pc: 0, mode: 'major' }] };
++    const k = M.keyScore(tr, pred, { windows: [5, 10, 35] });
++    assert.strictEqual(k.counts.n, 40); assert.strictEqual(k.counts.exact, 10); assert.strictEqual(k.counts.relative, 10); assert.strictEqual(k.counts.parallel, 10); assert.strictEqual(k.counts.none, 10);
++    assert.strictEqual(k.exact_acc, 0.25); assert.strictEqual(k.unknown_rate, 0.25); assert.strictEqual(k.counts.excluded_undetermined_s, 20);
++    assert.strictEqual(k.counts.mode, 10); // chỉ đoạn exact có mode đúng (relative/parallel đều sai mode; none không tính)
++    assert.strictEqual(k.by_window[5].n, 1); assert.strictEqual(k.by_window[5].exact, 0); assert.strictEqual(k.by_window[35].exact, 1);
++    assert.strictEqual(k.confusion[0][24], 10); assert.strictEqual(k.confusion[0][21], 10);
++});
++T('metric key: end_time null không có duration bị loại, có duration thì tính', () => {
++    const tr = base({ segments: [{ start_time: 0, end_time: null, tonic: 'C', mode: 'major' }] }); const pred = { key_timeline: [{ t: 0, pc: 0, mode: 'major' }] };
++    assert.strictEqual(M.keyScore(tr, pred, {}).counts.excluded_unbounded_segments, 1); assert.strictEqual(M.keyScore(tr, pred, { duration: 30 }).counts.n, 30);
++});
++const modTrack = () => base({ modulations: [{ time: 100, from_key: key('D', 'major'), to_key: key('Eb', 'major') }, { time: 200, from_key: key('Eb', 'major'), to_key: key('F', 'major') }] });
++T('metric mod: ghép 1-1, TP/FP/FN, latency, delta đúng/sai, FP ngoài vùng mod', () => {
++    const pred = { mod_events: [{ t: 108, kind: 'MODULATION', semitone_delta: 1 }, { t: 150, kind: 'MODULATION', semitone_delta: 3 }, { t: 207, kind: 'MODULATION', semitone_delta: 1 }, { t: 99, kind: 'MODE_CHANGE' }] };
++    const r = M.modScore(modTrack(), pred, { tol: 10, duration: 300 });
++    assert.deepStrictEqual([r.counts.tp, r.counts.fp, r.counts.fn], [2, 1, 0]); assert.strictEqual(r.counts.fp_outside_mod_windows, 1);
++    assert.strictEqual(r.precision, 2 / 3); assert.strictEqual(r.recall, 1); assert.strictEqual(r.latency.median, 7.5); assert.strictEqual(r.latency.p90, 8);
++    assert.strictEqual(r.counts.delta_correct, 1); // +1 đúng ở sự kiện 1; sự kiện 2 gt +2 báo +1 => sai
++    assert.strictEqual(r.semitone_accuracy, 0.5); assert.strictEqual(r.strict_recall, 0.5); assert.ok(r.by_type['+1'] && r.by_type['+2']);
++    assert.ok(r.fp_per_min_non_mod > 0);
++});
++T('metric mod: tolerance bắt buộc; độ nhạy đổi kết quả; báo sớm/trễ ngoài cửa sổ = FP+FN', () => {
++    assert.throws(() => M.modScore(modTrack(), { mod_events: [] }, {}));
++    const pred = { mod_events: [{ t: 115, kind: 'MODULATION', semitone_delta: 1 }] };
++    const s = M.sensitivity(modTrack(), pred, [5, 10, 20], { duration: 300 });
++    assert.deepStrictEqual(s.map((x) => x.tp), [0, 0, 1]); assert.strictEqual(M.modScore(modTrack(), { mod_events: [{ t: 90, kind: 'MODULATION' }] }, { tol: 10 }).counts.tp, 0);
++    assert.strictEqual(M.modScore(modTrack(), { mod_events: [{ t: 99, kind: 'MODULATION' }] }, { tol: 10 }).latency.median, -1); // báo sớm 1 s vẫn khớp (pre=2)
++});
++T('metric mod: nhóm đối chứng không modulation => mọi sự kiện là FP', () => {
++    const r = M.modScore(base(), { mod_events: [{ t: 30, kind: 'MODULATION' }, { t: 60, kind: 'MODULATION' }] }, { tol: 10, duration: 120 });
++    assert.strictEqual(r.counts.fp, 2); assert.strictEqual(r.precision, 0); assert.strictEqual(r.recall, null); assert.strictEqual(r.fp_per_min_non_mod, 1);
++});
++T('pipeline: dữ liệu giả tách bạch, chỉ chấm VERIFIED, test cần --final-test, UNVERIFIED không vào số liệu', () => {
++    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-')), pd = path.join(d, 'pred'); fs.mkdirSync(pd);
++    const mk = (id, split, st) => { fs.writeFileSync(path.join(d, id + '.wav'), id); return base({ track_id: id, split, reference_status: st, audio_reference: { path: id + '.wav' }, audio_hash: S.sha256File(path.join(d, id + '.wav')),
++        modulations: [{ time: 50, from_key: key('C', 'major'), to_key: key('D', 'major') }] }); };
++    const man = { tracks: [mk('dev-ok', 'dev', 'VERIFIED_INDEPENDENT'), mk('dev-unv', 'dev', 'UNVERIFIED_REFERENCE'), mk('test-ok', 'test', 'VERIFIED_INDEPENDENT')] };
++    for (const id of ['dev-ok', 'dev-unv', 'test-ok']) fs.writeFileSync(path.join(pd, id + '.json'), JSON.stringify({ duration_s: 100, key_timeline: [{ t: 0, pc: 0, mode: 'major' }], mod_events: [{ t: 55, kind: 'MODULATION', semitone_delta: 2 }] }));
++    const o = { audioRoot: d, predictionsDir: pd, tol: 10, tols: [5, 10] }, r1 = evaluate(man, o);
++    assert.strictEqual(r1.counts.evaluated, 1); assert.strictEqual(r1.counts.unverified_skipped, 1); assert.strictEqual(r1.counts.test_skipped, 1);
++    assert.strictEqual(r1.tracks.find((x) => x.track_id === 'test-ok').skipped, 'test_set_requires_--final-test');
++    assert.strictEqual(r1.aggregate.mod.counts.tp, 1); assert.strictEqual(r1.data_origin, 'REAL_MUSIC');
++    const r2 = evaluate(man, Object.assign({ finalTest: true }, o)); assert.strictEqual(r2.counts.evaluated, 2);
++    assert.strictEqual(evaluate({ tracks: [base({ split: 'zzz' })] }, o).valid, false);
++});
++console.log(`RealBenchA08: ${n} nhóm OK`);
+diff --git a/tools/algbench/manifest/real_music_manifest.json b/tools/algbench/manifest/real_music_manifest.json
+index dfde299..7df35bd 100644
+--- a/tools/algbench/manifest/real_music_manifest.json
++++ b/tools/algbench/manifest/real_music_manifest.json
+@@ -1,25 +1,17 @@
+ {
+-  "schema": "AI-ALG-07/manifest/v1",
+-  "note": "Nhãn do người dùng cung cấp = UNVERIFIED_REFERENCE. Không có audio trong repo. Không bịa nhãn.",
+-  "pieces": [
++  "schema": "AI-ALG-08/manifest/v2",
++  "note": "Nhãn người dùng cung cấp = UNVERIFIED_REFERENCE và KHÔNG được tính vào số liệu chính. Không bịa nhãn, không có audio trong repo. Xem tools/algbench/realbench/README.md để thêm bài.",
++  "tracks": [
+     {
+-      "id": "thuong-em-yt-wHLNh9qFgU8",
+-      "path": null,
+-      "sha256": null,
+-      "source_url": "https://www.youtube.com/watch?v=wHLNh9qFgU8",
+-      "duration_s": null,
+-      "sample_rate": null,
+-      "label_source": "user_observation",
+-      "label_confidence": "UNVERIFIED_REFERENCE",
+-      "reference_key_start": { "tonic": "D", "mode": "major" },
+-      "boundaries": [ { "t_s": 188, "key_before": "D major", "key_after": "Eb major", "semitone_delta": 1 } ],
+-      "group": "modulation",
+-      "split": "test",
+-      "status": "NOT_TESTED_NO_AUDIO",
+-      "notes": "Menu hiện báo B minor (quan hệ song song-tương đối của D major) và bỏ lỡ modulation 03:08. Cần clip audio + nhãn đã xác minh."
++      "track_id": "thuong-em-yt-wHLNh9qFgU8",
++      "audio_reference": { "type": "url_reference_only", "path": null, "source_url": "https://www.youtube.com/watch?v=wHLNh9qFgU8", "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp." },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "annotator": "user_observation (Khói, chưa kiểm chứng độc lập)",
++      "segments": [],
++      "modulations": [ { "time": 188, "from_key": { "tonic": "D", "mode": "major" }, "to_key": { "tonic": "Eb", "mode": "major" } } ],
++      "annotation_notes": "Người dùng báo: tại 03:08 (188 s) chuyển D major lên Eb major (+1 bán cung). Chưa có ranh giới đoạn/key các phần khác nên segments để trống (không ép nhãn). KHÔNG giả định engine đang báo B minor cho đến khi có log thực tế trên audio.",
++      "split": "test"
+     }
+-  ],
+-  "required_fields_for_new_pieces": ["id","path","sha256","duration_s","sample_rate","reference_key","stable_intervals","boundaries","key_before","key_after","semitone_delta","label_source","label_confidence","split","group","notes"],
+-  "groups": ["modulation","control_no_modulation"],
+-  "splits": ["dev","test"]
++  ]
+ }
+diff --git a/tools/algbench/realbench/README.md b/tools/algbench/realbench/README.md
+new file mode 100644
+index 0000000..97cc76d
+--- /dev/null
++++ b/tools/algbench/realbench/README.md
+@@ -0,0 +1,24 @@
++# realbench — kiểm chứng Key/Mod trên nhạc thật (AI-ALG-08)
++
++Không sửa runtime. Chỉ đọc `ui/js/engines/*` qua vm (đồng hồ ảo). Số liệu synthetic KHÔNG được trộn vào đây.
++
++## Thêm một bài nhạc
++1. Đặt file audio (do bạn có quyền sử dụng) vào một thư mục, ví dụ `G:\AUTO_MENU_AI_AUDIO\`.
++2. Tính sha256 của file (PowerShell: `Get-FileHash file.wav -Algorithm SHA256`), ghi vào `audio_hash` (chữ thường).
++3. Thêm một mục vào `tools/algbench/manifest/real_music_manifest.json` → `tracks[]`:
++   `track_id, audio_reference{path,source_url,license_note}, audio_hash, reference_status, annotator, segments[], modulations[], annotation_notes, split`.
++   - `reference_status`: `VERIFIED_INDEPENDENT` (đã kiểm chứng độc lập: bản nhạc/lead sheet/người chú thích thứ hai) hoặc `UNVERIFIED_REFERENCE` (chỉ nghe/ghi nhớ — KHÔNG vào số liệu chính).
++   - `segments[]`: `{start_time,end_time,tonic,mode}` (giây; `end_time:null` = đến hết bài). Đoạn không chắc: `mode:"undetermined", tonic:null` → bị loại khỏi mẫu số, không ép nhãn.
++   - `modulations[]`: `{time,from_key,to_key}`. Bài đối chứng không chuyển tông: `[]`.
++   - `split`: `dev` hoặc `test` theo BÀI. Một `audio_hash` không được ở cả hai tập (validator báo lỗi).
++4. Chạy: `node tools/algbench/realbench/run.js --audio-root <thư mục audio> [--split dev] [--out report.json]`.
++   Tập test chỉ chạy với `--final-test` (không dùng để chỉnh tham số). `--tol` (mặc định 10 s) và `--tols` (độ nhạy) do người chạy chọn và được ghi vào báo cáo.
++   Cần `ffmpeg` trong PATH. Có thể đưa dự đoán sẵn: `--predictions <dir>` với `<track_id>.json = {key_timeline:[{t,pc,mode}], mod_events:[{t,kind,semitone_delta}], duration_s}`.
++
++## Định nghĩa metric (metrics.js)
++- **Key**: lấy mẫu mỗi 1 s trong đoạn có key xác định. Mẫu số = số mốc đó. Engine chưa báo key (null) tính SAI và vào `unknown_rate`. Đoạn undetermined/không biết độ dài bị loại và đếm riêng.
++  Exact = đúng tonic+mode; tonic = đúng tonic; mode = đúng mode. Lỗi: `relative` (khác mode, cùng thang), `parallel` (cùng tonic khác mode), `other`, `none`. Ma trận nhầm 24 lớp + cột "không báo". Accuracy theo cửa sổ W (5,10,20,40,60 s): key engine báo tại `start+W` của mỗi đoạn dài ≥ W. Tổng hợp: micro (cộng mốc) và macro (TB theo bài).
++- **Mod**: chỉ tính sự kiện `kind="MODULATION"`. Ghép 1-1 tham lam theo |Δt| nhỏ nhất, p khớp g nếu `g.t - 2 s ≤ p.t ≤ g.t + tol`. Latency = p.t − g.t. TP/FP/FN → precision/recall/F1; *strict* = cần thêm đúng độ lệch bán cung (so mod 12). FP vùng không modulation: sự kiện chưa ghép nằm ngoài mọi cửa sổ; quy ra FP/phút. Phân loại theo độ lệch có dấu (+1, +2, …). Phân tích độ nhạy theo nhiều tol.
++- `reference_status=UNVERIFIED_REFERENCE` hoặc audio thiếu/hash lệch ⇒ không được chấm vào số liệu chính.
++
++Test: `node tests/unit/RealBenchA08.verify.js` (dữ liệu TEST_FIXTURE, không phải nhạc thật).
+diff --git a/tools/algbench/realbench/engine_runner.js b/tools/algbench/realbench/engine_runner.js
+new file mode 100644
+index 0000000..0c50314
+--- /dev/null
++++ b/tools/algbench/realbench/engine_runner.js
+@@ -0,0 +1,28 @@
++'use strict';
++// AI-ALG-08 — chạy KeyEngine + ModEngine THẬT (đọc nguyên mã ui/js/engines trong vm, đồng hồ ảo) trên 1 file audio.
++// Giải mã bằng ffmpeg -> mono float32 22050 Hz. KHÔNG sửa engine. Mô phỏng cách renderer dùng: ModEngine bắt đầu sau khi Key đầu tiên được báo.
++const { spawnSync } = require('child_process'), path = require('path');
++const { mkAnalyser, sandbox, loadEngine } = require('../lib.js');
++const NOTE = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
++function decode(file, sr = 22050) {
++    const r = spawnSync('ffmpeg', ['-v', 'error', '-i', file, '-ac', '1', '-ar', String(sr), '-f', 'f32le', '-'], { maxBuffer: 1 << 30 });
++    if (r.status !== 0) throw new Error('ffmpeg lỗi: ' + String(r.stderr).slice(0, 200));
++    const b = r.stdout; return { pcm: new Float32Array(b.buffer, b.byteOffset, Math.floor(b.length / 4)), sr };
++}
++function runEngines(repo, pcm, sr, opt = {}) {
++    const clock = { t: 1000 }, secs = pcm.length / sr, S = sandbox(clock, () => mkAnalyser(pcm, sr, 8192, clock, 1000), sr);
++    loadEngine(repo, S.sb, 'keyEngine.js', 'KeyEngine'); loadEngine(repo, S.sb, 'modEngine.js', 'ModEngine');
++    const K = S.sb.KeyEngine, M = S.sb.ModEngine; K.init(S.ctx, { connect() {} });
++    const T = () => (clock.t - 1000) / 1000, timeline = [], events = [], labels = []; let modOn = false, firstPc = null;
++    K.watchContinuous((res) => {
++        timeline.push({ t: T(), pc: res.rootIndex, mode: String(res.mode).toLowerCase() });
++        if (!modOn) { modOn = true; firstPc = res.rootIndex;
++            M.start(res.rootIndex, (d) => events.push({ t: T(), kind: d.kind || 'MODULATION', semitone_abs: d.semitone, semitone_delta: undefined, target_key: d.targetKey }),
++                () => false, (st, p) => { if (st === 'KEY_LABEL_CHANGED') labels.push({ t: T(), kind: p && p.kind }); }, { originalMode: res.mode }); }
++    });
++    S.step(Math.floor(secs * 1000)); try { M.stop(); } catch (e) { } K.stop();
++    // semitone_delta (có dấu, so với key đứng ngay trước) suy từ semitone_abs của ModEngine (đã là offset tuyệt đối so với key gốc)
++    let prev = 0; events.filter((e) => e.kind === 'MODULATION').forEach((e) => { if (Number.isFinite(e.semitone_abs)) { let d = ((e.semitone_abs - prev) % 12 + 12) % 12; e.semitone_delta = d > 6 ? d - 12 : d; prev = e.semitone_abs; } });
++    return { key_timeline: timeline, mod_events: events, label_events: labels, duration_s: secs, first_key: firstPc === null ? null : NOTE[firstPc] };
++}
++module.exports = { decode, runEngines };
+diff --git a/tools/algbench/realbench/metrics.js b/tools/algbench/realbench/metrics.js
+new file mode 100644
+index 0000000..7e22d99
+--- /dev/null
++++ b/tools/algbench/realbench/metrics.js
+@@ -0,0 +1,101 @@
++'use strict';
++// AI-ALG-08 — metric Key/Modulation (hàm thuần, không I/O). Định nghĩa chi tiết: tools/algbench/realbench/README.md
++const { parseKey } = require('./schema.js');
++
++const kidx = (pc, mode) => pc + (mode === 'minor' ? 12 : 0);              // lớp 0..23 (0-11 major, 12-23 minor)
++const NONE = 24;                                                          // cột "engine không báo key"
++const signedDelta = (from, to) => { let d = ((to - from) % 12 + 12) % 12; return d > 6 ? d - 12 : d; }; // −5..+6 (6 = tritone, +6)
++const relMajorOf = (pc, mode) => (mode === 'minor' ? (pc + 3) % 12 : pc);
++function relation(truth, pred) {                                          // truth,pred = {pc,mode}; pred có thể null
++    if (!pred || pred.pc === null || pred.pc === undefined) return 'none';
++    if (truth.pc === pred.pc && truth.mode === pred.mode) return 'exact';
++    if (truth.pc === pred.pc) return 'parallel';                          // cùng tonic, khác mode
++    if (truth.mode !== pred.mode && relMajorOf(truth.pc, truth.mode) === relMajorOf(pred.pc, pred.mode)) return 'relative';
++    return 'other';
++}
++// key dự đoán tại thời điểm t: timeline = [{t, pc|null, mode}] sắp theo t. Trước mục đầu tiên = null (chưa có key).
++function predAt(timeline, t) {
++    let lo = 0, hi = timeline.length - 1, ans = null;
++    while (lo <= hi) { const m = (lo + hi) >> 1; if (timeline[m].t <= t) { ans = timeline[m]; lo = m + 1; } else hi = m - 1; }
++    return ans && ans.pc !== null && ans.pc !== undefined ? { pc: ans.pc, mode: ans.mode } : null;
++}
++const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y), n = s.length; return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2; };
++const pct = (a, p) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.max(0, Math.ceil(p / 100 * s.length) - 1))]; };
++const ratio = (a, b) => (b > 0 ? a / b : null);
++
++function segsOf(track, duration) {                                        // đoạn đã parse; end_time null -> duration (nếu biết)
++    return (track.segments || []).map((s) => { const k = parseKey(s); return { start: s.start_time, end: s.end_time === null ? (Number.isFinite(duration) ? duration : null) : s.end_time, key: k }; });
++}
++// ---- KEY ----
++// Mẫu số: các mốc lấy mẫu mỗi `step` giây trong đoạn CÓ key xác định (mode != undetermined). Đoạn undetermined/không xác định độ dài bị loại và đếm riêng.
++// Engine không báo key tại mốc đó (null) => tính SAI cho exact/tonic/mode và đếm vào unknown_rate.
++function keyScore(track, pred, opt = {}) {
++    const step = opt.step || 1, duration = opt.duration, windows = opt.windows || [5, 10, 20, 40, 60];
++    const conf = Array.from({ length: 24 }, () => new Array(25).fill(0));
++    const c = { n: 0, exact: 0, tonic: 0, mode: 0, relative: 0, parallel: 0, other: 0, none: 0, excluded_undetermined_s: 0, excluded_unbounded_segments: 0 };
++    const win = {}; windows.forEach((w) => { win[w] = { n: 0, exact: 0 }; });
++    for (const s of segsOf(track, duration)) {
++        if (!s.key) continue;
++        if (s.key.mode === 'undetermined') { if (s.end !== null) c.excluded_undetermined_s += s.end - s.start; continue; }
++        if (s.end === null) { c.excluded_unbounded_segments++; continue; }
++        for (let t = s.start; t < s.end - 1e-9; t += step) {
++            const p = predAt(pred.key_timeline || [], t), r = relation(s.key, p);
++            c.n++; conf[kidx(s.key.pc, s.key.mode)][p ? kidx(p.pc, p.mode) : NONE]++;
++            if (r === 'exact') c.exact++;
++            if (p && p.pc === s.key.pc) c.tonic++; if (p && p.mode === s.key.mode) c.mode++;
++            if (r === 'relative' || r === 'parallel' || r === 'other' || r === 'none') c[r]++;
++        }
++        for (const w of windows) if (s.start + w <= s.end) { const p = predAt(pred.key_timeline || [], s.start + w); win[w].n++; if (relation(s.key, p) === 'exact') win[w].exact++; }
++    }
++    return { counts: c, confusion: conf, by_window: win, exact_acc: ratio(c.exact, c.n), tonic_acc: ratio(c.tonic, c.n), mode_acc: ratio(c.mode, c.n),
++        relative_err_rate: ratio(c.relative, c.n), parallel_err_rate: ratio(c.parallel, c.n), unknown_rate: ratio(c.none, c.n) };
++}
++// ---- MOD ----
++function gtEvents(track) { return (track.modulations || []).map((m) => { const f = parseKey(m.from_key), t = parseKey(m.to_key); return { t: m.time, delta: signedDelta(f.pc, t.pc), from: f, to: t }; }).sort((a, b) => a.t - b.t); }
++// Quy tắc ghép: dự đoán p khớp mốc g nếu g.t - pre <= p.t <= g.t + tol; ghép 1-1 tham lam theo |p.t-g.t| nhỏ nhất. Chỉ sự kiện kind="MODULATION".
++// Độ trễ = p.t - g.t (âm = báo sớm). tol là tham số bắt buộc người gọi chọn; luôn báo cáo kèm phân tích độ nhạy.
++function modScore(track, pred, opt = {}) {
++    const tol = opt.tol, pre = opt.pre === undefined ? 2 : opt.pre; if (!Number.isFinite(tol)) throw new Error('modScore: cần tol (giây)');
++    const gt = gtEvents(track), ps = (pred.mod_events || []).filter((e) => (e.kind || 'MODULATION') === 'MODULATION').map((e) => Object.assign({}, e)).sort((a, b) => a.t - b.t);
++    const cand = [];
++    gt.forEach((g, gi) => ps.forEach((p, pi) => { if (p.t >= g.t - pre && p.t <= g.t + tol) cand.push({ gi, pi, d: Math.abs(p.t - g.t) }); }));
++    cand.sort((a, b) => a.d - b.d); const gu = new Set(), pu = new Set(), pairs = [];
++    for (const m of cand) if (!gu.has(m.gi) && !pu.has(m.pi)) { gu.add(m.gi); pu.add(m.pi); pairs.push(m); }
++    const tp = pairs.length, fn = gt.length - tp, fp = ps.length - tp;
++    const hasDelta = (p) => Number.isFinite(p.semitone_delta);
++    const deltaOk = pairs.filter((m) => hasDelta(ps[m.pi]) && (((ps[m.pi].semitone_delta - gt[m.gi].delta) % 12) + 12) % 12 === 0);
++    const deltaKnown = pairs.filter((m) => hasDelta(ps[m.pi]));
++    const lat = pairs.map((m) => ps[m.pi].t - gt[m.gi].t);
++    // FP trong vùng KHÔNG modulation: dự đoán chưa ghép và không rơi vào cửa sổ [g.t-pre, g.t+tol] của mốc nào
++    const inWin = (t) => gt.some((g) => t >= g.t - pre && t <= g.t + tol);
++    const fpOutside = ps.filter((p, pi) => !pu.has(pi) && !inWin(p.t)).length;
++    const dur = opt.duration, winS = gt.reduce((a) => a + pre + tol, 0), nonModS = Number.isFinite(dur) ? Math.max(0, dur - winS) : null;
++    const bins = [['<0', -Infinity, 0], ['0-2', 0, 2], ['2-5', 2, 5], ['5-10', 5, 10], ['10-20', 10, 20], ['20-30', 20, 30], ['>=30', 30, Infinity]];
++    const hist = {}; bins.forEach(([k, a, b]) => { hist[k] = lat.filter((x) => x >= a && x < b).length; });
++    const byType = {};
++    gt.forEach((g, gi) => { const k = (g.delta > 0 ? '+' : '') + g.delta; const o = byType[k] || (byType[k] = { gt: 0, tp: 0, strict_tp: 0, latencies: [] }); o.gt++;
++        const m = pairs.find((x) => x.gi === gi); if (m) { o.tp++; o.latencies.push(ps[m.pi].t - g.t); if (deltaOk.includes(m)) o.strict_tp++; } });
++    const strictTp = deltaOk.length;
++    return { tol, pre, counts: { gt: gt.length, pred: ps.length, tp, fp, fn, fp_outside_mod_windows: fpOutside, delta_known: deltaKnown.length, delta_correct: deltaOk.length, strict_tp: strictTp },
++        precision: ratio(tp, tp + fp), recall: ratio(tp, tp + fn), f1: tp ? 2 * tp / (2 * tp + fp + fn) : (gt.length + ps.length ? 0 : null),
++        strict_precision: ratio(strictTp, tp + fp), strict_recall: ratio(strictTp, tp + fn), semitone_accuracy: ratio(deltaOk.length, deltaKnown.length),
++        latency: { n: lat.length, median: median(lat), p90: pct(lat, 90), mean: lat.length ? lat.reduce((a, b) => a + b, 0) / lat.length : null, min: lat.length ? Math.min(...lat) : null, max: lat.length ? Math.max(...lat) : null, histogram: hist, values: lat },
++        fp_per_min_non_mod: nonModS ? fpOutside / (nonModS / 60) : null, non_mod_seconds: nonModS, by_type: byType };
++}
++function sensitivity(track, pred, tols, opt = {}) { return tols.map((tol) => { const r = modScore(track, pred, Object.assign({}, opt, { tol })); return { tol, precision: r.precision, recall: r.recall, f1: r.f1, median_latency: r.latency.median, tp: r.counts.tp, fp: r.counts.fp, fn: r.counts.fn }; }); }
++// Gộp nhiều track: key = cộng mẫu (micro) + trung bình theo bài (macro); mod = cộng số đếm (micro) + latency gộp.
++function aggregateKey(list) {
++    const c = { n: 0, exact: 0, tonic: 0, mode: 0, relative: 0, parallel: 0, other: 0, none: 0 }, conf = Array.from({ length: 24 }, () => new Array(25).fill(0)), win = {};
++    list.forEach((r) => { for (const k of Object.keys(c)) c[k] += r.counts[k]; r.confusion.forEach((row, i) => row.forEach((v, j) => { conf[i][j] += v; }));
++        for (const w of Object.keys(r.by_window)) { win[w] = win[w] || { n: 0, exact: 0 }; win[w].n += r.by_window[w].n; win[w].exact += r.by_window[w].exact; } });
++    const macro = list.filter((r) => r.exact_acc !== null); 
++    return { tracks: list.length, counts: c, confusion: conf, exact_acc: ratio(c.exact, c.n), tonic_acc: ratio(c.tonic, c.n), mode_acc: ratio(c.mode, c.n), relative_err_rate: ratio(c.relative, c.n), parallel_err_rate: ratio(c.parallel, c.n), unknown_rate: ratio(c.none, c.n),
++        macro_exact_acc: macro.length ? macro.reduce((a, r) => a + r.exact_acc, 0) / macro.length : null, by_window: Object.fromEntries(Object.entries(win).map(([w, o]) => [w, Object.assign({ acc: ratio(o.exact, o.n) }, o)])) };
++}
++function aggregateMod(list) {
++    const c = { gt: 0, pred: 0, tp: 0, fp: 0, fn: 0, fp_outside_mod_windows: 0, delta_known: 0, delta_correct: 0, strict_tp: 0 }; const lat = [];
++    list.forEach((r) => { for (const k of Object.keys(c)) c[k] += r.counts[k]; lat.push(...r.latency.values); });
++    return { tracks: list.length, counts: c, precision: ratio(c.tp, c.tp + c.fp), recall: ratio(c.tp, c.tp + c.fn), f1: c.tp ? 2 * c.tp / (2 * c.tp + c.fp + c.fn) : null, semitone_accuracy: ratio(c.delta_correct, c.delta_known),
++        latency: { n: lat.length, median: median(lat), p90: pct(lat, 90) } };
++}
++module.exports = { kidx, NONE, signedDelta, relation, predAt, keyScore, modScore, sensitivity, gtEvents, aggregateKey, aggregateMod, median, pct };
+diff --git a/tools/algbench/realbench/run.js b/tools/algbench/realbench/run.js
+new file mode 100644
+index 0000000..40753a4
+--- /dev/null
++++ b/tools/algbench/realbench/run.js
+@@ -0,0 +1,48 @@
++#!/usr/bin/env node
++'use strict';
++// AI-ALG-08 — pipeline đánh giá Key/Mod trên nhạc thật.
++//   node tools/algbench/realbench/run.js [--manifest f] [--audio-root dir] [--split dev|test] [--final-test] [--predictions dir] [--out report.json] [--tols 2,5,10,15,20,30] [--tol 10]
++// - Chỉ chấm track có: audio_ok (hash khớp) VÀ reference_status=VERIFIED_INDEPENDENT. Nhãn UNVERIFIED không vào số liệu chính.
++// - Test set chỉ được chạy với --final-test (không dùng để chỉnh tham số).
++// - --predictions dir: đọc <track_id>.json {key_timeline,mod_events,duration_s} thay vì chạy engine (dùng cho test/so sánh).
++const fs = require('fs'), path = require('path');
++const { validateManifest, audioStatus, parseKey } = require('./schema.js'), M = require('./metrics.js');
++const args = process.argv.slice(2), arg = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : true) : d; };
++const REPO = path.resolve(__dirname, '../../..');
++function evaluate(manifest, o) {
++    const v = validateManifest(manifest), rep = { schema: 'AI-ALG-08/report/v1', data_origin: 'REAL_MUSIC', valid: v.errors.length === 0, errors: v.errors, warnings: v.warnings, params: { split: o.split, final_test: !!o.finalTest, tol_s: o.tol, tolerances_s: o.tols, step_s: 1 }, tracks: [], counts: {} };
++    const C = rep.counts = { total: 0, with_audio: 0, verified: 0, evaluated: 0, blocked_no_audio: 0, unverified_skipped: 0, test_skipped: 0 };
++    if (!rep.valid) return rep;
++    const keyRes = [], modRes = [];
++    for (const t of v.tracks) {
++        C.total++; const st = audioStatus(t, o.audioRoot), row = { track_id: t.track_id, split: t.split, reference_status: t.reference_status, audio_status: st.status, reason: st.reason }, ok = st.status === 'AUDIO_OK';
++        if (ok) C.with_audio++; else C.blocked_no_audio++;
++        if (t.reference_status === 'VERIFIED_INDEPENDENT') C.verified++;
++        rep.tracks.push(row);
++        if (o.split && t.split !== o.split) { row.skipped = 'split'; continue; }
++        if (t.split === 'test' && !o.finalTest) { row.skipped = 'test_set_requires_--final-test'; C.test_skipped++; continue; }
++        if (!ok && !o.predictionsDir) { row.result = 'BLOCKED_NO_AUDIO'; continue; }
++        if (t.reference_status !== 'VERIFIED_INDEPENDENT') { row.result = 'SKIPPED_UNVERIFIED_LABELS'; C.unverified_skipped++; continue; }
++        let pred; if (o.predictionsDir) { const f = path.join(o.predictionsDir, t.track_id + '.json'); if (!fs.existsSync(f)) { row.result = 'NO_PREDICTION_FILE'; continue; } pred = JSON.parse(fs.readFileSync(f, 'utf8')); }
++        else { const R = require('./engine_runner.js'), a = R.decode(st.file); pred = R.runEngines(REPO, a.pcm, a.sr); }
++        const dur = pred.duration_s, ks = M.keyScore(t, pred, { duration: dur }), ms = M.modScore(t, pred, { tol: o.tol, duration: dur });
++        row.result = 'EVALUATED'; row.duration_s = dur; row.key = ks; row.mod = ms; row.mod_sensitivity = M.sensitivity(t, pred, o.tols, { duration: dur });
++        row.other_events = { non_modulation: (pred.mod_events || []).filter((e) => e.kind && e.kind !== 'MODULATION').length };
++        C.evaluated++; keyRes.push(ks); modRes.push(ms);
++    }
++    rep.aggregate = C.evaluated ? { key: M.aggregateKey(keyRes), mod: M.aggregateMod(modRes) } : null;
++    rep.status = C.evaluated ? 'EVALUATED' : 'BLOCKED_NO_AUDIO';
++    return rep;
++}
++module.exports = { evaluate };
++if (require.main === module) {
++    const mf = path.resolve(arg('manifest', path.join(__dirname, '../manifest/real_music_manifest.json'))), manifest = JSON.parse(fs.readFileSync(mf, 'utf8'));
++    const tols = String(arg('tols', '2,5,10,15,20,30')).split(',').map(Number), tol = +arg('tol', 10);
++    const rep = evaluate(manifest, { audioRoot: path.resolve(arg('audio-root', path.dirname(mf))), split: arg('split', null), finalTest: !!arg('final-test', false), predictionsDir: arg('predictions', null), tol, tols });
++    const out = arg('out', null); if (out) fs.writeFileSync(out, JSON.stringify(rep, null, 1));
++    console.log(`manifest: ${rep.valid ? 'HỢP LỆ' : 'KHÔNG HỢP LỆ'} | status=${rep.status || 'INVALID'} | tracks=${rep.counts.total} audio=${rep.counts.with_audio} verified=${rep.counts.verified} evaluated=${rep.counts.evaluated}`);
++    rep.errors.forEach((e) => console.log('  LỖI:', e)); rep.warnings.forEach((e) => console.log('  CẢNH BÁO:', e));
++    rep.tracks.forEach((r) => console.log(`  - ${r.track_id} [${r.split}/${r.reference_status}] audio=${r.audio_status} -> ${r.result || r.skipped || ''}${r.reason ? ' (' + r.reason + ')' : ''}`));
++    if (rep.aggregate) { const a = rep.aggregate; console.log(`KEY exact=${a.key.exact_acc} tonic=${a.key.tonic_acc} mode=${a.key.mode_acc} relErr=${a.key.relative_err_rate} parErr=${a.key.parallel_err_rate} unknown=${a.key.unknown_rate}`); console.log(`MOD (tol=${tol}s) P=${a.mod.precision} R=${a.mod.recall} F1=${a.mod.f1} medLat=${a.mod.latency.median}`); }
++    process.exitCode = rep.valid ? 0 : 1;
++}
+diff --git a/tools/algbench/realbench/schema.js b/tools/algbench/realbench/schema.js
+new file mode 100644
+index 0000000..971c16e
+--- /dev/null
++++ b/tools/algbench/realbench/schema.js
+@@ -0,0 +1,92 @@
++'use strict';
++// AI-ALG-08 — schema ground-truth Key/Modulation cho nhạc thật. Chỉ kiểm tra dữ liệu; KHÔNG chạm runtime.
++// Nhãn: reference_status = VERIFIED_INDEPENDENT (đã kiểm chứng độc lập) | UNVERIFIED_REFERENCE (người dùng cung cấp, chưa kiểm chứng).
++const fs = require('fs'), path = require('path'), crypto = require('crypto');
++const NOTE = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
++const FLAT = { DB: 1, EB: 3, GB: 6, AB: 8, BB: 10, CB: 11, FB: 4, 'E#': 5, 'B#': 0 };
++const REF_STATUS = ['VERIFIED_INDEPENDENT', 'UNVERIFIED_REFERENCE'];
++const SPLITS = ['dev', 'test'];
++// Đoạn không xác định chắc chắn: mode "undetermined", tonic null — KHÔNG ép về một key; bị loại khỏi mẫu số key accuracy.
++const MODES = ['major', 'minor', 'undetermined'];
++
++function pc(name) { // tên nốt -> pitch class 0..11, hoặc null
++    if (typeof name !== 'string') return null;
++    const s = name.trim().toUpperCase().replace('♯', '#').replace('♭', 'B');
++    const i = NOTE.indexOf(s); if (i >= 0) return i;
++    return Object.prototype.hasOwnProperty.call(FLAT, s) ? FLAT[s] : null;
++}
++function parseKey(k) { // {tonic:"D",mode:"major"} -> {pc,mode} | null (không hợp lệ). undetermined -> {pc:null,mode:"undetermined"}
++    if (!k || typeof k !== 'object') return null;
++    const mode = String(k.mode || '').toLowerCase();
++    if (!MODES.includes(mode)) return null;
++    if (mode === 'undetermined') return { pc: null, mode };
++    const p = pc(k.tonic); return p === null ? null : { pc: p, mode };
++}
++function sha256File(p) { return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'); }
++const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
++
++// Kiểm tra 1 track. Trả {errors[], warnings[]}.
++function validateTrack(t, idx) {
++    const E = [], W = [], id = (t && t.track_id) || `#${idx}`, at = (m) => `${id}: ${m}`;
++    if (!t || typeof t !== 'object') return { errors: [`#${idx}: không phải object`], warnings: [] };
++    if (!t.track_id || typeof t.track_id !== 'string') E.push(at('thiếu track_id'));
++    if (!t.audio_reference || typeof t.audio_reference !== 'object') E.push(at('thiếu audio_reference'));
++    else if (!t.audio_reference.path && !t.audio_reference.source_url) E.push(at('audio_reference cần path hoặc source_url'));
++    if (t.audio_hash !== null && t.audio_hash !== undefined && !/^[0-9a-f]{64}$/.test(String(t.audio_hash))) E.push(at('audio_hash phải là sha256 hex 64 ký tự hoặc null'));
++    if (!REF_STATUS.includes(t.reference_status)) E.push(at(`reference_status phải thuộc ${REF_STATUS.join('|')}`));
++    if (!t.annotator || typeof t.annotator !== 'string') E.push(at('thiếu annotator/nguồn xác minh'));
++    if (!SPLITS.includes(t.split)) E.push(at('split phải là dev|test'));
++    if (typeof t.annotation_notes !== 'string') E.push(at('thiếu annotation_notes (có thể để chuỗi rỗng)'));
++    if (!Array.isArray(t.segments)) E.push(at('segments phải là mảng'));
++    else {
++        let prevEnd = -Infinity;
++        t.segments.forEach((s, i) => {
++            const p = at(`segments[${i}]`);
++            if (!isNum(s.start_time) || s.start_time < 0) E.push(`${p}: start_time không hợp lệ`);
++            if (s.end_time !== null && !isNum(s.end_time)) E.push(`${p}: end_time phải là số hoặc null (null = đến hết bài)`);
++            if (isNum(s.end_time) && isNum(s.start_time) && s.end_time <= s.start_time) E.push(`${p}: end_time <= start_time`);
++            if (!parseKey(s)) E.push(`${p}: tonic/mode không hợp lệ`);
++            if (isNum(s.start_time) && s.start_time < prevEnd) E.push(`${p}: chồng lấn đoạn trước`);
++            prevEnd = s.end_time === null ? Infinity : (isNum(s.end_time) ? s.end_time : prevEnd);
++        });
++    }
++    if (!Array.isArray(t.modulations)) E.push(at('modulations phải là mảng (rỗng = nhóm đối chứng không chuyển tông)'));
++    else t.modulations.forEach((m, i) => {
++        const p = at(`modulations[${i}]`);
++        if (!isNum(m.time) || m.time < 0) E.push(`${p}: time không hợp lệ`);
++        const f = parseKey(m.from_key), to = parseKey(m.to_key);
++        if (!f || f.mode === 'undetermined') E.push(`${p}: from_key không hợp lệ`);
++        if (!to || to.mode === 'undetermined') E.push(`${p}: to_key không hợp lệ`);
++        if (f && to && f.pc === to.pc && f.mode === to.mode) E.push(`${p}: from_key trùng to_key`);
++    });
++    if (t.audio_hash && t.reference_status === 'VERIFIED_INDEPENDENT' && !t.annotator) E.push(at('nhãn VERIFIED cần nguồn xác minh'));
++    if (t.reference_status === 'VERIFIED_INDEPENDENT' && Array.isArray(t.segments) && t.segments.length === 0 && Array.isArray(t.modulations) && t.modulations.length === 0)
++        W.push(at('VERIFIED nhưng không có segments lẫn modulations: không chấm được gì'));
++    return { errors: E, warnings: W };
++}
++
++// Trạng thái dữ liệu của 1 track theo đĩa: audio có/không, hash khớp không.
++function audioStatus(t, audioRoot) {
++    const ref = t.audio_reference || {};
++    if (!ref.path) return { status: 'BLOCKED_NO_AUDIO', reason: 'chưa có file audio (chỉ có tham chiếu URL hoặc không có)' };
++    const p = path.resolve(audioRoot || '.', ref.path);
++    if (!fs.existsSync(p)) return { status: 'BLOCKED_NO_AUDIO', reason: `không thấy file: ${ref.path}` };
++    if (!t.audio_hash) return { status: 'BLOCKED_NO_HASH', reason: 'có file nhưng manifest chưa ghi audio_hash', file: p };
++    const h = sha256File(p);
++    if (h !== t.audio_hash) return { status: 'BLOCKED_HASH_MISMATCH', reason: `sha256 file ${h.slice(0, 12)}… ≠ manifest ${String(t.audio_hash).slice(0, 12)}…`, file: p };
++    return { status: 'AUDIO_OK', file: p };
++}
++
++// Kiểm tra cả manifest (schema + ràng buộc chéo: id duy nhất, một audio_hash không nằm ở cả dev lẫn test).
++function validateManifest(m) {
++    const errors = [], warnings = [];
++    if (!m || typeof m !== 'object' || !Array.isArray(m.tracks)) return { errors: ['manifest cần trường tracks[]'], warnings, tracks: [] };
++    const ids = new Set(), hashSplit = new Map();
++    m.tracks.forEach((t, i) => {
++        const r = validateTrack(t, i); errors.push(...r.errors); warnings.push(...r.warnings);
++        if (t && t.track_id) { if (ids.has(t.track_id)) errors.push(`${t.track_id}: track_id trùng`); ids.add(t.track_id); }
++        if (t && t.audio_hash) { const o = hashSplit.get(t.audio_hash); if (o && o !== t.split) errors.push(`${t.track_id}: cùng audio_hash xuất hiện ở cả dev và test (rò rỉ)`); hashSplit.set(t.audio_hash, t.split); }
++    });
++    return { errors, warnings, tracks: m.tracks };
++}
++module.exports = { NOTE, pc, parseKey, validateTrack, validateManifest, audioStatus, sha256File, REF_STATUS, SPLITS, MODES };
+-- 
+2.43.0
+
