@@ -1,0 +1,299 @@
+diff --git a/tests/unit/FxIndicatorA06.verify.js b/tests/unit/FxIndicatorA06.verify.js
+new file mode 100644
+index 0000000..69ce498
+--- /dev/null
++++ b/tests/unit/FxIndicatorA06.verify.js
+@@ -0,0 +1,61 @@
++/**
++ * AI-FIX-06 — Nút FX tự sáng/tắt theo nhạc: kiểm chứng wiring THẬT trong renderer.js (createFxAutoWiring) với DOM/ActionRegistry giả,
++ * audioSource.js thật. TÍN HIỆU TỔNG HỢP; không phải MIDI/DAW/nhạc thật.
++ * Chạy: node tests/unit/FxIndicatorA06.verify.js
++ */
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const asSrc = fs.readFileSync(path.resolve(__dirname, '../../ui/js/audioSource.js'), 'utf8');
++const ren = fs.readFileSync(path.resolve(__dirname, '../../ui/js/renderer.js'), 'utf8');
++const a = ren.indexOf('function createFxAutoWiring() {'), b = ren.indexOf('createFxAutoWiring();\n', a);
++const fnSrc = ren.slice(a, b);
++let fail = 0; const ok = (c, m) => { console.log(`  ${c ? '✅' : '❌'} ${m}`); if (!c) fail++; };
++
++function build(opts = {}) {
++    const clock = { t: 0 }; const executed = []; const telemetry = []; const cls = new Set(); const btn = { dataset: {}, title: '', classList: { toggle(c, f) { (f === undefined ? !cls.has(c) : f) ? cls.add(c) : cls.delete(c); }, contains: (c) => cls.has(c), add: (c) => cls.add(c) } };
++    const cfg = new Set(opts.configured || []); let failExec = !!opts.failExec; const intervals = [];
++    const win = { performance: { now: () => 0 }, electronAPI: { sendTelemetry: (r) => telemetry.push(r) } }; win.window = win;
++    win.Date = { now: () => clock.t };
++    vm.createContext(win); vm.runInContext(asSrc, win);
++    Object.assign(win, {
++        document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) }, getSetting: (k, f) => (k === 'fxAutoMidiMode' ? 'toggle' : f), saveData: () => {}, console: { log() {}, warn() {}, error() {} },
++        setInterval: (fn, ms) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,
++        ActionRegistry: {
++            ACTIONS: { MONITOR_FX: 'MONITOR_FX', FX_SEND_REVERB: 'FX_SEND_REVERB', FX_SEND_DELAY: 'FX_SEND_DELAY' },
++            getMidiOutMapping: (n) => (cfg.has(n) ? { kind: 'cc', number: 20, value: 127, channel: 1 } : null), getMouseCoordinate: () => '',
++            executeAction: async (n, ctx) => { executed.push({ n, t: clock.t }); return failExec ? { ok: false, status: 'NO_DEVICE', via: 'midi' } : { ok: true, status: 'SUCCESS', via: 'midi' }; },
++        },
++    });
++    vm.runInContext(fnSrc + '\ncreateFxAutoWiring();', win);
++    const ctl = win.__fxAuto; ctl.setSourceState(true);
++    return { win, btn, cls, executed, telemetry, ctl, setFail: (v) => { failExec = v; },
++        async run(sec, lvl) { const end = clock.t + sec * 1000; while (clock.t < end) { clock.t += 16; ctl.feedLevel(lvl(clock.t / 1000), clock.t); if (Math.round(clock.t / 16) % 31 === 0) ctl.tick(clock.t); await Promise.resolve(); } for (let i = 0; i < 5; i++) await Promise.resolve(); } };
++}
++const SIL = () => -80, MUS = () => -25;
++(async () => {
++    console.log('=== FxIndicatorA06 (wiring thật trong renderer.js; synthetic) ===');
++    let r = build({ configured: ['FX_SEND_REVERB', 'FX_SEND_DELAY'] }); await r.run(5, SIL); await r.run(5, MUS);
++    ok(r.cls.has('active'), '1. Nhạc phát → nút FX tự SÁNG');
++    ok(r.executed.length === 2 && r.btn.dataset.fxSync === 'sent-unconfirmed' && /chưa xác nhận/.test(r.btn.title), '   đã gửi Reverb + Delay đúng 1 lệnh mỗi Send; trạng thái = đã gửi, CHƯA xác nhận');
++    await r.run(20, MUS); ok(r.executed.length === 2, '2. Nhạc tiếp tục → không gửi lặp');
++    await r.run(3, SIL); await r.run(3, MUS); ok(r.cls.has('active') && r.executed.length === 2, '3. Lặng ngắn → nút vẫn sáng, không gửi');
++    await r.run(10, SIL); ok(!r.cls.has('active') && r.executed.length === 4, '4. Nhạc dừng đủ lâu → nút TẮT + 2 lệnh tắt');
++    await r.run(30, SIL); ok(r.executed.length === 4 && !r.cls.has('active'), '5. Micro/nhiễu sau khi dừng (không vào bộ phát hiện) → vẫn tắt, không gửi');
++    await r.run(5, MUS); ok(r.cls.has('active') && r.executed.length === 6, '6. Nhạc phát lại → sáng lại + bật Send');
++    // chưa cấu hình Send: nút VẪN sáng theo yêu cầu nhưng trạng thái nói rõ không có lệnh nào tới DAW
++    r = build({ configured: [] }); await r.run(5, SIL); await r.run(5, MUS);
++    ok(r.cls.has('active') && r.executed.length === 0, '7a. Chưa cấu hình Send: nút sáng theo YÊU CẦU, KHÔNG có lệnh nào gửi đi');
++    ok(r.btn.dataset.fxSync === 'not-configured' && /CHƯA cấu hình/.test(r.btn.title), '7b. Trạng thái hiển thị đúng sự thật: chưa cấu hình, DAW không nhận lệnh (không báo thành công giả)');
++    // MIDI lỗi
++    r = build({ configured: ['FX_SEND_REVERB', 'FX_SEND_DELAY'], failExec: true }); await r.run(5, SIL); await r.run(5, MUS);
++    ok(r.cls.has('active') && r.btn.dataset.fxSync === 'failed' && /LỖI/.test(r.btn.title), '8. MIDI lỗi: nút theo yêu cầu nhưng trạng thái = LỖI/chưa đồng bộ (không báo đã áp dụng)');
++    const n = r.executed.length; await r.run(60, MUS); ok(r.executed.length <= n + 4, `   thử lại có giới hạn, không lặp vô hạn (${r.executed.length - n} lệnh thêm)`);
++    r.setFail(false);
++    // nguồn mất: đóng băng
++    r = build({ configured: ['FX_SEND_REVERB'] }); await r.run(5, SIL); await r.run(5, MUS); r.ctl.setSourceState(false); await r.run(20, SIL);
++    ok(r.cls.has('active') && /không khả dụng/.test(r.btn.title), '9. Nguồn nhạc mất → giữ nguyên trạng thái, báo không khả dụng');
++    // telemetry
++    r = build({ configured: ['FX_SEND_REVERB'] }); await r.run(5, SIL); await r.run(5, MUS); await r.run(10, SIL);
++    ok(r.telemetry.filter((x) => x.event === 'FX_AUTO').length >= 2 && r.telemetry.length < 30, `10. Chuyển trạng thái được ghi log FX_AUTO (${r.telemetry.length} bản ghi, không spam mỗi chu kỳ)`);
++    ok(typeof r.win.__fxAutoDebug === 'function' && r.win.__fxAutoDebug().framesSeen > 0, '    __fxAutoDebug() trả về chẩn đoán (số khung nhận, mức dBFS, Send)');
++    console.log(fail ? `❌ ${fail} FAIL` : '✅ TẤT CẢ PASS'); process.exit(fail ? 1 : 0);
++})();
+diff --git a/tools/algbench/modbench.js b/tools/algbench/modbench.js
+index 9ab5c27..d67184c 100644
+--- a/tools/algbench/modbench.js
++++ b/tools/algbench/modbench.js
+@@ -28,7 +28,7 @@ function run(spec, secs, modAt, shift) {
+     return events;
+ }
+ const cases = [];
+-for (const mode of ['major', 'minor']) for (const prog of Object.keys(PROGS[mode])) for (const root of [0, 6]) cases.push({ mode, prog, root, seed: root * 13 + prog.length + 5 });
++for (const mode of ['major', 'minor']) for (const prog of Object.keys(PROGS[mode])) for (const root of [0, 6]) cases.push(Object.assign({ mode, prog, root, seed: root * 13 + prog.length + 5 }, JSON.parse(process.env.MODBENCH_SPEC || '{}')));
+ const rows = [];
+ cases.forEach((c, idx) => { if (idx % nsh !== shard) return;
+     const stat = run(c, 40, 0, 0);
+diff --git a/tools/algbench/noisebench.js b/tools/algbench/noisebench.js
+new file mode 100644
+index 0000000..d8ee593
+--- /dev/null
++++ b/tools/algbench/noisebench.js
+@@ -0,0 +1,24 @@
++'use strict';
++// AI-FIX-06 — tái hiện triệu chứng log thật (LONG_REANCHOR liên tục) bằng nhạc tổng hợp + nhiễu băng rộng/bộ gõ mạnh.
++// Dùng: node tools/algbench/noisebench.js <REPO> [secs=90] — in số LONG_REANCHOR, số lần đổi khoá, khoá cuối, đúng/sai.
++const path = require('path');
++const REPO = path.resolve(process.argv[2] || '.'); const SECS = +(process.argv[3] || 90);
++const { render, PROGS } = require(path.join(__dirname, '../../tests/helpers/synthPop.js'));
++const { mkAnalyser, sandbox, loadEngine } = require('./lib.js');
++const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
++const conds = { clean: { noise: 0 }, diffuse: { noise: 0.3, padAmp: 0.03, bassAmp: 0.05, melAmp: 0.05 }, diffuse2: { noise: 0.5, padAmp: 0.04, bassAmp: 0.06, melAmp: 0.06 } };
++const out = {};
++for (const [cn, co] of Object.entries(conds)) {
++    let n = 0, reanch = 0, changes = 0, finalOk = 0, lockedAny = 0;
++    for (const mode of ['major', 'minor']) for (const prog of Object.keys(PROGS[mode])) for (const root of [0, 7]) {
++        const sr = 22050, r = render(Object.assign({ sr, seconds: SECS + 1, mode, prog, root, seed: root * 13 + prog.length + 5 }, co)); const clock = { t: 1000 };
++        const S = sandbox(clock, () => mkAnalyser(r.pcm, sr, 8192, clock, 1000), sr);
++        S.sb.electronAPI = { sendTelemetry: (rec) => { if (rec && rec.event === 'LONG_REANCHOR') reanch++; } };
++        loadEngine(REPO, S.sb, 'keyEngine.js', 'KeyEngine'); const K = S.sb.KeyEngine; K.init(S.ctx, { connect() {} });
++        const locks = []; K.watchContinuous((x) => locks.push(x.key)); S.step(SECS * 1000); K.stop();
++        n++; changes += Math.max(0, locks.length - 1); if (locks.length) lockedAny++;
++        const truth = `${NOTE[r.truth.root]} ${r.truth.mode === 'minor' ? 'Minor' : 'Major'}`; if (locks[locks.length - 1] === truth) finalOk++;
++    }
++    out[cn] = { songs: n, reanchorPerSong: +(reanch / n).toFixed(1), lockChangesPerSong: +(changes / n).toFixed(2), finalExact: `${finalOk}/${n}`, locked: `${lockedAny}/${n}` };
++}
++console.log(JSON.stringify(out, null, 1));
+diff --git a/ui/js/audioSource.js b/ui/js/audioSource.js
+index 6a28435..37de450 100644
+--- a/ui/js/audioSource.js
++++ b/ui/js/audioSource.js
+@@ -415,11 +415,11 @@
+         let actionState = FxActionState.IDLE;
+         let sourceRunning = false, lastFrameAt = null, availableSince = null;
+         let manualOverride = false, inflight = false, retries = 0, retryAt = null, lastTarget = null;
+-        let sentCount = 0, failedCount = 0;
++        let sentCount = 0, failedCount = 0, lastResult = null, lastDbfs = null, framesSeen = 0;
+         const notify = () => { try { deps.onState && deps.onState(getInfo()); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } };
+ 
+         function getInfo() {
+-            return { musicState, actionState, fxTarget: lastTarget, manualOverride, sentCount, failedCount, retries };
++            return { musicState, actionState, fxTarget: lastTarget, manualOverride, sentCount, failedCount, retries, lastResult, lastDbfs, framesSeen, sourceRunning };
+         }
+         function prune(t) {
+             const keepFrom = t - Math.max(P.confirmSilenceMs, P.confirmMusicMs) - 500;
+@@ -429,7 +429,7 @@
+         function feedLevel(dbfs, t) {
+             const tt = t === undefined ? now() : t;
+             if (availableSince === null) availableSince = tt;
+-            lastFrameAt = tt;
++            lastFrameAt = tt; lastDbfs = Number.isFinite(dbfs) ? +dbfs.toFixed(1) : null; framesSeen++;
+             frames.push({ t: tt, db: Number.isFinite(dbfs) ? dbfs : -Infinity });
+             prune(tt);
+         }
+@@ -486,9 +486,10 @@
+             if (deps.getFxState() === target) { if (actionState === FxActionState.FX_ACTION_FAILED) actionState = FxActionState.IDLE; return; } // đã đúng: KHÔNG gửi
+             if (lastTarget !== target) retries = 0;
+             lastTarget = target; inflight = true;
++            try { deps.onRequest && deps.onRequest(target); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } // AI-FIX-06: TRẠNG THÁI YÊU CẦU tách khỏi trạng thái đã gửi
+             let res;
+             try { res = await deps.applyFx(target); } catch (e) { res = { ok: false, error: String(e) }; }
+-            inflight = false;
++            inflight = false; lastResult = res ? { ok: !!res.ok, partial: !!res.partial, reason: res.reason || res.status || null } : null;
+             if (res && res.ok) {
+                 sentCount++; actionState = FxActionState.SEND_SENT_UNCONFIRMED; retryAt = null;
+             } else {
+@@ -541,7 +542,12 @@
+         }
+         // Bấm tay: đánh dấu các Send đã gửi theo kết quả thật (deps.execute đã được gọi bên ngoài).
+         function markSent(n, state) { sent[n] = state; }
+-        return { apply, seed, markSent, managed, getSent: () => Object.assign({}, sent) };
++        // Trạng thái "đã gửi" gộp của các Send đang quản lý: true/false nếu tất cả khớp, null nếu lẫn lộn/chưa có Send nào (KHÔNG phải trạng thái DAW đã xác nhận).
++        function aggregate() {
++            const list = managed(); if (!list.length) return null;
++            const v = list.map((n) => sent[n]); return v.every((x) => x === true) ? true : v.every((x) => x === false) ? false : null;
++        }
++        return { apply, seed, markSent, aggregate, managed, getSent: () => Object.assign({}, sent) };
+     }
+ 
+     global.AudioSourceType = AudioSourceType;
+diff --git a/ui/js/engines/keyEngine.js b/ui/js/engines/keyEngine.js
+index b91d565..f19034f 100644
+--- a/ui/js/engines/keyEngine.js
++++ b/ui/js/engines/keyEngine.js
+@@ -84,6 +84,10 @@ const KeyEngine = (() => {
+     const LONG_LOCK_MIN_S = 4;        // ... và đã tích luỹ ≥ 4 s nhạc
+     const SHORT_TAU_S = 1.5;          // bộ tích luỹ ngắn: đo "năng lượng ngoài thang của Key dài hạn" + làm điểm neo khi Key thật sự đổi
+     const OOK_RATIO = 0.25;           // ≥ 25% năng lượng ngoài thang âm của Key dài hạn ...
++    const OOK_NEWKEY_MAX_OUT = 0.12;  // AI-FIX-06: Key mới phải giải thích đoạn ngắn: ngoài-thang của Key mới ≤ 12%
++    const OOK_EXPLAIN_GAP = 0.15;     // ... và ngoài-thang của Key cũ phải lớn hơn Key mới ≥ 15 điểm %
++    const OOK_COOLDOWN_S = 12;        // ... tối thiểu 12 s giữa 2 lần neo lại
++    let lastReanchorAtS = -1e9;
+     const OOK_TICKS = 4;              // ... liên tục ≥ 4 tick (1.6 s) => nghi chuyển điệu thật: neo lại bộ tích luỹ dài hạn vào đoạn ngắn
+     const LONG_ANCHOR_MASS_S = 2;     // "khối lượng" bằng chứng của điểm neo (giây tương đương) — dữ liệu mới lấn át điểm neo sau vài giây
+     const LONG_LOCK_MIN_MODAL = 0.2;  // khoá thẳng theo dài hạn chỉ khi có bằng chứng quãng 3 rõ (hợp âm thiếu quãng 3 = mập mờ Major/Minor, không khoá)
+@@ -162,7 +166,7 @@ const KeyEngine = (() => {
+         hasMusicalContent = false;
+         bassRootVotes = new Array(12).fill(0);
+         tuningCents = 0; tuningVotes = {}; tuningFrame = 0; // AI-ALG-03: reset theo nguồn mới
+-        chromaVectorLong = new Array(12).fill(0); longSum = new Array(12).fill(0); longMass = 0; chromaVectorShort = new Array(12).fill(0); ookStreak = 0; chromaVectorMid = new Array(12).fill(0); longSeconds = 0; lastLongAt = null; longState.key = null; longState.streak = 0; longState.result = null; // AI-ALG-05
++        chromaVectorLong = new Array(12).fill(0); longSum = new Array(12).fill(0); longMass = 0; chromaVectorShort = new Array(12).fill(0); ookStreak = 0; chromaVectorMid = new Array(12).fill(0); longSeconds = 0; lastReanchorAtS = -1e9; lastLongAt = null; longState.key = null; longState.streak = 0; longState.result = null; // AI-ALG-05
+         lastTop1Key = null;
+         lastTop1Label = null;
+         lastTop1ChangedAt = null;
+@@ -505,8 +509,19 @@ const KeyEngine = (() => {
+         for (const o of scaleOffsets) inScale[(r.rootIndex + o) % 12] = true;
+         let tot = 0, out = 0;
+         for (let i = 0; i < 12; i++) { const e = chromaVectorShort[i] * chromaVectorShort[i]; tot += e; if (!inScale[i]) out += e; }
+-        ookStreak = (tot > 0 && out / tot >= OOK_RATIO) ? ookStreak + 1 : 0;
++        // AI-FIX-06: chroma "loãng" (nhiễu/bộ gõ/giọng hát trải đều 12 nốt) LUÔN có ≥33–42% năng lượng nằm ngoài bất kỳ thang nào => điều kiện cũ
++        // (≥25%) thoả liên tục, neo lại hàng trăm lần trên nhạc thật (log 15/10: 262 LONG_REANCHOR/292 s) và vô hiệu bộ nhớ dài hạn.
++        // Chuyển điệu THẬT phải có 1 Key MỚI giải thích tốt đoạn ngắn (ngoài-thang của Key mới thấp) và Key cũ giải thích kém hơn rõ rệt.
++        let ookOk = tot > 0 && out / tot >= OOK_RATIO;
++        if (ookOk) {
++            const ns = estimateKeyFromChroma(chromaVectorShort, { bassWeight: LONG_BASS_WEIGHT });
++            const nk = ns && Number.isInteger(ns.rootIndex) ? outOfScaleRatio(ns.rootIndex, ns.mode, "short") : null;
++            const sameSet = ns && (ns.rootIndex === r.rootIndex && ns.mode === r.mode);
++            ookOk = !sameSet && nk !== null && nk <= OOK_NEWKEY_MAX_OUT && (out / tot) - nk >= OOK_EXPLAIN_GAP && (longSeconds - lastReanchorAtS) >= OOK_COOLDOWN_S;
++        }
++        ookStreak = ookOk ? ookStreak + 1 : 0;
+         if (ookStreak >= OOK_TICKS) {
++            lastReanchorAtS = longSeconds;
+             // neo lại: bằng chứng dài hạn = đoạn ngắn hiện tại (khối lượng nhỏ để dữ liệu mới lấn át nhanh)
+             let mag = Math.sqrt(chromaVectorShort.reduce((a, v) => a + v * v, 0)) || 1;
+             for (let i = 0; i < 12; i++) { longSum[i] = (chromaVectorShort[i] / mag) * LONG_ANCHOR_MASS_S; chromaVectorLong[i] = longSum[i] / LONG_ANCHOR_MASS_S; }
+diff --git a/ui/js/engines/modEngine.js b/ui/js/engines/modEngine.js
+index f1ad9ed..1c8fb7e 100644
+--- a/ui/js/engines/modEngine.js
++++ b/ui/js/engines/modEngine.js
+@@ -52,6 +52,10 @@ const ModEngine = (() => {
+     const SUSTAIN_REQUIRED = 3;
+     // TASK AI-ALG-05 — tỷ lệ năng lượng ngắn hạn NGOÀI thang âm của Key hiện hành tối thiểu để xác nhận chuyển điệu/đổi mode (chỉ áp ở chế độ nhãn).
+     const MOD_MIN_OUT_OF_SCALE = 0.15;
++    const MOD_NEWKEY_MAX_OUT = 0.2;  // AI-FIX-06: Key mới phải giải thích đoạn trung hạn (ngoài-thang ≤ 15%)
++    const MOD_EXPLAIN_GAP = 0.08;     // ... và Key cũ ngoài-thang lớn hơn ≥ 15 điểm %
++    const MOD_LABEL_COOLDOWN_TICKS = 20; // đổi nhãn Mode/relative: tối thiểu 20 tick (≈20 s) từ lần đổi trước
++    let ticksSinceLabelChange = 1e9;
+     const LONGMOD_SUSTAIN = 4; // đường 2: Key dài hạn khác Key hiện hành liên tục ≥ 4 tick (poll 1 s)
+ 
+     /**
+@@ -114,7 +118,9 @@ const ModEngine = (() => {
+ 
+         emitState("LISTENING", { timestamp: Date.now() }); // trạng thái mặc định lúc bắt đầu theo dõi
+ 
++        ticksSinceLabelChange = 1e9;
+         pollTimerId = setInterval(() => {
++            if (ticksSinceLabelChange < 1e9) ticksSinceLabelChange++;
+ 
+             if (isManualOverrideActiveFn?.()) {
+                 if (pendingRoot !== null) emitState("LISTENING", { timestamp: Date.now(), reason: "manual_override" });
+@@ -168,6 +174,18 @@ const ModEngine = (() => {
+                 }
+                 const kind = cur.root === baseline.root ? "MODE_CHANGE"
+                     : (relativeMajorRoot(cur) === relativeMajorRoot(baseline) ? "RELATIVE_KEY" : "MODULATION");
++                // AI-FIX-06 — hiệu chỉnh theo "chance": chroma loãng (nhiễu/bộ gõ/giọng) luôn có ≥33% ngoài MỌI thang nên cổng trên không chặn được gì trên nhạc thật
++                // (log 15/10: MOD_CONFIRMED ±5/±1/±3/±6 và nhãn B Minor<->B Major đảo qua lại cách 4 s). Thêm: (1) chuyển điệu THẬT cần Key mới giải thích tốt đoạn
++                // trung hạn (ngoài-thang Key mới thấp) và Key cũ kém hơn rõ rệt; (2) đổi nhãn MODE_CHANGE cùng tonic (không đổi pitch) cần ≥ MOD_LABEL_COOLDOWN_TICKS giây từ lần đổi trước.
++                if (kind === "MODULATION" && typeof KeyEngine.outOfScaleRatio === "function") {
++                    const nOut = KeyEngine.outOfScaleRatio(cur.root, cur.mode, "mid"), bOut = KeyEngine.outOfScaleRatio(baseline.root, baseline.mode, "mid");
++                    if (typeof nOut === "number" && typeof bOut === "number" && !(nOut <= MOD_NEWKEY_MAX_OUT && bOut - nOut >= MOD_EXPLAIN_GAP)) {
++                        pendingStreak = SUSTAIN_REQUIRED - 1; return;
++                    }
++                } else if (kind === "MODE_CHANGE" && ticksSinceLabelChange < MOD_LABEL_COOLDOWN_TICKS) {
++                    pendingStreak = SUSTAIN_REQUIRED - 1; return;
++                }
++                ticksSinceLabelChange = 0;
+                 const fromLabel = labelOf(baseline);
+                 baseline = cur; pendingRoot = null; pendingStreak = 0; longPendKey = null; longPendCount = 0;
+ 
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index e6cf0de..f753adc 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -510,18 +510,38 @@ function createFxAutoWiring() {
+     });
+     group.seed(!!fxBtn?.classList.contains("active")); // trạng thái khởi động = trạng thái UI đã lưu (không có feedback DAW)
+     window.__fxSendGroup = group;
++    // AI-FIX-06 — TÁCH 3 trạng thái: (1) YÊU CẦU (nút FX sáng/tắt theo nhạc nền ngay khi chuyển trạng thái được xác nhận),
++    // (2) ĐÃ GỬI (group.aggregate(), dùng để quyết định gửi/không gửi lại), (3) DAW ĐÃ XÁC NHẬN (KHÔNG tồn tại: không có feedback).
++    // Trước đây nút chỉ sáng khi gửi MIDI thành công => chưa cấu hình Send / MIDI lỗi => nút KHÔNG BAO GIỜ sáng và không có dấu vết nào.
++    // Trạng thái đồng bộ hiện ở tooltip (title) + data-fx-sync của nút (không đổi HTML/CSS); chuyển trạng thái được ghi vào log telemetry.
++    const syncText = (info) => {
++        const lr = info.lastResult;
++        if (info.manualOverride) return "FX: điều khiển thủ công (Auto tạm nhường tới lần nhạc đổi trạng thái)";
++        if (info.musicState === "SOURCE_UNAVAILABLE") return "FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái";
++        if (!lr) return "FX Auto: đang theo dõi nhạc nền";
++        if (lr.ok) return "FX Auto: đã GỬI lệnh Send Reverb/Delay — DAW chưa xác nhận (không có phản hồi)";
++        if (lr.reason === "NOT_CONFIGURED") return "FX Auto: CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh";
++        return "FX Auto: gửi lệnh Send LỖI" + (lr.partial ? " một phần" : "") + " — DAW có thể chưa đồng bộ";
++    };
++    let __lastFxLogKey = "";
+     const ctl = AudioSource.createFxAutoController({
+-        getFxState: () => !!fxBtn?.classList.contains("active"),
++        getFxState: () => group.aggregate(),
++        onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); saveData(); } },
+         applyFx: async (target) => {
+             if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
+             const res = await group.apply(target);
+-            if (res && res.ok) { fxBtn?.classList.toggle("active", target); saveData(); }
+-            else console.warn("[FX-AUTO] Gửi lệnh Send FX thất bại/một phần — UI giữ nguyên, DAW có thể chưa đồng bộ:", res);
++            if (!(res && res.ok)) console.warn("[FX-AUTO] Gửi lệnh Send FX thất bại/một phần/chưa cấu hình — nút giữ trạng thái YÊU CẦU, DAW có thể chưa đồng bộ:", res);
+             return res;
+         },
+-        onState: (info) => { window.__fxAutoInfo = info; },
++        onState: (info) => {
++            window.__fxAutoInfo = info;
++            if (fxBtn) { fxBtn.title = syncText(info); fxBtn.dataset.fxSync = info.manualOverride ? "manual" : (info.lastResult ? (info.lastResult.ok ? "sent-unconfirmed" : (info.lastResult.reason === "NOT_CONFIGURED" ? "not-configured" : "failed")) : "idle"); }
++            const k = `${info.musicState}|${info.actionState}|${info.fxTarget}|${info.lastResult ? info.lastResult.ok + ":" + info.lastResult.reason : ""}`;
++            if (k !== __lastFxLogKey) { __lastFxLogKey = k; window.electronAPI?.sendTelemetry?.({ event: "FX_AUTO", musicState: info.musicState, actionState: info.actionState, target: info.fxTarget, lastResult: info.lastResult, lastDbfs: info.lastDbfs, framesSeen: info.framesSeen, timestamp: Date.now() }); }
++        },
+     });
+     window.__fxAuto = ctl;
++    window.__fxAutoDebug = () => Object.assign({}, ctl.getInfo(), { sends: group.getSent(), managed: group.managed(), params: ctl.params });
+     setInterval(() => { if (getSetting("fxAutoEnabled", true) !== false) ctl.tick(); }, 500); // ĐÚNG 1 interval cho cả vòng đời trang
+     return ctl;
+ }

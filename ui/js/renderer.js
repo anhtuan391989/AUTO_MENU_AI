@@ -510,18 +510,38 @@ function createFxAutoWiring() {
     });
     group.seed(!!fxBtn?.classList.contains("active")); // trạng thái khởi động = trạng thái UI đã lưu (không có feedback DAW)
     window.__fxSendGroup = group;
+    // AI-FIX-06 — TÁCH 3 trạng thái: (1) YÊU CẦU (nút FX sáng/tắt theo nhạc nền ngay khi chuyển trạng thái được xác nhận),
+    // (2) ĐÃ GỬI (group.aggregate(), dùng để quyết định gửi/không gửi lại), (3) DAW ĐÃ XÁC NHẬN (KHÔNG tồn tại: không có feedback).
+    // Trước đây nút chỉ sáng khi gửi MIDI thành công => chưa cấu hình Send / MIDI lỗi => nút KHÔNG BAO GIỜ sáng và không có dấu vết nào.
+    // Trạng thái đồng bộ hiện ở tooltip (title) + data-fx-sync của nút (không đổi HTML/CSS); chuyển trạng thái được ghi vào log telemetry.
+    const syncText = (info) => {
+        const lr = info.lastResult;
+        if (info.manualOverride) return "FX: điều khiển thủ công (Auto tạm nhường tới lần nhạc đổi trạng thái)";
+        if (info.musicState === "SOURCE_UNAVAILABLE") return "FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái";
+        if (!lr) return "FX Auto: đang theo dõi nhạc nền";
+        if (lr.ok) return "FX Auto: đã GỬI lệnh Send Reverb/Delay — DAW chưa xác nhận (không có phản hồi)";
+        if (lr.reason === "NOT_CONFIGURED") return "FX Auto: CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh";
+        return "FX Auto: gửi lệnh Send LỖI" + (lr.partial ? " một phần" : "") + " — DAW có thể chưa đồng bộ";
+    };
+    let __lastFxLogKey = "";
     const ctl = AudioSource.createFxAutoController({
-        getFxState: () => !!fxBtn?.classList.contains("active"),
+        getFxState: () => group.aggregate(),
+        onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); saveData(); } },
         applyFx: async (target) => {
             if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
             const res = await group.apply(target);
-            if (res && res.ok) { fxBtn?.classList.toggle("active", target); saveData(); }
-            else console.warn("[FX-AUTO] Gửi lệnh Send FX thất bại/một phần — UI giữ nguyên, DAW có thể chưa đồng bộ:", res);
+            if (!(res && res.ok)) console.warn("[FX-AUTO] Gửi lệnh Send FX thất bại/một phần/chưa cấu hình — nút giữ trạng thái YÊU CẦU, DAW có thể chưa đồng bộ:", res);
             return res;
         },
-        onState: (info) => { window.__fxAutoInfo = info; },
+        onState: (info) => {
+            window.__fxAutoInfo = info;
+            if (fxBtn) { fxBtn.title = syncText(info); fxBtn.dataset.fxSync = info.manualOverride ? "manual" : (info.lastResult ? (info.lastResult.ok ? "sent-unconfirmed" : (info.lastResult.reason === "NOT_CONFIGURED" ? "not-configured" : "failed")) : "idle"); }
+            const k = `${info.musicState}|${info.actionState}|${info.fxTarget}|${info.lastResult ? info.lastResult.ok + ":" + info.lastResult.reason : ""}`;
+            if (k !== __lastFxLogKey) { __lastFxLogKey = k; window.electronAPI?.sendTelemetry?.({ event: "FX_AUTO", musicState: info.musicState, actionState: info.actionState, target: info.fxTarget, lastResult: info.lastResult, lastDbfs: info.lastDbfs, framesSeen: info.framesSeen, timestamp: Date.now() }); }
+        },
     });
     window.__fxAuto = ctl;
+    window.__fxAutoDebug = () => Object.assign({}, ctl.getInfo(), { sends: group.getSent(), managed: group.managed(), params: ctl.params });
     setInterval(() => { if (getSetting("fxAutoEnabled", true) !== false) ctl.tick(); }, 500); // ĐÚNG 1 interval cho cả vòng đời trang
     return ctl;
 }

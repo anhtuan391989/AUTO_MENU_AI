@@ -84,6 +84,10 @@ const KeyEngine = (() => {
     const LONG_LOCK_MIN_S = 4;        // ... và đã tích luỹ ≥ 4 s nhạc
     const SHORT_TAU_S = 1.5;          // bộ tích luỹ ngắn: đo "năng lượng ngoài thang của Key dài hạn" + làm điểm neo khi Key thật sự đổi
     const OOK_RATIO = 0.25;           // ≥ 25% năng lượng ngoài thang âm của Key dài hạn ...
+    const OOK_NEWKEY_MAX_OUT = 0.12;  // AI-FIX-06: Key mới phải giải thích đoạn ngắn: ngoài-thang của Key mới ≤ 12%
+    const OOK_EXPLAIN_GAP = 0.15;     // ... và ngoài-thang của Key cũ phải lớn hơn Key mới ≥ 15 điểm %
+    const OOK_COOLDOWN_S = 12;        // ... tối thiểu 12 s giữa 2 lần neo lại
+    let lastReanchorAtS = -1e9;
     const OOK_TICKS = 4;              // ... liên tục ≥ 4 tick (1.6 s) => nghi chuyển điệu thật: neo lại bộ tích luỹ dài hạn vào đoạn ngắn
     const LONG_ANCHOR_MASS_S = 2;     // "khối lượng" bằng chứng của điểm neo (giây tương đương) — dữ liệu mới lấn át điểm neo sau vài giây
     const LONG_LOCK_MIN_MODAL = 0.2;  // khoá thẳng theo dài hạn chỉ khi có bằng chứng quãng 3 rõ (hợp âm thiếu quãng 3 = mập mờ Major/Minor, không khoá)
@@ -162,7 +166,7 @@ const KeyEngine = (() => {
         hasMusicalContent = false;
         bassRootVotes = new Array(12).fill(0);
         tuningCents = 0; tuningVotes = {}; tuningFrame = 0; // AI-ALG-03: reset theo nguồn mới
-        chromaVectorLong = new Array(12).fill(0); longSum = new Array(12).fill(0); longMass = 0; chromaVectorShort = new Array(12).fill(0); ookStreak = 0; chromaVectorMid = new Array(12).fill(0); longSeconds = 0; lastLongAt = null; longState.key = null; longState.streak = 0; longState.result = null; // AI-ALG-05
+        chromaVectorLong = new Array(12).fill(0); longSum = new Array(12).fill(0); longMass = 0; chromaVectorShort = new Array(12).fill(0); ookStreak = 0; chromaVectorMid = new Array(12).fill(0); longSeconds = 0; lastReanchorAtS = -1e9; lastLongAt = null; longState.key = null; longState.streak = 0; longState.result = null; // AI-ALG-05
         lastTop1Key = null;
         lastTop1Label = null;
         lastTop1ChangedAt = null;
@@ -505,8 +509,19 @@ const KeyEngine = (() => {
         for (const o of scaleOffsets) inScale[(r.rootIndex + o) % 12] = true;
         let tot = 0, out = 0;
         for (let i = 0; i < 12; i++) { const e = chromaVectorShort[i] * chromaVectorShort[i]; tot += e; if (!inScale[i]) out += e; }
-        ookStreak = (tot > 0 && out / tot >= OOK_RATIO) ? ookStreak + 1 : 0;
+        // AI-FIX-06: chroma "loãng" (nhiễu/bộ gõ/giọng hát trải đều 12 nốt) LUÔN có ≥33–42% năng lượng nằm ngoài bất kỳ thang nào => điều kiện cũ
+        // (≥25%) thoả liên tục, neo lại hàng trăm lần trên nhạc thật (log 15/10: 262 LONG_REANCHOR/292 s) và vô hiệu bộ nhớ dài hạn.
+        // Chuyển điệu THẬT phải có 1 Key MỚI giải thích tốt đoạn ngắn (ngoài-thang của Key mới thấp) và Key cũ giải thích kém hơn rõ rệt.
+        let ookOk = tot > 0 && out / tot >= OOK_RATIO;
+        if (ookOk) {
+            const ns = estimateKeyFromChroma(chromaVectorShort, { bassWeight: LONG_BASS_WEIGHT });
+            const nk = ns && Number.isInteger(ns.rootIndex) ? outOfScaleRatio(ns.rootIndex, ns.mode, "short") : null;
+            const sameSet = ns && (ns.rootIndex === r.rootIndex && ns.mode === r.mode);
+            ookOk = !sameSet && nk !== null && nk <= OOK_NEWKEY_MAX_OUT && (out / tot) - nk >= OOK_EXPLAIN_GAP && (longSeconds - lastReanchorAtS) >= OOK_COOLDOWN_S;
+        }
+        ookStreak = ookOk ? ookStreak + 1 : 0;
         if (ookStreak >= OOK_TICKS) {
+            lastReanchorAtS = longSeconds;
             // neo lại: bằng chứng dài hạn = đoạn ngắn hiện tại (khối lượng nhỏ để dữ liệu mới lấn át nhanh)
             let mag = Math.sqrt(chromaVectorShort.reduce((a, v) => a + v * v, 0)) || 1;
             for (let i = 0; i < 12; i++) { longSum[i] = (chromaVectorShort[i] / mag) * LONG_ANCHOR_MASS_S; chromaVectorLong[i] = longSum[i] / LONG_ANCHOR_MASS_S; }

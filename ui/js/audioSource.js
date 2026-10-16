@@ -415,11 +415,11 @@
         let actionState = FxActionState.IDLE;
         let sourceRunning = false, lastFrameAt = null, availableSince = null;
         let manualOverride = false, inflight = false, retries = 0, retryAt = null, lastTarget = null;
-        let sentCount = 0, failedCount = 0;
+        let sentCount = 0, failedCount = 0, lastResult = null, lastDbfs = null, framesSeen = 0;
         const notify = () => { try { deps.onState && deps.onState(getInfo()); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } };
 
         function getInfo() {
-            return { musicState, actionState, fxTarget: lastTarget, manualOverride, sentCount, failedCount, retries };
+            return { musicState, actionState, fxTarget: lastTarget, manualOverride, sentCount, failedCount, retries, lastResult, lastDbfs, framesSeen, sourceRunning };
         }
         function prune(t) {
             const keepFrom = t - Math.max(P.confirmSilenceMs, P.confirmMusicMs) - 500;
@@ -429,7 +429,7 @@
         function feedLevel(dbfs, t) {
             const tt = t === undefined ? now() : t;
             if (availableSince === null) availableSince = tt;
-            lastFrameAt = tt;
+            lastFrameAt = tt; lastDbfs = Number.isFinite(dbfs) ? +dbfs.toFixed(1) : null; framesSeen++;
             frames.push({ t: tt, db: Number.isFinite(dbfs) ? dbfs : -Infinity });
             prune(tt);
         }
@@ -486,9 +486,10 @@
             if (deps.getFxState() === target) { if (actionState === FxActionState.FX_ACTION_FAILED) actionState = FxActionState.IDLE; return; } // đã đúng: KHÔNG gửi
             if (lastTarget !== target) retries = 0;
             lastTarget = target; inflight = true;
+            try { deps.onRequest && deps.onRequest(target); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } // AI-FIX-06: TRẠNG THÁI YÊU CẦU tách khỏi trạng thái đã gửi
             let res;
             try { res = await deps.applyFx(target); } catch (e) { res = { ok: false, error: String(e) }; }
-            inflight = false;
+            inflight = false; lastResult = res ? { ok: !!res.ok, partial: !!res.partial, reason: res.reason || res.status || null } : null;
             if (res && res.ok) {
                 sentCount++; actionState = FxActionState.SEND_SENT_UNCONFIRMED; retryAt = null;
             } else {
@@ -541,7 +542,12 @@
         }
         // Bấm tay: đánh dấu các Send đã gửi theo kết quả thật (deps.execute đã được gọi bên ngoài).
         function markSent(n, state) { sent[n] = state; }
-        return { apply, seed, markSent, managed, getSent: () => Object.assign({}, sent) };
+        // Trạng thái "đã gửi" gộp của các Send đang quản lý: true/false nếu tất cả khớp, null nếu lẫn lộn/chưa có Send nào (KHÔNG phải trạng thái DAW đã xác nhận).
+        function aggregate() {
+            const list = managed(); if (!list.length) return null;
+            const v = list.map((n) => sent[n]); return v.every((x) => x === true) ? true : v.every((x) => x === false) ? false : null;
+        }
+        return { apply, seed, markSent, aggregate, managed, getSent: () => Object.assign({}, sent) };
     }
 
     global.AudioSourceType = AudioSourceType;

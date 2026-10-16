@@ -52,6 +52,10 @@ const ModEngine = (() => {
     const SUSTAIN_REQUIRED = 3;
     // TASK AI-ALG-05 — tỷ lệ năng lượng ngắn hạn NGOÀI thang âm của Key hiện hành tối thiểu để xác nhận chuyển điệu/đổi mode (chỉ áp ở chế độ nhãn).
     const MOD_MIN_OUT_OF_SCALE = 0.15;
+    const MOD_NEWKEY_MAX_OUT = 0.2;  // AI-FIX-06: Key mới phải giải thích đoạn trung hạn (ngoài-thang ≤ 15%)
+    const MOD_EXPLAIN_GAP = 0.08;     // ... và Key cũ ngoài-thang lớn hơn ≥ 15 điểm %
+    const MOD_LABEL_COOLDOWN_TICKS = 20; // đổi nhãn Mode/relative: tối thiểu 20 tick (≈20 s) từ lần đổi trước
+    let ticksSinceLabelChange = 1e9;
     const LONGMOD_SUSTAIN = 4; // đường 2: Key dài hạn khác Key hiện hành liên tục ≥ 4 tick (poll 1 s)
 
     /**
@@ -114,7 +118,9 @@ const ModEngine = (() => {
 
         emitState("LISTENING", { timestamp: Date.now() }); // trạng thái mặc định lúc bắt đầu theo dõi
 
+        ticksSinceLabelChange = 1e9;
         pollTimerId = setInterval(() => {
+            if (ticksSinceLabelChange < 1e9) ticksSinceLabelChange++;
 
             if (isManualOverrideActiveFn?.()) {
                 if (pendingRoot !== null) emitState("LISTENING", { timestamp: Date.now(), reason: "manual_override" });
@@ -168,6 +174,18 @@ const ModEngine = (() => {
                 }
                 const kind = cur.root === baseline.root ? "MODE_CHANGE"
                     : (relativeMajorRoot(cur) === relativeMajorRoot(baseline) ? "RELATIVE_KEY" : "MODULATION");
+                // AI-FIX-06 — hiệu chỉnh theo "chance": chroma loãng (nhiễu/bộ gõ/giọng) luôn có ≥33% ngoài MỌI thang nên cổng trên không chặn được gì trên nhạc thật
+                // (log 15/10: MOD_CONFIRMED ±5/±1/±3/±6 và nhãn B Minor<->B Major đảo qua lại cách 4 s). Thêm: (1) chuyển điệu THẬT cần Key mới giải thích tốt đoạn
+                // trung hạn (ngoài-thang Key mới thấp) và Key cũ kém hơn rõ rệt; (2) đổi nhãn MODE_CHANGE cùng tonic (không đổi pitch) cần ≥ MOD_LABEL_COOLDOWN_TICKS giây từ lần đổi trước.
+                if (kind === "MODULATION" && typeof KeyEngine.outOfScaleRatio === "function") {
+                    const nOut = KeyEngine.outOfScaleRatio(cur.root, cur.mode, "mid"), bOut = KeyEngine.outOfScaleRatio(baseline.root, baseline.mode, "mid");
+                    if (typeof nOut === "number" && typeof bOut === "number" && !(nOut <= MOD_NEWKEY_MAX_OUT && bOut - nOut >= MOD_EXPLAIN_GAP)) {
+                        pendingStreak = SUSTAIN_REQUIRED - 1; return;
+                    }
+                } else if (kind === "MODE_CHANGE" && ticksSinceLabelChange < MOD_LABEL_COOLDOWN_TICKS) {
+                    pendingStreak = SUSTAIN_REQUIRED - 1; return;
+                }
+                ticksSinceLabelChange = 0;
                 const fromLabel = labelOf(baseline);
                 baseline = cur; pendingRoot = null; pendingStreak = 0; longPendKey = null; longPendCount = 0;
 

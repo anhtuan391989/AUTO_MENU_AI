@@ -28,7 +28,7 @@ function run(spec, secs, modAt, shift) {
     return events;
 }
 const cases = [];
-for (const mode of ['major', 'minor']) for (const prog of Object.keys(PROGS[mode])) for (const root of [0, 6]) cases.push({ mode, prog, root, seed: root * 13 + prog.length + 5 });
+for (const mode of ['major', 'minor']) for (const prog of Object.keys(PROGS[mode])) for (const root of [0, 6]) cases.push(Object.assign({ mode, prog, root, seed: root * 13 + prog.length + 5 }, JSON.parse(process.env.MODBENCH_SPEC || '{}')));
 const rows = [];
 cases.forEach((c, idx) => { if (idx % nsh !== shard) return;
     const stat = run(c, 40, 0, 0);
