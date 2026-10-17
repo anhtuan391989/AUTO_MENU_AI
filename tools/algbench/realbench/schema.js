@@ -24,6 +24,17 @@ function parseKey(k) { // {tonic:"D",mode:"major"} -> {pc,mode} | null (không h
     if (mode === 'undetermined') return { pc: null, mode };
     const p = pc(k.tonic); return p === null ? null : { pc: p, mode };
 }
+
+// AI-ALG-10 — đọc tên giọng dạng chuỗi ("Bb Minor", "A# minor", "E Major", "Db trưởng"). Enharmonic quy về cùng pitch class.
+// Major/Minor luôn tách biệt (relative KHÔNG bằng nhau). Không có mode rõ ràng => null (không đoán).
+function parseKeyString(str) {
+    if (typeof str !== 'string') return null;
+    const m = str.trim().replace('♯', '#').replace('♭', 'b').match(/^([A-Ga-g])\s*([#b]?)\s*[-\s]*(major|minor|maj|min|trưởng|thứ)$/i);
+    if (!m) return null;
+    const mode = /^(major|maj|trưởng)$/i.test(m[3]) ? 'major' : 'minor', p = pc(m[1].toUpperCase() + (m[2] === 'b' ? 'B' : m[2]));
+    return p === null ? null : { pc: p, mode };
+}
+const keyLabel = (k) => (k && k.pc !== null ? `${NOTE[k.pc]} ${k.mode}` : null);   // tên chuẩn hóa (dùng thang # cho enharmonic)
 function sha256File(p) { return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'); }
 const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
 
@@ -109,4 +120,4 @@ function validateManifest(m) {
     });
     return { errors, warnings, tracks: m.tracks };
 }
-module.exports = { NOTE, pc, parseKey, validateTrack, validateManifest, audioStatus, sha256File, REF_STATUS, SPLITS, MODES, LABEL_STATES };
+module.exports = { NOTE, pc, parseKey, validateTrack, validateManifest, audioStatus, sha256File, REF_STATUS, SPLITS, MODES, LABEL_STATES, parseKeyString, keyLabel };

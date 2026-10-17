@@ -1,6 +1,6 @@
 {
   "schema": "AI-ALG-08/manifest/v2",
-  "schema_ext": "AI-ALG-09 (title,label_state,user_reference,observations,track_group)",
+  "schema_ext": "AI-ALG-09/10 (title,label_state,user_reference,observations,track_group)",
   "note": "Nhãn người dùng = UNVERIFIED_REFERENCE; KHÔNG vào số liệu chính. segments[] để trống vì chưa có ranh giới đoạn đã xác minh. Chỉ 14/20 bài được cung cấp trong task AI-ALG-09 (xem báo cáo). Quy tắc chia: sha256(track_id)[0] % 10 < 3 -> test, còn lại dev (cố định trước khi có kết quả).",
   "tracks": [
     {
@@ -617,14 +617,28 @@
         "modulation_unclear": false
       },
       "observations": {
-        "auto_key": null,
-        "menu": null,
-        "tester_note": "Người kiểm thử ghi chú \"sai tone\": cần làm rõ, chưa kết luận đúng/sai."
+        "auto_key": {
+          "raw": "E minor",
+          "key": {
+            "tonic": "E",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": true
+        },
+        "menu": {
+          "raw": "E minor",
+          "key": {
+            "tonic": "E",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": true
+        },
+        "tester_note": "sai tone (nguyên văn người kiểm thử; cả hai engine trùng nhãn E minor)"
       },
       "segments": [],
       "modulations": [],
       "track_group": "stable_user_reported",
-      "annotation_notes": "Người kiểm thử ghi chú \"sai tone\": cần làm rõ, chưa kết luận đúng/sai.",
+      "annotation_notes": "Nhãn người dùng E minor; cả Auto Key và Menu đều E minor; người kiểm thử ghi chú \"sai tone\". CẦN XÁC MINH (nhãn hay bản thu sai?): không tự sửa nhãn, không kết luận đúng/sai.",
       "split": "dev"
     }
   ]

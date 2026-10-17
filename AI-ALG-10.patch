@@ -1,0 +1,317 @@
+From 8c79e461452ec265fc75b443da0a863edd358ffd Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 17 Oct 2026 01:15:31 +0000
+Subject: [PATCH] AI-ALG-10: source-table reconcile tool, enharmonic key
+ parser, hoa-phan-ai-luu update; still BLOCKED (no source table/audio)
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01FrhXxWK5TMfTR3qNCGmEyc
+---
+ .../AI-ALG-10-DATASET-SYNC-AUDIT-REPORT.md    | 73 +++++++++++++++++++
+ tests/unit/RealBenchA10.verify.js             | 63 ++++++++++++++++
+ .../manifest/real_music_manifest.json         | 24 ++++--
+ tools/algbench/realbench/README.md            |  4 +
+ tools/algbench/realbench/reconcile.js         | 55 ++++++++++++++
+ tools/algbench/realbench/schema.js            | 13 +++-
+ 6 files changed, 226 insertions(+), 6 deletions(-)
+ create mode 100644 AI_BOOT.md/AI-ALG-10-DATASET-SYNC-AUDIT-REPORT.md
+ create mode 100644 tests/unit/RealBenchA10.verify.js
+ create mode 100644 tools/algbench/realbench/reconcile.js
+
+diff --git a/AI_BOOT.md/AI-ALG-10-DATASET-SYNC-AUDIT-REPORT.md b/AI_BOOT.md/AI-ALG-10-DATASET-SYNC-AUDIT-REPORT.md
+new file mode 100644
+index 0000000..d45c5ff
+--- /dev/null
++++ b/AI_BOOT.md/AI-ALG-10-DATASET-SYNC-AUDIT-REPORT.md
+@@ -0,0 +1,73 @@
++# AI-ALG-10 — Synchronize 20-Song Dataset & Audit Benchmark Readiness
++
++**Trạng thái: ĐỐI CHIẾU CHƯA HOÀN TẤT — BLOCKED_NO_SOURCE_TABLE; benchmark vẫn `BLOCKED_NO_AUDIO`.**
++Không bảng 20 bài nguồn nào truy cập được từ phiên này (đã tìm: repo/lịch sử git, file bạn đính kèm, Google Drive, bộ nhớ dự án). Vì vậy KHÔNG thể liệt kê chính xác 6 bài còn thiếu; không bịa tên/nhãn. Đã dựng công cụ đối chiếu có test — gửi bảng là chạy được ngay. Không sửa runtime/thuật toán; không nhãn nào lên VERIFIED; không tuyên bố accuracy.
++
++## 1. Số lượng
++| Mục | Số |
++|---|---|
++| Bài nguồn (theo đề: 20) | **Không xác minh được** — chỉ có 14 bài có tên (từ đề AI-ALG-09) + 1 URL YouTube |
++| Bài trong manifest | 14 |
++| Bài chưa xác định tên (thiếu so với 20) | 6 |
++| Bài trùng trong manifest | 0 |
++| Bài có đủ điều kiện chấm accuracy | **0** |
++
++## 2. Danh sách khác biệt đã biết
++- **Thiếu (6 bài):** không có tên trong dữ liệu nhận được → cần bảng nguồn đầy đủ. Không điền.
++- **Trùng:** không có (id duy nhất 14/14; tên duy nhất sau khi bỏ dấu).
++- **URL YouTube:** chỉ "THƯƠNG EM" có (`wHLNh9qFgU8`); 13 bài còn lại chưa có link → cần cung cấp.
++- **Mốc modulation:** "THƯƠNG EM" 188 s (D major → Eb major); "Yêu Lại Từ Đầu" D major → Eb major **chưa có mốc thời gian**; "Phía Sau Một Cô Gái" diễn biến chuyển tone chưa xác minh.
++- **Enharmonic:** "đừng quên tên anh" lưu Db major, công cụ in chuẩn hóa là "C# major" (cùng key); A# minor ≡ Bb minor trong parser/so sánh.
++- **Cập nhật từ đề AI-ALG-10:** "họa phận ái lưu" — nhãn E minor, Auto Key = Menu = E minor, ghi chú "sai tone" → `label_state=NEEDS_CLARIFICATION`, nhãn giữ nguyên E minor, không kết luận đúng/sai.
++- **"Viên Đá nhỏ":** không có key chuẩn → `NO_REFERENCE`, không chấm accuracy.
++
++## 3. Thay đổi cần thiết để manifest đại diện đủ 20 bài
++1. Gửi bảng nguồn 20 bài (CSV/TSV/JSON; cột Tên bài, Link, Key chuẩn, Auto Key, Menu, Ghi chú).
++2. Chạy `node tools/algbench/realbench/reconcile.js --source <bảng> --expect 20` → sinh danh sách THIẾU/THỪA/TRÙNG/LỆCH chính xác.
++3. Thêm 6 bài còn thiếu vào manifest (nhãn = `user_reference`, `UNVERIFIED_REFERENCE`); sửa các trường lệch theo bảng nguồn. (Chưa làm vì chưa có dữ liệu.)
++
++## 4. Trước / sau
++| Hạng mục | Trước (AI-ALG-09) | Sau (AI-ALG-10) |
++|---|---|---|
++| Bài manifest | 14 | 14 |
++| họa phận ái lưu: Auto/Menu | chưa ghi | E minor / E minor (theo đề), cần xác minh |
++| Parser tên giọng chuỗi | chưa có | `parseKeyString` (enharmonic chuẩn hóa; không có mode ⇒ null, không đoán) |
++| Đối chiếu nguồn ↔ manifest | thủ công | `reconcile.js` + test (9 nhóm) |
++| Bài đủ điều kiện chấm | 0 | 0 |
++
++## 5. Audit trạng thái benchmark (14 bài)
++| Hạng mục | Trạng thái |
++|---|---|
++| Audio hợp lệ | 0/14 (`BLOCKED_NO_AUDIO` cả 14) |
++| SHA-256 | 0/14 (null; không tự tạo) |
++| Segment labels | 0/14 (`segments=[]`; không tự tạo) |
++| Nhãn VERIFIED_INDEPENDENT / nguồn đối chứng độc lập | 0/14 — mọi nhãn là `user_reference` chưa xác minh |
++| Chia tập (quy tắc cố định sha256(track_id)[0]%10<3 → test) | dev 10, test 4 (yeu-lai-tu-dau, me-em, dung-quen-ten-anh, vien-da-nho) — theo bài, không rò rỉ |
++| Chạy `run.js` | manifest hợp lệ; `status=BLOCKED_NO_AUDIO`; đánh giá 0 bài; 14 bài bị loại, lý do: `BLOCKED_NO_AUDIO` + `LABEL_NOT_VERIFIED` (+ `NO_REFERENCE_LABEL` cho Viên Đá nhỏ, `LABEL_NEEDS_CLARIFICATION` cho họa phận ái lưu) |
++Major/Minor và relative giữ tách biệt trong mọi so sánh (`M.relation` + `reconcile`); relative KHÔNG coi là đúng.
++
++## 6. File thay đổi
++| File | Thay đổi |
++|---|---|
++| `tools/algbench/realbench/schema.js` | +`parseKeyString`, `keyLabel` (enharmonic, Major/Minor tách biệt) |
++| `tools/algbench/realbench/reconcile.js` | MỚI: đối chiếu bảng nguồn ↔ manifest (chỉ đọc) |
++| `tools/algbench/realbench/README.md` | hướng dẫn đối chiếu |
++| `tools/algbench/manifest/real_music_manifest.json` | họa phận ái lưu: Auto/Menu E minor + ghi chú cần xác minh |
++| `tests/unit/RealBenchA10.verify.js` | MỚI: 9 nhóm test |
++Không sửa `ui/`, KeyEngine/ModEngine, ngưỡng/profile/trọng số, MIDI, FX, preset.
++
++## 7. Test
++`node --check` các file realbench + 2 test: OK. `RealBenchA10.verify.js` 9/9; `RealBenchA08.verify.js` 17/17; `git diff --check` sạch; `reconcile.js` không `--source` → `BLOCKED_NO_SOURCE_TABLE` (exit 2). Toàn bộ `tests/unit`: chỉ `AutoSongCollector`/`NowPlayingResolver` fail khi cây git chưa commit (pass sau commit); `MusicAnalysis` fail nền đã biết. Không chạy final test.
++
++## 8. Điều kiện còn thiếu (người dùng cần cung cấp)
++1. Bảng nguồn 20 bài đầy đủ (6 bài còn thiếu + link YouTube từng bài).
++2. File audio hợp lệ + sha256.
++3. Nhãn xác minh độc lập + ranh giới đoạn/mốc chuyển tone.
++4. Làm rõ "sai tone" của họa phận ái lưu; nhãn cho Viên Đá nhỏ.
++
++---
++Claude A : Task A: AI-ALG-10
++1. File đã sửa: `tools/algbench/realbench/{schema.js,reconcile.js,README.md}`, `tools/algbench/manifest/real_music_manifest.json`, `tests/unit/RealBenchA10.verify.js`, báo cáo này. Không sửa runtime/thuật toán.
++2. Vì sao: không truy cập được bảng 20 bài nguồn nên không thể kết luận bài thiếu cụ thể; dựng công cụ đối chiếu có test (enharmonic chuẩn hóa, Major/Minor tách biệt) và cập nhật dữ liệu mới của "họa phận ái lưu" mà không nâng nhãn.
++3. Ảnh hưởng module: không (công cụ offline + test; engine/UI/MIDI/FX/preset không đổi).
++4. Còn lại: bảng nguồn 20 bài, audio + sha256, nhãn xác minh độc lập, rồi chạy reconcile và baseline dev.
+diff --git a/tests/unit/RealBenchA10.verify.js b/tests/unit/RealBenchA10.verify.js
+new file mode 100644
+index 0000000..1d6f763
+--- /dev/null
++++ b/tests/unit/RealBenchA10.verify.js
+@@ -0,0 +1,63 @@
++'use strict';
++// AI-ALG-10 — test đối chiếu bảng nguồn ↔ manifest, enharmonic, Major/Minor tách biệt (dữ liệu TEST_FIXTURE).
++const assert = require('assert'), fs = require('fs'), os = require('os'), path = require('path'), cp = require('child_process');
++const R = path.resolve(__dirname, '../../tools/algbench/realbench'), S = require(R + '/schema.js'), { reconcile, loadSource, fold } = require(R + '/reconcile.js');
++const MAN = JSON.parse(fs.readFileSync(R + '/../manifest/real_music_manifest.json', 'utf8'));
++let n = 0; const T = (name, fn) => { fn(); n++; console.log('ok', name); };
++
++// Dựng "bảng nguồn" 14 dòng từ chính manifest (tự nhất quán) để kiểm tra đường đi không-lệch.
++const rowOf = (t) => ({ title: t.title, url: t.audio_reference.source_url || '', key: t.user_reference.key ? S.keyLabel(S.parseKey(t.user_reference.key)) : '',
++    auto: t.observations && t.observations.auto_key ? t.observations.auto_key.raw : '', menu: t.observations && t.observations.menu ? t.observations.menu.raw : '', note: t.annotation_notes || '' });
++const base14 = () => MAN.tracks.map(rowOf);
++
++T('parseKeyString: enharmonic bằng nhau, Major/Minor và relative KHÔNG bằng nhau', () => {
++    const k = (x) => S.keyLabel(S.parseKeyString(x));
++    assert.strictEqual(k('Bb Minor'), k('A# minor')); assert.strictEqual(k('Db major'), k('C# Major')); assert.strictEqual(k('E Minor'), 'E minor');
++    assert.notStrictEqual(k('D major'), k('B minor')); assert.notStrictEqual(k('C major'), k('C minor')); assert.strictEqual(S.parseKeyString('C#'), null); assert.strictEqual(S.parseKeyString('H minor'), null);
++});
++T('fold: bỏ dấu tiếng Việt/đ, không phân biệt hoa-thường', () => { assert.strictEqual(fold('Đớn Đau Vô Cùng'), fold('don dau vo cung')); assert.strictEqual(fold('THƯƠNG EM'), 'thuong em'); });
++T('manifest repo: họa phận ái lưu giữ E minor cả hai engine + NEEDS_CLARIFICATION, nhãn không bị đổi', () => {
++    const t = MAN.tracks.find((x) => x.track_id === 'hoa-phan-ai-luu');
++    assert.strictEqual(t.label_state, 'NEEDS_CLARIFICATION'); assert.strictEqual(t.reference_status, 'UNVERIFIED_REFERENCE'); assert.deepStrictEqual(t.user_reference.key, { tonic: 'E', mode: 'minor' });
++    assert.strictEqual(t.observations.auto_key.raw, 'E minor'); assert.strictEqual(t.observations.menu.raw, 'E minor'); assert.ok(/sai tone/.test(t.observations.tester_note));
++    const v = MAN.tracks.find((x) => x.track_id === 'vien-da-nho'); assert.strictEqual(v.user_reference.key, null); assert.strictEqual(v.label_state, 'NO_REFERENCE');
++    assert.ok(MAN.tracks.every((x) => x.reference_status !== 'VERIFIED_INDEPENDENT' && x.audio_hash === null && x.segments.length === 0));
++});
++T('reconcile: bảng 14 dòng tự nhất quán => 0 lệch; kỳ vọng 20 => counts_ok=false, manifest 14', () => {
++    const r = reconcile(base14(), MAN, { expect: 20 }); assert.strictEqual(r.matched, 14); assert.strictEqual(r.field_mismatches.length, 0); assert.strictEqual(r.missing_in_manifest.length, 0);
++    assert.strictEqual(r.source_count, 14); assert.strictEqual(r.counts_ok, false); // 14 ≠ 20 kỳ vọng
++    assert.strictEqual(reconcile(base14(), MAN, {}).counts_ok, true);
++});
++T('reconcile: bài thiếu, thừa, trùng, dòng thiếu tên', () => {
++    const src = base14().filter((r) => r.title !== 'Mê Em'); src.push({ title: 'Bài Mới A', url: '', key: 'C Major', auto: '', menu: '', note: '' }, { title: 'bai moi a', url: '', key: '', auto: '', menu: '', note: '' }, { title: '', key: 'C Major' });
++    const r = reconcile(src, MAN, { expect: 20 });
++    assert.deepStrictEqual(r.missing_in_manifest.map((x) => x.title), ['Bài Mới A']); assert.deepStrictEqual(r.extra_in_manifest.map((x) => x.track_id), ['me-em']);
++    assert.strictEqual(r.duplicates_in_source.length, 1); assert.ok(r.incomplete_source_rows.some((x) => /thiếu tên/.test(x.problem))); assert.strictEqual(r.counts_ok, false);
++});
++T('reconcile: lệch trường được báo; enharmonic KHÔNG lệch; relative/mode lệch có báo', () => {
++    const src = base14().map((r) => Object.assign({}, r)), g = (t) => src.find((r) => r.title === t);
++    g('giả vờ thương anh được').menu = 'Bb Minor';           // manifest: A# minor => cùng key, không lệch
++    g('đừng quên tên anh').key = 'C# Major';                  // manifest Db major => enharmonic, không lệch
++    g('sau này em cưới ai').key = 'B Minor';                  // relative của D major => LỆCH
++    g('Mê Em').key = 'C Minor';                               // khác mode => LỆCH
++    g('THƯƠNG EM').url = 'https://www.youtube.com/watch?v=XXXXXXXXXXX'; g('luu nien'.length ? 'lưu niên' : '').auto = 'F# major';
++    const r = reconcile(src, MAN, {}), f = r.field_mismatches.map((x) => x.track_id + ':' + x.field);
++    assert.ok(!f.some((x) => x.startsWith('gia-vo') && x.includes('menu'))); assert.ok(!f.some((x) => x.startsWith('dung-quen') && x.includes('reference')));
++    assert.ok(f.includes('sau-nay-em-cuoi-ai:user_reference.key')); assert.ok(f.includes('me-em:user_reference.key')); assert.ok(f.includes('thuong-em:audio_reference.source_url')); assert.ok(f.includes('luu-nien:observations.auto_key'));
++});
++T('reconcile: key không đọc được bị báo, không đoán; "Viên Đá nhỏ" không key', () => {
++    const src = base14().map((r) => Object.assign({}, r)); src.find((r) => r.title === 'Mê Em').key = 'C'; src.find((r) => r.title === 'Viên Đá nhỏ').key = '';
++    const r = reconcile(src, MAN, {}); assert.ok(r.incomplete_source_rows.some((x) => x.title === 'Mê Em' && /không đọc được/.test(x.problem))); assert.ok(!r.field_mismatches.some((x) => x.track_id === 'vien-da-nho' && x.field === 'user_reference.key'));
++});
++T('loadSource: CSV (Việt, dấu ngoặc kép, BOM) và JSON; CLI không có nguồn => BLOCKED_NO_SOURCE_TABLE (exit 2)', () => {
++    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-')), f = path.join(d, 's.csv');
++    fs.writeFileSync(f, '﻿Tên bài,Link,Key chuẩn,Auto Key,Menu,Ghi chú\n"Mê Em, bản live",,C Major,khớp nhãn,G Major,"ghi chú, có dấu phẩy"\n');
++    const rows = loadSource(f); assert.strictEqual(rows[0].title, 'Mê Em, bản live'); assert.strictEqual(rows[0].key, 'C Major'); assert.strictEqual(rows[0].note, 'ghi chú, có dấu phẩy');
++    const j = path.join(d, 's.json'); fs.writeFileSync(j, JSON.stringify([{ title: 'X', key: 'D Minor' }])); assert.strictEqual(loadSource(j)[0].key, 'D Minor');
++    const r = cp.spawnSync('node', [R + '/reconcile.js'], { encoding: 'utf8' }); assert.strictEqual(r.status, 2); assert.ok(/BLOCKED_NO_SOURCE_TABLE/.test(r.stdout));
++});
++T('pipeline: manifest vẫn BLOCKED_NO_AUDIO, 0 bài đủ điều kiện, không nhãn nào vào metric chính', () => {
++    const { evaluate } = require(R + '/run.js'), rep = evaluate(MAN, { audioRoot: '.', tol: 10, tols: [10], finalTest: true });
++    assert.strictEqual(rep.status, 'BLOCKED_NO_AUDIO'); assert.strictEqual(rep.counts.eligible_for_accuracy, 0); assert.strictEqual(rep.aggregate, null); assert.strictEqual(rep.counts.verified, 0);
++});
++console.log(`RealBenchA10: ${n} nhóm OK`);
+diff --git a/tools/algbench/manifest/real_music_manifest.json b/tools/algbench/manifest/real_music_manifest.json
+index 28facfa..8333d3d 100644
+--- a/tools/algbench/manifest/real_music_manifest.json
++++ b/tools/algbench/manifest/real_music_manifest.json
+@@ -1,6 +1,6 @@
+ {
+   "schema": "AI-ALG-08/manifest/v2",
+-  "schema_ext": "AI-ALG-09 (title,label_state,user_reference,observations,track_group)",
++  "schema_ext": "AI-ALG-09/10 (title,label_state,user_reference,observations,track_group)",
+   "note": "Nhãn người dùng = UNVERIFIED_REFERENCE; KHÔNG vào số liệu chính. segments[] để trống vì chưa có ranh giới đoạn đã xác minh. Chỉ 14/20 bài được cung cấp trong task AI-ALG-09 (xem báo cáo). Quy tắc chia: sha256(track_id)[0] % 10 < 3 -> test, còn lại dev (cố định trước khi có kết quả).",
+   "tracks": [
+     {
+@@ -617,14 +617,28 @@
+         "modulation_unclear": false
+       },
+       "observations": {
+-        "auto_key": null,
+-        "menu": null,
+-        "tester_note": "Người kiểm thử ghi chú \"sai tone\": cần làm rõ, chưa kết luận đúng/sai."
++        "auto_key": {
++          "raw": "E minor",
++          "key": {
++            "tonic": "E",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": true
++        },
++        "menu": {
++          "raw": "E minor",
++          "key": {
++            "tonic": "E",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": true
++        },
++        "tester_note": "sai tone (nguyên văn người kiểm thử; cả hai engine trùng nhãn E minor)"
+       },
+       "segments": [],
+       "modulations": [],
+       "track_group": "stable_user_reported",
+-      "annotation_notes": "Người kiểm thử ghi chú \"sai tone\": cần làm rõ, chưa kết luận đúng/sai.",
++      "annotation_notes": "Nhãn người dùng E minor; cả Auto Key và Menu đều E minor; người kiểm thử ghi chú \"sai tone\". CẦN XÁC MINH (nhãn hay bản thu sai?): không tự sửa nhãn, không kết luận đúng/sai.",
+       "split": "dev"
+     }
+   ]
+diff --git a/tools/algbench/realbench/README.md b/tools/algbench/realbench/README.md
+index de76f74..c3a06f2 100644
+--- a/tools/algbench/realbench/README.md
++++ b/tools/algbench/realbench/README.md
+@@ -27,3 +27,7 @@ Test: `node tests/unit/RealBenchA08.verify.js` (dữ liệu TEST_FIXTURE, không
+ `title`; `label_state` (`VERIFIED | USER_LABEL_UNVERIFIED | NO_REFERENCE | NEEDS_CLARIFICATION`; ánh xạ "UNDETERMINED" = `NO_REFERENCE`); `user_reference{key,modulation{time,from_key,to_key},modulation_unclear}` (nhãn người dùng, KHÔNG chấm); `observations{auto_key,menu}{raw,key,agrees_with_user_reference}` + `tester_note`; `track_group`.
+ Báo cáo `run.js` có `exclusion_reasons` cho từng bài (không bài nào bị mất khỏi bảng) và `observations_descriptive_only` (so Auto/Menu với nhãn người dùng — chỉ MÔ TẢ, không phải accuracy).
+ Quy tắc chia tập (cố định, không phụ thuộc kết quả): `sha256(track_id)[0] % 10 < 3` → test, còn lại dev.
++
++## Đối chiếu bảng nguồn 20 bài (AI-ALG-10)
++`node tools/algbench/realbench/reconcile.js --source <bảng.csv|tsv|json> [--expect 20] [--out rec.json]`
++Cột (không phân biệt hoa/thường/dấu): Tên bài | Link | Key chuẩn | Auto Key | Menu | Ghi chú. Báo: bài THIẾU/THỪA/TRÙNG, dòng lỗi, trường LỆCH (url, key chuẩn, Auto, Menu, ghi chú). Enharmonic (Bb minor = A# minor) coi là cùng key; Major/Minor và relative KHÔNG coi là bằng nhau. Không có `--source` ⇒ `BLOCKED_NO_SOURCE_TABLE` (exit 2). Công cụ chỉ đọc: không sửa manifest, không nâng nhãn lên VERIFIED.
+diff --git a/tools/algbench/realbench/reconcile.js b/tools/algbench/realbench/reconcile.js
+new file mode 100644
+index 0000000..96000ec
+--- /dev/null
++++ b/tools/algbench/realbench/reconcile.js
+@@ -0,0 +1,55 @@
++#!/usr/bin/env node
++'use strict';
++// AI-ALG-10 — đối chiếu bảng 20 bài NGUỒN (Khói cung cấp) với manifest. Chỉ đọc; KHÔNG sửa manifest, KHÔNG nâng trạng thái nhãn.
++//   node tools/algbench/realbench/reconcile.js --source <file.csv|tsv|json> [--manifest f] [--expect 20] [--out report.json]
++// Cột nguồn (không phân biệt hoa/thường, có/không dấu): title|tên bài|bài hát, url|link|youtube, key|key chuẩn|nhãn|reference, auto|auto key, menu, note|ghi chú|lỗi.
++// So sánh key: enharmonic quy về cùng pitch class (Bb minor == A# minor); Major/Minor và relative KHÔNG coi là bằng nhau.
++const fs = require('fs'), path = require('path');
++const S = require('./schema.js');
++const fold = (x) => String(x == null ? '' : x).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
++const ALIAS = { title: ['title', 'ten bai', 'bai hat', 'ten', 'song'], url: ['url', 'link', 'youtube', 'link youtube', 'nguon'], key: ['key', 'key chuan', 'nhan', 'reference', 'user reference', 'key tham chieu'], auto: ['auto', 'auto key', 'autokey'], menu: ['menu', 'menu key', 'key menu'], note: ['note', 'ghi chu', 'loi', 'ghi chu loi', 'notes'] };
++function splitLine(line, d) { const o = []; let c = '', q = false; for (let i = 0; i < line.length; i++) { const ch = line[i]; if (q) { if (ch === '"' && line[i + 1] === '"') { c += '"'; i++; } else if (ch === '"') q = false; else c += ch; } else if (ch === '"') q = true; else if (ch === d) { o.push(c); c = ''; } else c += ch; } o.push(c); return o.map((x) => x.trim()); }
++function loadSource(file) {
++    const txt = fs.readFileSync(file, 'utf8').replace(/^﻿/, ''); let rows;
++    if (/\.json$/i.test(file)) rows = JSON.parse(txt); else {
++        const lines = txt.split(/\r?\n/).filter((l) => l.trim()), d = lines[0].includes('\t') ? '\t' : (lines[0].split(';').length > lines[0].split(',').length ? ';' : ','), head = splitLine(lines[0], d);
++        rows = lines.slice(1).map((l) => { const c = splitLine(l, d), o = {}; head.forEach((h, i) => { o[h] = c[i] === undefined ? '' : c[i]; }); return o; });
++    }
++    return rows.map((r, i) => { const o = { _row: i + 1 }; for (const [f, names] of Object.entries(ALIAS)) { const k = Object.keys(r).find((h) => names.includes(fold(h))); o[f] = k === undefined || r[k] === null ? '' : String(r[k]).trim(); } return o; });
++}
++// ô Auto/Menu: key đọc được -> so theo pitch class+mode; "khớp nhãn" -> agrees; còn lại so chữ đã chuẩn hóa. Trống = chưa có dữ liệu.
++function cell(v) { const t = String(v || '').trim(); if (!t) return { empty: true }; const k = S.parseKeyString(t); return k ? { key: k } : { text: fold(t), agrees: /khop/.test(fold(t)) }; }
++const sameCell = (a, b) => (a.empty && b.empty) || (a.key && b.key && a.key.pc === b.key.pc && a.key.mode === b.key.mode) || (a.text !== undefined && b.text !== undefined && a.text === b.text);
++function manifestCell(o) { if (!o) return { empty: true }; if (o.key) { const k = S.parseKey(o.key); if (k) return { key: k }; } return o.raw ? cell(o.raw) : { empty: true }; }
++function reconcile(sourceRows, manifest, opt = {}) {
++    const R = { source_count: sourceRows.length, manifest_count: manifest.tracks.length, expected: opt.expect || null, missing_in_manifest: [], extra_in_manifest: [], duplicates_in_source: [], duplicates_in_manifest: [], field_mismatches: [], incomplete_source_rows: [], matched: 0 };
++    const byTitle = new Map(); manifest.tracks.forEach((t) => { const k = fold(t.title); if (byTitle.has(k)) R.duplicates_in_manifest.push(t.track_id); byTitle.set(k, t); });
++    const seen = new Map(), used = new Set();
++    for (const r of sourceRows) {
++        const k = fold(r.title); if (!k) { R.incomplete_source_rows.push({ row: r._row, problem: 'thiếu tên bài' }); continue; }
++        if (seen.has(k)) { R.duplicates_in_source.push({ title: r.title, rows: [seen.get(k), r._row] }); continue; } seen.set(k, r._row);
++        const t = byTitle.get(k); if (!t) { R.missing_in_manifest.push({ title: r.title, row: r._row }); continue; }
++        used.add(t.track_id); R.matched++;
++        const mm = (field, src, man) => R.field_mismatches.push({ track_id: t.track_id, title: t.title, field, source: src, manifest: man });
++        const ref = r.key ? S.parseKeyString(r.key) : null, mref = t.user_reference && t.user_reference.key ? S.parseKey(t.user_reference.key) : null;
++        if (r.key && !ref && !/khong|chua|none|n\/a|-/i.test(fold(r.key))) R.incomplete_source_rows.push({ row: r._row, title: r.title, problem: `key "${r.key}" không đọc được (cần dạng "D Major")` });
++        else if ((ref || mref) && !(ref && mref && ref.pc === mref.pc && ref.mode === mref.mode)) mm('user_reference.key', r.key || null, mref ? S.keyLabel(mref) : null);
++        for (const [f, who] of [['auto', 'auto_key'], ['menu', 'menu']]) { const a = cell(r[f]), b = manifestCell(t.observations && t.observations[who]); if (!sameCell(a, b)) mm('observations.' + who, r[f] || null, b.key ? S.keyLabel(b.key) : (t.observations && t.observations[who] ? t.observations[who].raw : null)); }
++        const murl = t.audio_reference && t.audio_reference.source_url || ''; if ((r.url || '') !== murl) mm('audio_reference.source_url', r.url || null, murl || null);
++        if (r.note && fold(r.note) !== fold(t.annotation_notes || '') && !fold(t.annotation_notes || '').includes(fold(r.note))) mm('annotation_notes', r.note, t.annotation_notes || null);
++    }
++    manifest.tracks.forEach((t) => { if (!used.has(t.track_id)) R.extra_in_manifest.push({ track_id: t.track_id, title: t.title }); });
++    R.counts_ok = R.source_count === (opt.expect || R.source_count) && !R.missing_in_manifest.length && !R.extra_in_manifest.length && !R.duplicates_in_source.length && !R.duplicates_in_manifest.length && !R.field_mismatches.length && !R.incomplete_source_rows.length && R.manifest_count === R.source_count;
++    return R;
++}
++module.exports = { loadSource, reconcile, fold };
++if (require.main === module) {
++    const a = process.argv.slice(2), arg = (k, d) => { const i = a.indexOf('--' + k); return i >= 0 ? a[i + 1] : d; };
++    const mf = path.resolve(arg('manifest', path.join(__dirname, '../manifest/real_music_manifest.json'))), man = JSON.parse(fs.readFileSync(mf, 'utf8')), src = arg('source', null);
++    if (!src || !fs.existsSync(src)) { console.log(`BLOCKED_NO_SOURCE_TABLE: chưa có bảng nguồn 20 bài (--source). Manifest hiện có ${man.tracks.length} bài; không thể kết luận bài thiếu/trùng/sai.`); process.exit(2); }
++    const rep = reconcile(loadSource(src), man, { expect: +arg('expect', 20) }); const out = arg('out', null); if (out) fs.writeFileSync(out, JSON.stringify(rep, null, 1));
++    console.log(`nguồn=${rep.source_count} (kỳ vọng ${rep.expected}) | manifest=${rep.manifest_count} | khớp tên=${rep.matched} | thiếu trong manifest=${rep.missing_in_manifest.length} | thừa trong manifest=${rep.extra_in_manifest.length} | trùng nguồn=${rep.duplicates_in_source.length} | lệch trường=${rep.field_mismatches.length} | dòng nguồn thiếu/sai=${rep.incomplete_source_rows.length}`);
++    rep.missing_in_manifest.forEach((x) => console.log('  THIẾU:', x.title)); rep.extra_in_manifest.forEach((x) => console.log('  THỪA:', x.title)); rep.duplicates_in_source.forEach((x) => console.log('  TRÙNG:', x.title));
++    rep.field_mismatches.forEach((x) => console.log(`  LỆCH ${x.title} [${x.field}]: nguồn=${x.source} manifest=${x.manifest}`)); rep.incomplete_source_rows.forEach((x) => console.log('  DÒNG LỖI:', JSON.stringify(x)));
++    process.exitCode = rep.counts_ok ? 0 : 1;
++}
+diff --git a/tools/algbench/realbench/schema.js b/tools/algbench/realbench/schema.js
+index ee79266..4250bec 100644
+--- a/tools/algbench/realbench/schema.js
++++ b/tools/algbench/realbench/schema.js
+@@ -24,6 +24,17 @@ function parseKey(k) { // {tonic:"D",mode:"major"} -> {pc,mode} | null (không h
+     if (mode === 'undetermined') return { pc: null, mode };
+     const p = pc(k.tonic); return p === null ? null : { pc: p, mode };
+ }
++
++// AI-ALG-10 — đọc tên giọng dạng chuỗi ("Bb Minor", "A# minor", "E Major", "Db trưởng"). Enharmonic quy về cùng pitch class.
++// Major/Minor luôn tách biệt (relative KHÔNG bằng nhau). Không có mode rõ ràng => null (không đoán).
++function parseKeyString(str) {
++    if (typeof str !== 'string') return null;
++    const m = str.trim().replace('♯', '#').replace('♭', 'b').match(/^([A-Ga-g])\s*([#b]?)\s*[-\s]*(major|minor|maj|min|trưởng|thứ)$/i);
++    if (!m) return null;
++    const mode = /^(major|maj|trưởng)$/i.test(m[3]) ? 'major' : 'minor', p = pc(m[1].toUpperCase() + (m[2] === 'b' ? 'B' : m[2]));
++    return p === null ? null : { pc: p, mode };
++}
++const keyLabel = (k) => (k && k.pc !== null ? `${NOTE[k.pc]} ${k.mode}` : null);   // tên chuẩn hóa (dùng thang # cho enharmonic)
+ function sha256File(p) { return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'); }
+ const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
+ 
+@@ -109,4 +120,4 @@ function validateManifest(m) {
+     });
+     return { errors, warnings, tracks: m.tracks };
+ }
+-module.exports = { NOTE, pc, parseKey, validateTrack, validateManifest, audioStatus, sha256File, REF_STATUS, SPLITS, MODES, LABEL_STATES };
++module.exports = { NOTE, pc, parseKey, validateTrack, validateManifest, audioStatus, sha256File, REF_STATUS, SPLITS, MODES, LABEL_STATES, parseKeyString, keyLabel };
+-- 
+2.43.0
+

@@ -27,3 +27,7 @@ Test: `node tests/unit/RealBenchA08.verify.js` (dữ liệu TEST_FIXTURE, không
 `title`; `label_state` (`VERIFIED | USER_LABEL_UNVERIFIED | NO_REFERENCE | NEEDS_CLARIFICATION`; ánh xạ "UNDETERMINED" = `NO_REFERENCE`); `user_reference{key,modulation{time,from_key,to_key},modulation_unclear}` (nhãn người dùng, KHÔNG chấm); `observations{auto_key,menu}{raw,key,agrees_with_user_reference}` + `tester_note`; `track_group`.
 Báo cáo `run.js` có `exclusion_reasons` cho từng bài (không bài nào bị mất khỏi bảng) và `observations_descriptive_only` (so Auto/Menu với nhãn người dùng — chỉ MÔ TẢ, không phải accuracy).
 Quy tắc chia tập (cố định, không phụ thuộc kết quả): `sha256(track_id)[0] % 10 < 3` → test, còn lại dev.
+
+## Đối chiếu bảng nguồn 20 bài (AI-ALG-10)
+`node tools/algbench/realbench/reconcile.js --source <bảng.csv|tsv|json> [--expect 20] [--out rec.json]`
+Cột (không phân biệt hoa/thường/dấu): Tên bài | Link | Key chuẩn | Auto Key | Menu | Ghi chú. Báo: bài THIẾU/THỪA/TRÙNG, dòng lỗi, trường LỆCH (url, key chuẩn, Auto, Menu, ghi chú). Enharmonic (Bb minor = A# minor) coi là cùng key; Major/Minor và relative KHÔNG coi là bằng nhau. Không có `--source` ⇒ `BLOCKED_NO_SOURCE_TABLE` (exit 2). Công cụ chỉ đọc: không sửa manifest, không nâng nhãn lên VERIFIED.
