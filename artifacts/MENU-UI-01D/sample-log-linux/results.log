@@ -1,0 +1,105 @@
+=== MENU-UI-01D verify ===
+Thoi gian : 2026-10-17 03:34:59
+Thu muc   : /tmp/d
+Commit    : 4475d4ec18447fb9809de896e8fcc6d575c8569e
+Nhanh     : main
+Working tree: CO 2 thay doi chua commit:
+    ?? artifacts/
+    ?? scripts/verify-menu-ui-01d.ps1
+Node      : v22.22.2
+npm       : 10.9.7
+node_modules: False | electron: False  (neu False: chay "npm install" truoc khi "npm start")
+
+>>> [SYNTAX app/main.js] node --check app/main.js
+<<< [SYNTAX app/main.js] exit=0 -> PASS
+
+>>> [SYNTAX app/preload.js] node --check app/preload.js
+<<< [SYNTAX app/preload.js] exit=0 -> PASS
+
+>>> [SYNTAX ui/js/renderer.js] node --check ui/js/renderer.js
+<<< [SYNTAX ui/js/renderer.js] exit=0 -> PASS
+
+>>> [GIT DIFF CHECK] git diff --check
+<<< [GIT DIFF CHECK] exit=0 -> PASS
+
+>>> [TEST AlwaysOnTopMenuUi01B] node tests/unit/AlwaysOnTopMenuUi01B.verify.js
+      OK   tooltip nêu lỗi
+      OK   getAlwaysOnTop ném lỗi: trạng thái error, không báo ON
+      OK   get ok=false: error (không tin value)
+      OK   electronAPI thiếu hàm: khoá và báo lỗi, không crash
+      OK   không có electronAPI: không crash
+    == CSS / HTML / bố cục ==
+      OK   công tắc 44x29px (cao bằng các nút khác)
+      OK   có style riêng cho ON
+      OK   lưới header 220px 1fr 170px GIỮ NGUYÊN
+      OK   tổng chiều rộng nhóm nút 149px <= cột phải 170px
+      OK   index.html KHÔNG bị sửa (công tắc tạo bằng JS)
+    42 PASS, 0 FAIL
+<<< [TEST AlwaysOnTopMenuUi01B] exit=0 -> PASS
+
+>>> [TEST MenuMinimizeRuntime] node tests/unit/MenuMinimizeRuntime.verify.js
+    == renderer.js: minBtn không còn console.log("MINIMIZE") UI-only ==
+      OK   handler console.log("MINIMIZE") cũ đã bị thay thế
+      OK   tìm thấy handler #minBtn mới trong renderer.js
+      OK   click gọi electronAPI.minimizeWindow() đúng 1 lần (thực tế: 1)
+    == preload.js: expose kênh minimize-window ==
+      OK   preload.js expose minimizeWindow() -> ipcRenderer.send("minimize-window")
+    == main.js: ipcMain.on("minimize-window") gọi mainWin.minimize() thật ==
+      OK   tìm thấy handler ipcMain.on("minimize-window") trong main.js
+      OK   handler gọi mainWin.minimize() thật (không phải no-op/log)
+      OK   handler tự bảo vệ khi mainWin đã bị destroy (không crash)
+    7 PASS, 0 FAIL
+<<< [TEST MenuMinimizeRuntime] exit=0 -> PASS
+
+>>> [TEST AutoSongCollector] node tests/unit/AutoSongCollector.verify.js
+      ✅ Không require('electron')
+      ✅ Không tạo timer nào (không có gì để rò rỉ theo thời gian)
+      ✅ Không đăng ký DOM/event listener nào
+      ✅ Không require bất kỳ file nào trong core/ai (AI Core)
+      ✅ keyEngine.js không bị đụng tới bởi task này
+      ✅ git status xác nhận không có file cũ nào bị sửa (chỉ thêm file mới)
+    === PHẦN F: Không tạo Memory Leak (SongCollectorState) ===
+      ✅ Gọi collect() 500 lần cho 1 bài hát -> cache vẫn chỉ có đúng 1 entry (thực tế: 1)
+      ✅ Cache tăng đúng theo số bài hát KHÁC NHAU (1 cũ + 50 mới = 51), không theo số lần gọi (thực tế: 51)
+      ✅ clear() dọn sạch cache hoàn toàn, không còn tham chiếu treo lại
+    ========== TỔNG KẾT ==========
+    ✅ TẤT CẢ kiểm chứng PASS — AutoSongCollector hoạt động đúng, không ảnh hưởng module khác.
+<<< [TEST AutoSongCollector] exit=0 -> PASS
+
+>>> [TEST NowPlayingResolver] node tests/unit/NowPlayingResolver.verify.js
+      ✅ Không dùng IPC
+      ✅ Không require('electron')
+      ✅ Không gọi Internet/HTTP dưới bất kỳ hình thức nào
+      ✅ Không tạo timer nào (không rủi ro memory leak theo thời gian)
+      ✅ Chỉ require module lõi Node (fs, path) + file nội bộ core/reference — không thêm package ngoài mới
+      ✅ package.json không có thay đổi (không thêm package mới cho task này)
+      ✅ keyEngine.js không bị đụng tới
+      ✅ git status xác nhận không có file cũ nào bị sửa
+    === PHẦN G: Không tạo Memory Leak khi resolve() lặp lại nhiều lần ===
+      ✅ NowPlayingResolver không có property/state nội bộ nào tích luỹ sau 1000 lần gọi (thực tế: 0 key)
+    ========== TỔNG KẾT ==========
+    ✅ TẤT CẢ kiểm chứng PASS — NowPlayingResolver hoạt động đúng, trung thực, không ảnh hưởng module khác.
+<<< [TEST NowPlayingResolver] exit=0 -> PASS
+
+--- Runtime Electron that (doc tu RUNTIME-CHECKLIST.md, script KHONG tu dien) ---
+    A1 : NOT RUN
+    A2 : NOT RUN
+    A3 : NOT RUN
+    A4 : NOT RUN
+    A5 : NOT RUN
+    A6 : NOT RUN
+    B1 : NOT RUN
+    B2 : NOT RUN
+    B3 : NOT RUN
+    C1 : NOT RUN
+    C2 : NOT RUN
+    C3 : NOT RUN
+    C4 : NOT RUN
+    D : NOT RUN
+
+TONG KET: BLOCKED (chua co ket qua runtime Windows that cho 14/14 muc)
+  Tu dong (mock/tinh): 8 PASS / 0 FAIL
+  Runtime that       : 0 PASS / 0 FAIL / 14 NOT RUN
+
+Da ghi: /tmp/d/artifacts/MENU-UI-01D/run-20261017-033459/results.md
+Da ghi: /tmp/d/artifacts/MENU-UI-01D/run-20261017-033459/results.log

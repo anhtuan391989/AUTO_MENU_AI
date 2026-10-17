@@ -1,0 +1,106 @@
+﻿=== MENU-UI-01D verify ===
+Thoi gian : 2026-10-17 10:38:17
+Thu muc   : G:\AUTO_MENU_AI
+Commit    : 4475d4ec18447fb9809de896e8fcc6d575c8569e
+Nhanh     : main
+Working tree: CO 3 thay doi chua commit:
+    ?? artifacts/
+    ?? logs/2026-10-17_10-34-27.jsonl
+    ?? scripts/verify-menu-ui-01d.ps1
+Node      : v20.20.2
+npm       : 10.8.2
+node_modules: True | electron: True  (neu False: chay "npm install" truoc khi "npm start")
+
+>>> [SYNTAX app/main.js] node --check app/main.js
+<<< [SYNTAX app/main.js] exit=0 -> PASS
+
+>>> [SYNTAX app/preload.js] node --check app/preload.js
+<<< [SYNTAX app/preload.js] exit=0 -> PASS
+
+>>> [SYNTAX ui/js/renderer.js] node --check ui/js/renderer.js
+<<< [SYNTAX ui/js/renderer.js] exit=0 -> PASS
+
+>>> [GIT DIFF CHECK] git diff --check
+<<< [GIT DIFF CHECK] exit=0 -> PASS
+
+>>> [TEST AlwaysOnTopMenuUi01B] node tests/unit/AlwaysOnTopMenuUi01B.verify.js
+      OK   tooltip n├¬u lß╗ùi
+      OK   getAlwaysOnTop n├⌐m lß╗ùi: trß║íng th├íi error, kh├┤ng b├ío ON
+      OK   get ok=false: error (kh├┤ng tin value)
+      OK   electronAPI thiß║┐u h├ám: kho├í v├á b├ío lß╗ùi, kh├┤ng crash
+      OK   kh├┤ng c├│ electronAPI: kh├┤ng crash
+    == CSS / HTML / bß╗æ cß╗Ñc ==
+      OK   c├┤ng tß║»c 44x29px (cao bß║▒ng c├íc n├║t kh├íc)
+      OK   c├│ style ri├¬ng cho ON
+      OK   l╞░ß╗¢i header 220px 1fr 170px GIß╗« NGUY├èN
+      OK   tß╗òng chiß╗üu rß╗Öng nh├│m n├║t 149px <= cß╗Öt phß║úi 170px
+      OK   index.html KH├öNG bß╗ï sß╗¡a (c├┤ng tß║»c tß║ío bß║▒ng JS)
+    42 PASS, 0 FAIL
+<<< [TEST AlwaysOnTopMenuUi01B] exit=0 -> PASS
+
+>>> [TEST MenuMinimizeRuntime] node tests/unit/MenuMinimizeRuntime.verify.js
+    == renderer.js: minBtn kh├┤ng c├▓n console.log("MINIMIZE") UI-only ==
+      OK   handler console.log("MINIMIZE") c┼⌐ ─æ├ú bß╗ï thay thß║┐
+      OK   t├¼m thß║Ñy handler #minBtn mß╗¢i trong renderer.js
+      OK   click gß╗ìi electronAPI.minimizeWindow() ─æ├║ng 1 lß║ºn (thß╗▒c tß║┐: 1)
+    == preload.js: expose k├¬nh minimize-window ==
+      OK   preload.js expose minimizeWindow() -> ipcRenderer.send("minimize-window")
+    == main.js: ipcMain.on("minimize-window") gß╗ìi mainWin.minimize() thß║¡t ==
+      OK   t├¼m thß║Ñy handler ipcMain.on("minimize-window") trong main.js
+      OK   handler gß╗ìi mainWin.minimize() thß║¡t (kh├┤ng phß║úi no-op/log)
+      OK   handler tß╗▒ bß║úo vß╗ç khi mainWin ─æ├ú bß╗ï destroy (kh├┤ng crash)
+    7 PASS, 0 FAIL
+<<< [TEST MenuMinimizeRuntime] exit=0 -> PASS
+
+>>> [TEST AutoSongCollector] node tests/unit/AutoSongCollector.verify.js
+      Γ£à Kh├┤ng require('electron')
+      Γ£à Kh├┤ng tß║ío timer n├áo (kh├┤ng c├│ g├¼ ─æß╗â r├▓ rß╗ë theo thß╗¥i gian)
+      Γ£à Kh├┤ng ─æ─âng k├╜ DOM/event listener n├áo
+      Γ£à Kh├┤ng require bß║Ñt kß╗│ file n├áo trong core/ai (AI Core)
+      Γ£à keyEngine.js kh├┤ng bß╗ï ─æß╗Ñng tß╗¢i bß╗ƒi task n├áy
+      Γ£à git status x├íc nhß║¡n kh├┤ng c├│ file c┼⌐ n├áo bß╗ï sß╗¡a (chß╗ë th├¬m file mß╗¢i)
+    === PHß║ªN F: Kh├┤ng tß║ío Memory Leak (SongCollectorState) ===
+      Γ£à Gß╗ìi collect() 500 lß║ºn cho 1 b├ái h├ít -> cache vß║½n chß╗ë c├│ ─æ├║ng 1 entry (thß╗▒c tß║┐: 1)
+      Γ£à Cache t─âng ─æ├║ng theo sß╗æ b├ái h├ít KH├üC NHAU (1 c┼⌐ + 50 mß╗¢i = 51), kh├┤ng theo sß╗æ lß║ºn gß╗ìi (thß╗▒c tß║┐: 51)
+      Γ£à clear() dß╗ìn sß║ích cache ho├án to├án, kh├┤ng c├▓n tham chiß║┐u treo lß║íi
+    ========== Tß╗öNG Kß║╛T ==========
+    Γ£à Tß║ñT Cß║ó kiß╗âm chß╗⌐ng PASS ΓÇö AutoSongCollector hoß║ít ─æß╗Öng ─æ├║ng, kh├┤ng ß║únh h╞░ß╗ƒng module kh├íc.
+<<< [TEST AutoSongCollector] exit=0 -> PASS
+
+>>> [TEST NowPlayingResolver] node tests/unit/NowPlayingResolver.verify.js
+      Γ£à Kh├┤ng d├╣ng IPC
+      Γ£à Kh├┤ng require('electron')
+      Γ£à Kh├┤ng gß╗ìi Internet/HTTP d╞░ß╗¢i bß║Ñt kß╗│ h├¼nh thß╗⌐c n├áo
+      Γ£à Kh├┤ng tß║ío timer n├áo (kh├┤ng rß╗ºi ro memory leak theo thß╗¥i gian)
+      Γ£à Chß╗ë require module l├╡i Node (fs, path) + file nß╗Öi bß╗Ö core/reference ΓÇö kh├┤ng th├¬m package ngo├ái mß╗¢i
+      Γ£à package.json kh├┤ng c├│ thay ─æß╗òi (kh├┤ng th├¬m package mß╗¢i cho task n├áy)
+      Γ£à keyEngine.js kh├┤ng bß╗ï ─æß╗Ñng tß╗¢i
+      Γ£à git status x├íc nhß║¡n kh├┤ng c├│ file c┼⌐ n├áo bß╗ï sß╗¡a
+    === PHß║ªN G: Kh├┤ng tß║ío Memory Leak khi resolve() lß║╖p lß║íi nhiß╗üu lß║ºn ===
+      Γ£à NowPlayingResolver kh├┤ng c├│ property/state nß╗Öi bß╗Ö n├áo t├¡ch luß╗╣ sau 1000 lß║ºn gß╗ìi (thß╗▒c tß║┐: 0 key)
+    ========== Tß╗öNG Kß║╛T ==========
+    Γ£à Tß║ñT Cß║ó kiß╗âm chß╗⌐ng PASS ΓÇö NowPlayingResolver hoß║ít ─æß╗Öng ─æ├║ng, trung thß╗▒c, kh├┤ng ß║únh h╞░ß╗ƒng module kh├íc.
+<<< [TEST NowPlayingResolver] exit=0 -> PASS
+
+--- Runtime Electron that (doc tu RUNTIME-CHECKLIST.md, script KHONG tu dien) ---
+    A1 : NOT RUN
+    A2 : NOT RUN
+    A3 : NOT RUN
+    A4 : NOT RUN
+    A5 : NOT RUN
+    A6 : NOT RUN
+    B1 : NOT RUN
+    B2 : NOT RUN
+    B3 : NOT RUN
+    C1 : NOT RUN
+    C2 : NOT RUN
+    C3 : NOT RUN
+    C4 : NOT RUN
+    D : NOT RUN
+
+TONG KET: BLOCKED (chua co ket qua runtime Windows that cho 14/14 muc)
+  Tu dong (mock/tinh): 8 PASS / 0 FAIL
+  Runtime that       : 0 PASS / 0 FAIL / 14 NOT RUN
+
+Da ghi: G:\AUTO_MENU_AI\artifacts\MENU-UI-01D\run-20261017-103817\results.md
+Da ghi: G:\AUTO_MENU_AI\artifacts\MENU-UI-01D\run-20261017-103817\results.log
