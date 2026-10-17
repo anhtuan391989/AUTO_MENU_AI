@@ -247,3 +247,14 @@ không đọc kích thước phần tử, nên đổi số đo ở đây không 
 .status-bar{ display:flex; gap:12px; margin-top:8px; padding:6px 10px; background:rgba(255,255,255,.05); border-radius:8px; font-size:12px; font-weight:600;}
 /* Cho phép định vị chấm trạng thái (dot-key/dot-bpm/dot-mod) vào góc trên-phải của card */
 .analyzer-card { position: relative; }
+
+/* --- MENU-UI-01B: CÔNG TẮC ALWAYS ON TOP (cạnh Settings, 44x29 trong cột phải 170px) --- */
+#aotSwitch { position: relative; width: 44px; height: 29px; padding: 0; flex-shrink: 0; border: 1px solid rgba(0, 180, 255, 0.3); border-radius: 15px; background: #10253b; cursor: pointer; transition: background .2s, border-color .2s; }
+#aotSwitch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 21px; height: 21px; border-radius: 50%; background: #6b7f93; transition: left .2s, background .2s, box-shadow .2s; }
+#aotSwitch[data-state="on"] { background: rgba(19, 223, 255, .25); border-color: var(--cyan); }
+#aotSwitch[data-state="on"]::after { left: 18px; background: var(--cyan); box-shadow: 0 0 8px rgba(0, 180, 255, .6); }
+#aotSwitch[data-state="pending"] { opacity: .5; }
+#aotSwitch[data-state="error"], #aotSwitch.aot-error { border-color: #ff4d4d; }
+#aotSwitch[data-state="error"]::after { background: #ff4d4d; }
+#aotSwitch:disabled { cursor: default; }
+#aotSwitch:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }

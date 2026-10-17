@@ -79,6 +79,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- UI FINAL v2.0: "Menu ôm sát nội dung" — CHỈ đổi chiều cao cửa sổ chính ----
     resizeWindow: (height) => ipcRenderer.send("resize-window", { height }),
 
+    // ---- TASK B — MENU RUNTIME: thu nhỏ cửa sổ chính thật (thay console.log("MINIMIZE")) ----
+    minimizeWindow: () => ipcRenderer.send("minimize-window"),
+
+    // ---- MENU-UI-01B — Always on Top: main trả về { ok, value, error? } với value = trạng thái THẬT ----
+    getAlwaysOnTop: () => ipcRenderer.invoke("get-always-on-top"),
+    setAlwaysOnTop: (enabled) => ipcRenderer.invoke("set-always-on-top", enabled),
+
     // ---- MIDI-MASTER-01 Phase 1: trạng thái MIDI THẬT phía main process (easymidi) ----
     // Dùng bởi ui/js/midiHealth.js để hợp nhất với trạng thái Web MIDI phía renderer.
     getMainMidiHealth: () => ipcRenderer.invoke("midi-health"),

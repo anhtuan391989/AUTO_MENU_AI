@@ -7,6 +7,8 @@ const os = require("os");
 
 let mainWin = null;
 let setupWin = null;
+// MENU-UI-01B — true khi người dùng đã chủ động gạt Always on Top trong phiên này (không lưu qua phiên).
+let aotUserChanged = false;
 
 // ================================
 // LƯU TRỮ DÙNG CHUNG (thay cho localStorage vốn bị cô lập theo từng cửa sổ)
@@ -83,6 +85,18 @@ function createMainWindow() {
     });
 
     mainWin.loadFile(path.join(__dirname, "..", "ui", "index.html"));
+
+    // MENU-UI-01B — Always on Top MẶC ĐỊNH ON mỗi lần khởi động (không lưu qua phiên).
+    // Đặt ngay sau khi tạo cửa sổ, rồi đặt lại ĐÚNG 1 LẦN khi trang tải xong (chỉ nếu người dùng
+    // chưa tự gạt) để chắc chắn Windows áp dụng. Trạng thái thật do isAlwaysOnTop() báo về UI.
+    try { mainWin.setAlwaysOnTop(true); } catch (err) { console.error("setAlwaysOnTop mặc định lỗi:", err); }
+    mainWin.webContents.once("did-finish-load", () => {
+        try {
+            if (mainWin && !mainWin.isDestroyed() && !aotUserChanged) mainWin.setAlwaysOnTop(true);
+        } catch (err) {
+            console.error("setAlwaysOnTop (did-finish-load) lỗi:", err);
+        }
+    });
 }
 
 function createSetupWindow() {
@@ -663,6 +677,56 @@ ipcMain.on("resize-window", (event, { height } = {}) => {
         mainWin.setContentSize(currentWidth, clampedHeight);
     } catch (err) {
         console.error("resize-window lỗi:", err);
+    }
+});
+
+// ================================
+// TASK B — MENU RUNTIME: nút Minimize (minBtn) trước đây chỉ console.log("MINIMIZE"),
+// không có tác dụng thật. Thêm kênh IPC thật để thu nhỏ cửa sổ chính (mainWin).
+// Không đụng Setup window, không đụng bất kỳ kênh IPC nào khác.
+// ================================
+ipcMain.on("minimize-window", () => {
+    try {
+        if (!mainWin || mainWin.isDestroyed()) return;
+        mainWin.minimize();
+    } catch (err) {
+        console.error("minimize-window lỗi:", err);
+    }
+});
+
+// ================================
+// MENU-UI-01B — ALWAYS ON TOP: 2 kênh invoke MỚI, tách biệt mọi kênh khác.
+// Main là nơi DUY NHẤT thao tác cửa sổ và trả về trạng thái THẬT (isAlwaysOnTop()).
+// Trả về { ok, value, error? } — value luôn là trạng thái thực tế, UI không được tự đoán.
+// ================================
+ipcMain.handle("get-always-on-top", () => {
+    try {
+        if (!mainWin || mainWin.isDestroyed()) return { ok: false, value: false, error: "Cửa sổ chính không khả dụng" };
+        return { ok: true, value: mainWin.isAlwaysOnTop() };
+    } catch (err) {
+        console.error("get-always-on-top lỗi:", err);
+        return { ok: false, value: false, error: String((err && err.message) || err) };
+    }
+});
+
+ipcMain.handle("set-always-on-top", (event, enabled) => {
+    try {
+        if (!mainWin || mainWin.isDestroyed()) return { ok: false, value: false, error: "Cửa sổ chính không khả dụng" };
+        if (typeof enabled !== "boolean") {
+            return { ok: false, value: mainWin.isAlwaysOnTop(), error: "Giá trị không hợp lệ" };
+        }
+        aotUserChanged = true;
+        mainWin.setAlwaysOnTop(enabled);
+        const actual = mainWin.isAlwaysOnTop();
+        if (actual !== enabled) {
+            return { ok: false, value: actual, error: "Hệ thống không áp dụng được trạng thái yêu cầu" };
+        }
+        return { ok: true, value: actual };
+    } catch (err) {
+        console.error("set-always-on-top lỗi:", err);
+        let actual = false;
+        try { actual = !!(mainWin && !mainWin.isDestroyed() && mainWin.isAlwaysOnTop()); } catch { /* giữ false */ }
+        return { ok: false, value: actual, error: String((err && err.message) || err) };
     }
 });
 

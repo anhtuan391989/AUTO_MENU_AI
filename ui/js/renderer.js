@@ -402,6 +402,81 @@ document.getElementById("minBtn")?.addEventListener("click", () => {
     }
 });
 
+// MENU-UI-01B — Công tắc Always on Top cạnh nút Settings. Tạo bằng JS (KHÔNG sửa index.html).
+// UI chỉ hiện ON/OFF theo giá trị THẬT main process trả về (isAlwaysOnTop()), không tự giả định.
+(function initAlwaysOnTopSwitch() {
+    const container = document.querySelector(".window-buttons");
+    if (!container) return;
+    const api = window.electronAPI;
+    const LABEL = "Always on Top — Luôn ở phía trên";
+
+    const sw = document.createElement("button");
+    sw.id = "aotSwitch";
+    sw.type = "button";
+    sw.setAttribute("role", "switch");
+    sw.setAttribute("aria-label", LABEL);
+    container.insertBefore(sw, document.getElementById("setupBtn") || container.firstChild);
+
+    let busy = false;
+
+    function render(state, errMsg) {
+        sw.dataset.state = state; // on | off | pending | error
+        sw.setAttribute("aria-checked", state === "on" ? "true" : "false");
+        if (errMsg) sw.classList.add("aot-error"); else sw.classList.remove("aot-error");
+        let tip = LABEL;
+        if (state === "on") tip += " — ĐANG BẬT (bấm để tắt)";
+        else if (state === "off") tip += " — ĐANG TẮT (bấm để bật)";
+        else if (state === "pending") tip += " — đang kiểm tra...";
+        else tip += " — không xác định";
+        if (errMsg) tip += " | Lỗi: " + errMsg;
+        sw.title = tip;
+    }
+
+    if (!api || typeof api.getAlwaysOnTop !== "function" || typeof api.setAlwaysOnTop !== "function") {
+        console.error("[AlwaysOnTop] electronAPI thiếu getAlwaysOnTop/setAlwaysOnTop.");
+        sw.disabled = true;
+        render("error", "electronAPI không khả dụng");
+        return;
+    }
+
+    render("pending");
+    sw.disabled = true;
+
+    Promise.resolve()
+        .then(() => api.getAlwaysOnTop())
+        .then((r) => {
+            if (r && typeof r.value === "boolean" && r.ok) render(r.value ? "on" : "off");
+            else render("error", (r && r.error) || "Không đọc được trạng thái");
+        })
+        .catch((err) => {
+            console.error("[AlwaysOnTop] getAlwaysOnTop lỗi:", err);
+            render("error", String((err && err.message) || err));
+        })
+        .finally(() => { sw.disabled = false; });
+
+    sw.addEventListener("click", async () => {
+        if (busy) return; // chặn bấm dồn: mỗi lần chỉ 1 IPC đang chờ
+        busy = true;
+        sw.disabled = true;
+        try {
+            const next = sw.getAttribute("aria-checked") !== "true";
+            const r = await api.setAlwaysOnTop(next);
+            if (r && typeof r.value === "boolean") {
+                render(r.value ? "on" : "off", r.ok ? null : (r.error || "Thao tác thất bại"));
+            } else {
+                render("error", "Phản hồi không hợp lệ từ main process");
+            }
+            if (r && !r.ok) console.error("[AlwaysOnTop] thao tác thất bại:", r.error);
+        } catch (err) {
+            console.error("[AlwaysOnTop] setAlwaysOnTop lỗi:", err);
+            render("error", String((err && err.message) || err));
+        } finally {
+            busy = false;
+            sw.disabled = false;
+        }
+    });
+})();
+
 document.getElementById("closeModal")?.addEventListener("click", () => {
     console.log("Close modal (setup window is separate)");
 });

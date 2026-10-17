@@ -1,17 +1,631 @@
 {
   "schema": "AI-ALG-08/manifest/v2",
-  "note": "Nhãn người dùng cung cấp = UNVERIFIED_REFERENCE và KHÔNG được tính vào số liệu chính. Không bịa nhãn, không có audio trong repo. Xem tools/algbench/realbench/README.md để thêm bài.",
+  "schema_ext": "AI-ALG-09 (title,label_state,user_reference,observations,track_group)",
+  "note": "Nhãn người dùng = UNVERIFIED_REFERENCE; KHÔNG vào số liệu chính. segments[] để trống vì chưa có ranh giới đoạn đã xác minh. Chỉ 14/20 bài được cung cấp trong task AI-ALG-09 (xem báo cáo). Quy tắc chia: sha256(track_id)[0] % 10 < 3 -> test, còn lại dev (cố định trước khi có kết quả).",
   "tracks": [
     {
-      "track_id": "thuong-em-yt-wHLNh9qFgU8",
-      "audio_reference": { "type": "url_reference_only", "path": null, "source_url": "https://www.youtube.com/watch?v=wHLNh9qFgU8", "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp." },
+      "track_id": "don-dau-vo-cung",
+      "title": "Đớn Đau Vô Cùng",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
       "audio_hash": null,
       "reference_status": "UNVERIFIED_REFERENCE",
-      "annotator": "user_observation (Khói, chưa kiểm chứng độc lập)",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "A",
+          "mode": "minor"
+        },
+        "modulation": null,
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "C major",
+          "key": {
+            "tonic": "C",
+            "mode": "major"
+          },
+          "agrees_with_user_reference": false
+        },
+        "menu": {
+          "raw": "A minor",
+          "key": {
+            "tonic": "A",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": true
+        },
+        "tester_note": ""
+      },
       "segments": [],
-      "modulations": [ { "time": 188, "from_key": { "tonic": "D", "mode": "major" }, "to_key": { "tonic": "Eb", "mode": "major" } } ],
-      "annotation_notes": "Người dùng báo: tại 03:08 (188 s) chuyển D major lên Eb major (+1 bán cung). Chưa có ranh giới đoạn/key các phần khác nên segments để trống (không ép nhãn). KHÔNG giả định engine đang báo B minor cho đến khi có log thực tế trên audio.",
+      "modulations": [],
+      "track_group": "stable_user_reported",
+      "annotation_notes": "",
+      "split": "dev"
+    },
+    {
+      "track_id": "thuong-em",
+      "title": "THƯƠNG EM",
+      "audio_reference": {
+        "type": "url_reference_only",
+        "path": null,
+        "source_url": "https://www.youtube.com/watch?v=wHLNh9qFgU8",
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "D",
+          "mode": "major"
+        },
+        "modulation": {
+          "time": 188,
+          "from_key": {
+            "tonic": "D",
+            "mode": "major"
+          },
+          "to_key": {
+            "tonic": "Eb",
+            "mode": "major"
+          }
+        },
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "khớp nhãn",
+          "key": null,
+          "agrees_with_user_reference": true
+        },
+        "menu": {
+          "raw": "B minor",
+          "key": {
+            "tonic": "B",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": false
+        },
+        "tester_note": "Menu chậm hiển thị key/modulation (ghi nhận của người kiểm thử)."
+      },
+      "segments": [],
+      "modulations": [
+        {
+          "time": 188,
+          "from_key": {
+            "tonic": "D",
+            "mode": "major"
+          },
+          "to_key": {
+            "tonic": "Eb",
+            "mode": "major"
+          }
+        }
+      ],
+      "track_group": "modulation_user_reported",
+      "annotation_notes": "Menu chậm hiển thị key/modulation (ghi nhận của người kiểm thử).",
+      "split": "dev"
+    },
+    {
+      "track_id": "yeu-lai-tu-dau",
+      "title": "Yêu Lại Từ Đầu",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "D",
+          "mode": "major"
+        },
+        "modulation": {
+          "time": null,
+          "from_key": {
+            "tonic": "D",
+            "mode": "major"
+          },
+          "to_key": {
+            "tonic": "Eb",
+            "mode": "major"
+          }
+        },
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "khớp nhãn",
+          "key": null,
+          "agrees_with_user_reference": true
+        },
+        "menu": {
+          "raw": "B minor",
+          "key": {
+            "tonic": "B",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": false
+        },
+        "tester_note": "Nhãn người dùng: D major → Eb major; chưa có mốc thời gian."
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "modulation_user_reported",
+      "annotation_notes": "Nhãn người dùng: D major → Eb major; chưa có mốc thời gian.",
       "split": "test"
+    },
+    {
+      "track_id": "me-em",
+      "title": "Mê Em",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "C",
+          "mode": "major"
+        },
+        "modulation": null,
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "khớp nhãn",
+          "key": null,
+          "agrees_with_user_reference": true
+        },
+        "menu": {
+          "raw": "G major",
+          "key": {
+            "tonic": "G",
+            "mode": "major"
+          },
+          "agrees_with_user_reference": false
+        },
+        "tester_note": ""
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "stable_user_reported",
+      "annotation_notes": "",
+      "split": "test"
+    },
+    {
+      "track_id": "dung-quen-ten-anh",
+      "title": "đừng quên tên anh",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "Db",
+          "mode": "major"
+        },
+        "modulation": null,
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "khớp nhãn",
+          "key": null,
+          "agrees_with_user_reference": true
+        },
+        "menu": {
+          "raw": "D# minor",
+          "key": {
+            "tonic": "D#",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": false
+        },
+        "tester_note": ""
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "stable_user_reported",
+      "annotation_notes": "",
+      "split": "test"
+    },
+    {
+      "track_id": "sau-nay-em-cuoi-ai",
+      "title": "sau này em cưới ai",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "D",
+          "mode": "major"
+        },
+        "modulation": null,
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "khớp nhãn",
+          "key": null,
+          "agrees_with_user_reference": true
+        },
+        "menu": {
+          "raw": "B minor",
+          "key": {
+            "tonic": "B",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": false
+        },
+        "tester_note": ""
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "stable_user_reported",
+      "annotation_notes": "",
+      "split": "dev"
+    },
+    {
+      "track_id": "luu-nien",
+      "title": "lưu niên",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "B",
+          "mode": "major"
+        },
+        "modulation": null,
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "khớp nhãn",
+          "key": null,
+          "agrees_with_user_reference": true
+        },
+        "menu": {
+          "raw": "F# major",
+          "key": {
+            "tonic": "F#",
+            "mode": "major"
+          },
+          "agrees_with_user_reference": false
+        },
+        "tester_note": ""
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "stable_user_reported",
+      "annotation_notes": "",
+      "split": "dev"
+    },
+    {
+      "track_id": "dem-trang",
+      "title": "Đêm trắng",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "D#",
+          "mode": "major"
+        },
+        "modulation": null,
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "khớp nhãn",
+          "key": null,
+          "agrees_with_user_reference": true
+        },
+        "menu": {
+          "raw": "A# major",
+          "key": {
+            "tonic": "A#",
+            "mode": "major"
+          },
+          "agrees_with_user_reference": false
+        },
+        "tester_note": ""
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "stable_user_reported",
+      "annotation_notes": "",
+      "split": "dev"
+    },
+    {
+      "track_id": "anh-khong-tha-thu",
+      "title": "Anh không tha thứ",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "C#",
+          "mode": "minor"
+        },
+        "modulation": null,
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "E major",
+          "key": {
+            "tonic": "E",
+            "mode": "major"
+          },
+          "agrees_with_user_reference": false
+        },
+        "menu": {
+          "raw": "C# minor",
+          "key": {
+            "tonic": "C#",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": true
+        },
+        "tester_note": ""
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "stable_user_reported",
+      "annotation_notes": "",
+      "split": "dev"
+    },
+    {
+      "track_id": "anh-khac-hay-em-khac",
+      "title": "Anh Khác hay em khác",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "A",
+          "mode": "minor"
+        },
+        "modulation": null,
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "D major",
+          "key": {
+            "tonic": "D",
+            "mode": "major"
+          },
+          "agrees_with_user_reference": false
+        },
+        "menu": {
+          "raw": "B minor",
+          "key": {
+            "tonic": "B",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": false
+        },
+        "tester_note": ""
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "stable_user_reported",
+      "annotation_notes": "",
+      "split": "dev"
+    },
+    {
+      "track_id": "gia-vo-thuong-anh-duoc",
+      "title": "giả vờ thương anh được",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "D",
+          "mode": "minor"
+        },
+        "modulation": null,
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "Db major",
+          "key": {
+            "tonic": "Db",
+            "mode": "major"
+          },
+          "agrees_with_user_reference": false
+        },
+        "menu": {
+          "raw": "A# minor",
+          "key": {
+            "tonic": "A#",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": false
+        },
+        "tester_note": ""
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "stable_user_reported",
+      "annotation_notes": "",
+      "split": "dev"
+    },
+    {
+      "track_id": "phia-sau-mot-co-gai",
+      "title": "Phía Sau Một Cô Gái",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "USER_LABEL_UNVERIFIED",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "F",
+          "mode": "minor"
+        },
+        "modulation": null,
+        "modulation_unclear": true
+      },
+      "observations": {
+        "auto_key": {
+          "raw": "F minor",
+          "key": {
+            "tonic": "F",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": true
+        },
+        "menu": {
+          "raw": "F minor",
+          "key": {
+            "tonic": "F",
+            "mode": "minor"
+          },
+          "agrees_with_user_reference": true
+        },
+        "tester_note": "Cần xác minh diễn biến chuyển tone theo bản thu thực tế."
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "modulation_unclear",
+      "annotation_notes": "Cần xác minh diễn biến chuyển tone theo bản thu thực tế.",
+      "split": "dev"
+    },
+    {
+      "track_id": "vien-da-nho",
+      "title": "Viên Đá nhỏ",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "NO_REFERENCE",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": null,
+        "modulation": null,
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": null,
+        "menu": null,
+        "tester_note": "Chưa có nhãn tham chiếu: không được chấm accuracy."
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "stable_user_reported",
+      "annotation_notes": "Chưa có nhãn tham chiếu: không được chấm accuracy.",
+      "split": "test"
+    },
+    {
+      "track_id": "hoa-phan-ai-luu",
+      "title": "họa phận ái lưu",
+      "audio_reference": {
+        "type": "none",
+        "path": null,
+        "source_url": null,
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+      },
+      "audio_hash": null,
+      "reference_status": "UNVERIFIED_REFERENCE",
+      "label_state": "NEEDS_CLARIFICATION",
+      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
+      "user_reference": {
+        "key": {
+          "tonic": "E",
+          "mode": "minor"
+        },
+        "modulation": null,
+        "modulation_unclear": false
+      },
+      "observations": {
+        "auto_key": null,
+        "menu": null,
+        "tester_note": "Người kiểm thử ghi chú \"sai tone\": cần làm rõ, chưa kết luận đúng/sai."
+      },
+      "segments": [],
+      "modulations": [],
+      "track_group": "stable_user_reported",
+      "annotation_notes": "Người kiểm thử ghi chú \"sai tone\": cần làm rõ, chưa kết luận đúng/sai.",
+      "split": "dev"
     }
   ]
 }

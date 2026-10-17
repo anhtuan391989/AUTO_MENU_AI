@@ -9,7 +9,7 @@ const base = (o) => Object.assign({ track_id: 't1', audio_reference: { path: 'a.
 
 T('manifest repo hợp lệ và Thương Em là UNVERIFIED, không audio', () => {
     const m = JSON.parse(fs.readFileSync(R + '/../manifest/real_music_manifest.json', 'utf8')), v = S.validateManifest(m);
-    assert.deepStrictEqual(v.errors, []); const t = m.tracks[0];
+    assert.deepStrictEqual(v.errors, []); const t = m.tracks.find((x) => x.track_id === 'thuong-em');
     assert.strictEqual(t.reference_status, 'UNVERIFIED_REFERENCE'); assert.strictEqual(S.audioStatus(t, '.').status, 'BLOCKED_NO_AUDIO');
     const rep = evaluate(m, { audioRoot: '.', tol: 10, tols: [5, 10] }); assert.strictEqual(rep.status, 'BLOCKED_NO_AUDIO'); assert.strictEqual(rep.counts.evaluated, 0);
 });
@@ -85,5 +85,47 @@ T('pipeline: dữ liệu giả tách bạch, chỉ chấm VERIFIED, test cần -
     assert.strictEqual(r1.aggregate.mod.counts.tp, 1); assert.strictEqual(r1.data_origin, 'REAL_MUSIC');
     const r2 = evaluate(man, Object.assign({ finalTest: true }, o)); assert.strictEqual(r2.counts.evaluated, 2);
     assert.strictEqual(evaluate({ tracks: [base({ split: 'zzz' })] }, o).valid, false);
+});
+
+// ---- AI-ALG-09: manifest 14 bài, trường mở rộng, readiness ----
+const MAN = JSON.parse(fs.readFileSync(R + '/../manifest/real_music_manifest.json', 'utf8')), byId = (id) => MAN.tracks.find((x) => x.track_id === id), { exclusions, observationTable } = require(R + '/run.js');
+T('A09 manifest: 14 bài duy nhất, hợp lệ, tất cả UNVERIFIED, 0 bài đủ điều kiện chấm', () => {
+    assert.strictEqual(MAN.tracks.length, 14); assert.strictEqual(new Set(MAN.tracks.map((x) => x.track_id)).size, 14);
+    assert.deepStrictEqual(S.validateManifest(MAN).errors, []); assert.ok(MAN.tracks.every((x) => x.reference_status === 'UNVERIFIED_REFERENCE' && x.audio_hash === null && x.segments.length === 0));
+    const rep = evaluate(MAN, { audioRoot: '.', tol: 10, tols: [10], finalTest: true });
+    assert.strictEqual(rep.status, 'BLOCKED_NO_AUDIO'); assert.strictEqual(rep.counts.eligible_for_accuracy, 0); assert.strictEqual(rep.counts.excluded, 14); assert.strictEqual(rep.aggregate, null);
+    assert.ok(rep.tracks.every((r) => r.exclusion_reasons.includes('LABEL_NOT_VERIFIED') && r.exclusion_reasons.includes('BLOCKED_NO_AUDIO')));
+});
+T('A09 dữ liệu gốc được bảo toàn (nhãn/Auto/Menu nguyên văn)', () => {
+    const o = (id, w) => byId(id).observations[w].raw, ref = (id) => byId(id).user_reference.key;
+    assert.deepStrictEqual([ref('don-dau-vo-cung'), o('don-dau-vo-cung', 'auto_key'), o('don-dau-vo-cung', 'menu')], [{ tonic: 'A', mode: 'minor' }, 'C major', 'A minor']);
+    assert.strictEqual(o('thuong-em', 'menu'), 'B minor'); assert.strictEqual(byId('thuong-em').user_reference.modulation.time, 188); assert.strictEqual(byId('thuong-em').observations.auto_key.agrees_with_user_reference, true);
+    assert.strictEqual(byId('yeu-lai-tu-dau').user_reference.modulation.time, null); assert.strictEqual(o('anh-khong-tha-thu', 'auto_key'), 'E major'); assert.strictEqual(o('giả'.length ? 'gia-vo-thuong-anh-duoc' : '', 'menu'), 'A# minor');
+    assert.strictEqual(byId('phia-sau-mot-co-gai').track_group, 'modulation_unclear'); assert.strictEqual(byId('vien-da-nho').user_reference.key, null); assert.strictEqual(byId('vien-da-nho').label_state, 'NO_REFERENCE');
+    assert.strictEqual(byId('hoa-phan-ai-luu').label_state, 'NEEDS_CLARIFICATION'); assert.strictEqual(byId('hoa-phan-ai-luu').user_reference.key.mode, 'minor');
+});
+T('A09 enharmonic: A# minor == Bb minor, Db == C#', () => {
+    assert.deepStrictEqual(S.parseKey({ tonic: 'A#', mode: 'minor' }), S.parseKey({ tonic: 'Bb', mode: 'minor' })); assert.strictEqual(S.pc('Db'), S.pc('C#'));
+    assert.strictEqual(M.relation(S.parseKey({ tonic: 'Db', mode: 'major' }), S.parseKey({ tonic: 'C#', mode: 'major' })), 'exact');
+});
+T('A09 schema mở rộng: label_state, user_reference, observations kiểm tra chặt', () => {
+    const b = (o) => S.validateTrack(Object.assign(base({ reference_status: 'UNVERIFIED_REFERENCE' }), o), 0).errors;
+    assert.deepStrictEqual(b({ label_state: 'USER_LABEL_UNVERIFIED', title: 'x', user_reference: { key: key('C', 'major') }, observations: { auto_key: { raw: 'C', key: key('C', 'major'), agrees_with_user_reference: true }, menu: null } }), []);
+    assert.ok(b({ label_state: 'VERIFIED' }).length); assert.ok(b({ label_state: 'zzz' }).length); assert.ok(b({ title: '' }).length);
+    assert.ok(b({ user_reference: { key: { tonic: 'H', mode: 'major' } } }).length); assert.ok(b({ observations: { auto_key: { key: key('C', 'major') } } }).length);
+    assert.ok(S.validateTrack(base({ label_state: 'NO_REFERENCE' }), 0).errors.length); // VERIFIED không đi cùng NO_REFERENCE
+    assert.ok(S.validateTrack(base({ audio_reference: { path: null, source_url: null } }), 0).errors.length); // VERIFIED phải có nguồn audio
+    assert.deepStrictEqual(S.validateTrack(base({ reference_status: 'UNVERIFIED_REFERENCE', audio_reference: { path: null, source_url: null } }), 0).errors, []);
+});
+T('A09 exclusions + observationTable (mô tả, không phải accuracy)', () => {
+    assert.deepStrictEqual(exclusions(base(), { status: 'AUDIO_OK' }), []); assert.deepStrictEqual(exclusions(base({ reference_status: 'UNVERIFIED_REFERENCE' }), { status: 'BLOCKED_NO_AUDIO' }), ['BLOCKED_NO_AUDIO', 'LABEL_NOT_VERIFIED']);
+    assert.ok(exclusions(base({ label_state: 'NEEDS_CLARIFICATION', reference_status: 'UNVERIFIED_REFERENCE' }), { status: 'AUDIO_OK' }).includes('LABEL_NEEDS_CLARIFICATION'));
+    const t = observationTable(MAN.tracks), g = (id) => t.find((x) => x.track_id === id);
+    assert.strictEqual(g('thuong-em').menu.vs_reference, 'relative'); assert.strictEqual(g('thuong-em').auto_key.vs_reference, 'agrees_as_reported'); assert.strictEqual(g('don-dau-vo-cung').auto_key.vs_reference, 'relative');
+    assert.strictEqual(g('me-em').menu.vs_reference, 'other'); assert.strictEqual(g('phia-sau-mot-co-gai').menu.vs_reference, 'exact'); assert.strictEqual(g('vien-da-nho').menu, null);
+});
+T('A09 chia tập: quy tắc cố định theo track_id, mọi bài có split, không rò rỉ', () => {
+    const crypto = require('crypto'); MAN.tracks.forEach((x) => assert.strictEqual(x.split, crypto.createHash('sha256').update(x.track_id).digest()[0] % 10 < 3 ? 'test' : 'dev'));
+    assert.ok(MAN.tracks.some((x) => x.split === 'dev') && MAN.tracks.some((x) => x.split === 'test'));
 });
 console.log(`RealBenchA08: ${n} nhóm OK`);

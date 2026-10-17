@@ -22,3 +22,8 @@ Không sửa runtime. Chỉ đọc `ui/js/engines/*` qua vm (đồng hồ ảo).
 - `reference_status=UNVERIFIED_REFERENCE` hoặc audio thiếu/hash lệch ⇒ không được chấm vào số liệu chính.
 
 Test: `node tests/unit/RealBenchA08.verify.js` (dữ liệu TEST_FIXTURE, không phải nhạc thật).
+
+## Mở rộng AI-ALG-09 (tùy chọn, tương thích ngược)
+`title`; `label_state` (`VERIFIED | USER_LABEL_UNVERIFIED | NO_REFERENCE | NEEDS_CLARIFICATION`; ánh xạ "UNDETERMINED" = `NO_REFERENCE`); `user_reference{key,modulation{time,from_key,to_key},modulation_unclear}` (nhãn người dùng, KHÔNG chấm); `observations{auto_key,menu}{raw,key,agrees_with_user_reference}` + `tester_note`; `track_group`.
+Báo cáo `run.js` có `exclusion_reasons` cho từng bài (không bài nào bị mất khỏi bảng) và `observations_descriptive_only` (so Auto/Menu với nhãn người dùng — chỉ MÔ TẢ, không phải accuracy).
+Quy tắc chia tập (cố định, không phụ thuộc kết quả): `sha256(track_id)[0] % 10 < 3` → test, còn lại dev.

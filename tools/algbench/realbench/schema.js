@@ -8,6 +8,8 @@ const REF_STATUS = ['VERIFIED_INDEPENDENT', 'UNVERIFIED_REFERENCE'];
 const SPLITS = ['dev', 'test'];
 // Đoạn không xác định chắc chắn: mode "undetermined", tonic null — KHÔNG ép về một key; bị loại khỏi mẫu số key accuracy.
 const MODES = ['major', 'minor', 'undetermined'];
+// AI-ALG-09 (tùy chọn, tương thích ngược): label_state mô tả mức tin cậy của nhãn; ánh xạ UNDETERMINED = NO_REFERENCE / segments mode "undetermined".
+const LABEL_STATES = ['VERIFIED', 'USER_LABEL_UNVERIFIED', 'NO_REFERENCE', 'NEEDS_CLARIFICATION'];
 
 function pc(name) { // tên nốt -> pitch class 0..11, hoặc null
     if (typeof name !== 'string') return null;
@@ -31,7 +33,7 @@ function validateTrack(t, idx) {
     if (!t || typeof t !== 'object') return { errors: [`#${idx}: không phải object`], warnings: [] };
     if (!t.track_id || typeof t.track_id !== 'string') E.push(at('thiếu track_id'));
     if (!t.audio_reference || typeof t.audio_reference !== 'object') E.push(at('thiếu audio_reference'));
-    else if (!t.audio_reference.path && !t.audio_reference.source_url) E.push(at('audio_reference cần path hoặc source_url'));
+    else if (!t.audio_reference.path && !t.audio_reference.source_url && t.reference_status === 'VERIFIED_INDEPENDENT') E.push(at('bài VERIFIED cần audio_reference.path hoặc source_url (bài chưa xác minh được phép chưa có nguồn audio)'));
     if (t.audio_hash !== null && t.audio_hash !== undefined && !/^[0-9a-f]{64}$/.test(String(t.audio_hash))) E.push(at('audio_hash phải là sha256 hex 64 ký tự hoặc null'));
     if (!REF_STATUS.includes(t.reference_status)) E.push(at(`reference_status phải thuộc ${REF_STATUS.join('|')}`));
     if (!t.annotator || typeof t.annotator !== 'string') E.push(at('thiếu annotator/nguồn xác minh'));
@@ -62,6 +64,24 @@ function validateTrack(t, idx) {
     if (t.audio_hash && t.reference_status === 'VERIFIED_INDEPENDENT' && !t.annotator) E.push(at('nhãn VERIFIED cần nguồn xác minh'));
     if (t.reference_status === 'VERIFIED_INDEPENDENT' && Array.isArray(t.segments) && t.segments.length === 0 && Array.isArray(t.modulations) && t.modulations.length === 0)
         W.push(at('VERIFIED nhưng không có segments lẫn modulations: không chấm được gì'));
+
+    // ---- AI-ALG-09: trường tùy chọn (title, label_state, user_reference, observations) ----
+    if (t.title !== undefined && (typeof t.title !== 'string' || !t.title.trim())) E.push(at('title phải là chuỗi không rỗng'));
+    if (t.label_state !== undefined) {
+        if (!LABEL_STATES.includes(t.label_state)) E.push(at(`label_state phải thuộc ${LABEL_STATES.join('|')}`));
+        else if (t.reference_status === 'VERIFIED_INDEPENDENT' && t.label_state !== 'VERIFIED') E.push(at('VERIFIED_INDEPENDENT chỉ đi với label_state=VERIFIED'));
+        else if (t.reference_status === 'UNVERIFIED_REFERENCE' && t.label_state === 'VERIFIED') E.push(at('label_state=VERIFIED mâu thuẫn với UNVERIFIED_REFERENCE'));
+    }
+    if (t.user_reference !== undefined && t.user_reference !== null) {
+        const u = t.user_reference;
+        if (u.key !== null && u.key !== undefined && !parseKey(u.key)) E.push(at('user_reference.key không hợp lệ'));
+        if (u.modulation) { if (!parseKey(u.modulation.from_key) || !parseKey(u.modulation.to_key)) E.push(at('user_reference.modulation from/to_key không hợp lệ')); if (u.modulation.time !== null && !isNum(u.modulation.time)) E.push(at('user_reference.modulation.time phải là số hoặc null')); }
+    }
+    if (t.observations !== undefined && t.observations !== null) for (const who of ['auto_key', 'menu']) {
+        const o = t.observations[who]; if (o === undefined || o === null) continue;
+        if (typeof o.raw !== 'string') E.push(at(`observations.${who}.raw phải là chuỗi (nguyên văn người kiểm thử)`));
+        if (o.key !== null && o.key !== undefined && !parseKey(o.key)) E.push(at(`observations.${who}.key không hợp lệ`));
+    }
     return { errors: E, warnings: W };
 }
 
@@ -89,4 +109,4 @@ function validateManifest(m) {
     });
     return { errors, warnings, tracks: m.tracks };
 }
-module.exports = { NOTE, pc, parseKey, validateTrack, validateManifest, audioStatus, sha256File, REF_STATUS, SPLITS, MODES };
+module.exports = { NOTE, pc, parseKey, validateTrack, validateManifest, audioStatus, sha256File, REF_STATUS, SPLITS, MODES, LABEL_STATES };

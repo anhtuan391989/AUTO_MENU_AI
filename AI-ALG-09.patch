@@ -1,0 +1,935 @@
+From b0b42a55725519f250cf3ce4a2094f9db8f514e2 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 17 Oct 2026 01:05:12 +0000
+Subject: [PATCH] AI-ALG-09: normalize 14-track real-music manifest, readiness
+ reasons, extended schema; baseline still BLOCKED_NO_AUDIO
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01FrhXxWK5TMfTR3qNCGmEyc
+---
+ ...-09-REAL-MUSIC-DATASET-READINESS-REPORT.md |  76 +++
+ tests/unit/RealBenchA08.verify.js             |  44 +-
+ .../manifest/real_music_manifest.json         | 626 +++++++++++++++++-
+ tools/algbench/realbench/README.md            |   5 +
+ tools/algbench/realbench/run.js               |  28 +-
+ tools/algbench/realbench/schema.js            |  24 +-
+ 6 files changed, 791 insertions(+), 12 deletions(-)
+ create mode 100644 AI_BOOT.md/AI-ALG-09-REAL-MUSIC-DATASET-READINESS-REPORT.md
+
+diff --git a/AI_BOOT.md/AI-ALG-09-REAL-MUSIC-DATASET-READINESS-REPORT.md b/AI_BOOT.md/AI-ALG-09-REAL-MUSIC-DATASET-READINESS-REPORT.md
+new file mode 100644
+index 0000000..64da464
+--- /dev/null
++++ b/AI_BOOT.md/AI-ALG-09-REAL-MUSIC-DATASET-READINESS-REPORT.md
+@@ -0,0 +1,76 @@
++# AI-ALG-09 — Real-Music Dataset Preparation & Baseline Readiness
++
++**Trạng thái: DỮ LIỆU ĐÃ CHUẨN HÓA — BASELINE VẪN `BLOCKED_NO_AUDIO`.** 0 bài đủ điều kiện chấm accuracy. Không có accuracy/precision/recall/F1 nhạc thật. Không sửa thuật toán, runtime, UI, MIDI, FX, preset.
++
++## 1. Sai khác so với đề bài (đọc trước)
++- Đề nói "20 bài" nhưng chỉ **14 bài** có tên trong task (12 bài đầy đủ + "Viên Đá nhỏ" + "họa phận ái lưu"); repo không có bảng 20 bài gốc. **Thiếu 6 bài** — không tự bổ sung. Cần bạn gửi lại bảng đầy đủ.
++- Chỉ "THƯƠNG EM" có link nguồn; 13 bài còn lại chưa có link/audio.
++- Với bài ghi "Auto Key khớp nhãn", chỉ lưu nguyên văn "khớp nhãn" + cờ `agrees_with_user_reference=true`; không tự điền key.
++- "đừng quên tên anh": nhãn Db major (cùng pitch class với C# major — hiển thị tool có thể in "C# major"; enharmonic không coi là khác key).
++- "Thương Em" từng là `test` trong AI-ALG-08; theo quy tắc chia tập cố định mới nó thành `dev` (chưa có kết quả nào bị ảnh hưởng).
++
++## 2. Manifest chuẩn hóa
++`tools/algbench/manifest/real_music_manifest.json` (schema AI-ALG-08 v2 + trường tùy chọn AI-ALG-09). Tất cả 14 bài: `reference_status=UNVERIFIED_REFERENCE`, `audio_hash=null`, `segments=[]`. Nhãn người dùng nằm ở `user_reference` (không vào số liệu); Auto/Menu nguyên văn ở `observations`. Ánh xạ trạng thái: `UNDETERMINED` (đề bài) = `label_state: NO_REFERENCE` (không có nhãn) hoặc segment `mode:"undetermined"`; không tạo enum mới ngoài schema (chỉ thêm `label_state` tùy chọn, tương thích ngược).
++
++## 3. Bảng trạng thái từng bài
++| track_id | Tên | Nhãn người dùng | Auto Key | Menu | split | Audio/SHA | Trạng thái nhãn | Lý do loại khỏi scoring |
++|---|---|---|---|---|---|---|---|---|
++| don-dau-vo-cung | Đớn Đau Vô Cùng | A minor | C major | A minor | dev | không/— | chưa xác minh | no audio; nhãn chưa xác minh |
++| thuong-em | THƯƠNG EM | D major → Eb major (188 s) | khớp nhãn | B minor (Menu chậm hiện key/mod) | dev | không/— | chưa xác minh | như trên |
++| yeu-lai-tu-dau | Yêu Lại Từ Đầu | D major → Eb major (chưa có mốc) | khớp nhãn | B minor | test | không/— | chưa xác minh | như trên |
++| me-em | Mê Em | C major | khớp nhãn | G major | test | không/— | chưa xác minh | như trên |
++| dung-quen-ten-anh | đừng quên tên anh | Db major | khớp nhãn | D# minor | test | không/— | chưa xác minh | như trên |
++| sau-nay-em-cuoi-ai | sau này em cưới ai | D major | khớp nhãn | B minor | dev | không/— | chưa xác minh | như trên |
++| luu-nien | lưu niên | B major | khớp nhãn | F# major | dev | không/— | chưa xác minh | như trên |
++| dem-trang | Đêm trắng | D# major | khớp nhãn | A# major | dev | không/— | chưa xác minh | như trên |
++| anh-khong-tha-thu | Anh không tha thứ | C# minor | E major | C# minor | dev | không/— | chưa xác minh | như trên |
++| anh-khac-hay-em-khac | Anh Khác hay em khác | A minor | D major | B minor | dev | không/— | chưa xác minh | như trên |
++| gia-vo-thuong-anh-duoc | giả vờ thương anh được | D minor | Db major | A# minor | dev | không/— | chưa xác minh | như trên |
++| phia-sau-mot-co-gai | Phía Sau Một Cô Gái | F minor | F minor | F minor | dev | không/— | chưa xác minh; diễn biến chuyển tone cần xác minh | như trên |
++| vien-da-nho | Viên Đá nhỏ | (không có) | — | — | test | không/— | NO_REFERENCE | không có nhãn; không chấm |
++| hoa-phan-ai-luu | họa phận ái lưu | E minor ("sai tone") | — | — | dev | không/— | NEEDS_CLARIFICATION | cần làm rõ, chưa kết luận đúng/sai |
++
++## 4. Quan sát MÔ TẢ (nhãn chưa xác minh — KHÔNG phải accuracy)
++Chỉ để chọn bài cần điều tra khi có audio. So với nhãn người dùng (12 bài có cả nhãn và Menu/Auto): Menu báo cùng tonic+mode ở 2 bài (Đớn Đau, Anh không tha thứ) + 1 bài khớp F minor (Phía Sau…); đang cách "tương đối" (relative) ở 3 bài (Thương Em, Yêu Lại Từ Đầu, sau này em cưới ai); khác kiểu khác ở các bài còn lại. Auto Key là mốc so sánh tạm theo quyết định; 2 bài Auto lệch kiểu relative (Đớn Đau, Anh không tha thứ). Không kết luận Menu/Auto kém hơn ở nhạc thật; mẫu nhỏ, nhãn chưa xác minh, chưa có audio. Dữ liệu trong `observations_descriptive_only` của `run.js`.
++
++## 5. Thay đổi code (offline, trong `tools/algbench/realbench/` + test)
++| File | Thay đổi |
++|---|---|
++| `schema.js` | Thêm trường tùy chọn `title`, `label_state`, `user_reference`, `observations` + kiểm tra; bài chưa xác minh được phép chưa có nguồn audio (bài VERIFIED vẫn bắt buộc) |
++| `run.js` | `exclusion_reasons` + `eligible_for_accuracy` mỗi bài; `observations_descriptive_only`; in số bài đủ điều kiện |
++| `README.md` | Mô tả trường mở rộng + quy tắc chia tập |
++| `tools/algbench/manifest/real_music_manifest.json` | 14 bài chuẩn hóa |
++| `tests/unit/RealBenchA08.verify.js` | +6 nhóm test (manifest 14 bài, bảo toàn dữ liệu gốc, enharmonic, schema mở rộng, exclusions/observation, quy tắc chia tập) |
++`metrics.js`, `engine_runner.js` không đổi. Pipeline cũ không cần sửa runtime để nhận bộ dữ liệu này.
++
++## 6. Kiểm tra đã chạy
++`node --check` các file realbench + test: OK. `RealBenchA08.verify.js`: 17/17 nhóm OK. `git diff --check`: sạch. `run.js` trên manifest: hợp lệ, `status=BLOCKED_NO_AUDIO`, audio=0, verified=0, evaluated=0, đủ điều kiện = 0/14. Toàn bộ `tests/unit`: chỉ fail nền `MenuMinimizeRuntime`, `MusicAnalysis`; `AutoSongCollector`/`NowPlayingResolver` chỉ fail khi cây git chưa commit (pass sau commit). Không chạy final test; không dùng test set để chỉnh tham số.
++
++## 7. Số lượng đủ điều kiện đánh giá thực tế
++| Mục | Số |
++|---|---|
++| Bài trong manifest | 14 (thiếu 6 so với "20") |
++| Có audio hợp lệ + hash | 0 |
++| Có nhãn VERIFIED_INDEPENDENT | 0 |
++| Đủ điều kiện chấm accuracy | **0** |
++
++## 8. Blocker còn lại — dữ liệu bạn cần cung cấp
++1. Bảng đầy đủ 20 bài (6 bài còn thiếu: tên + nhãn + Auto + Menu).
++2. File audio hợp lệ cho từng bài (bạn có quyền dùng) + sha256 (`Get-FileHash <file> -Algorithm SHA256`); link nguồn nếu có.
++3. Nhãn xác minh độc lập: lead sheet/bản hợp âm đáng tin hoặc người chú thích thứ hai, kèm ranh giới đoạn key ổn định và mốc chuyển tone (đặc biệt Yêu Lại Từ Đầu, Phía Sau Một Cô Gái).
++4. Làm rõ "họa phận ái lưu" ("sai tone": nhãn E minor sai hay bản thu bị đổi tone?) và nhãn cho "Viên Đá nhỏ".
++5. Xác nhận quy tắc chia dev/test (hiện: sha256(track_id)[0]%10<3 → test).
++6. Chốt tiêu chí thành công TRƯỚC khi thử biến thể ở task tối ưu sau.
++
++## 9. Xác nhận phạm vi
++Runtime/thuật toán KeyEngine, ModEngine, UI, HTML, MIDI, FX, preset: **KHÔNG bị sửa**. Không tải audio, không dùng chuỗi bí mật từ binary. Không tạo audio/nhãn/hash/kết quả giả.
++
++## 10. Git
++Commit local (hash trong chat); push GitHub bị 403 (phiên không có quyền ghi).
++
++---
++Claude A : Task A: AI-ALG-09
++1. File đã sửa: `tools/algbench/manifest/real_music_manifest.json` (14 bài), `tools/algbench/realbench/{schema.js,run.js,README.md}`, `tests/unit/RealBenchA08.verify.js`, báo cáo này. Không sửa runtime/thuật toán.
++2. Vì sao: chuẩn hóa bộ dữ liệu người dùng (bảo toàn nguyên văn, tách nhãn chưa xác minh) và xác nhận pipeline nhận được mà vẫn trả BLOCKED_NO_AUDIO trung thực; thêm lý do loại từng bài.
++3. Ảnh hưởng module: không (chỉ công cụ offline + test).
++4. Còn lại: 6 bài thiếu, audio + sha256, nhãn xác minh độc lập, làm rõ 2 bài, rồi chạy baseline dev (chưa có tiêu chí/baseline nào để tối ưu).
+diff --git a/tests/unit/RealBenchA08.verify.js b/tests/unit/RealBenchA08.verify.js
+index 312fa9c..49cb711 100644
+--- a/tests/unit/RealBenchA08.verify.js
++++ b/tests/unit/RealBenchA08.verify.js
+@@ -9,7 +9,7 @@ const base = (o) => Object.assign({ track_id: 't1', audio_reference: { path: 'a.
+ 
+ T('manifest repo hợp lệ và Thương Em là UNVERIFIED, không audio', () => {
+     const m = JSON.parse(fs.readFileSync(R + '/../manifest/real_music_manifest.json', 'utf8')), v = S.validateManifest(m);
+-    assert.deepStrictEqual(v.errors, []); const t = m.tracks[0];
++    assert.deepStrictEqual(v.errors, []); const t = m.tracks.find((x) => x.track_id === 'thuong-em');
+     assert.strictEqual(t.reference_status, 'UNVERIFIED_REFERENCE'); assert.strictEqual(S.audioStatus(t, '.').status, 'BLOCKED_NO_AUDIO');
+     const rep = evaluate(m, { audioRoot: '.', tol: 10, tols: [5, 10] }); assert.strictEqual(rep.status, 'BLOCKED_NO_AUDIO'); assert.strictEqual(rep.counts.evaluated, 0);
+ });
+@@ -86,4 +86,46 @@ T('pipeline: dữ liệu giả tách bạch, chỉ chấm VERIFIED, test cần -
+     const r2 = evaluate(man, Object.assign({ finalTest: true }, o)); assert.strictEqual(r2.counts.evaluated, 2);
+     assert.strictEqual(evaluate({ tracks: [base({ split: 'zzz' })] }, o).valid, false);
+ });
++
++// ---- AI-ALG-09: manifest 14 bài, trường mở rộng, readiness ----
++const MAN = JSON.parse(fs.readFileSync(R + '/../manifest/real_music_manifest.json', 'utf8')), byId = (id) => MAN.tracks.find((x) => x.track_id === id), { exclusions, observationTable } = require(R + '/run.js');
++T('A09 manifest: 14 bài duy nhất, hợp lệ, tất cả UNVERIFIED, 0 bài đủ điều kiện chấm', () => {
++    assert.strictEqual(MAN.tracks.length, 14); assert.strictEqual(new Set(MAN.tracks.map((x) => x.track_id)).size, 14);
++    assert.deepStrictEqual(S.validateManifest(MAN).errors, []); assert.ok(MAN.tracks.every((x) => x.reference_status === 'UNVERIFIED_REFERENCE' && x.audio_hash === null && x.segments.length === 0));
++    const rep = evaluate(MAN, { audioRoot: '.', tol: 10, tols: [10], finalTest: true });
++    assert.strictEqual(rep.status, 'BLOCKED_NO_AUDIO'); assert.strictEqual(rep.counts.eligible_for_accuracy, 0); assert.strictEqual(rep.counts.excluded, 14); assert.strictEqual(rep.aggregate, null);
++    assert.ok(rep.tracks.every((r) => r.exclusion_reasons.includes('LABEL_NOT_VERIFIED') && r.exclusion_reasons.includes('BLOCKED_NO_AUDIO')));
++});
++T('A09 dữ liệu gốc được bảo toàn (nhãn/Auto/Menu nguyên văn)', () => {
++    const o = (id, w) => byId(id).observations[w].raw, ref = (id) => byId(id).user_reference.key;
++    assert.deepStrictEqual([ref('don-dau-vo-cung'), o('don-dau-vo-cung', 'auto_key'), o('don-dau-vo-cung', 'menu')], [{ tonic: 'A', mode: 'minor' }, 'C major', 'A minor']);
++    assert.strictEqual(o('thuong-em', 'menu'), 'B minor'); assert.strictEqual(byId('thuong-em').user_reference.modulation.time, 188); assert.strictEqual(byId('thuong-em').observations.auto_key.agrees_with_user_reference, true);
++    assert.strictEqual(byId('yeu-lai-tu-dau').user_reference.modulation.time, null); assert.strictEqual(o('anh-khong-tha-thu', 'auto_key'), 'E major'); assert.strictEqual(o('giả'.length ? 'gia-vo-thuong-anh-duoc' : '', 'menu'), 'A# minor');
++    assert.strictEqual(byId('phia-sau-mot-co-gai').track_group, 'modulation_unclear'); assert.strictEqual(byId('vien-da-nho').user_reference.key, null); assert.strictEqual(byId('vien-da-nho').label_state, 'NO_REFERENCE');
++    assert.strictEqual(byId('hoa-phan-ai-luu').label_state, 'NEEDS_CLARIFICATION'); assert.strictEqual(byId('hoa-phan-ai-luu').user_reference.key.mode, 'minor');
++});
++T('A09 enharmonic: A# minor == Bb minor, Db == C#', () => {
++    assert.deepStrictEqual(S.parseKey({ tonic: 'A#', mode: 'minor' }), S.parseKey({ tonic: 'Bb', mode: 'minor' })); assert.strictEqual(S.pc('Db'), S.pc('C#'));
++    assert.strictEqual(M.relation(S.parseKey({ tonic: 'Db', mode: 'major' }), S.parseKey({ tonic: 'C#', mode: 'major' })), 'exact');
++});
++T('A09 schema mở rộng: label_state, user_reference, observations kiểm tra chặt', () => {
++    const b = (o) => S.validateTrack(Object.assign(base({ reference_status: 'UNVERIFIED_REFERENCE' }), o), 0).errors;
++    assert.deepStrictEqual(b({ label_state: 'USER_LABEL_UNVERIFIED', title: 'x', user_reference: { key: key('C', 'major') }, observations: { auto_key: { raw: 'C', key: key('C', 'major'), agrees_with_user_reference: true }, menu: null } }), []);
++    assert.ok(b({ label_state: 'VERIFIED' }).length); assert.ok(b({ label_state: 'zzz' }).length); assert.ok(b({ title: '' }).length);
++    assert.ok(b({ user_reference: { key: { tonic: 'H', mode: 'major' } } }).length); assert.ok(b({ observations: { auto_key: { key: key('C', 'major') } } }).length);
++    assert.ok(S.validateTrack(base({ label_state: 'NO_REFERENCE' }), 0).errors.length); // VERIFIED không đi cùng NO_REFERENCE
++    assert.ok(S.validateTrack(base({ audio_reference: { path: null, source_url: null } }), 0).errors.length); // VERIFIED phải có nguồn audio
++    assert.deepStrictEqual(S.validateTrack(base({ reference_status: 'UNVERIFIED_REFERENCE', audio_reference: { path: null, source_url: null } }), 0).errors, []);
++});
++T('A09 exclusions + observationTable (mô tả, không phải accuracy)', () => {
++    assert.deepStrictEqual(exclusions(base(), { status: 'AUDIO_OK' }), []); assert.deepStrictEqual(exclusions(base({ reference_status: 'UNVERIFIED_REFERENCE' }), { status: 'BLOCKED_NO_AUDIO' }), ['BLOCKED_NO_AUDIO', 'LABEL_NOT_VERIFIED']);
++    assert.ok(exclusions(base({ label_state: 'NEEDS_CLARIFICATION', reference_status: 'UNVERIFIED_REFERENCE' }), { status: 'AUDIO_OK' }).includes('LABEL_NEEDS_CLARIFICATION'));
++    const t = observationTable(MAN.tracks), g = (id) => t.find((x) => x.track_id === id);
++    assert.strictEqual(g('thuong-em').menu.vs_reference, 'relative'); assert.strictEqual(g('thuong-em').auto_key.vs_reference, 'agrees_as_reported'); assert.strictEqual(g('don-dau-vo-cung').auto_key.vs_reference, 'relative');
++    assert.strictEqual(g('me-em').menu.vs_reference, 'other'); assert.strictEqual(g('phia-sau-mot-co-gai').menu.vs_reference, 'exact'); assert.strictEqual(g('vien-da-nho').menu, null);
++});
++T('A09 chia tập: quy tắc cố định theo track_id, mọi bài có split, không rò rỉ', () => {
++    const crypto = require('crypto'); MAN.tracks.forEach((x) => assert.strictEqual(x.split, crypto.createHash('sha256').update(x.track_id).digest()[0] % 10 < 3 ? 'test' : 'dev'));
++    assert.ok(MAN.tracks.some((x) => x.split === 'dev') && MAN.tracks.some((x) => x.split === 'test'));
++});
+ console.log(`RealBenchA08: ${n} nhóm OK`);
+diff --git a/tools/algbench/manifest/real_music_manifest.json b/tools/algbench/manifest/real_music_manifest.json
+index 7df35bd..28facfa 100644
+--- a/tools/algbench/manifest/real_music_manifest.json
++++ b/tools/algbench/manifest/real_music_manifest.json
+@@ -1,17 +1,631 @@
+ {
+   "schema": "AI-ALG-08/manifest/v2",
+-  "note": "Nhãn người dùng cung cấp = UNVERIFIED_REFERENCE và KHÔNG được tính vào số liệu chính. Không bịa nhãn, không có audio trong repo. Xem tools/algbench/realbench/README.md để thêm bài.",
++  "schema_ext": "AI-ALG-09 (title,label_state,user_reference,observations,track_group)",
++  "note": "Nhãn người dùng = UNVERIFIED_REFERENCE; KHÔNG vào số liệu chính. segments[] để trống vì chưa có ranh giới đoạn đã xác minh. Chỉ 14/20 bài được cung cấp trong task AI-ALG-09 (xem báo cáo). Quy tắc chia: sha256(track_id)[0] % 10 < 3 -> test, còn lại dev (cố định trước khi có kết quả).",
+   "tracks": [
+     {
+-      "track_id": "thuong-em-yt-wHLNh9qFgU8",
+-      "audio_reference": { "type": "url_reference_only", "path": null, "source_url": "https://www.youtube.com/watch?v=wHLNh9qFgU8", "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp." },
++      "track_id": "don-dau-vo-cung",
++      "title": "Đớn Đau Vô Cùng",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
+       "audio_hash": null,
+       "reference_status": "UNVERIFIED_REFERENCE",
+-      "annotator": "user_observation (Khói, chưa kiểm chứng độc lập)",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "A",
++          "mode": "minor"
++        },
++        "modulation": null,
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "C major",
++          "key": {
++            "tonic": "C",
++            "mode": "major"
++          },
++          "agrees_with_user_reference": false
++        },
++        "menu": {
++          "raw": "A minor",
++          "key": {
++            "tonic": "A",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": true
++        },
++        "tester_note": ""
++      },
+       "segments": [],
+-      "modulations": [ { "time": 188, "from_key": { "tonic": "D", "mode": "major" }, "to_key": { "tonic": "Eb", "mode": "major" } } ],
+-      "annotation_notes": "Người dùng báo: tại 03:08 (188 s) chuyển D major lên Eb major (+1 bán cung). Chưa có ranh giới đoạn/key các phần khác nên segments để trống (không ép nhãn). KHÔNG giả định engine đang báo B minor cho đến khi có log thực tế trên audio.",
++      "modulations": [],
++      "track_group": "stable_user_reported",
++      "annotation_notes": "",
++      "split": "dev"
++    },
++    {
++      "track_id": "thuong-em",
++      "title": "THƯƠNG EM",
++      "audio_reference": {
++        "type": "url_reference_only",
++        "path": null,
++        "source_url": "https://www.youtube.com/watch?v=wHLNh9qFgU8",
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "D",
++          "mode": "major"
++        },
++        "modulation": {
++          "time": 188,
++          "from_key": {
++            "tonic": "D",
++            "mode": "major"
++          },
++          "to_key": {
++            "tonic": "Eb",
++            "mode": "major"
++          }
++        },
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "khớp nhãn",
++          "key": null,
++          "agrees_with_user_reference": true
++        },
++        "menu": {
++          "raw": "B minor",
++          "key": {
++            "tonic": "B",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": false
++        },
++        "tester_note": "Menu chậm hiển thị key/modulation (ghi nhận của người kiểm thử)."
++      },
++      "segments": [],
++      "modulations": [
++        {
++          "time": 188,
++          "from_key": {
++            "tonic": "D",
++            "mode": "major"
++          },
++          "to_key": {
++            "tonic": "Eb",
++            "mode": "major"
++          }
++        }
++      ],
++      "track_group": "modulation_user_reported",
++      "annotation_notes": "Menu chậm hiển thị key/modulation (ghi nhận của người kiểm thử).",
++      "split": "dev"
++    },
++    {
++      "track_id": "yeu-lai-tu-dau",
++      "title": "Yêu Lại Từ Đầu",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "D",
++          "mode": "major"
++        },
++        "modulation": {
++          "time": null,
++          "from_key": {
++            "tonic": "D",
++            "mode": "major"
++          },
++          "to_key": {
++            "tonic": "Eb",
++            "mode": "major"
++          }
++        },
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "khớp nhãn",
++          "key": null,
++          "agrees_with_user_reference": true
++        },
++        "menu": {
++          "raw": "B minor",
++          "key": {
++            "tonic": "B",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": false
++        },
++        "tester_note": "Nhãn người dùng: D major → Eb major; chưa có mốc thời gian."
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "modulation_user_reported",
++      "annotation_notes": "Nhãn người dùng: D major → Eb major; chưa có mốc thời gian.",
++      "split": "test"
++    },
++    {
++      "track_id": "me-em",
++      "title": "Mê Em",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "C",
++          "mode": "major"
++        },
++        "modulation": null,
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "khớp nhãn",
++          "key": null,
++          "agrees_with_user_reference": true
++        },
++        "menu": {
++          "raw": "G major",
++          "key": {
++            "tonic": "G",
++            "mode": "major"
++          },
++          "agrees_with_user_reference": false
++        },
++        "tester_note": ""
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "stable_user_reported",
++      "annotation_notes": "",
++      "split": "test"
++    },
++    {
++      "track_id": "dung-quen-ten-anh",
++      "title": "đừng quên tên anh",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "Db",
++          "mode": "major"
++        },
++        "modulation": null,
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "khớp nhãn",
++          "key": null,
++          "agrees_with_user_reference": true
++        },
++        "menu": {
++          "raw": "D# minor",
++          "key": {
++            "tonic": "D#",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": false
++        },
++        "tester_note": ""
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "stable_user_reported",
++      "annotation_notes": "",
+       "split": "test"
++    },
++    {
++      "track_id": "sau-nay-em-cuoi-ai",
++      "title": "sau này em cưới ai",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "D",
++          "mode": "major"
++        },
++        "modulation": null,
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "khớp nhãn",
++          "key": null,
++          "agrees_with_user_reference": true
++        },
++        "menu": {
++          "raw": "B minor",
++          "key": {
++            "tonic": "B",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": false
++        },
++        "tester_note": ""
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "stable_user_reported",
++      "annotation_notes": "",
++      "split": "dev"
++    },
++    {
++      "track_id": "luu-nien",
++      "title": "lưu niên",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "B",
++          "mode": "major"
++        },
++        "modulation": null,
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "khớp nhãn",
++          "key": null,
++          "agrees_with_user_reference": true
++        },
++        "menu": {
++          "raw": "F# major",
++          "key": {
++            "tonic": "F#",
++            "mode": "major"
++          },
++          "agrees_with_user_reference": false
++        },
++        "tester_note": ""
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "stable_user_reported",
++      "annotation_notes": "",
++      "split": "dev"
++    },
++    {
++      "track_id": "dem-trang",
++      "title": "Đêm trắng",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "D#",
++          "mode": "major"
++        },
++        "modulation": null,
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "khớp nhãn",
++          "key": null,
++          "agrees_with_user_reference": true
++        },
++        "menu": {
++          "raw": "A# major",
++          "key": {
++            "tonic": "A#",
++            "mode": "major"
++          },
++          "agrees_with_user_reference": false
++        },
++        "tester_note": ""
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "stable_user_reported",
++      "annotation_notes": "",
++      "split": "dev"
++    },
++    {
++      "track_id": "anh-khong-tha-thu",
++      "title": "Anh không tha thứ",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "C#",
++          "mode": "minor"
++        },
++        "modulation": null,
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "E major",
++          "key": {
++            "tonic": "E",
++            "mode": "major"
++          },
++          "agrees_with_user_reference": false
++        },
++        "menu": {
++          "raw": "C# minor",
++          "key": {
++            "tonic": "C#",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": true
++        },
++        "tester_note": ""
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "stable_user_reported",
++      "annotation_notes": "",
++      "split": "dev"
++    },
++    {
++      "track_id": "anh-khac-hay-em-khac",
++      "title": "Anh Khác hay em khác",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "A",
++          "mode": "minor"
++        },
++        "modulation": null,
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "D major",
++          "key": {
++            "tonic": "D",
++            "mode": "major"
++          },
++          "agrees_with_user_reference": false
++        },
++        "menu": {
++          "raw": "B minor",
++          "key": {
++            "tonic": "B",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": false
++        },
++        "tester_note": ""
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "stable_user_reported",
++      "annotation_notes": "",
++      "split": "dev"
++    },
++    {
++      "track_id": "gia-vo-thuong-anh-duoc",
++      "title": "giả vờ thương anh được",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "D",
++          "mode": "minor"
++        },
++        "modulation": null,
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "Db major",
++          "key": {
++            "tonic": "Db",
++            "mode": "major"
++          },
++          "agrees_with_user_reference": false
++        },
++        "menu": {
++          "raw": "A# minor",
++          "key": {
++            "tonic": "A#",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": false
++        },
++        "tester_note": ""
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "stable_user_reported",
++      "annotation_notes": "",
++      "split": "dev"
++    },
++    {
++      "track_id": "phia-sau-mot-co-gai",
++      "title": "Phía Sau Một Cô Gái",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "USER_LABEL_UNVERIFIED",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "F",
++          "mode": "minor"
++        },
++        "modulation": null,
++        "modulation_unclear": true
++      },
++      "observations": {
++        "auto_key": {
++          "raw": "F minor",
++          "key": {
++            "tonic": "F",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": true
++        },
++        "menu": {
++          "raw": "F minor",
++          "key": {
++            "tonic": "F",
++            "mode": "minor"
++          },
++          "agrees_with_user_reference": true
++        },
++        "tester_note": "Cần xác minh diễn biến chuyển tone theo bản thu thực tế."
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "modulation_unclear",
++      "annotation_notes": "Cần xác minh diễn biến chuyển tone theo bản thu thực tế.",
++      "split": "dev"
++    },
++    {
++      "track_id": "vien-da-nho",
++      "title": "Viên Đá nhỏ",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "NO_REFERENCE",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": null,
++        "modulation": null,
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": null,
++        "menu": null,
++        "tester_note": "Chưa có nhãn tham chiếu: không được chấm accuracy."
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "stable_user_reported",
++      "annotation_notes": "Chưa có nhãn tham chiếu: không được chấm accuracy.",
++      "split": "test"
++    },
++    {
++      "track_id": "hoa-phan-ai-luu",
++      "title": "họa phận ái lưu",
++      "audio_reference": {
++        "type": "none",
++        "path": null,
++        "source_url": null,
++        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
++      },
++      "audio_hash": null,
++      "reference_status": "UNVERIFIED_REFERENCE",
++      "label_state": "NEEDS_CLARIFICATION",
++      "annotator": "user_observation (Khói, bảng thử nghiệm 20 bài; chưa kiểm chứng độc lập)",
++      "user_reference": {
++        "key": {
++          "tonic": "E",
++          "mode": "minor"
++        },
++        "modulation": null,
++        "modulation_unclear": false
++      },
++      "observations": {
++        "auto_key": null,
++        "menu": null,
++        "tester_note": "Người kiểm thử ghi chú \"sai tone\": cần làm rõ, chưa kết luận đúng/sai."
++      },
++      "segments": [],
++      "modulations": [],
++      "track_group": "stable_user_reported",
++      "annotation_notes": "Người kiểm thử ghi chú \"sai tone\": cần làm rõ, chưa kết luận đúng/sai.",
++      "split": "dev"
+     }
+   ]
+ }
+diff --git a/tools/algbench/realbench/README.md b/tools/algbench/realbench/README.md
+index 97cc76d..de76f74 100644
+--- a/tools/algbench/realbench/README.md
++++ b/tools/algbench/realbench/README.md
+@@ -22,3 +22,8 @@ Không sửa runtime. Chỉ đọc `ui/js/engines/*` qua vm (đồng hồ ảo).
+ - `reference_status=UNVERIFIED_REFERENCE` hoặc audio thiếu/hash lệch ⇒ không được chấm vào số liệu chính.
+ 
+ Test: `node tests/unit/RealBenchA08.verify.js` (dữ liệu TEST_FIXTURE, không phải nhạc thật).
++
++## Mở rộng AI-ALG-09 (tùy chọn, tương thích ngược)
++`title`; `label_state` (`VERIFIED | USER_LABEL_UNVERIFIED | NO_REFERENCE | NEEDS_CLARIFICATION`; ánh xạ "UNDETERMINED" = `NO_REFERENCE`); `user_reference{key,modulation{time,from_key,to_key},modulation_unclear}` (nhãn người dùng, KHÔNG chấm); `observations{auto_key,menu}{raw,key,agrees_with_user_reference}` + `tester_note`; `track_group`.
++Báo cáo `run.js` có `exclusion_reasons` cho từng bài (không bài nào bị mất khỏi bảng) và `observations_descriptive_only` (so Auto/Menu với nhãn người dùng — chỉ MÔ TẢ, không phải accuracy).
++Quy tắc chia tập (cố định, không phụ thuộc kết quả): `sha256(track_id)[0] % 10 < 3` → test, còn lại dev.
+diff --git a/tools/algbench/realbench/run.js b/tools/algbench/realbench/run.js
+index 40753a4..168b7d1 100644
+--- a/tools/algbench/realbench/run.js
++++ b/tools/algbench/realbench/run.js
+@@ -9,6 +9,26 @@ const fs = require('fs'), path = require('path');
+ const { validateManifest, audioStatus, parseKey } = require('./schema.js'), M = require('./metrics.js');
+ const args = process.argv.slice(2), arg = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : true) : d; };
+ const REPO = path.resolve(__dirname, '../../..');
++
++// AI-ALG-09 — lý do một bài KHÔNG đủ điều kiện chấm accuracy (không bài nào bị mất khỏi bảng; chỉ ghi lý do).
++function exclusions(t, st) {
++    const r = [];
++    if (st.status !== 'AUDIO_OK') r.push(st.status);
++    if (t.reference_status !== 'VERIFIED_INDEPENDENT') r.push('LABEL_NOT_VERIFIED');
++    if (t.label_state === 'NO_REFERENCE') r.push('NO_REFERENCE_LABEL');
++    if (t.label_state === 'NEEDS_CLARIFICATION') r.push('LABEL_NEEDS_CLARIFICATION');
++    if (!(t.segments && t.segments.length) && !(t.modulations && t.modulations.length) && t.reference_status === 'VERIFIED_INDEPENDENT') r.push('NO_SCORABLE_GROUND_TRUTH');
++    return r;
++}
++const keyName = (k) => (k ? `${require('./schema.js').NOTE[k.pc]} ${k.mode}` : null);
++// Bảng quan sát MÔ TẢ (nhãn người dùng chưa xác minh) — KHÔNG phải accuracy; dùng để chọn bài cần điều tra khi có audio.
++function observationTable(tracks) {
++    return tracks.filter((t) => t.observations || t.user_reference).map((t) => {
++        const ref = t.user_reference && t.user_reference.key ? parseKey(t.user_reference.key) : null, row = { track_id: t.track_id, title: t.title, user_reference: keyName(ref), label_state: t.label_state || null };
++        for (const who of ['auto_key', 'menu']) { const o = t.observations && t.observations[who]; if (!o) { row[who] = null; continue; }
++            const k = o.key ? parseKey(o.key) : null; row[who] = { raw: o.raw, key: keyName(k), vs_reference: o.agrees_with_user_reference === true && !k ? 'agrees_as_reported' : (k && ref ? M.relation(ref, k) : 'unknown') }; }
++        return row; });
++}
+ function evaluate(manifest, o) {
+     const v = validateManifest(manifest), rep = { schema: 'AI-ALG-08/report/v1', data_origin: 'REAL_MUSIC', valid: v.errors.length === 0, errors: v.errors, warnings: v.warnings, params: { split: o.split, final_test: !!o.finalTest, tol_s: o.tol, tolerances_s: o.tols, step_s: 1 }, tracks: [], counts: {} };
+     const C = rep.counts = { total: 0, with_audio: 0, verified: 0, evaluated: 0, blocked_no_audio: 0, unverified_skipped: 0, test_skipped: 0 };
+@@ -18,7 +38,7 @@ function evaluate(manifest, o) {
+         C.total++; const st = audioStatus(t, o.audioRoot), row = { track_id: t.track_id, split: t.split, reference_status: t.reference_status, audio_status: st.status, reason: st.reason }, ok = st.status === 'AUDIO_OK';
+         if (ok) C.with_audio++; else C.blocked_no_audio++;
+         if (t.reference_status === 'VERIFIED_INDEPENDENT') C.verified++;
+-        rep.tracks.push(row);
++        row.exclusion_reasons = exclusions(t, st); row.eligible_for_accuracy = row.exclusion_reasons.length === 0; row.title = t.title; row.track_group = t.track_group; rep.tracks.push(row);
+         if (o.split && t.split !== o.split) { row.skipped = 'split'; continue; }
+         if (t.split === 'test' && !o.finalTest) { row.skipped = 'test_set_requires_--final-test'; C.test_skipped++; continue; }
+         if (!ok && !o.predictionsDir) { row.result = 'BLOCKED_NO_AUDIO'; continue; }
+@@ -30,11 +50,12 @@ function evaluate(manifest, o) {
+         row.other_events = { non_modulation: (pred.mod_events || []).filter((e) => e.kind && e.kind !== 'MODULATION').length };
+         C.evaluated++; keyRes.push(ks); modRes.push(ms);
+     }
++    C.eligible_for_accuracy = rep.tracks.filter((r) => r.eligible_for_accuracy).length; C.excluded = C.total - C.eligible_for_accuracy; rep.observations_descriptive_only = observationTable(v.tracks);
+     rep.aggregate = C.evaluated ? { key: M.aggregateKey(keyRes), mod: M.aggregateMod(modRes) } : null;
+     rep.status = C.evaluated ? 'EVALUATED' : 'BLOCKED_NO_AUDIO';
+     return rep;
+ }
+-module.exports = { evaluate };
++module.exports = { evaluate, exclusions, observationTable };
+ if (require.main === module) {
+     const mf = path.resolve(arg('manifest', path.join(__dirname, '../manifest/real_music_manifest.json'))), manifest = JSON.parse(fs.readFileSync(mf, 'utf8'));
+     const tols = String(arg('tols', '2,5,10,15,20,30')).split(',').map(Number), tol = +arg('tol', 10);
+@@ -42,7 +63,8 @@ if (require.main === module) {
+     const out = arg('out', null); if (out) fs.writeFileSync(out, JSON.stringify(rep, null, 1));
+     console.log(`manifest: ${rep.valid ? 'HỢP LỆ' : 'KHÔNG HỢP LỆ'} | status=${rep.status || 'INVALID'} | tracks=${rep.counts.total} audio=${rep.counts.with_audio} verified=${rep.counts.verified} evaluated=${rep.counts.evaluated}`);
+     rep.errors.forEach((e) => console.log('  LỖI:', e)); rep.warnings.forEach((e) => console.log('  CẢNH BÁO:', e));
+-    rep.tracks.forEach((r) => console.log(`  - ${r.track_id} [${r.split}/${r.reference_status}] audio=${r.audio_status} -> ${r.result || r.skipped || ''}${r.reason ? ' (' + r.reason + ')' : ''}`));
++    console.log(`đủ điều kiện chấm accuracy: ${rep.counts.eligible_for_accuracy}/${rep.counts.total}; bị loại: ${rep.counts.excluded}`);
++    rep.tracks.forEach((r) => console.log(`  - ${r.track_id} [${r.split}/${r.reference_status}] audio=${r.audio_status} eligible=${r.eligible_for_accuracy} lý do=${r.exclusion_reasons.join(',') || '-'} -> ${r.result || r.skipped || ''}`));
+     if (rep.aggregate) { const a = rep.aggregate; console.log(`KEY exact=${a.key.exact_acc} tonic=${a.key.tonic_acc} mode=${a.key.mode_acc} relErr=${a.key.relative_err_rate} parErr=${a.key.parallel_err_rate} unknown=${a.key.unknown_rate}`); console.log(`MOD (tol=${tol}s) P=${a.mod.precision} R=${a.mod.recall} F1=${a.mod.f1} medLat=${a.mod.latency.median}`); }
+     process.exitCode = rep.valid ? 0 : 1;
+ }
+diff --git a/tools/algbench/realbench/schema.js b/tools/algbench/realbench/schema.js
+index 971c16e..ee79266 100644
+--- a/tools/algbench/realbench/schema.js
++++ b/tools/algbench/realbench/schema.js
+@@ -8,6 +8,8 @@ const REF_STATUS = ['VERIFIED_INDEPENDENT', 'UNVERIFIED_REFERENCE'];
+ const SPLITS = ['dev', 'test'];
+ // Đoạn không xác định chắc chắn: mode "undetermined", tonic null — KHÔNG ép về một key; bị loại khỏi mẫu số key accuracy.
+ const MODES = ['major', 'minor', 'undetermined'];
++// AI-ALG-09 (tùy chọn, tương thích ngược): label_state mô tả mức tin cậy của nhãn; ánh xạ UNDETERMINED = NO_REFERENCE / segments mode "undetermined".
++const LABEL_STATES = ['VERIFIED', 'USER_LABEL_UNVERIFIED', 'NO_REFERENCE', 'NEEDS_CLARIFICATION'];
+ 
+ function pc(name) { // tên nốt -> pitch class 0..11, hoặc null
+     if (typeof name !== 'string') return null;
+@@ -31,7 +33,7 @@ function validateTrack(t, idx) {
+     if (!t || typeof t !== 'object') return { errors: [`#${idx}: không phải object`], warnings: [] };
+     if (!t.track_id || typeof t.track_id !== 'string') E.push(at('thiếu track_id'));
+     if (!t.audio_reference || typeof t.audio_reference !== 'object') E.push(at('thiếu audio_reference'));
+-    else if (!t.audio_reference.path && !t.audio_reference.source_url) E.push(at('audio_reference cần path hoặc source_url'));
++    else if (!t.audio_reference.path && !t.audio_reference.source_url && t.reference_status === 'VERIFIED_INDEPENDENT') E.push(at('bài VERIFIED cần audio_reference.path hoặc source_url (bài chưa xác minh được phép chưa có nguồn audio)'));
+     if (t.audio_hash !== null && t.audio_hash !== undefined && !/^[0-9a-f]{64}$/.test(String(t.audio_hash))) E.push(at('audio_hash phải là sha256 hex 64 ký tự hoặc null'));
+     if (!REF_STATUS.includes(t.reference_status)) E.push(at(`reference_status phải thuộc ${REF_STATUS.join('|')}`));
+     if (!t.annotator || typeof t.annotator !== 'string') E.push(at('thiếu annotator/nguồn xác minh'));
+@@ -62,6 +64,24 @@ function validateTrack(t, idx) {
+     if (t.audio_hash && t.reference_status === 'VERIFIED_INDEPENDENT' && !t.annotator) E.push(at('nhãn VERIFIED cần nguồn xác minh'));
+     if (t.reference_status === 'VERIFIED_INDEPENDENT' && Array.isArray(t.segments) && t.segments.length === 0 && Array.isArray(t.modulations) && t.modulations.length === 0)
+         W.push(at('VERIFIED nhưng không có segments lẫn modulations: không chấm được gì'));
++
++    // ---- AI-ALG-09: trường tùy chọn (title, label_state, user_reference, observations) ----
++    if (t.title !== undefined && (typeof t.title !== 'string' || !t.title.trim())) E.push(at('title phải là chuỗi không rỗng'));
++    if (t.label_state !== undefined) {
++        if (!LABEL_STATES.includes(t.label_state)) E.push(at(`label_state phải thuộc ${LABEL_STATES.join('|')}`));
++        else if (t.reference_status === 'VERIFIED_INDEPENDENT' && t.label_state !== 'VERIFIED') E.push(at('VERIFIED_INDEPENDENT chỉ đi với label_state=VERIFIED'));
++        else if (t.reference_status === 'UNVERIFIED_REFERENCE' && t.label_state === 'VERIFIED') E.push(at('label_state=VERIFIED mâu thuẫn với UNVERIFIED_REFERENCE'));
++    }
++    if (t.user_reference !== undefined && t.user_reference !== null) {
++        const u = t.user_reference;
++        if (u.key !== null && u.key !== undefined && !parseKey(u.key)) E.push(at('user_reference.key không hợp lệ'));
++        if (u.modulation) { if (!parseKey(u.modulation.from_key) || !parseKey(u.modulation.to_key)) E.push(at('user_reference.modulation from/to_key không hợp lệ')); if (u.modulation.time !== null && !isNum(u.modulation.time)) E.push(at('user_reference.modulation.time phải là số hoặc null')); }
++    }
++    if (t.observations !== undefined && t.observations !== null) for (const who of ['auto_key', 'menu']) {
++        const o = t.observations[who]; if (o === undefined || o === null) continue;
++        if (typeof o.raw !== 'string') E.push(at(`observations.${who}.raw phải là chuỗi (nguyên văn người kiểm thử)`));
++        if (o.key !== null && o.key !== undefined && !parseKey(o.key)) E.push(at(`observations.${who}.key không hợp lệ`));
++    }
+     return { errors: E, warnings: W };
+ }
+ 
+@@ -89,4 +109,4 @@ function validateManifest(m) {
+     });
+     return { errors, warnings, tracks: m.tracks };
+ }
+-module.exports = { NOTE, pc, parseKey, validateTrack, validateManifest, audioStatus, sha256File, REF_STATUS, SPLITS, MODES };
++module.exports = { NOTE, pc, parseKey, validateTrack, validateManifest, audioStatus, sha256File, REF_STATUS, SPLITS, MODES, LABEL_STATES };
+-- 
+2.43.0
+
