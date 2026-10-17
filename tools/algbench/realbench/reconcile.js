@@ -47,7 +47,8 @@ if (require.main === module) {
     const a = process.argv.slice(2), arg = (k, d) => { const i = a.indexOf('--' + k); return i >= 0 ? a[i + 1] : d; };
     const mf = path.resolve(arg('manifest', path.join(__dirname, '../manifest/real_music_manifest.json'))), man = JSON.parse(fs.readFileSync(mf, 'utf8')), src = arg('source', null);
     if (!src || !fs.existsSync(src)) { console.log(`BLOCKED_NO_SOURCE_TABLE: chưa có bảng nguồn 20 bài (--source). Manifest hiện có ${man.tracks.length} bài; không thể kết luận bài thiếu/trùng/sai.`); process.exit(2); }
-    const rep = reconcile(loadSource(src), man, { expect: +arg('expect', 20) }); const out = arg('out', null); if (out) fs.writeFileSync(out, JSON.stringify(rep, null, 1));
+    const rows = loadSource(src); if (!rows.length) { console.log(`BLOCKED_EMPTY_SOURCE: ${src} không có bản ghi nào (chỉ có tiêu đề?). Không đối chiếu.`); process.exit(2); }
+    const rep = reconcile(rows, man, { expect: +arg('expect', 20) }); const out = arg('out', null); if (out) fs.writeFileSync(out, JSON.stringify(rep, null, 1));
     console.log(`nguồn=${rep.source_count} (kỳ vọng ${rep.expected}) | manifest=${rep.manifest_count} | khớp tên=${rep.matched} | thiếu trong manifest=${rep.missing_in_manifest.length} | thừa trong manifest=${rep.extra_in_manifest.length} | trùng nguồn=${rep.duplicates_in_source.length} | lệch trường=${rep.field_mismatches.length} | dòng nguồn thiếu/sai=${rep.incomplete_source_rows.length}`);
     rep.missing_in_manifest.forEach((x) => console.log('  THIẾU:', x.title)); rep.extra_in_manifest.forEach((x) => console.log('  THỪA:', x.title)); rep.duplicates_in_source.forEach((x) => console.log('  TRÙNG:', x.title));
     rep.field_mismatches.forEach((x) => console.log(`  LỆCH ${x.title} [${x.field}]: nguồn=${x.source} manifest=${x.manifest}`)); rep.incomplete_source_rows.forEach((x) => console.log('  DÒNG LỖI:', JSON.stringify(x)));

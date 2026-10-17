@@ -60,4 +60,19 @@ T('pipeline: manifest vẫn BLOCKED_NO_AUDIO, 0 bài đủ điều kiện, khôn
     const { evaluate } = require(R + '/run.js'), rep = evaluate(MAN, { audioRoot: '.', tol: 10, tols: [10], finalTest: true });
     assert.strictEqual(rep.status, 'BLOCKED_NO_AUDIO'); assert.strictEqual(rep.counts.eligible_for_accuracy, 0); assert.strictEqual(rep.aggregate, null); assert.strictEqual(rep.counts.verified, 0);
 });
+T('A10R: bảng nguồn rỗng/chỉ tiêu đề => BLOCKED_EMPTY_SOURCE (không báo "thừa" giả)', () => {
+    const r = cp.spawnSync('node', [R + '/reconcile.js', '--source', R + '/../source/songs_20_source.TEMPLATE.csv'], { encoding: 'utf8' }); assert.strictEqual(r.status, 2); assert.ok(/BLOCKED_EMPTY_SOURCE/.test(r.stdout));
+});
+T('A10R: mâu thuẫn THƯƠNG EM giữ cả hai giá trị + nguồn, UNRESOLVED, không chọn giá trị chuẩn', () => {
+    const t = MAN.tracks.find((x) => x.track_id === 'thuong-em'), c = t.data_conflicts[0];
+    assert.strictEqual(c.status, 'UNRESOLVED'); assert.deepStrictEqual(c.values.map((v) => v.value_s), [82, 188]); assert.ok(c.values.every((v) => v.source));
+    assert.strictEqual(t.modulations[0].time, 188); assert.strictEqual(t.observations.menu.display_delay_report.seconds, 82); assert.strictEqual(t.reference_status, 'UNVERIFIED_REFERENCE');
+    assert.ok(S.validateTrack(Object.assign({}, t, { data_conflicts: [{ field: 'x', values: [{ source: 'a' }], status: 'UNRESOLVED' }] }), 0).errors.length); // cần ≥2 giá trị
+    assert.ok(S.validateTrack(Object.assign({}, t, { data_conflicts: [{ field: 'x', values: [{ source: 'a' }, { source: 'b' }], status: 'OK' }] }), 0).errors.length);
+});
+T('A10R: Phía Sau Một Cô Gái không có URL (không tự tạo); Viên Đá nhỏ NO_REFERENCE; họa phận ái lưu NEEDS_CLARIFICATION', () => {
+    const g = (id) => MAN.tracks.find((x) => x.track_id === id);
+    assert.strictEqual(g('phia-sau-mot-co-gai').audio_reference.source_url, null); assert.ok(/TRỐNG/.test(g('phia-sau-mot-co-gai').audio_reference.source_url_note));
+    assert.strictEqual(g('vien-da-nho').label_state, 'NO_REFERENCE'); assert.strictEqual(g('hoa-phan-ai-luu').label_state, 'NEEDS_CLARIFICATION'); assert.strictEqual(MAN.tracks.length, 14);
+});
 console.log(`RealBenchA10: ${n} nhóm OK`);

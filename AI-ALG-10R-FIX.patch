@@ -1,0 +1,78 @@
+From a0b82c9022828b9b0cdcf5e17bde684d0ffe1b72 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 17 Oct 2026 03:46:17 +0000
+Subject: [PATCH] AI-ALG-10R-FIX: exhaustive source search report (source table
+ not found); merge resolved
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01FrhXxWK5TMfTR3qNCGmEyc
+---
+ tools/algbench/reports/AI-ALG-10R-FIX.md | 56 ++++++++++++++++++++++++
+ 1 file changed, 56 insertions(+)
+ create mode 100644 tools/algbench/reports/AI-ALG-10R-FIX.md
+
+diff --git a/tools/algbench/reports/AI-ALG-10R-FIX.md b/tools/algbench/reports/AI-ALG-10R-FIX.md
+new file mode 100644
+index 0000000..2ea3de4
+--- /dev/null
++++ b/tools/algbench/reports/AI-ALG-10R-FIX.md
+@@ -0,0 +1,56 @@
++# AI-ALG-10R-FIX — Recover Source and Complete Reconciliation
++
++**Kết quả: KHÔNG TÌM THẤY bảng nguồn 20 bài sau khi kiểm tra toàn diện → CHƯA đối chiếu. Không tuyên bố đối chiếu thành công. Không dựng lại bảng bằng suy đoán.**
++
++## 1. Bằng chứng đã kiểm tra (tất cả KHÔNG chứa bảng 20 bài)
++| Nguồn | Cách kiểm tra | Kết quả |
++|---|---|---|
++| GitHub `origin/main` (fetch mới, HEAD `b199de7`) | `git fetch --all`; 1 nhánh duy nhất (`main`) | không có file bảng nguồn |
++| Lịch sử Git (mọi commit, mọi nhánh) | `git log --all -S"Viên Đá" / "họa phận" / "Đớn Đau" / "Phía Sau Một Cô" / "wHLNh9qFgU8"` loại trừ file do AI-ALG-09/10 tạo | chỉ trùng ở commit auto-sync `4475d4e` = chính nội dung AI-ALG-10 (do tôi tạo, không phải bảng gốc); `wHLNh9qFgU8` chỉ trong manifest/báo cáo AI-ALG |
++| GitHub search_code `"Viên Đá"` | MCP GitHub | 0 kết quả |
++| Tệp dự án | `git ls-files` (xlsx/csv/zip/rar/docx/pdf); mở `hình ảnh và chức năng MENU AI.xlsx` (26 mục), `sync.zip`, `PDL TOOL AI S1/auto-menu-ai-s1.zip` (2762 mục) tìm 6 chuỗi tên bài | không trúng |
++| `data/songs.json`, 177 log `logs/*.jsonl` (tìm tên bài, trường title) | grep | `songs.json` = `[]`; log không chứa tên bài |
++| Google Drive (MCP) | tìm theo tên bài/"key"/"bài hát" | 0 kết quả |
++| Bản ghi cuộc trò chuyện + mọi tệp đính kèm | tìm "Viên Đá", "Phía Sau Một Cô Gái", "1:22" | chỉ trong chính các đề task (AI-ALG-09 liệt kê 14 bài; AI-ALG-10R nêu 2 dữ kiện), không có bảng 6 cột × 20 dòng |
++| `G:\AUTO_MENU_AI` trên máy Khói | không truy cập được từ phiên này (không liên kết máy) | CHƯA KIỂM TRA — nếu bảng nằm ở đó thì Khói cần đưa lên |
++Ghi chú: lần trước tôi kết luận "thiếu nguồn" sớm hơn mức nên; lần này đã kiểm tra các vị trí trên trước khi kết luận.
++
++## 2. Kết quả reconcile
++`reconcile.js` chưa có bảng nguồn ⇒ `BLOCKED_NO_SOURCE_TABLE`; bảng rỗng ⇒ `BLOCKED_EMPTY_SOURCE` (exit 2). Số liệu hiện biết: manifest 14 bài; nguồn (20) chưa nhận. **Chưa thể nêu tên/ID bài thiếu, thừa, trùng hay trường lệch.** Không có "bảng CSV nguồn chuẩn" để lưu (chỉ có khung trống `tools/algbench/source/songs_20_source.TEMPLATE.csv`). Không đoán tên 6 bài từ 20−14.
++
++## 3. THƯƠNG EM — 1:22 (82 s) và 3:08 (188 s)
++| Giá trị | Bằng chứng | Nói về điều gì |
++|---|---|---|
++| 3:08 = 188 s | Khói viết trực tiếp (AI-ALG-07): "tại 03:08 lên tone từ D Major lên Eb Major (+1 bán cung)" | vị trí modulation trong bài (nhãn người dùng, `UNVERIFIED_REFERENCE`, chưa có audio kiểm tra) |
++| 1:22 = 82 s | chỉ có câu trong đề 10R: bảng nguồn ghi "Menu chậm hiển thị Key/Mod đến 1:22" (không thấy bảng gốc) | độ trễ/mốc Menu bắt đầu hiển thị Key/Mod theo quan sát; chưa rõ là mốc trong bài hay độ dài trễ |
++Đánh giá: hai số không tự mâu thuẫn — một là vị trí modulation, một là mốc/độ trễ hiển thị của Menu (82 s < 188 s nên không xung đột logic). Nhưng ý nghĩa chính xác của "1:22" chưa xác minh (cần câu gốc trong bảng + bản thu). **Không chọn giá trị chuẩn**; manifest giữ `data_conflicts` UNRESOLVED với cả hai giá trị và nguồn gốc, `modulations[].time=188` giữ nguyên là nhãn người dùng chưa xác minh.
++
++## 4. Các bài đặc biệt (không đổi)
++- Viên Đá nhỏ: `NO_REFERENCE` (không key chuẩn, không chấm).
++- họa phận ái lưu: nhãn E minor, Auto = Menu = E minor, ghi chú "sai tone" → `NEEDS_CLARIFICATION`.
++- Phía Sau Một Cô Gái: URL nguồn trống → `source_url` null, không tạo URL.
++- Không bài nào `VERIFIED_INDEPENDENT`; Auto Key chỉ là `observations`, không phải ground truth.
++
++## 5. Benchmark
++`run.js`: manifest HỢP LỆ; `BLOCKED_NO_AUDIO`; 14 bài, audio=0, verified=0, evaluated=0, đủ điều kiện 0/14. Không có accuracy thực nghiệm.
++
++## 6. Test & kiểm tra
++`node --check` realbench: OK. `RealBenchA10.verify.js` 12/12; `RealBenchA08.verify.js` 17/17. `git diff --check` sạch. Merge xung đột add/add 5 file với `origin/main` (do auto-sync đã đưa bản AI-ALG-10 của tôi lên): đã xác minh bản origin = commit `8c79e46` nên giữ bản mới hơn của tôi, không mất nội dung. Không sửa KeyEngine/ModEngine/UI/ngưỡng/profile/trọng số/MIDI/FX/preset.
++
++## 7. GitHub / commit / push
++`origin/main` = `b199de7`. Local ahead 30 commit (gồm merge `b46ae06`, AI-ALG-10R `e0de739`). `git push` → 403 ("Claude doesn't have GitHub access ... org admin can install the Claude GitHub App"). Auto-sync của Khói đã đưa AI-ALG-10 lên main (commit `4475d4e`); AI-ALG-10R (`e0de739`) và báo cáo này CHƯA lên origin. Hoàn tất: code/test/báo cáo trong commit local. Chưa push: tất cả commit sau `b199de7`.
++
++## 8. ZIP bàn giao
++`/tmp/claude-0/-home-claude/bf04ef9d-67c9-58e1-943d-1aa94e433ea5/scratchpad/AI-ALG-10R-FIX.zip` (báo cáo này + manifest + công cụ + khung CSV + test + patch).
++
++## 9. Dữ liệu cần Khói cung cấp
++1. **Bảng gốc 20 bài (6 cột)**: dán vào chat dạng văn bản, hoặc đính kèm CSV/xlsx, hoặc đặt vào repo (`tools/algbench/source/songs_20_source.csv`) để auto-sync đưa lên. (Nếu file đang ở `G:\AUTO_MENU_AI`, hãy chép vào thư mục này.)
++2. Câu gốc về THƯƠNG EM "1:22" (là mốc trong bài hay độ trễ?).
++3. Audio + sha256, nhãn xác minh độc lập, mốc chuyển tone.
++
++---
++Claude A : Task A: AI-ALG-10R-FIX
++1. File đã sửa: `tools/algbench/reports/AI-ALG-10R-FIX.md` (mới); đã giải quyết merge với origin (giữ nội dung AI-ALG-10R). Không sửa thêm code/manifest/runtime.
++2. Vì sao: kiểm tra toàn diện nguồn 20 bài (GitHub, lịch sử, tệp, log, Drive, hội thoại) — không tìm thấy; ghi bằng chứng và làm rõ THƯƠNG EM.
++3. Ảnh hưởng module: không.
++4. Còn lại: bảng gốc 20 bài → chạy reconcile; làm rõ "1:22"; audio + nhãn độc lập; push GitHub bị 403.
+-- 
+2.43.0
+

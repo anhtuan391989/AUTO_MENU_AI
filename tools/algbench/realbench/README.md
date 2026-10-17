@@ -31,3 +31,4 @@ Quy tắc chia tập (cố định, không phụ thuộc kết quả): `sha256(t
 ## Đối chiếu bảng nguồn 20 bài (AI-ALG-10)
 `node tools/algbench/realbench/reconcile.js --source <bảng.csv|tsv|json> [--expect 20] [--out rec.json]`
 Cột (không phân biệt hoa/thường/dấu): Tên bài | Link | Key chuẩn | Auto Key | Menu | Ghi chú. Báo: bài THIẾU/THỪA/TRÙNG, dòng lỗi, trường LỆCH (url, key chuẩn, Auto, Menu, ghi chú). Enharmonic (Bb minor = A# minor) coi là cùng key; Major/Minor và relative KHÔNG coi là bằng nhau. Không có `--source` ⇒ `BLOCKED_NO_SOURCE_TABLE` (exit 2). Công cụ chỉ đọc: không sửa manifest, không nâng nhãn lên VERIFIED.
+Nhập bảng nguồn: điền `tools/algbench/source/songs_20_source.TEMPLATE.csv` (chỉ có tiêu đề) rồi lưu thành `songs_20_source.csv`. Bảng rỗng ⇒ `BLOCKED_EMPTY_SOURCE`. `data_conflicts[]` (tùy chọn) lưu mâu thuẫn dữ liệu: ≥2 giá trị kèm nguồn, trạng thái UNRESOLVED/RESOLVED — không tự chọn giá trị chuẩn.

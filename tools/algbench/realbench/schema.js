@@ -88,6 +88,10 @@ function validateTrack(t, idx) {
         if (u.key !== null && u.key !== undefined && !parseKey(u.key)) E.push(at('user_reference.key không hợp lệ'));
         if (u.modulation) { if (!parseKey(u.modulation.from_key) || !parseKey(u.modulation.to_key)) E.push(at('user_reference.modulation from/to_key không hợp lệ')); if (u.modulation.time !== null && !isNum(u.modulation.time)) E.push(at('user_reference.modulation.time phải là số hoặc null')); }
     }
+    if (t.data_conflicts !== undefined) {   // AI-ALG-10R: mâu thuẫn dữ liệu được GIỮ nguyên từng giá trị + nguồn, không tự chọn
+        if (!Array.isArray(t.data_conflicts)) E.push(at('data_conflicts phải là mảng'));
+        else t.data_conflicts.forEach((c, i) => { if (!c || typeof c.field !== 'string' || !Array.isArray(c.values) || c.values.length < 2 || c.values.some((v) => !v || typeof v.source !== 'string')) E.push(at(`data_conflicts[${i}] cần field + ≥2 values có source`)); if (c && c.status !== 'UNRESOLVED' && c.status !== 'RESOLVED') E.push(at(`data_conflicts[${i}].status phải là UNRESOLVED|RESOLVED`)); });
+    }
     if (t.observations !== undefined && t.observations !== null) for (const who of ['auto_key', 'menu']) {
         const o = t.observations[who]; if (o === undefined || o === null) continue;
         if (typeof o.raw !== 'string') E.push(at(`observations.${who}.raw phải là chuỗi (nguyên văn người kiểm thử)`));

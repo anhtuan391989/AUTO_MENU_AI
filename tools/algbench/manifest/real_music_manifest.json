@@ -1,6 +1,6 @@
 {
   "schema": "AI-ALG-08/manifest/v2",
-  "schema_ext": "AI-ALG-09/10 (title,label_state,user_reference,observations,track_group)",
+  "schema_ext": "AI-ALG-09/10R (title,label_state,user_reference,observations,track_group,data_conflicts)",
   "note": "Nhãn người dùng = UNVERIFIED_REFERENCE; KHÔNG vào số liệu chính. segments[] để trống vì chưa có ranh giới đoạn đã xác minh. Chỉ 14/20 bài được cung cấp trong task AI-ALG-09 (xem báo cáo). Quy tắc chia: sha256(track_id)[0] % 10 < 3 -> test, còn lại dev (cố định trước khi có kết quả).",
   "tracks": [
     {
@@ -92,7 +92,12 @@
             "tonic": "B",
             "mode": "minor"
           },
-          "agrees_with_user_reference": false
+          "agrees_with_user_reference": false,
+          "display_delay_report": {
+            "text": "1:22",
+            "seconds": 82,
+            "source": "đề AI-ALG-10R trích bảng nguồn 20 bài (bảng gốc chưa nhận được)"
+          }
         },
         "tester_note": "Menu chậm hiển thị key/modulation (ghi nhận của người kiểm thử)."
       },
@@ -112,7 +117,28 @@
       ],
       "track_group": "modulation_user_reported",
       "annotation_notes": "Menu chậm hiển thị key/modulation (ghi nhận của người kiểm thử).",
-      "split": "dev"
+      "split": "dev",
+      "data_conflicts": [
+        {
+          "field": "thuong-em timing (Menu hiển thị key/mod vs mốc modulation)",
+          "values": [
+            {
+              "source": "đề AI-ALG-10R trích bảng nguồn: \"Menu chậm hiển thị Key/Mod đến 1:22\"",
+              "value_text": "1:22",
+              "value_s": 82,
+              "meaning": "độ trễ hiển thị của Menu (theo bảng nguồn)"
+            },
+            {
+              "source": "quan sát người dùng ban đầu (AI-ALG-07): modulation D→Eb tại 03:08",
+              "value_text": "3:08",
+              "value_s": 188,
+              "meaning": "mốc modulation trong bài"
+            }
+          ],
+          "status": "UNRESOLVED",
+          "note": "Đề task gọi đây là mâu thuẫn; có thể là hai đại lượng khác nhau (độ trễ Menu vs vị trí modulation) nhưng chưa xác nhận. Không chọn giá trị chuẩn; modulations[].time=188 giữ nguyên nguồn gốc (UNVERIFIED)."
+        }
+      ]
     },
     {
       "track_id": "yeu-lai-tu-dau",
@@ -527,7 +553,8 @@
         "type": "none",
         "path": null,
         "source_url": null,
-        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp."
+        "license_note": "Chưa có file audio hợp lệ; không tải/trích xuất audio trái phép. Cần file do người dùng cung cấp.",
+        "source_url_note": "Bảng nguồn ghi link YouTube TRỐNG (theo đề AI-ALG-10R); không tự tạo URL."
       },
       "audio_hash": null,
       "reference_status": "UNVERIFIED_REFERENCE",
