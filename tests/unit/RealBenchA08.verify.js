@@ -87,13 +87,13 @@ T('pipeline: dữ liệu giả tách bạch, chỉ chấm VERIFIED, test cần -
     assert.strictEqual(evaluate({ tracks: [base({ split: 'zzz' })] }, o).valid, false);
 });
 
-// ---- AI-ALG-09: manifest 14 bài, trường mở rộng, readiness ----
+// ---- AI-ALG-09 (cập nhật 10R-FINAL: manifest 20 bài): manifest, trường mở rộng, readiness ----
 const MAN = JSON.parse(fs.readFileSync(R + '/../manifest/real_music_manifest.json', 'utf8')), byId = (id) => MAN.tracks.find((x) => x.track_id === id), { exclusions, observationTable } = require(R + '/run.js');
-T('A09 manifest: 14 bài duy nhất, hợp lệ, tất cả UNVERIFIED, 0 bài đủ điều kiện chấm', () => {
-    assert.strictEqual(MAN.tracks.length, 14); assert.strictEqual(new Set(MAN.tracks.map((x) => x.track_id)).size, 14);
+T('A09 manifest: 20 bài duy nhất, hợp lệ, tất cả UNVERIFIED, 0 bài đủ điều kiện chấm', () => {
+    assert.strictEqual(MAN.tracks.length, 20); assert.strictEqual(new Set(MAN.tracks.map((x) => x.track_id)).size, 20);
     assert.deepStrictEqual(S.validateManifest(MAN).errors, []); assert.ok(MAN.tracks.every((x) => x.reference_status === 'UNVERIFIED_REFERENCE' && x.audio_hash === null && x.segments.length === 0));
     const rep = evaluate(MAN, { audioRoot: '.', tol: 10, tols: [10], finalTest: true });
-    assert.strictEqual(rep.status, 'BLOCKED_NO_AUDIO'); assert.strictEqual(rep.counts.eligible_for_accuracy, 0); assert.strictEqual(rep.counts.excluded, 14); assert.strictEqual(rep.aggregate, null);
+    assert.strictEqual(rep.status, 'BLOCKED_NO_AUDIO'); assert.strictEqual(rep.counts.eligible_for_accuracy, 0); assert.strictEqual(rep.counts.excluded, 20); assert.strictEqual(rep.aggregate, null);
     assert.ok(rep.tracks.every((r) => r.exclusion_reasons.includes('LABEL_NOT_VERIFIED') && r.exclusion_reasons.includes('BLOCKED_NO_AUDIO')));
 });
 T('A09 dữ liệu gốc được bảo toàn (nhãn/Auto/Menu nguyên văn)', () => {
@@ -122,7 +122,7 @@ T('A09 exclusions + observationTable (mô tả, không phải accuracy)', () => 
     assert.ok(exclusions(base({ label_state: 'NEEDS_CLARIFICATION', reference_status: 'UNVERIFIED_REFERENCE' }), { status: 'AUDIO_OK' }).includes('LABEL_NEEDS_CLARIFICATION'));
     const t = observationTable(MAN.tracks), g = (id) => t.find((x) => x.track_id === id);
     assert.strictEqual(g('thuong-em').menu.vs_reference, 'relative'); assert.strictEqual(g('thuong-em').auto_key.vs_reference, 'agrees_as_reported'); assert.strictEqual(g('don-dau-vo-cung').auto_key.vs_reference, 'relative');
-    assert.strictEqual(g('me-em').menu.vs_reference, 'other'); assert.strictEqual(g('phia-sau-mot-co-gai').menu.vs_reference, 'exact'); assert.strictEqual(g('vien-da-nho').menu, null);
+    assert.strictEqual(g('me-em').menu.vs_reference, 'other'); assert.strictEqual(g('phia-sau-mot-co-gai').menu.vs_reference, 'exact'); assert.strictEqual(g('vien-da-nho').menu.raw, 'B Major'); assert.strictEqual(g('vien-da-nho').menu.vs_reference, 'unknown'); /* có Menu từ bảng nguồn nhưng KHÔNG có nhãn tham chiếu => không so được */
 });
 T('A09 chia tập: quy tắc cố định theo track_id, mọi bài có split, không rò rỉ', () => {
     const crypto = require('crypto'); MAN.tracks.forEach((x) => assert.strictEqual(x.split, crypto.createHash('sha256').update(x.track_id).digest()[0] % 10 < 3 ? 'test' : 'dev'));

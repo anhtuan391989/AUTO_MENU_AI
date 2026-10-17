@@ -1,0 +1,82 @@
+{
+ "source_count": 20,
+ "manifest_count": 20,
+ "expected": 20,
+ "missing_in_manifest": [],
+ "extra_in_manifest": [],
+ "duplicates_in_source": [],
+ "duplicates_in_manifest": [],
+ "field_mismatches": [
+  {
+   "track_id": "gia-vo-thuong-anh-duoc",
+   "title": "giả vờ thương anh được",
+   "field": "observations.menu",
+   "source": "A# Minnor",
+   "manifest": "A# minor",
+   "kind": "SOURCE_CELL_UNREADABLE_OR_TYPO"
+  }
+ ],
+ "info_notes": [
+  {
+   "track_id": "thuong-em",
+   "field": "audio_reference.source_url",
+   "note": "cùng video id wHLNh9qFgU8, khác dạng link (nguồn có thêm tham số list/index)"
+  }
+ ],
+ "unreadable_source_cells": [
+  {
+   "track_id": "gia-vo-thuong-anh-duoc",
+   "title": "giả vờ thương anh được",
+   "field": "menu",
+   "source": "A# Minnor",
+   "manifest": "A# minor"
+  }
+ ],
+ "incomplete_source_rows": [],
+ "matched": 20,
+ "counts_ok": false,
+ "source_validation": {
+  "rows": 20,
+  "expected": 20,
+  "columns_found": {
+   "title": "Tên bài",
+   "url": "Link Youtube",
+   "key": "Key chuẩn đã xác minh",
+   "auto": "Kết quả Auto Key",
+   "menu": "Kết quả Menu",
+   "note": "lỗi Menu"
+  },
+  "columns_missing": [],
+  "empty_fields": {
+   "title": [],
+   "url": [
+    "Phía Sau Một Cô Gái"
+   ],
+   "key": [],
+   "auto": [],
+   "menu": [],
+   "note": [
+    "Đớn Đau Vô Cùng",
+    "VU QUY",
+    "GIÁ NHƯ ANH LÀ EM",
+    "Mê Em",
+    "Viên Đá nhỏ",
+    "đừng quên tên anh",
+    "sau này em cưới ai",
+    "lưu niên",
+    "Đêm trắng",
+    "Anh không tha thứ",
+    "Từng Yêu",
+    "Người Lạ Thoáng Qua",
+    "NGÀY MAI NGƯỜI TA LẤY CHỒNG",
+    "Anh Khác hay em khác",
+    "giả vờ thương anh được",
+    "chờ em trong đêm",
+    "Phía Sau Một Cô Gái"
+   ]
+  },
+  "rows_with_wrong_cell_count": [],
+  "duplicate_titles": [],
+  "ok": true
+ }
+}

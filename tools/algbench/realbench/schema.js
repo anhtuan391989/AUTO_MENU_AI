@@ -96,6 +96,7 @@ function validateTrack(t, idx) {
         const o = t.observations[who]; if (o === undefined || o === null) continue;
         if (typeof o.raw !== 'string') E.push(at(`observations.${who}.raw phải là chuỗi (nguyên văn người kiểm thử)`));
         if (o.key !== null && o.key !== undefined && !parseKey(o.key)) E.push(at(`observations.${who}.key không hợp lệ`));
+        if (o.chain !== undefined && (!Array.isArray(o.chain) || o.chain.length < 2 || o.chain.some((k) => !parseKey(k)))) E.push(at(`observations.${who}.chain phải là mảng ≥2 key hợp lệ`));
     }
     return { errors: E, warnings: W };
 }

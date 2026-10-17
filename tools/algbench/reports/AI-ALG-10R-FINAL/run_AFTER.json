@@ -1,0 +1,660 @@
+{
+ "schema": "AI-ALG-08/report/v1",
+ "data_origin": "REAL_MUSIC",
+ "valid": true,
+ "errors": [],
+ "warnings": [],
+ "params": {
+  "split": null,
+  "final_test": false,
+  "tol_s": 10,
+  "tolerances_s": [
+   2,
+   5,
+   10,
+   15,
+   20,
+   30
+  ],
+  "step_s": 1
+ },
+ "tracks": [
+  {
+   "track_id": "don-dau-vo-cung",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "Đớn Đau Vô Cùng",
+   "track_group": "stable_user_reported",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "thuong-em",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "THƯƠNG EM",
+   "track_group": "modulation_user_reported",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "yeu-lai-tu-dau",
+   "split": "test",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "Yêu Lại Từ Đầu",
+   "track_group": "modulation_user_reported",
+   "skipped": "test_set_requires_--final-test"
+  },
+  {
+   "track_id": "me-em",
+   "split": "test",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "Mê Em",
+   "track_group": "stable_user_reported",
+   "skipped": "test_set_requires_--final-test"
+  },
+  {
+   "track_id": "dung-quen-ten-anh",
+   "split": "test",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "đừng quên tên anh",
+   "track_group": "stable_user_reported",
+   "skipped": "test_set_requires_--final-test"
+  },
+  {
+   "track_id": "sau-nay-em-cuoi-ai",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "sau này em cưới ai",
+   "track_group": "stable_user_reported",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "luu-nien",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "lưu niên",
+   "track_group": "stable_user_reported",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "dem-trang",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "Đêm trắng",
+   "track_group": "stable_user_reported",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "anh-khong-tha-thu",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "Anh không tha thứ",
+   "track_group": "stable_user_reported",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "anh-khac-hay-em-khac",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "Anh Khác hay em khác",
+   "track_group": "stable_user_reported",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "gia-vo-thuong-anh-duoc",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "giả vờ thương anh được",
+   "track_group": "stable_user_reported",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "phia-sau-mot-co-gai",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "Phía Sau Một Cô Gái",
+   "track_group": "modulation_unclear",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "vien-da-nho",
+   "split": "test",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED",
+    "NO_REFERENCE_LABEL"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "Viên Đá nhỏ",
+   "track_group": "stable_user_reported",
+   "skipped": "test_set_requires_--final-test"
+  },
+  {
+   "track_id": "hoa-phan-ai-luu",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED",
+    "LABEL_NEEDS_CLARIFICATION"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "họa phận ái lưu",
+   "track_group": "stable_user_reported",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "vu-quy",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "VU QUY",
+   "track_group": "stable_user_reported",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "gia-nhu-anh-la-em",
+   "split": "test",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "GIÁ NHƯ ANH LÀ EM",
+   "track_group": "stable_user_reported",
+   "skipped": "test_set_requires_--final-test"
+  },
+  {
+   "track_id": "tung-yeu",
+   "split": "test",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "Từng Yêu",
+   "track_group": "stable_user_reported",
+   "skipped": "test_set_requires_--final-test"
+  },
+  {
+   "track_id": "nguoi-la-thoang-qua",
+   "split": "dev",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "Người Lạ Thoáng Qua",
+   "track_group": "stable_user_reported",
+   "result": "BLOCKED_NO_AUDIO"
+  },
+  {
+   "track_id": "ngay-mai-nguoi-ta-lay-chong",
+   "split": "test",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "NGÀY MAI NGƯỜI TA LẤY CHỒNG",
+   "track_group": "stable_user_reported",
+   "skipped": "test_set_requires_--final-test"
+  },
+  {
+   "track_id": "cho-em-trong-dem",
+   "split": "test",
+   "reference_status": "UNVERIFIED_REFERENCE",
+   "audio_status": "BLOCKED_NO_AUDIO",
+   "reason": "chưa có file audio (chỉ có tham chiếu URL hoặc không có)",
+   "exclusion_reasons": [
+    "BLOCKED_NO_AUDIO",
+    "LABEL_NOT_VERIFIED"
+   ],
+   "eligible_for_accuracy": false,
+   "title": "chờ em trong đêm",
+   "track_group": "stable_user_reported",
+   "skipped": "test_set_requires_--final-test"
+  }
+ ],
+ "counts": {
+  "total": 20,
+  "with_audio": 0,
+  "verified": 0,
+  "evaluated": 0,
+  "blocked_no_audio": 20,
+  "unverified_skipped": 0,
+  "test_skipped": 8,
+  "eligible_for_accuracy": 0,
+  "excluded": 20
+ },
+ "observations_descriptive_only": [
+  {
+   "track_id": "don-dau-vo-cung",
+   "title": "Đớn Đau Vô Cùng",
+   "user_reference": "A minor",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "C major",
+    "key": "C major",
+    "vs_reference": "relative"
+   },
+   "menu": {
+    "raw": "A minor",
+    "key": "A minor",
+    "vs_reference": "exact"
+   }
+  },
+  {
+   "track_id": "thuong-em",
+   "title": "THƯƠNG EM",
+   "user_reference": "D major",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "D Major - Eb Major",
+    "key": null,
+    "vs_reference": "agrees_as_reported"
+   },
+   "menu": {
+    "raw": "B minor",
+    "key": "B minor",
+    "vs_reference": "relative"
+   }
+  },
+  {
+   "track_id": "yeu-lai-tu-dau",
+   "title": "Yêu Lại Từ Đầu",
+   "user_reference": "D major",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "D Major - Eb Major",
+    "key": null,
+    "vs_reference": "agrees_as_reported"
+   },
+   "menu": {
+    "raw": "B minor",
+    "key": "B minor",
+    "vs_reference": "relative"
+   }
+  },
+  {
+   "track_id": "me-em",
+   "title": "Mê Em",
+   "user_reference": "C major",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "C Major",
+    "key": "C major",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "G major",
+    "key": "G major",
+    "vs_reference": "other"
+   }
+  },
+  {
+   "track_id": "dung-quen-ten-anh",
+   "title": "đừng quên tên anh",
+   "user_reference": "C# major",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "Db Major",
+    "key": "C# major",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "D# minor",
+    "key": "D# minor",
+    "vs_reference": "other"
+   }
+  },
+  {
+   "track_id": "sau-nay-em-cuoi-ai",
+   "title": "sau này em cưới ai",
+   "user_reference": "D major",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "D Major",
+    "key": "D major",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "B minor",
+    "key": "B minor",
+    "vs_reference": "relative"
+   }
+  },
+  {
+   "track_id": "luu-nien",
+   "title": "lưu niên",
+   "user_reference": "B major",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "B Major",
+    "key": "B major",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "F# major",
+    "key": "F# major",
+    "vs_reference": "other"
+   }
+  },
+  {
+   "track_id": "dem-trang",
+   "title": "Đêm trắng",
+   "user_reference": "D# major",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "D# Major",
+    "key": "D# major",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "A# major",
+    "key": "A# major",
+    "vs_reference": "other"
+   }
+  },
+  {
+   "track_id": "anh-khong-tha-thu",
+   "title": "Anh không tha thứ",
+   "user_reference": "C# minor",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "E major",
+    "key": "E major",
+    "vs_reference": "relative"
+   },
+   "menu": {
+    "raw": "C# minor",
+    "key": "C# minor",
+    "vs_reference": "exact"
+   }
+  },
+  {
+   "track_id": "anh-khac-hay-em-khac",
+   "title": "Anh Khác hay em khác",
+   "user_reference": "A minor",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "D major",
+    "key": "D major",
+    "vs_reference": "other"
+   },
+   "menu": {
+    "raw": "B minor",
+    "key": "B minor",
+    "vs_reference": "other"
+   }
+  },
+  {
+   "track_id": "gia-vo-thuong-anh-duoc",
+   "title": "giả vờ thương anh được",
+   "user_reference": "D minor",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "Db major",
+    "key": "C# major",
+    "vs_reference": "other"
+   },
+   "menu": {
+    "raw": "A# minor",
+    "key": "A# minor",
+    "vs_reference": "other"
+   }
+  },
+  {
+   "track_id": "phia-sau-mot-co-gai",
+   "title": "Phía Sau Một Cô Gái",
+   "user_reference": "F minor",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "F minor",
+    "key": "F minor",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "F minor",
+    "key": "F minor",
+    "vs_reference": "exact"
+   }
+  },
+  {
+   "track_id": "vien-da-nho",
+   "title": "Viên Đá nhỏ",
+   "user_reference": null,
+   "label_state": "NO_REFERENCE",
+   "auto_key": {
+    "raw": "F# Major",
+    "key": "F# major",
+    "vs_reference": "unknown"
+   },
+   "menu": {
+    "raw": "B Major",
+    "key": "B major",
+    "vs_reference": "unknown"
+   }
+  },
+  {
+   "track_id": "hoa-phan-ai-luu",
+   "title": "họa phận ái lưu",
+   "user_reference": "E minor",
+   "label_state": "NEEDS_CLARIFICATION",
+   "auto_key": {
+    "raw": "E minor",
+    "key": "E minor",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "E minor",
+    "key": "E minor",
+    "vs_reference": "exact"
+   }
+  },
+  {
+   "track_id": "vu-quy",
+   "title": "VU QUY",
+   "user_reference": "B minor",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "B minor",
+    "key": "B minor",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "B Minor",
+    "key": "B minor",
+    "vs_reference": "exact"
+   }
+  },
+  {
+   "track_id": "gia-nhu-anh-la-em",
+   "title": "GIÁ NHƯ ANH LÀ EM",
+   "user_reference": "B minor",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "B Minor",
+    "key": "B minor",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "B Minor",
+    "key": "B minor",
+    "vs_reference": "exact"
+   }
+  },
+  {
+   "track_id": "tung-yeu",
+   "title": "Từng Yêu",
+   "user_reference": "F minor",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "F Minor",
+    "key": "F minor",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "F Minor",
+    "key": "F minor",
+    "vs_reference": "exact"
+   }
+  },
+  {
+   "track_id": "nguoi-la-thoang-qua",
+   "title": "Người Lạ Thoáng Qua",
+   "user_reference": "E minor",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "E Minor",
+    "key": "E minor",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "E Minor",
+    "key": "E minor",
+    "vs_reference": "exact"
+   }
+  },
+  {
+   "track_id": "ngay-mai-nguoi-ta-lay-chong",
+   "title": "NGÀY MAI NGƯỜI TA LẤY CHỒNG",
+   "user_reference": "A# minor",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "Bb Minor",
+    "key": "A# minor",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "A# Minor",
+    "key": "A# minor",
+    "vs_reference": "exact"
+   }
+  },
+  {
+   "track_id": "cho-em-trong-dem",
+   "title": "chờ em trong đêm",
+   "user_reference": "A minor",
+   "label_state": "USER_LABEL_UNVERIFIED",
+   "auto_key": {
+    "raw": "A Minor",
+    "key": "A minor",
+    "vs_reference": "exact"
+   },
+   "menu": {
+    "raw": "A Minor",
+    "key": "A minor",
+    "vs_reference": "exact"
+   }
+  }
+ ],
+ "aggregate": null,
+ "status": "BLOCKED_NO_AUDIO"
+}
