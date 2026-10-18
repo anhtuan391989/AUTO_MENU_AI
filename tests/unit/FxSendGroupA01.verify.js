@@ -17,7 +17,7 @@ function chain(opts = {}) {
         execute: async (n, target) => { sends.push({ t: clock.t, n, target }); if (fail.has(n)) return { ok: false, status: 'NO_DEVICE' }; dawState[n] = target; return { ok: true }; },
     });
     group.seed(!!opts.seed);
-    const ctl = AS.createFxAutoController({ now: () => clock.t, getFxState: () => fx, applyFx: async (t) => { const r = await group.apply(t); if (r.ok) fx = t; return r; } });
+    const ctl = AS.createFxAutoController({ now: () => clock.t, getFxState: () => group.aggregate() /* MENU-FX-FIX: giống wiring thật (renderer dùng group.aggregate(), không dùng biến fx riêng) */, applyFx: async (t) => { const r = await group.apply(t); if (r.ok) fx = t; return r; } });
     ctl.setSourceState(true);
     return { clock, sends, dawState, group, ctl, fail, get fx() { return fx; },
         async run(sec, music, mic) { const end = clock.t + sec * 1000; while (clock.t < end) { clock.t += 16; ctl.feedLevel(music(clock.t / 1000), clock.t); /* mic KHÔNG được đưa vào controller */ if (Math.round(clock.t / 16) % 31 === 0) ctl.tick(clock.t); await Promise.resolve(); } await Promise.resolve(); } };
@@ -28,7 +28,7 @@ const SIL = () => -80, MUS = () => -25, SPEECH = (t) => -20 + 8 * Math.sin(t * 5
     let c = chain(); await c.run(5, SIL); await c.run(10, MUS);
     ok(c.sends.length === 2 && c.dawState.FX_SEND_REVERB === true && c.dawState.FX_SEND_DELAY === true, '1. Nhạc bắt đầu → CẢ Send Reverb và Delay được bật (mỗi Send đúng 1 lệnh)');
     await c.run(30, MUS); ok(c.sends.length === 2, '2. Nhạc tiếp tục → không gửi lặp');
-    await c.run(3, SIL); await c.run(5, MUS); ok(c.sends.length === 2, '3. Khoảng lặng ngắn → Send vẫn bật');
+    await c.run(0.5, SIL); await c.run(5, MUS); ok(c.sends.length === 2, '3. Khoảng lặng ngắn (0,5 s < 1 s) → Send vẫn bật');
     await c.run(10, SIL);
     ok(c.sends.length === 4 && c.dawState.FX_SEND_REVERB === false && c.dawState.FX_SEND_DELAY === false, '4. Nhạc dừng đủ lâu → CẢ 2 Send tắt');
     // 5/6: micro nói to nhưng nhạc đã dừng: mic không vào controller => Send vẫn tắt
@@ -60,7 +60,7 @@ const SIL = () => -80, MUS = () => -25, SPEECH = (t) => -20 + 8 * Math.sin(t * 5
     c = chain(); await c.run(5, SIL); await c.run(10, MUS); c.ctl.notifyManual(); const r = await c.group.apply(false, { force: true });
     ok(r.ok && c.dawState.FX_SEND_REVERB === false && c.dawState.FX_SEND_DELAY === false, '11a. Bấm tay tắt → cả 2 Send tắt');
     const nm = c.sends.length; await c.run(20, MUS); ok(c.sends.length === nm, '11b. Auto nhường quyền trong lúc nhạc vẫn chạy');
-    await c.run(10, SIL); await c.run(5, MUS); ok(c.dawState.FX_SEND_REVERB === true, '11c. Sau lần chuyển nhạc kế tiếp Auto hoạt động lại');
+    await c.run(45, MUS); ok(c.dawState.FX_SEND_REVERB === true, '11c. [MENU-FX-FIX] Hết 60 s giữ quyền, nhạc vẫn phát → Auto tiếp quản lại');
     // 12: khởi động lại: seed theo UI, không gửi
     c = chain({ seed: true }); await c.group.apply(true); ok(c.sends.length === 0, '12. Khởi động với UI đã ON (seed) rồi apply(ON) → không gửi lệnh');
     c = chain(); await c.run(10, SIL); ok(c.sends.length === 0, '12. Khởi động lại khi đang im lặng & FX OFF → không phát sinh lệnh');

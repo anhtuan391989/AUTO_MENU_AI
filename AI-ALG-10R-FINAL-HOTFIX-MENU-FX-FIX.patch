@@ -1,0 +1,896 @@
+diff --git a/tests/unit/FxAutoA01.verify.js b/tests/unit/FxAutoA01.verify.js
+index 4f02ba3..7e4bf25 100644
+--- a/tests/unit/FxAutoA01.verify.js
++++ b/tests/unit/FxAutoA01.verify.js
+@@ -36,8 +36,8 @@ const SIL = () => -80, MUS = () => -25, NOISE = (t) => -62 + 4 * Math.sin(t * 7)
+     ok(r.calls.length === 1 && r.calls[0].target === true, `2. Nhạc ổn định → ON đúng 1 lần (${r.calls.length})`);
+     ok(r.ctl.getInfo().actionState === 'SEND_SENT_UNCONFIRMED', '   trạng thái = SEND_SENT_UNCONFIRMED (không "đã xác nhận")');
+     await r.run(30, MUS); ok(r.calls.length === 1, '3. Nhạc vẫn chạy → không gửi thêm');
+-    await r.run(3, SIL); await r.run(10, MUS); ok(r.calls.length === 1 && r.fx === true, '4. Khoảng lặng 3 s (<6 s) → giữ ON');
+-    await r.run(10, SIL); ok(r.calls.length === 2 && r.calls[1].target === false, `5. Im lặng >6 s → OFF đúng 1 lần (${r.calls.length})`);
++    await r.run(0.5, SIL); await r.run(10, MUS); ok(r.calls.length === 1 && r.fx === true, '4. Khoảng lặng 0,5 s (<1 s) → giữ ON [MENU-FX-FIX: ngưỡng tắt 6 s → 1 s theo yêu cầu]');
++    await r.run(10, SIL); ok(r.calls.length === 2 && r.calls[1].target === false, `5. Im lặng ≥1 s → OFF đúng 1 lần (${r.calls.length})`);
+     await r.run(20, SIL); ok(r.calls.length === 2, '   im lặng tiếp → không gửi lặp');
+     await r.run(5, MUS); ok(r.calls.length === 3 && r.calls[2].target === true, '6. Nhạc phát lại → ON');
+     // 7. dao động quanh ngưỡng: -48 (giữa off -52 và on -45) → trạng thái không đổi
+@@ -62,11 +62,11 @@ const SIL = () => -80, MUS = () => -25, NOISE = (t) => -62 + 4 * Math.sin(t * 7)
+     // 12. thủ công
+     r = rig(); await r.run(5, SIL); await r.run(10, MUS); r.fx = false; r.ctl.notifyManual();
+     await r.run(20, MUS); ok(r.fx === false && r.calls.length === 1, '12a. User tắt tay khi nhạc chạy → Auto nhường quyền, không ép bật lại');
+-    await r.run(10, SIL); await r.run(5, MUS); ok(r.calls.length === 2 && r.fx === true, '12b. Đổi trạng thái nhạc kế tiếp → Auto hoạt động lại');
++    await r.run(45, MUS); ok(r.calls.length === 2 && r.fx === true, '12b. [MENU-FX-FIX] Hết 60 s giữ quyền, nhạc vẫn phát → Auto tiếp quản theo trạng thái HIỆN TẠI (bật lại)');
+     // khởi động khi nhạc đang phát và UI đã ON (persisted) → không gửi
+     r = rig({ fxInit: true }); await r.run(10, MUS); ok(r.calls.length === 0, 'Khởi động khi nhạc đang phát và FX đã ON → không gửi lệnh');
+     // đổi bài: im lặng 2 s
+-    r = rig(); await r.run(5, SIL); await r.run(10, MUS); await r.run(2, SIL); await r.run(10, MUS); ok(r.calls.length === 1, 'Chuyển bài (2 s lặng) → không tắt/bật');
++    r = rig(); await r.run(5, SIL); await r.run(10, MUS); await r.run(2, SIL); await r.run(10, MUS); ok(r.calls.length === 3 && r.calls[1].target === false && r.calls[2].target === true, 'Chuyển bài (2 s lặng, > 1 s) → TẮT rồi BẬT lại đúng 1 lần mỗi chiều [MENU-FX-FIX: hệ quả có chủ ý của ngưỡng tắt 1 s]');
+     // fade-out dài: 8 s giảm dần
+     r = rig(); await r.run(5, SIL); await r.run(10, MUS);
+     await r.run(8, (t) => -25 - ((t % 8) / 8) * 40); await r.run(10, SIL);
+diff --git a/tests/unit/FxIndicatorA06.verify.js b/tests/unit/FxIndicatorA06.verify.js
+index 69ce498..30a359d 100644
+--- a/tests/unit/FxIndicatorA06.verify.js
++++ b/tests/unit/FxIndicatorA06.verify.js
+@@ -37,7 +37,7 @@ const SIL = () => -80, MUS = () => -25;
+     ok(r.cls.has('active'), '1. Nhạc phát → nút FX tự SÁNG');
+     ok(r.executed.length === 2 && r.btn.dataset.fxSync === 'sent-unconfirmed' && /chưa xác nhận/.test(r.btn.title), '   đã gửi Reverb + Delay đúng 1 lệnh mỗi Send; trạng thái = đã gửi, CHƯA xác nhận');
+     await r.run(20, MUS); ok(r.executed.length === 2, '2. Nhạc tiếp tục → không gửi lặp');
+-    await r.run(3, SIL); await r.run(3, MUS); ok(r.cls.has('active') && r.executed.length === 2, '3. Lặng ngắn → nút vẫn sáng, không gửi');
++    await r.run(0.5, SIL); await r.run(3, MUS); ok(r.cls.has('active') && r.executed.length === 2, '3. Lặng ngắn (0,5 s) → nút vẫn sáng, không gửi');
+     await r.run(10, SIL); ok(!r.cls.has('active') && r.executed.length === 4, '4. Nhạc dừng đủ lâu → nút TẮT + 2 lệnh tắt');
+     await r.run(30, SIL); ok(r.executed.length === 4 && !r.cls.has('active'), '5. Micro/nhiễu sau khi dừng (không vào bộ phát hiện) → vẫn tắt, không gửi');
+     await r.run(5, MUS); ok(r.cls.has('active') && r.executed.length === 6, '6. Nhạc phát lại → sáng lại + bật Send');
+diff --git a/tests/unit/FxSendGroupA01.verify.js b/tests/unit/FxSendGroupA01.verify.js
+index 666b599..db96a38 100644
+--- a/tests/unit/FxSendGroupA01.verify.js
++++ b/tests/unit/FxSendGroupA01.verify.js
+@@ -17,7 +17,7 @@ function chain(opts = {}) {
+         execute: async (n, target) => { sends.push({ t: clock.t, n, target }); if (fail.has(n)) return { ok: false, status: 'NO_DEVICE' }; dawState[n] = target; return { ok: true }; },
+     });
+     group.seed(!!opts.seed);
+-    const ctl = AS.createFxAutoController({ now: () => clock.t, getFxState: () => fx, applyFx: async (t) => { const r = await group.apply(t); if (r.ok) fx = t; return r; } });
++    const ctl = AS.createFxAutoController({ now: () => clock.t, getFxState: () => group.aggregate() /* MENU-FX-FIX: giống wiring thật (renderer dùng group.aggregate(), không dùng biến fx riêng) */, applyFx: async (t) => { const r = await group.apply(t); if (r.ok) fx = t; return r; } });
+     ctl.setSourceState(true);
+     return { clock, sends, dawState, group, ctl, fail, get fx() { return fx; },
+         async run(sec, music, mic) { const end = clock.t + sec * 1000; while (clock.t < end) { clock.t += 16; ctl.feedLevel(music(clock.t / 1000), clock.t); /* mic KHÔNG được đưa vào controller */ if (Math.round(clock.t / 16) % 31 === 0) ctl.tick(clock.t); await Promise.resolve(); } await Promise.resolve(); } };
+@@ -28,7 +28,7 @@ const SIL = () => -80, MUS = () => -25, SPEECH = (t) => -20 + 8 * Math.sin(t * 5
+     let c = chain(); await c.run(5, SIL); await c.run(10, MUS);
+     ok(c.sends.length === 2 && c.dawState.FX_SEND_REVERB === true && c.dawState.FX_SEND_DELAY === true, '1. Nhạc bắt đầu → CẢ Send Reverb và Delay được bật (mỗi Send đúng 1 lệnh)');
+     await c.run(30, MUS); ok(c.sends.length === 2, '2. Nhạc tiếp tục → không gửi lặp');
+-    await c.run(3, SIL); await c.run(5, MUS); ok(c.sends.length === 2, '3. Khoảng lặng ngắn → Send vẫn bật');
++    await c.run(0.5, SIL); await c.run(5, MUS); ok(c.sends.length === 2, '3. Khoảng lặng ngắn (0,5 s < 1 s) → Send vẫn bật');
+     await c.run(10, SIL);
+     ok(c.sends.length === 4 && c.dawState.FX_SEND_REVERB === false && c.dawState.FX_SEND_DELAY === false, '4. Nhạc dừng đủ lâu → CẢ 2 Send tắt');
+     // 5/6: micro nói to nhưng nhạc đã dừng: mic không vào controller => Send vẫn tắt
+@@ -60,7 +60,7 @@ const SIL = () => -80, MUS = () => -25, SPEECH = (t) => -20 + 8 * Math.sin(t * 5
+     c = chain(); await c.run(5, SIL); await c.run(10, MUS); c.ctl.notifyManual(); const r = await c.group.apply(false, { force: true });
+     ok(r.ok && c.dawState.FX_SEND_REVERB === false && c.dawState.FX_SEND_DELAY === false, '11a. Bấm tay tắt → cả 2 Send tắt');
+     const nm = c.sends.length; await c.run(20, MUS); ok(c.sends.length === nm, '11b. Auto nhường quyền trong lúc nhạc vẫn chạy');
+-    await c.run(10, SIL); await c.run(5, MUS); ok(c.dawState.FX_SEND_REVERB === true, '11c. Sau lần chuyển nhạc kế tiếp Auto hoạt động lại');
++    await c.run(45, MUS); ok(c.dawState.FX_SEND_REVERB === true, '11c. [MENU-FX-FIX] Hết 60 s giữ quyền, nhạc vẫn phát → Auto tiếp quản lại');
+     // 12: khởi động lại: seed theo UI, không gửi
+     c = chain({ seed: true }); await c.group.apply(true); ok(c.sends.length === 0, '12. Khởi động với UI đã ON (seed) rồi apply(ON) → không gửi lệnh');
+     c = chain(); await c.run(10, SIL); ok(c.sends.length === 0, '12. Khởi động lại khi đang im lặng & FX OFF → không phát sinh lệnh');
+diff --git a/tests/unit/MenuFxFix.verify.js b/tests/unit/MenuFxFix.verify.js
+new file mode 100644
+index 0000000..4b2896e
+--- /dev/null
++++ b/tests/unit/MenuFxFix.verify.js
+@@ -0,0 +1,181 @@
++/**
++ * MENU-FX-FIX — 10 trường hợp bắt buộc cho Auto FX + nút FX của Menu.
++ * Dùng wiring THẬT createFxAutoWiring() trích từ ui/js/renderer.js + audioSource.js THẬT; DOM/ActionRegistry/DAW GIẢ LẬP; ĐỒNG HỒ ẢO
++ * (không chờ thật 60 s); chu kỳ tick 100 ms lấy đúng từ setInterval mà wiring đăng ký.
++ * ĐÂY LÀ TEST LOGIC/UI TRÊN TÍN HIỆU TỔNG HỢP — KHÔNG PHẢI xác minh Reverb/Delay Send thật trong DAW, không phải nhạc/MIDI thật.
++ * Chạy: node tests/unit/MenuFxFix.verify.js
++ */
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const asSrc = fs.readFileSync(path.resolve(__dirname, '../../ui/js/audioSource.js'), 'utf8');
++const ren = fs.readFileSync(path.resolve(__dirname, '../../ui/js/renderer.js'), 'utf8');
++const a = ren.indexOf('function createFxAutoWiring() {'), b = ren.indexOf('createFxAutoWiring();\n', a);
++const fnSrc = ren.slice(a, b);
++let fail = 0; const ok = (c, m) => { console.log(`  ${c ? '✅' : '❌'} ${m}`); if (!c) fail++; };
++
++const FRAME = 16, TICK = 100;
++function build(opts = {}) {
++    const clock = { t: 0 }; const executed = []; const telemetry = []; const timers = []; const deferred = [];
++    const cls = new Set(opts.saved ? ['active'] : []);
++    const btn = { dataset: {}, title: '', classList: { toggle(c, f) { (f === undefined ? !cls.has(c) : f) ? cls.add(c) : cls.delete(c); }, contains: (c) => cls.has(c), add: (c) => cls.add(c) } };
++    const cfg = new Set(opts.configured === undefined ? ['FX_SEND_REVERB', 'FX_SEND_DELAY'] : opts.configured);
++    let mode = opts.mode || 'ok'; const intervals = [];
++    const win = { performance: { now: () => 0 }, electronAPI: { sendTelemetry: (r) => telemetry.push(r) } }; win.window = win;
++    win.Date = { now: () => clock.t };
++    vm.createContext(win); win.setTimeout = (fn, ms) => { timers.push({ at: clock.t + ms, fn }); return timers.length; }; win.clearTimeout = (h) => { if (timers[h - 1]) timers[h - 1].fn = null; };
++    vm.runInContext(asSrc, win);
++    Object.assign(win, {
++        document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) }, getSetting: (k, f) => (k === 'fxAutoMidiMode' ? 'toggle' : f), saveData: () => {}, console: { log() {}, warn() {}, error() {} },
++        setInterval: (fn) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,
++        ActionRegistry: {
++            ACTIONS: { MONITOR_FX: 'MONITOR_FX', FX_SEND_REVERB: 'FX_SEND_REVERB', FX_SEND_DELAY: 'FX_SEND_DELAY' },
++            getMidiOutMapping: (n) => (cfg.has(n) ? { kind: 'cc', number: 20, value: 127, channel: 1 } : null), getMouseCoordinate: () => '',
++            executeAction: (n) => {
++                executed.push({ n, t: clock.t });
++                if (!cfg.has(n)) return Promise.resolve({ ok: false, reason: 'NOT_CONFIGURED' }); // đúng hình dạng actionRegistry thật khi chưa cấu hình
++                if (mode === 'fail') return Promise.resolve({ ok: false, status: 'NO_DEVICE', via: 'midi' });
++                if (mode === 'defer') return new Promise((res) => deferred.push(res));
++                if (mode === 'hang') return new Promise(() => {});
++                return Promise.resolve({ ok: true, status: 'SUCCESS', via: 'midi' });
++            },
++        },
++    });
++    vm.runInContext(fnSrc + '\ncreateFxAutoWiring();', win);
++    const ctl = win.__fxAuto; if (opts.source !== false) ctl.setSourceState(true);
++    const R = {
++        win, btn, cls, executed, telemetry, ctl, deferred, clock,
++        setMode: (m) => { mode = m; },
++        get on() { return cls.has('active'); }, get info() { return ctl.getInfo(); },
++        // Mô phỏng ĐÚNG click handler: đổi class rồi gọi __fxManualToggle(trạng thái mới)
++        click() { btn.classList.toggle('active'); return win.__fxManualToggle(cls.has('active')); },
++        async flush() { for (let i = 0; i < 8; i++) await Promise.resolve(); },
++        // mic: được truyền vào để cho thấy NÓ KHÔNG đi vào bộ điều khiển (production không có đường nào nối mic -> __fxAuto)
++        async run(sec, music, mic) {
++            const end = clock.t + sec * 1000; let nextTick = Math.ceil(clock.t / TICK) * TICK;
++            while (clock.t < end) {
++                clock.t += FRAME; ctl.feedLevel(music(clock.t / 1000), clock.t); void mic;
++                for (const tm of timers) if (tm.fn && tm.at <= clock.t) { const f = tm.fn; tm.fn = null; f(); }
++                while (nextTick <= clock.t) { intervals.forEach((fn) => fn()); nextTick += TICK; }
++                await Promise.resolve();
++            }
++            await R.flush();
++        },
++    };
++    return R;
++}
++async function settle(r, res) { for (let i = 0; i < 6; i++) { const d = r.deferred.splice(0); if (!d.length) { await r.flush(); continue; } d.forEach((f) => f(res)); await r.flush(); } }
++const SIL = () => -80, MUS = () => -25, MIC_LOUD = (t) => -18 + 6 * Math.sin(t * 5);
++// đo độ trễ: chạy từng bước 16 ms tới khi điều kiện đúng, trả về số ms kể từ mốc
++async function until(r, music, cond, maxMs) { const t0 = r.clock.t; while (r.clock.t - t0 < maxMs) { await r.run(0.016, music); if (cond()) return r.clock.t - t0; } return Infinity; }
++
++(async () => {
++    console.log('=== MenuFxFix (wiring thật + đồng hồ ảo; TÍN HIỆU TỔNG HỢP, KHÔNG phải DAW thật) ===');
++
++    // ---- 1. nhạc xuất hiện → FX bật ≤ 1 s
++    let r = build(); await r.run(5, SIL); ok(!r.on, '1a. Im lặng ban đầu: nút TẮT');
++    let ms = await until(r, MUS, () => r.on, 3000);
++    ok(ms <= 1000, `1b. Nhạc xuất hiện → nút/yêu cầu FX BẬT sau ${ms} ms (≤ 1000)`);
++    await r.run(0.3, MUS); ok(r.executed.length === 2 && r.executed.every((e) => e.t - 5000 <= 1000 + 400), `1c. Lệnh Send Reverb+Delay gửi ngay khi bật (${r.executed.length} lệnh)`);
++    // nhạc xuất hiện TRỞ LẠI sau khi tắt
++    await r.run(3, SIL); ok(!r.on, '1d. (tiền đề) đã tắt sau im lặng');
++    ms = await until(r, MUS, () => r.on, 3000); ok(ms <= 1000, `1e. Nhạc xuất hiện trở lại → BẬT sau ${ms} ms (≤ 1000)`);
++
++    // ---- 2. nhạc im lặng liên tục 1 s → FX tắt
++    r = build(); await r.run(5, SIL); await r.run(5, MUS); ok(r.on, '2a. (tiền đề) đang BẬT');
++    ms = await until(r, SIL, () => !r.on, 3000);
++    ok(ms >= 1000 - FRAME && ms <= 1000 + TICK + 2 * FRAME, `2b. Im lặng liên tục → TẮT sau ${ms} ms (đích ≈ 1000 ms + ≤1 chu kỳ tick)`);
++    r = build(); await r.run(5, SIL); await r.run(5, MUS); await r.run(0.8, SIL); await r.run(5, MUS); ok(r.on, '2c. Lặng chỉ 0,8 s (<1 s) → KHÔNG tắt');
++
++    // ---- 3. mic hoạt động, không có nhạc → Auto FX không bật
++    r = build(); await r.run(30, SIL, MIC_LOUD);
++    ok(!r.on && r.executed.length === 0, '3a. Mic to liên tục, nhạc im → FX không bật, không gửi lệnh');
++    const micBlock = ren.slice(ren.indexOf('__micSource = AudioSource.createMicSource()'), ren.indexOf('__micSource.start()'));
++    ok(micBlock.length > 100 && !/__fxAuto|feedLevel|createFxAuto/.test(micBlock), '3b. (tĩnh) khối khởi tạo MIC trong renderer.js KHÔNG tham chiếu bộ Auto FX');
++    const feedSites = [...ren.matchAll(/__fxAuto\??\.feedLevel/g)].length;
++    const lvlBlock = ren.slice(ren.indexOf('BPMEngine.onLevel(({'), ren.indexOf('BPMEngine.onLevel(({') + 900);
++    ok(feedSites === 1 && /__fxAuto\?\.feedLevel\(dbfs\)/.test(lvlBlock), '3c. (tĩnh) feedLevel chỉ được gọi ĐÚNG 1 chỗ: BPMEngine.onLevel (analyser của SYSTEM_AUDIO)');
++    ok(/BPMEngine\.init\(audioContext, source\)/.test(ren) && /systemAudio\.getRawSourceNodeForAdapter\(\)/.test(ren), '3d. (tĩnh) BPMEngine được nối với nguồn SYSTEM_AUDIO, không phải MIC');
++
++    // ---- 4. mic tiếp tục sau khi nhạc dừng → vẫn tắt
++    r = build(); await r.run(5, SIL); await r.run(5, MUS); await r.run(3, SIL, MIC_LOUD); ok(!r.on, '4a. Nhạc dừng → TẮT');
++    const n4 = r.executed.length; await r.run(60, SIL, MIC_LOUD); ok(!r.on && r.executed.length === n4, '4b. Mic vẫn nói 60 s sau khi nhạc dừng → vẫn TẮT, không gửi lại');
++
++    // ---- 5. bấm tay → Auto không ghi đè trong 60 s
++    r = build(); await r.run(5, SIL); await r.click(); await r.flush(); ok(r.on && r.info.manualOverride, '5a. Bấm tay BẬT khi nhạc im: nút BẬT, manualOverride');
++    const n5 = r.executed.length; await r.run(59, SIL); ok(r.on && r.executed.length === n5, '5b. 59 s im lặng sau bấm tay: Auto KHÔNG tắt, không gửi lệnh');
++    r = build(); await r.run(5, SIL); await r.run(5, MUS); await r.click(); await r.flush(); ok(!r.on, '5c. Bấm tay TẮT khi nhạc đang phát: nút TẮT');
++    const n5c = r.executed.length; await r.run(59, MUS); ok(!r.on && r.executed.length === n5c, '5d. 59 s nhạc vẫn phát: Auto KHÔNG bật lại');
++    // bấm lần nữa thì tính lại 60 s
++    await r.run(0.5, MUS); await r.click(); await r.flush(); await r.click(); await r.flush();
++    const n5e = r.executed.length; await r.run(55, MUS); ok(!r.on && r.executed.length === n5e, '5e. Bấm tiếp → mốc 60 s tính lại từ lần bấm cuối');
++
++    // ---- 6. hết 60 s, nhạc vẫn phát → tiếp quản theo trạng thái HIỆN TẠI
++    r = build(); await r.run(5, SIL); await r.run(5, MUS); await r.click(); await r.flush(); // tắt tay khi nhạc phát
++    await r.run(59, MUS); ok(!r.on, '6a. Trong 59 s: vẫn tắt tay');
++    ms = await until(r, MUS, () => r.on, 3000); ok(ms <= 1500, `6b. Hết 60 s, nhạc vẫn phát → Auto BẬT lại (+${ms} ms sau mốc 59 s; mốc 60 s ≤ ${1000} ms nữa)`);
++    ok(r.executed.length >= 2 && r.executed[r.executed.length - 1].t >= 10000 + 60000 - 1, '6c. Lệnh tiếp quản KHÔNG được gửi trước mốc 60 s kể từ lúc bấm');
++    // trạng thái hiện tại, không phải trạng thái cũ: nhạc dừng giữa chừng rồi phát lại trước mốc 60 s
++    r = build(); await r.run(5, SIL); await r.run(5, MUS); await r.click(); await r.flush(); // tắt tay (nhạc phát)
++    await r.run(10, SIL); await r.run(20, SIL); ok(!r.on, '6d. (tiền đề) giữa chừng nhạc dừng 30 s');
++    await r.run(15, MUS); await r.run(20, MUS); // phát lại, tới sau mốc 60 s
++    ok(r.on, '6e. Nhạc phát lại trước mốc 60 s và còn phát khi hết 60 s → BẬT theo trạng thái HIỆN TẠI (không dùng trạng thái im lặng cũ)');
++
++    // ---- 7. hết 60 s, nhạc đã im lặng → TẮT theo trạng thái hiện tại
++    r = build(); await r.run(5, SIL); await r.run(5, MUS); await r.click(); await r.flush(); await r.click(); await r.flush(); // ON bằng tay (2 lần bấm: tắt rồi bật)
++    ok(r.on, '7a. (tiền đề) BẬT tay');
++    await r.run(20, MUS); await r.run(30, SIL); ok(r.on, '7b. Trước mốc 60 s (nhạc đã im 30 s): vẫn BẬT (Auto chưa được ghi đè)');
++    ms = await until(r, SIL, () => !r.on, 15000); ok(ms <= 11000, `7c. Hết 60 s, nhạc đã im → TẮT (+${ms} ms)`);
++    r = build(); await r.run(5, SIL); await r.run(5, MUS); await r.click(); await r.flush(); await r.click(); await r.flush();
++    await r.run(20, MUS); await r.run(10, SIL); await r.run(10, MUS); await r.run(25, SIL); // im ở thời điểm hết hạn
++    ok(!r.on, '7d. Nhạc dừng/phát/dừng trong lúc giữ quyền; im lặng khi hết 60 s → TẮT (theo trạng thái hiện tại)');
++    r = build(); await r.run(5, SIL); await r.click(); await r.flush(); await r.run(70, SIL, MIC_LOUD); ok(!r.on, '7e. Mic to suốt 70 s, nhạc im → hết 60 s vẫn TẮT (mic không đổi kết quả)');
++
++    // ---- 8. Send chưa cấu hình → UI hiện đúng trạng thái yêu cầu, không tuyên bố Send đã hoạt động
++    r = build({ configured: [] }); await r.run(5, SIL); await r.run(3, MUS);
++    ok(r.on && r.executed.length === 0, '8a. Auto: chưa cấu hình Send → nút BẬT theo YÊU CẦU, không lệnh nào gửi tới DAW');
++    ok(r.btn.dataset.fxSync === 'not-configured' && /CHƯA cấu hình/.test(r.btn.title) && !/đã GỬI/.test(r.btn.title), '8b. Hiển thị rõ: CHƯA cấu hình Send, không nói "đã gửi"');
++    r = build({ configured: [] }); await r.run(2, SIL); await r.click(); await r.flush();
++    ok(r.on && r.btn.dataset.fxSync === 'not-configured' && r.btn.dataset.fxControl === 'manual' && /THỦ CÔNG/.test(r.btn.title) && /CHƯA cấu hình/.test(r.btn.title), '8c. Bấm tay (Send chưa cấu hình): nút theo yêu cầu + hiển thị "thủ công" + "CHƯA cấu hình Send"');
++    r = build({ configured: ['FX_SEND_REVERB', 'FX_SEND_DELAY'] }); await r.run(5, SIL); await r.run(3, MUS);
++    ok(r.btn.dataset.fxSync === 'sent-unconfirmed' && /chưa xác nhận/.test(r.btn.title) && !/(^|[^a-zA-Z])đã xác nhận/.test(r.btn.title), '8d. Dù gửi OK: chỉ ghi "đã GỬI — DAW chưa xác nhận"; không bao giờ ghi "đã đồng bộ/xác nhận"');
++
++    // ---- 9. runtime chậm / lỗi → không hiện đồng bộ giả
++    r = build({ mode: 'defer' }); await r.run(5, SIL); await r.run(1.5, MUS);
++    ok(r.on && r.btn.dataset.fxSync === 'pending' && /CHƯA có phản hồi/.test(r.btn.title), '9a. Phản hồi chậm: nút theo yêu cầu nhưng trạng thái = "đang gửi, CHƯA có phản hồi" (không phải đã gửi)');
++    await settle(r, { ok: true }); await r.run(0.5, MUS);
++    ok(r.btn.dataset.fxSync === 'sent-unconfirmed', '9b. Khi runtime trả lời OK mới đổi sang "đã gửi (chưa xác nhận)"');
++    r = build({ mode: 'fail' }); await r.run(5, SIL); await r.run(3, MUS);
++    ok(r.on && r.btn.dataset.fxSync === 'failed' && /LỖI/.test(r.btn.title), '9c. Runtime lỗi: nút theo yêu cầu, trạng thái = LỖI (không báo đã đồng bộ)');
++    r = build({ mode: 'hang' }); await r.run(5, SIL); await r.run(1.5, MUS); ok(r.btn.dataset.fxSync === 'pending', '9d. Runtime treo: vẫn "pending", không báo gửi xong');
++    await r.run(6, MUS); ok(r.btn.dataset.fxSync === 'timeout' && /KHÔNG phản hồi/.test(r.btn.title), '9e. Quá 5 s không phản hồi → TIMEOUT hiển thị rõ (không kẹt "pending" mãi)');
++    r.setMode('ok'); await r.run(10, SIL); ok(!r.on, '9f. Sau timeout, nhạc dừng → nút được ĐỒNG BỘ về TẮT theo yêu cầu hiện tại (không kẹt ở BẬT; lệnh BẬT đã timeout không tính là "đã gửi")');
++    const nT = r.executed.length; await r.run(3, MUS); ok(r.on && r.executed.length > nT && r.btn.dataset.fxSync === 'sent-unconfirmed', '9f2. Hàng đợi Send KHÔNG kẹt sau timeout: nhạc phát lại → gửi BẬT bình thường');
++    // bấm tay + phản hồi chậm
++    r = build({ mode: 'defer' }); await r.run(2, SIL); r.click(); await r.flush(); // KHÔNG await click: lời hứa chỉ xong khi runtime trả lời
++    ok(r.on && r.btn.dataset.fxSync === 'pending', '9g. Bấm tay + phản hồi chậm: nút theo yêu cầu, trạng thái "pending"');
++    await settle(r, { ok: false, status: 'NO_DEVICE' });
++    ok(r.on && r.btn.dataset.fxSync === 'failed', '9h. Bấm tay + lỗi: nút giữ yêu cầu, trạng thái = LỖI');
++    // lệnh Auto chậm, nhạc đổi trạng thái trong lúc chờ: lệnh sau không được MẤT
++    r = build({ mode: 'defer' }); await r.run(5, SIL); await r.run(1.2, MUS); // BẬT đang chờ phản hồi
++    await r.run(0.1, MUS); await settle(r, { ok: true });
++    await r.run(2, SIL); await settle(r, { ok: true }); await r.run(0.5, SIL); await settle(r, { ok: true });
++    ok(!r.on && r.executed.filter((e) => e.n === 'FX_SEND_REVERB').length === 2, '9i. Nhạc đổi trạng thái khi lệnh trước còn chờ → lệnh TẮT vẫn được gửi (trước đây bị mất)');
++    let rr = build({ mode: 'defer' }); await rr.run(5, SIL); await rr.run(1.0, MUS); // lệnh BẬT còn treo
++    await rr.run(1.3, SIL); // im lặng đủ lâu trong lúc BẬT chưa trả lời
++    await settle(rr, { ok: true }); await rr.run(0.3, SIL); await settle(rr, { ok: true }); await rr.run(0.3, SIL);
++    ok(!rr.on, '9j. Lệnh BẬT còn treo, nhạc dừng → sau khi nó xong, yêu cầu TẮT (hiện tại) được áp dụng, nút không kẹt ở BẬT');
++
++    // ---- 10. khởi động lại → không có state cũ làm FX sai
++    // (toàn bộ state Auto nằm trong bộ nhớ JS: instance mới = sạch; chỉ nút FX "đã lưu" (data.fx) được khôi phục)
++    r = build(); await r.run(5, SIL); await r.click(); await r.flush(); ok(r.info.manualOverride, '10a. (tiền đề) phiên cũ đang trong 60 s giữ quyền thủ công');
++    let r2 = build({ saved: true }); ok(!r2.info.manualOverride && r2.info.musicState === 'UNKNOWN' && r2.info.lastResult === null, '10b. Khởi động lại: KHÔNG kế thừa manual override / trạng thái nhạc / kết quả gửi của phiên cũ');
++    await r2.run(0.7, SIL); ok(r2.on, '10c. Nút lưu BẬT + chưa đủ 1 s im lặng: chưa tự đổi (chưa có bằng chứng)');
++    await r2.run(1, SIL); ok(!r2.on && r2.executed.length === 2, '10d. Nút lưu BẬT + nhạc im → TẮT sau ≈1 s và gửi lệnh TẮT (sửa state cũ sai)');
++    r2 = build({ saved: false }); await r2.run(1, SIL); ms = await until(r2, MUS, () => r2.on, 3000); ok(ms <= 1000 && r2.executed.length === 2, `10e. Nút lưu TẮT + nhạc phát → BẬT sau ${ms} ms và gửi lệnh BẬT`);
++    r2 = build({ saved: true }); await r2.run(1, MUS); await r2.run(10, MUS);
++    ok(r2.on && r2.executed.length === 0, '10f. Nút lưu BẬT + nhạc đang phát → giữ BẬT, không gửi lệnh thừa (GIẢ ĐỊNH: DAW còn đúng trạng thái đã lưu — KHÔNG kiểm chứng được, không có feedback DAW)');
++    r2 = build({ saved: true, source: false }); await r2.run(10, SIL);
++    ok(r2.on && r2.executed.length === 0 && r2.info.musicState === 'SOURCE_UNAVAILABLE', '10g. Nguồn SYSTEM_AUDIO chưa chạy: giữ nguyên nút đã lưu, không tự bật/tắt (đóng băng)');
++    ok(/__fxManualToggle\(e\.target\.classList\.contains\("active"\)\)/.test(ren) && (ren.match(/setInterval\(\(\) => \{ if \(getSetting\("fxAutoEnabled", true\) !== false\) ctl\.tick\(\); \}, 100\)/g) || []).length === 1, '10h. (tĩnh) click handler gọi __fxManualToggle; đúng 1 interval tick 100 ms');
++
++    console.log(fail ? `❌ ${fail} FAIL` : '✅ TẤT CẢ PASS'); process.exit(fail ? 1 : 0);
++})();
+diff --git a/tools/algbench/manifest/real_music_manifest.json b/tools/algbench/manifest/real_music_manifest.json
+index 64426db..2a883cf 100644
+--- a/tools/algbench/manifest/real_music_manifest.json
++++ b/tools/algbench/manifest/real_music_manifest.json
+@@ -1,7 +1,7 @@
+ {
+   "schema": "AI-ALG-08/manifest/v2",
+   "schema_ext": "AI-ALG-09/10R-FINAL (title,label_state,user_reference,observations{chain,menu_error_note,source_cell_raw},track_group,data_conflicts)",
+-  "note": "Nhãn người dùng = UNVERIFIED_REFERENCE; KHÔNG vào số liệu chính. segments[] để trống vì chưa có ranh giới đoạn đã xác minh. Chỉ 14/20 bài được cung cấp trong task AI-ALG-09 (xem báo cáo). Quy tắc chia: sha256(track_id)[0] % 10 < 3 -> test, còn lại dev (cố định trước khi có kết quả).",
++  "note": "Nhãn người dùng = UNVERIFIED_REFERENCE; KHÔNG vào số liệu chính. segments[] để trống vì chưa có ranh giới đoạn đã xác minh. Trạng thái hiện tại: đã nhập đủ 20/20 bài từ bảng nguồn (tools/algbench/source/songs_20_source.csv); nhãn tham chiếu CHƯA được xác minh độc lập (tất cả UNVERIFIED_REFERENCE); chưa có audio hợp lệ (audio_hash = null) nên benchmark vẫn BLOCKED_NO_AUDIO và không công bố accuracy. Ô nguồn 'A# Minnor' (bài gia-vo-thuong-anh-duoc, cột Menu) là lỗi nguồn chưa đọc được, được giữ nguyên, không đoán/sửa. Quy tắc chia: sha256(track_id)[0] % 10 < 3 -> test, còn lại dev (cố định trước khi có kết quả).",
+   "tracks": [
+     {
+       "track_id": "don-dau-vo-cung",
+diff --git a/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/A_reconcile_AFTER.log b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/A_reconcile_AFTER.log
+new file mode 100644
+index 0000000..ee20436
+--- /dev/null
++++ b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/A_reconcile_AFTER.log
+@@ -0,0 +1,7 @@
++bảng nguồn: 20 bản ghi (kỳ vọng 20) | cột nhận diện: title=OK url=OK key=OK auto=OK menu=OK note=OK | trùng tên=0 | dòng sai số ô=0
++  ô trống [url] (1): Phía Sau Một Cô Gái
++  ô trống [note] (17): Đớn Đau Vô Cùng; VU QUY; GIÁ NHƯ ANH LÀ EM; Mê Em; Viên Đá nhỏ; đừng quên tên anh; sau này em cưới ai; lưu niên; Đêm trắng; Anh không tha thứ; Từng Yêu; Người Lạ Thoáng Qua; NGÀY MAI NGƯỜI TA LẤY CHỒNG; Anh Khác hay em khác; giả vờ thương anh được; chờ em trong đêm; Phía Sau Một Cô Gái
++manifest=20 | khớp tên=20 | thiếu trong manifest=0 | thừa=0 | trùng nguồn=0 | lệch trường=1 | ô nguồn không đọc được=1 | dòng nguồn thiếu/sai=0 | thông tin=1
++  LỆCH giả vờ thương anh được [observations.menu] (SOURCE_CELL_UNREADABLE_OR_TYPO): nguồn=A# Minnor | manifest=A# minor
++  Ô KHÔNG ĐỌC ĐƯỢC giả vờ thương anh được [menu]: "A# Minnor"
++reconcile_exit=1
+diff --git a/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/A_run_AFTER.log b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/A_run_AFTER.log
+new file mode 100644
+index 0000000..e231f96
+--- /dev/null
++++ b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/A_run_AFTER.log
+@@ -0,0 +1,23 @@
++manifest: HỢP LỆ | status=BLOCKED_NO_AUDIO | tracks=20 audio=0 verified=0 evaluated=0
++đủ điều kiện chấm accuracy: 0/20; bị loại: 20
++  - don-dau-vo-cung [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
++  - thuong-em [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
++  - yeu-lai-tu-dau [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
++  - me-em [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
++  - dung-quen-ten-anh [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
++  - sau-nay-em-cuoi-ai [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
++  - luu-nien [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
++  - dem-trang [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
++  - anh-khong-tha-thu [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
++  - anh-khac-hay-em-khac [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
++  - gia-vo-thuong-anh-duoc [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
++  - phia-sau-mot-co-gai [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
++  - vien-da-nho [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED,NO_REFERENCE_LABEL -> test_set_requires_--final-test
++  - hoa-phan-ai-luu [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED,LABEL_NEEDS_CLARIFICATION -> BLOCKED_NO_AUDIO
++  - vu-quy [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
++  - gia-nhu-anh-la-em [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
++  - tung-yeu [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
++  - nguoi-la-thoang-qua [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
++  - ngay-mai-nguoi-ta-lay-chong [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
++  - cho-em-trong-dem [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
++run_exit=0
+diff --git a/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/A_tests_AFTER.log b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/A_tests_AFTER.log
+new file mode 100644
+index 0000000..4b64365
+--- /dev/null
++++ b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/A_tests_AFTER.log
+@@ -0,0 +1,2 @@
++RealBenchA08: 17 nhóm OK
++RealBenchA10: 18 nhóm OK
+diff --git a/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/FxAutoA01_AFTER.log b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/FxAutoA01_AFTER.log
+new file mode 100644
+index 0000000..441b402
+--- /dev/null
++++ b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/FxAutoA01_AFTER.log
+@@ -0,0 +1,24 @@
++=== FxAutoA01 (synthetic) ===
++  ✅ 1. Không nhạc, FX đã OFF → không gửi gì
++  ✅ 2. Nhạc ổn định → ON đúng 1 lần (1)
++  ✅    trạng thái = SEND_SENT_UNCONFIRMED (không "đã xác nhận")
++  ✅ 3. Nhạc vẫn chạy → không gửi thêm
++  ✅ 4. Khoảng lặng 0,5 s (<1 s) → giữ ON [MENU-FX-FIX: ngưỡng tắt 6 s → 1 s theo yêu cầu]
++  ✅ 5. Im lặng ≥1 s → OFF đúng 1 lần (2)
++  ✅    im lặng tiếp → không gửi lặp
++  ✅ 6. Nhạc phát lại → ON
++  ✅ 7. Dao động quanh ngưỡng (trong dải hysteresis) → không bật/tắt (0 lệnh thêm)
++  ✅    từ im lặng, dao động trong dải hysteresis → không bật
++  ✅ 8. Nhiễu nền -62±4 dBFS → không chuyển trạng thái giả
++  ✅ xung lẻ xen im lặng: OFF tối đa 1 lần, không dao động (1 lệnh thêm)
++  ✅ 9. Gửi thất bại → UI giữ OFF, trạng thái FX_ACTION_FAILED (không giả vờ)
++  ✅    thử lại có giới hạn (3 lần, tối đa 1 + maxRetries)
++  ✅ 10. Mất rồi nối lại nguồn khi nhạc vẫn chạy → không gửi trùng
++  ✅    nguồn không khả dụng → đóng băng, KHÔNG tắt FX
++  ✅ 11. Wiring: đúng 1 setInterval và có chốt chống tạo controller thứ hai
++  ✅ 12a. User tắt tay khi nhạc chạy → Auto nhường quyền, không ép bật lại
++  ✅ 12b. [MENU-FX-FIX] Hết 60 s giữ quyền, nhạc vẫn phát → Auto tiếp quản theo trạng thái HIỆN TẠI (bật lại)
++  ✅ Khởi động khi nhạc đang phát và FX đã ON → không gửi lệnh
++  ✅ Chuyển bài (2 s lặng, > 1 s) → TẮT rồi BẬT lại đúng 1 lần mỗi chiều [MENU-FX-FIX: hệ quả có chủ ý của ngưỡng tắt 1 s]
++  ✅ Fade-out → OFF đúng 1 lần sau khi im lặng xác nhận
++✅ TẤT CẢ PASS
+diff --git a/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/FxIndicatorA06_AFTER.log b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/FxIndicatorA06_AFTER.log
+new file mode 100644
+index 0000000..ab615b6
+--- /dev/null
++++ b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/FxIndicatorA06_AFTER.log
+@@ -0,0 +1,16 @@
++=== FxIndicatorA06 (wiring thật trong renderer.js; synthetic) ===
++  ✅ 1. Nhạc phát → nút FX tự SÁNG
++  ✅    đã gửi Reverb + Delay đúng 1 lệnh mỗi Send; trạng thái = đã gửi, CHƯA xác nhận
++  ✅ 2. Nhạc tiếp tục → không gửi lặp
++  ✅ 3. Lặng ngắn (0,5 s) → nút vẫn sáng, không gửi
++  ✅ 4. Nhạc dừng đủ lâu → nút TẮT + 2 lệnh tắt
++  ✅ 5. Micro/nhiễu sau khi dừng (không vào bộ phát hiện) → vẫn tắt, không gửi
++  ✅ 6. Nhạc phát lại → sáng lại + bật Send
++  ✅ 7a. Chưa cấu hình Send: nút sáng theo YÊU CẦU, KHÔNG có lệnh nào gửi đi
++  ✅ 7b. Trạng thái hiển thị đúng sự thật: chưa cấu hình, DAW không nhận lệnh (không báo thành công giả)
++  ✅ 8. MIDI lỗi: nút theo yêu cầu nhưng trạng thái = LỖI/chưa đồng bộ (không báo đã áp dụng)
++  ✅    thử lại có giới hạn, không lặp vô hạn (4 lệnh thêm)
++  ✅ 9. Nguồn nhạc mất → giữ nguyên trạng thái, báo không khả dụng
++  ✅ 10. Chuyển trạng thái được ghi log FX_AUTO (8 bản ghi, không spam mỗi chu kỳ)
++  ✅     __fxAutoDebug() trả về chẩn đoán (số khung nhận, mức dBFS, Send)
++✅ TẤT CẢ PASS
+diff --git a/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/FxSendGroupA01_AFTER.log b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/FxSendGroupA01_AFTER.log
+new file mode 100644
+index 0000000..0a7ee9c
+--- /dev/null
++++ b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/FxSendGroupA01_AFTER.log
+@@ -0,0 +1,24 @@
++=== FxSendGroupA01 (synthetic) ===
++  ✅ 1. Nhạc bắt đầu → CẢ Send Reverb và Delay được bật (mỗi Send đúng 1 lệnh)
++  ✅ 2. Nhạc tiếp tục → không gửi lặp
++  ✅ 3. Khoảng lặng ngắn (0,5 s < 1 s) → Send vẫn bật
++  ✅ 4. Nhạc dừng đủ lâu → CẢ 2 Send tắt
++  ✅ 5/6. Nhạc dừng, micro vẫn nói → Send vẫn tắt, mic không kích hoạt lại
++  ✅    renderer: feedLevel chỉ được gọi đúng 1 chỗ (1)
++  ✅    chỗ đó nằm trong BPMEngine.onLevel (SYSTEM_AUDIO), không phải callback của __micSource
++  ✅    khối MIC không tham chiếu __fxAuto
++  ✅ 7. Nhạc phát lại → bật lại cả 2
++  ✅ 8a. Nhạc nhỏ (-40 dBFS, trên ngưỡng -45) → vẫn bật
++  ✅ 8b. Dao động nhẹ khi nhạc nhỏ → không dao động trạng thái
++  ✅ 9a. Delay gửi lỗi → nút FX KHÔNG hiện bật, trạng thái FX_ACTION_FAILED, không tuyên bố đồng bộ toàn bộ
++  ✅ 9b. Thử lại chỉ Send bị lỗi (Reverb không bị gửi trùng/đảo toggle)
++  ✅ 9c. Chưa cấu hình Send nào → không gửi, không đổi nút, báo lỗi (không giả vờ)
++  ✅    chỉ cấu hình MONITOR_FX cũ → dùng như Send đơn (tương thích)
++  ✅    chỉ Reverb được cấu hình → chỉ điều khiển Reverb (Delay được báo là chưa cấu hình trong báo cáo)
++  ✅ 10. Hai apply đồng thời cùng mục tiêu → hàng đợi tuần tự, mỗi Send đúng 1 lệnh (2)
++  ✅ 11a. Bấm tay tắt → cả 2 Send tắt
++  ✅ 11b. Auto nhường quyền trong lúc nhạc vẫn chạy
++  ✅ 11c. [MENU-FX-FIX] Hết 60 s giữ quyền, nhạc vẫn phát → Auto tiếp quản lại
++  ✅ 12. Khởi động với UI đã ON (seed) rồi apply(ON) → không gửi lệnh
++  ✅ 12. Khởi động lại khi đang im lặng & FX OFF → không phát sinh lệnh
++✅ TẤT CẢ PASS
+diff --git a/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/MenuFxFix_AFTER.log b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/MenuFxFix_AFTER.log
+new file mode 100644
+index 0000000..b496970
+--- /dev/null
++++ b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/MenuFxFix_AFTER.log
+@@ -0,0 +1,54 @@
++=== MenuFxFix (wiring thật + đồng hồ ảo; TÍN HIỆU TỔNG HỢP, KHÔNG phải DAW thật) ===
++  ✅ 1a. Im lặng ban đầu: nút TẮT
++  ✅ 1b. Nhạc xuất hiện → nút/yêu cầu FX BẬT sau 496 ms (≤ 1000)
++  ✅ 1c. Lệnh Send Reverb+Delay gửi ngay khi bật (2 lệnh)
++  ✅ 1d. (tiền đề) đã tắt sau im lặng
++  ✅ 1e. Nhạc xuất hiện trở lại → BẬT sau 496 ms (≤ 1000)
++  ✅ 2a. (tiền đề) đang BẬT
++  ✅ 2b. Im lặng liên tục → TẮT sau 992 ms (đích ≈ 1000 ms + ≤1 chu kỳ tick)
++  ✅ 2c. Lặng chỉ 0,8 s (<1 s) → KHÔNG tắt
++  ✅ 3a. Mic to liên tục, nhạc im → FX không bật, không gửi lệnh
++  ✅ 3b. (tĩnh) khối khởi tạo MIC trong renderer.js KHÔNG tham chiếu bộ Auto FX
++  ✅ 3c. (tĩnh) feedLevel chỉ được gọi ĐÚNG 1 chỗ: BPMEngine.onLevel (analyser của SYSTEM_AUDIO)
++  ✅ 3d. (tĩnh) BPMEngine được nối với nguồn SYSTEM_AUDIO, không phải MIC
++  ✅ 4a. Nhạc dừng → TẮT
++  ✅ 4b. Mic vẫn nói 60 s sau khi nhạc dừng → vẫn TẮT, không gửi lại
++  ✅ 5a. Bấm tay BẬT khi nhạc im: nút BẬT, manualOverride
++  ✅ 5b. 59 s im lặng sau bấm tay: Auto KHÔNG tắt, không gửi lệnh
++  ✅ 5c. Bấm tay TẮT khi nhạc đang phát: nút TẮT
++  ✅ 5d. 59 s nhạc vẫn phát: Auto KHÔNG bật lại
++  ✅ 5e. Bấm tiếp → mốc 60 s tính lại từ lần bấm cuối
++  ✅ 6a. Trong 59 s: vẫn tắt tay
++  ✅ 6b. Hết 60 s, nhạc vẫn phát → Auto BẬT lại (+992 ms sau mốc 59 s; mốc 60 s ≤ 1000 ms nữa)
++  ✅ 6c. Lệnh tiếp quản KHÔNG được gửi trước mốc 60 s kể từ lúc bấm
++  ✅ 6d. (tiền đề) giữa chừng nhạc dừng 30 s
++  ✅ 6e. Nhạc phát lại trước mốc 60 s và còn phát khi hết 60 s → BẬT theo trạng thái HIỆN TẠI (không dùng trạng thái im lặng cũ)
++  ✅ 7a. (tiền đề) BẬT tay
++  ✅ 7b. Trước mốc 60 s (nhạc đã im 30 s): vẫn BẬT (Auto chưa được ghi đè)
++  ✅ 7c. Hết 60 s, nhạc đã im → TẮT (+10000 ms)
++  ✅ 7d. Nhạc dừng/phát/dừng trong lúc giữ quyền; im lặng khi hết 60 s → TẮT (theo trạng thái hiện tại)
++  ✅ 7e. Mic to suốt 70 s, nhạc im → hết 60 s vẫn TẮT (mic không đổi kết quả)
++  ✅ 8a. Auto: chưa cấu hình Send → nút BẬT theo YÊU CẦU, không lệnh nào gửi tới DAW
++  ✅ 8b. Hiển thị rõ: CHƯA cấu hình Send, không nói "đã gửi"
++  ✅ 8c. Bấm tay (Send chưa cấu hình): nút theo yêu cầu + hiển thị "thủ công" + "CHƯA cấu hình Send"
++  ✅ 8d. Dù gửi OK: chỉ ghi "đã GỬI — DAW chưa xác nhận"; không bao giờ ghi "đã đồng bộ/xác nhận"
++  ✅ 9a. Phản hồi chậm: nút theo yêu cầu nhưng trạng thái = "đang gửi, CHƯA có phản hồi" (không phải đã gửi)
++  ✅ 9b. Khi runtime trả lời OK mới đổi sang "đã gửi (chưa xác nhận)"
++  ✅ 9c. Runtime lỗi: nút theo yêu cầu, trạng thái = LỖI (không báo đã đồng bộ)
++  ✅ 9d. Runtime treo: vẫn "pending", không báo gửi xong
++  ✅ 9e. Quá 5 s không phản hồi → TIMEOUT hiển thị rõ (không kẹt "pending" mãi)
++  ✅ 9f. Sau timeout, nhạc dừng → nút được ĐỒNG BỘ về TẮT theo yêu cầu hiện tại (không kẹt ở BẬT; lệnh BẬT đã timeout không tính là "đã gửi")
++  ✅ 9f2. Hàng đợi Send KHÔNG kẹt sau timeout: nhạc phát lại → gửi BẬT bình thường
++  ✅ 9g. Bấm tay + phản hồi chậm: nút theo yêu cầu, trạng thái "pending"
++  ✅ 9h. Bấm tay + lỗi: nút giữ yêu cầu, trạng thái = LỖI
++  ✅ 9i. Nhạc đổi trạng thái khi lệnh trước còn chờ → lệnh TẮT vẫn được gửi (trước đây bị mất)
++  ✅ 9j. Lệnh BẬT còn treo, nhạc dừng → sau khi nó xong, yêu cầu TẮT (hiện tại) được áp dụng, nút không kẹt ở BẬT
++  ✅ 10a. (tiền đề) phiên cũ đang trong 60 s giữ quyền thủ công
++  ✅ 10b. Khởi động lại: KHÔNG kế thừa manual override / trạng thái nhạc / kết quả gửi của phiên cũ
++  ✅ 10c. Nút lưu BẬT + chưa đủ 1 s im lặng: chưa tự đổi (chưa có bằng chứng)
++  ✅ 10d. Nút lưu BẬT + nhạc im → TẮT sau ≈1 s và gửi lệnh TẮT (sửa state cũ sai)
++  ✅ 10e. Nút lưu TẮT + nhạc phát → BẬT sau 496 ms và gửi lệnh BẬT
++  ✅ 10f. Nút lưu BẬT + nhạc đang phát → giữ BẬT, không gửi lệnh thừa (GIẢ ĐỊNH: DAW còn đúng trạng thái đã lưu — KHÔNG kiểm chứng được, không có feedback DAW)
++  ✅ 10g. Nguồn SYSTEM_AUDIO chưa chạy: giữ nguyên nút đã lưu, không tự bật/tắt (đóng băng)
++  ✅ 10h. (tĩnh) click handler gọi __fxManualToggle; đúng 1 interval tick 100 ms
++✅ TẤT CẢ PASS
+diff --git a/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/MenuFxFix_BEFORE.log b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/MenuFxFix_BEFORE.log
+new file mode 100644
+index 0000000..74b1434
+--- /dev/null
++++ b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/MenuFxFix_BEFORE.log
+@@ -0,0 +1,54 @@
++=== MenuFxFix (wiring thật + đồng hồ ảo; TÍN HIỆU TỔNG HỢP, KHÔNG phải DAW thật) ===
++  ✅ 1a. Im lặng ban đầu: nút TẮT
++  ✅ 1b. Nhạc xuất hiện → nút/yêu cầu FX BẬT sau 704 ms (≤ 1000)
++  ✅ 1c. Lệnh Send Reverb+Delay gửi ngay khi bật (2 lệnh)
++  ❌ 1d. (tiền đề) đã tắt sau im lặng
++  ✅ 1e. Nhạc xuất hiện trở lại → BẬT sau 16 ms (≤ 1000)
++  ✅ 2a. (tiền đề) đang BẬT
++  ❌ 2b. Im lặng liên tục → TẮT sau Infinity ms (đích ≈ 1000 ms + ≤1 chu kỳ tick)
++  ✅ 2c. Lặng chỉ 0,8 s (<1 s) → KHÔNG tắt
++  ✅ 3a. Mic to liên tục, nhạc im → FX không bật, không gửi lệnh
++  ✅ 3b. (tĩnh) khối khởi tạo MIC trong renderer.js KHÔNG tham chiếu bộ Auto FX
++  ✅ 3c. (tĩnh) feedLevel chỉ được gọi ĐÚNG 1 chỗ: BPMEngine.onLevel (analyser của SYSTEM_AUDIO)
++  ✅ 3d. (tĩnh) BPMEngine được nối với nguồn SYSTEM_AUDIO, không phải MIC
++  ❌ 4a. Nhạc dừng → TẮT
++  ❌ 4b. Mic vẫn nói 60 s sau khi nhạc dừng → vẫn TẮT, không gửi lại
++  ✅ 5a. Bấm tay BẬT khi nhạc im: nút BẬT, manualOverride
++  ✅ 5b. 59 s im lặng sau bấm tay: Auto KHÔNG tắt, không gửi lệnh
++  ✅ 5c. Bấm tay TẮT khi nhạc đang phát: nút TẮT
++  ✅ 5d. 59 s nhạc vẫn phát: Auto KHÔNG bật lại
++  ✅ 5e. Bấm tiếp → mốc 60 s tính lại từ lần bấm cuối
++  ✅ 6a. Trong 59 s: vẫn tắt tay
++  ❌ 6b. Hết 60 s, nhạc vẫn phát → Auto BẬT lại (+Infinity ms sau mốc 59 s; mốc 60 s ≤ 1000 ms nữa)
++  ❌ 6c. Lệnh tiếp quản KHÔNG được gửi trước mốc 60 s kể từ lúc bấm
++  ✅ 6d. (tiền đề) giữa chừng nhạc dừng 30 s
++  ✅ 6e. Nhạc phát lại trước mốc 60 s và còn phát khi hết 60 s → BẬT theo trạng thái HIỆN TẠI (không dùng trạng thái im lặng cũ)
++  ✅ 7a. (tiền đề) BẬT tay
++  ❌ 7b. Trước mốc 60 s (nhạc đã im 30 s): vẫn BẬT (Auto chưa được ghi đè)
++  ✅ 7c. Hết 60 s, nhạc đã im → TẮT (+16 ms)
++  ✅ 7d. Nhạc dừng/phát/dừng trong lúc giữ quyền; im lặng khi hết 60 s → TẮT (theo trạng thái hiện tại)
++  ❌ 7e. Mic to suốt 70 s, nhạc im → hết 60 s vẫn TẮT (mic không đổi kết quả)
++  ✅ 8a. Auto: chưa cấu hình Send → nút BẬT theo YÊU CẦU, không lệnh nào gửi tới DAW
++  ✅ 8b. Hiển thị rõ: CHƯA cấu hình Send, không nói "đã gửi"
++  ❌ 8c. Bấm tay (Send chưa cấu hình): nút theo yêu cầu + hiển thị "thủ công" + "CHƯA cấu hình Send"
++  ✅ 8d. Dù gửi OK: chỉ ghi "đã GỬI — DAW chưa xác nhận"; không bao giờ ghi "đã đồng bộ/xác nhận"
++  ❌ 9a. Phản hồi chậm: nút theo yêu cầu nhưng trạng thái = "đang gửi, CHƯA có phản hồi" (không phải đã gửi)
++  ✅ 9b. Khi runtime trả lời OK mới đổi sang "đã gửi (chưa xác nhận)"
++  ✅ 9c. Runtime lỗi: nút theo yêu cầu, trạng thái = LỖI (không báo đã đồng bộ)
++  ❌ 9d. Runtime treo: vẫn "pending", không báo gửi xong
++  ❌ 9e. Quá 5 s không phản hồi → TIMEOUT hiển thị rõ (không kẹt "pending" mãi)
++  ❌ 9f. Sau timeout, nhạc dừng → nút được ĐỒNG BỘ về TẮT theo yêu cầu hiện tại (không kẹt ở BẬT; lệnh BẬT đã timeout không tính là "đã gửi")
++  ❌ 9f2. Hàng đợi Send KHÔNG kẹt sau timeout: nhạc phát lại → gửi BẬT bình thường
++  ❌ 9g. Bấm tay + phản hồi chậm: nút theo yêu cầu, trạng thái "pending"
++  ❌ 9h. Bấm tay + lỗi: nút giữ yêu cầu, trạng thái = LỖI
++  ❌ 9i. Nhạc đổi trạng thái khi lệnh trước còn chờ → lệnh TẮT vẫn được gửi (trước đây bị mất)
++  ❌ 9j. Lệnh BẬT còn treo, nhạc dừng → sau khi nó xong, yêu cầu TẮT (hiện tại) được áp dụng, nút không kẹt ở BẬT
++  ✅ 10a. (tiền đề) phiên cũ đang trong 60 s giữ quyền thủ công
++  ✅ 10b. Khởi động lại: KHÔNG kế thừa manual override / trạng thái nhạc / kết quả gửi của phiên cũ
++  ✅ 10c. Nút lưu BẬT + chưa đủ 1 s im lặng: chưa tự đổi (chưa có bằng chứng)
++  ❌ 10d. Nút lưu BẬT + nhạc im → TẮT sau ≈1 s và gửi lệnh TẮT (sửa state cũ sai)
++  ✅ 10e. Nút lưu TẮT + nhạc phát → BẬT sau 704 ms và gửi lệnh BẬT
++  ✅ 10f. Nút lưu BẬT + nhạc đang phát → giữ BẬT, không gửi lệnh thừa (GIẢ ĐỊNH: DAW còn đúng trạng thái đã lưu — KHÔNG kiểm chứng được, không có feedback DAW)
++  ✅ 10g. Nguồn SYSTEM_AUDIO chưa chạy: giữ nguyên nút đã lưu, không tự bật/tắt (đóng băng)
++  ❌ 10h. (tĩnh) click handler gọi __fxManualToggle; đúng 1 interval tick 100 ms
++❌ 20 FAIL
+diff --git a/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/regression_unit_AFTER.txt b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/regression_unit_AFTER.txt
+new file mode 100644
+index 0000000..0fe0fd4
+--- /dev/null
++++ b/tools/algbench/reports/AI-ALG-10R-FINAL-HOTFIX-MENU-FX-FIX/regression_unit_AFTER.txt
+@@ -0,0 +1,100 @@
++0 tests/unit/A68VuLayout.verify.js
++0 tests/unit/A69VuConsolidation.verify.js
++0 tests/unit/A71SystemAudioSetup.verify.js
++0 tests/unit/A72AiLifecycle.verify.js
++0 tests/unit/A73AiStateUi.verify.js
++0 tests/unit/A73BpmConfidence.verify.js
++0 tests/unit/A75AutoDetect.verify.js
++0 tests/unit/A75VuIsolation.verify.js
++0 tests/unit/A76FixR1.verify.js
++0 tests/unit/AdminAuthA52.verify.js
++0 tests/unit/AiIntegrationSafetyA49.verify.js
++0 tests/unit/AiKeyDetectionA60.verify.js
++0 tests/unit/AiKeyFast02.verify.js
++0 tests/unit/AiKeyFast03.verify.js
++0 tests/unit/AiKeyFast05.verify.js
++0 tests/unit/AiKeyFast06.verify.js
++0 tests/unit/AiKeyFast07.verify.js
++0 tests/unit/AiKeyFast08.verify.js
++0 tests/unit/AiKeyRuntimeClosureA61.verify.js
++0 tests/unit/AiManagementRelocationC60.verify.js
++0 tests/unit/AiNowPlayingOpt02.verify.js
++0 tests/unit/AiRuntimeContractA58.verify.js
++0 tests/unit/AiRuntimeContractA59.verify.js
++0 tests/unit/AiSystemBoundaryA56.verify.js
++0 tests/unit/AiTabAdminLockA53.verify.js
++0 tests/unit/AlwaysOnTopMenuUi01B.verify.js
++0 tests/unit/AudioEngine.verify.js
++0 tests/unit/AudioReconnectC62.verify.js
++0 tests/unit/AudioRoutingClosureC61.verify.js
++0 tests/unit/AudioSourceB58.verify.js
++1 tests/unit/AutoSongCollector.verify.js
++0 tests/unit/B30ReadinessValidation.verify.js
++0 tests/unit/B31ReadinessHardening.verify.js
++0 tests/unit/B32SetupReadinessConsistency.verify.js
++0 tests/unit/B38D1RuntimeIntegration.verify.js
++0 tests/unit/B70SetupDeviceAudit.verify.js
++0 tests/unit/B71SetupDeviceFix.verify.js
++0 tests/unit/B72AudioConfig.verify.js
++0 tests/unit/CommandRuntimeHealth.verify.js
++0 tests/unit/ConfidenceV2.verify.js
++0 tests/unit/D1SpecValidation.verify.js
++0 tests/unit/DawLauncherC56.verify.js
++0 tests/unit/DawSetupPersistence.verify.js
++0 tests/unit/FxAutoA01.verify.js
++0 tests/unit/FxIndicatorA06.verify.js
++0 tests/unit/FxSendGroupA01.verify.js
++0 tests/unit/KeyEngineAccuracyA35.verify.js
++0 tests/unit/KeyEngineFastPath.verify.js
++0 tests/unit/KeyEngineV2.verify.js
++0 tests/unit/KeyLongEvidenceA05.verify.js
++0 tests/unit/KnobBeatMaster.verify.js
++0 tests/unit/KnobDynamicValue.verify.js
++0 tests/unit/KnobMappingIsolation.verify.js
++0 tests/unit/ManualPriorityGuard.verify.js
++0 tests/unit/ManualState.verify.js
++0 tests/unit/ManualStateReporter.verify.js
++0 tests/unit/ManualStateSequence.verify.js
++0 tests/unit/MarginEngine.verify.js
++0 tests/unit/MarginLogger.verify.js
++0 tests/unit/MenuFxFix.verify.js
++0 tests/unit/MenuMinimizeRuntime.verify.js
++0 tests/unit/Midi01.verify.js
++0 tests/unit/MidiD1RuntimeB61.verify.js
++0 tests/unit/MidiHealth.verify.js
++0 tests/unit/MidiLearnDispatch.verify.js
++0 tests/unit/ModDualTarget.verify.js
++0 tests/unit/ModEngineA03.verify.js
++0 tests/unit/ModEngineV2.verify.js
++0 tests/unit/ModPipelineA03.verify.js
++0 tests/unit/ModPipelineA04.verify.js
++0 tests/unit/ModalEvidenceFloorA40.verify.js
++0 tests/unit/MonitorBeatRetuneBackend.verify.js
++0 tests/unit/MonitorBeatToggle.verify.js
++0 tests/unit/MouseControlGate.verify.js
++0 tests/unit/MpcHcSession.verify.js
++1 tests/unit/MusicAnalysis.verify.js
++0 tests/unit/NowPlayingArbitrator.verify.js
++0 tests/unit/NowPlayingAutoDetect.verify.js
++0 tests/unit/NowPlayingIntegrationA51.verify.js
++1 tests/unit/NowPlayingResolver.verify.js
++0 tests/unit/PluginCommandBridge.verify.js
++0 tests/unit/PortSelectionPolicy.verify.js
++0 tests/unit/RealBenchA08.verify.js
++0 tests/unit/RealBenchA10.verify.js
++0 tests/unit/ResultQueueHardeningA50.verify.js
++0 tests/unit/SettingsFileIO.verify.js
++0 tests/unit/SettingsPersistenceRoundtrip.verify.js
++0 tests/unit/SetupAiPanelStructureA54.verify.js
++0 tests/unit/SetupCompletionA77.verify.js
++0 tests/unit/SetupHardeningA78.verify.js
++0 tests/unit/SetupReadinessAvailability.verify.js
++0 tests/unit/SongReference.verify.js
++0 tests/unit/SoundcardSetupPersistence.verify.js
++0 tests/unit/StabilityTracker.verify.js
++0 tests/unit/StartupPathsPersistenceA55.verify.js
++0 tests/unit/TelemetryAnalyzer.verify.js
++0 tests/unit/TelemetryLogger.verify.js
++0 tests/unit/ToneStepA04.verify.js
++0 tests/unit/Top1StabilityTimer.verify.js
++0 tests/unit/WindowsMediaSession.verify.js
+diff --git a/ui/js/audioSource.js b/ui/js/audioSource.js
+index 37de450..a81e088 100644
+--- a/ui/js/audioSource.js
++++ b/ui/js/audioSource.js
+@@ -396,9 +396,13 @@
+     const FX_AUTO_DEFAULTS = Object.freeze({
+         onDbfs: -45,            // trên ngưỡng này = "có tín hiệu hữu ích" (dBFS RMS)
+         offDbfs: -52,           // dưới ngưỡng này = "im lặng" (hysteresis 7 dB so với onDbfs)
+-        confirmMusicMs: 800,    // cần tín hiệu liên tục gần như đủ trong khoảng này mới coi là có nhạc
++        // MENU-FX-FIX: YÊU CẦU CỦA KHÓI — nhạc xuất hiện => FX BẬT trong ≤ 1 s; im lặng liên tục 1 s => TẮT.
++        // (Trước đây 800 ms/6000 ms + tick 500 ms => bật trễ tới ~1,3 s và tắt sau 6 s.) Ngưỡng dBFS (onDbfs/offDbfs) và tỷ lệ KHÔNG đổi.
++        // Bật: cửa sổ 500 ms + chu kỳ tick 100 ms (renderer) => tối đa ≈ 0,5–0,7 s. Tắt: cửa sổ 1000 ms => ≈ 1,0–1,15 s.
++        confirmMusicMs: 500,    // cần tín hiệu liên tục gần như đủ trong khoảng này mới coi là có nhạc
+         confirmMusicRatio: 0.8, // tỷ lệ khung phải vượt onDbfs trong cửa sổ xác nhận có nhạc
+-        confirmSilenceMs: 6000, // im lặng phải kéo dài thế này mới tắt (nhịp nghỉ/chuyển bài/fade-out ngắn hơn bị bỏ qua)
++        confirmSilenceMs: 1000, // im lặng liên tục thế này thì tắt (HỆ QUẢ: khoảng lặng/chuyển bài > 1 s sẽ tắt rồi bật lại FX)
++        manualHoldMs: 60000,    // MENU-FX-FIX: người dùng bấm tay => Auto KHÔNG ghi đè trong khoảng này, hết hạn thì tiếp quản theo trạng thái nhạc HIỆN TẠI
+         silenceMaxAboveRatio: 0.02, // tối đa 2% khung vượt offDbfs trong cửa sổ im lặng (chịu xung nhiễu lẻ)
+         staleMs: 2000,          // không có khung mới quá lâu => nguồn không khả dụng, ĐÓNG BĂNG (không bật/tắt)
+         retryMs: 5000,          // gửi lỗi: thử lại sau khoảng này, tối đa maxRetries lần cho cùng 1 mục tiêu
+@@ -416,10 +420,11 @@
+         let sourceRunning = false, lastFrameAt = null, availableSince = null;
+         let manualOverride = false, inflight = false, retries = 0, retryAt = null, lastTarget = null;
+         let sentCount = 0, failedCount = 0, lastResult = null, lastDbfs = null, framesSeen = 0;
++        let manualUntil = 0, pending = false, dirty = false, manualSeq = 0; // MENU-FX-FIX
+         const notify = () => { try { deps.onState && deps.onState(getInfo()); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } };
+ 
+         function getInfo() {
+-            return { musicState, actionState, fxTarget: lastTarget, manualOverride, sentCount, failedCount, retries, lastResult, lastDbfs, framesSeen, sourceRunning };
++            return { musicState, actionState, fxTarget: lastTarget, manualOverride, manualUntil: manualOverride ? manualUntil : null, pending, sentCount, failedCount, retries, lastResult, lastDbfs, framesSeen, sourceRunning };
+         }
+         function prune(t) {
+             const keepFrom = t - Math.max(P.confirmSilenceMs, P.confirmMusicMs) - 500;
+@@ -446,8 +451,16 @@
+             return n >= 3 ? { n, ratio: above / n } : null;
+         }
+         function evaluate(t) {
++            // MENU-FX-FIX: hết thời gian giữ quyền thủ công => Auto tiếp quản theo trạng thái nhạc HIỆN TẠI (musicState được cập nhật mỗi tick,
++            // kể cả trong lúc giữ quyền; không dùng trạng thái đã lưu/cũ). Không còn "nhường tới lần chuyển nhạc kế tiếp".
++            let released = false;
++            if (manualOverride && t >= manualUntil) {
++                manualOverride = false; retries = 0; retryAt = null; released = true;
++                if (actionState === FxActionState.MANUAL_OVERRIDE) actionState = FxActionState.IDLE;
++            }
+             if (!sourceRunning || lastFrameAt === null || t - lastFrameAt > P.staleMs) {
+                 if (musicState !== FxMusicState.SOURCE_UNAVAILABLE) { musicState = FxMusicState.SOURCE_UNAVAILABLE; retryAt = null; notify(); }
++                else if (released) notify();
+                 return;
+             }
+             let next = musicState;
+@@ -465,14 +478,12 @@
+             }
+             if (next !== musicState) {
+                 const prev = musicState; musicState = next;
+-                if (next === FxMusicState.MUSIC_PRESENT || next === FxMusicState.MUSIC_SILENT) {
+-                    // Chuyển trạng thái nhạc đã xác nhận => kết thúc nhường quyền thủ công, tự động hoạt động lại.
+-                    manualOverride = false; retries = 0; retryAt = null;
+-                    if (actionState === FxActionState.MANUAL_OVERRIDE) actionState = FxActionState.IDLE;
+-                }
++                // MENU-FX-FIX: chuyển trạng thái nhạc KHÔNG còn kết thúc quyền thủ công (chỉ hết 60 s mới tiếp quản).
++                if (!manualOverride && (next === FxMusicState.MUSIC_PRESENT || next === FxMusicState.MUSIC_SILENT)) { retries = 0; retryAt = null; }
+                 notify();
+                 if (prev !== next) reconcile(t);
+-            } else if (retryAt !== null && t >= retryAt) { retryAt = null; reconcile(t); }
++            } else if (released) { notify(); reconcile(t); }
++            else if (retryAt !== null && t >= retryAt) { retryAt = null; reconcile(t); }
+         }
+         function desiredTarget() {
+             if (musicState === FxMusicState.MUSIC_PRESENT) return true;
+@@ -480,16 +491,27 @@
+             return null;
+         }
+         async function reconcile(t) {
+-            if (inflight || manualOverride) return;
++            if (manualOverride) return;
++            if (inflight) { dirty = true; return; } // MENU-FX-FIX: nhạc đổi trạng thái trong lúc lệnh trước chưa trả lời => kiểm lại sau khi nó xong (trước đây bị MẤT)
+             const target = desiredTarget();
+             if (target === null) return;
+-            if (deps.getFxState() === target) { if (actionState === FxActionState.FX_ACTION_FAILED) actionState = FxActionState.IDLE; return; } // đã đúng: KHÔNG gửi
++            if (deps.getFxState() === target) { // đã đúng: KHÔNG gửi
++                if (actionState === FxActionState.FX_ACTION_FAILED) actionState = FxActionState.IDLE;
++                // MENU-FX-FIX: vẫn phải ĐỒNG BỘ NÚT với yêu cầu hiện tại. Trước đây nhánh này thoát sớm nên nút kẹt ở trạng thái cũ
++                // (vd: BẬT bị lỗi/timeout -> trạng thái "đã gửi" vẫn là TẮT -> nhạc dừng -> không gửi và nút KHÔNG được tắt).
++                lastTarget = target; try { deps.onRequest && deps.onRequest(target); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ }
++                notify(); return;
++            }
+             if (lastTarget !== target) retries = 0;
+-            lastTarget = target; inflight = true;
++            lastTarget = target; inflight = true; pending = true; lastResult = null; // MENU-FX-FIX: chưa có phản hồi => không giữ kết quả cũ (tránh hiện "đã gửi" giả cho yêu cầu mới)
++            const seq = manualSeq;
+             try { deps.onRequest && deps.onRequest(target); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } // AI-FIX-06: TRẠNG THÁI YÊU CẦU tách khỏi trạng thái đã gửi
++            notify(); // MENU-FX-FIX: báo ngay "đang gửi, chưa có phản hồi" để UI không giữ kết quả/tooltip cũ trong lúc chờ
+             let res;
+             try { res = await deps.applyFx(target); } catch (e) { res = { ok: false, error: String(e) }; }
+-            inflight = false; lastResult = res ? { ok: !!res.ok, partial: !!res.partial, reason: res.reason || res.status || null } : null;
++            inflight = false; pending = false;
++            if (seq !== manualSeq) { notify(); return; } // người dùng đã bấm tay trong lúc chờ: kết quả Auto cũ không được ghi đè trạng thái hiển thị thủ công
++            lastResult = res ? { ok: !!res.ok, partial: !!res.partial, reason: res.reason || res.status || null } : null;
+             if (res && res.ok) {
+                 sentCount++; actionState = FxActionState.SEND_SENT_UNCONFIRMED; retryAt = null;
+             } else {
+@@ -498,11 +520,25 @@
+                 if (!nonRetryable && retries < P.maxRetries) { retries++; retryAt = now() + P.retryMs; } else { retryAt = null; }
+             }
+             notify();
++            if (dirty) { dirty = false; reconcile(now()); }
++        }
++        // MENU-FX-FIX: người dùng bấm FX tay => Auto nhường quyền đúng P.manualHoldMs (60 s); bấm tiếp thì tính lại 60 s.
++        // `target` (tuỳ chọn) = trạng thái người dùng yêu cầu. Kết quả gửi báo về qua reportManualResult().
++        function notifyManual(target) {
++            manualOverride = true; manualUntil = now() + P.manualHoldMs; retryAt = null; retries = 0; dirty = false; manualSeq++;
++            actionState = FxActionState.MANUAL_OVERRIDE;
++            if (typeof target === "boolean") { lastTarget = target; pending = true; lastResult = null; }
++            notify();
++        }
++        function reportManualResult(res, seq) {
++            if (seq !== undefined && seq !== manualSeq) return; // phản hồi của lần bấm cũ
++            pending = false;
++            lastResult = res ? { ok: !!res.ok, partial: !!res.partial, reason: res.reason || res.status || null } : null;
++            if (lastResult && lastResult.ok) sentCount++; else failedCount++;
++            notify();
+         }
+-        // Người dùng bấm FX tay: nhường quyền cho tới lần chuyển trạng thái nhạc đã xác nhận kế tiếp.
+-        function notifyManual() { manualOverride = true; retryAt = null; retries = 0; actionState = FxActionState.MANUAL_OVERRIDE; notify(); }
+         function tick(t) { evaluate(t === undefined ? now() : t); }
+-        return { feedLevel, setSourceState, tick, notifyManual, getInfo, params: P };
++        return { feedLevel, setSourceState, tick, notifyManual, reportManualResult, getManualSeq: () => manualSeq, getInfo, params: P };
+     }
+ 
+ 
+@@ -519,6 +555,16 @@
+             return deps.isConfigured(deps.legacyAction) ? [deps.legacyAction] : [];
+         }
+         function seed(state) { names.concat([deps.legacyAction]).forEach((n) => { if (sent[n] === undefined) sent[n] = !!state; }); }
++        // MENU-FX-FIX: lệnh không trả lời quá deps.timeoutMs => coi là LỖI (TIMEOUT), không kẹt hàng đợi vĩnh viễn và không báo "đã gửi".
++        function withTimeout(p) {
++            if (!deps.timeoutMs) return p;
++            const setT = deps.setTimer || ((typeof setTimeout === "function") ? setTimeout : null), clrT = deps.clearTimer || ((typeof clearTimeout === "function") ? clearTimeout : null);
++            if (!setT) return p;
++            return new Promise((resolve, reject) => {
++                const h = setT(() => resolve({ ok: false, reason: "TIMEOUT" }), deps.timeoutMs);
++                Promise.resolve(p).then((v) => { clrT && clrT(h); resolve(v); }, (e) => { clrT && clrT(h); reject(e); });
++            });
++        }
+         let chain = Promise.resolve(); // hàng đợi tuần tự: Auto + bấm tay không bao giờ chạy chồng nhau
+         function apply(target, opts = {}) {
+             const p = chain.then(() => applyNow(target, opts), () => applyNow(target, opts));
+@@ -531,14 +577,17 @@
+             const results = {};
+             for (const n of list) {                      // tuần tự, không chồng lệnh
+                 if (!opts.force && sent[n] === target) { results[n] = { ok: true, skipped: true }; continue; }
+-                let r; try { r = await deps.execute(n, target); } catch (e) { r = { ok: false, error: String(e) }; }
++                let r;
++                try { r = await withTimeout(deps.execute(n, target)); } catch (e) { r = { ok: false, error: String(e) }; }
+                 results[n] = r;
+                 if (r && r.ok) sent[n] = target;
++                // MENU-FX-FIX: runtime treo => các Send còn lại cũng sẽ treo; không chờ thêm timeout cho từng Send (UI phải báo TIMEOUT sớm).
++                if (r && r.reason === "TIMEOUT") { for (const m of list.slice(list.indexOf(n) + 1)) results[m] = { ok: false, reason: "TIMEOUT", notAttempted: true }; break; }
+             }
+             const vals = Object.values(results);
+             const okAll = vals.every((r) => r.ok), okSome = vals.some((r) => r.ok && !r.skipped);
+             const nonRetry = vals.filter((r) => !r.ok).every((r) => r.reason === "NOT_CONFIGURED" || r.status === "NOT_CONFIGURED" || r.status === "MOUSE_DISABLED");
+-            return { ok: okAll, partial: !okAll && (okSome || vals.some((r) => r.ok)), reason: okAll ? undefined : (nonRetry ? "NOT_CONFIGURED" : "SEND_FAILED"), results, sends: list.slice() };
++            return { ok: okAll, partial: !okAll && (okSome || vals.some((r) => r.ok)), reason: okAll ? undefined : (nonRetry ? "NOT_CONFIGURED" : (vals.some((r) => r.reason === "TIMEOUT") ? "TIMEOUT" : "SEND_FAILED")), results, sends: list.slice() };
+         }
+         // Bấm tay: đánh dấu các Send đã gửi theo kết quả thật (deps.execute đã được gọi bên ngoài).
+         function markSent(n, state) { sent[n] = state; }
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 3e8c293..7abebc8 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -536,7 +536,10 @@ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2"
+         e.target.classList.toggle("active");
+         saveData();
+         if (id === "fxBtn") {
+-            window.__fxAuto?.notifyManual(); // AI-FX-01: bấm tay => Auto nhường quyền tới lần chuyển nhạc/im lặng kế tiếp
++            // MENU-FX-FIX: bấm tay => Auto nhường quyền 60 s (không ghi đè), rồi tiếp quản theo trạng thái nhạc HIỆN TẠI.
++            // Toàn bộ đường gửi + báo kết quả (đã gửi/chưa cấu hình/lỗi) nằm trong __fxManualToggle để UI không tự suy diễn.
++            if (window.__fxManualToggle) { window.__fxManualToggle(e.target.classList.contains("active")); return; }
++            window.__fxAuto?.notifyManual();
+             // Nếu đã cấu hình Send Reverb/Delay: bấm tay cũng điều khiển ĐÚNG các Send đó (nhất quán với Auto) thay vì
+             // chỉ MONITOR_FX cũ. Chưa cấu hình => hành vi cũ giữ NGUYÊN (rơi xuống executeAction MONITOR_FX bên dưới).
+             const grp = window.__fxSendGroup;
+@@ -574,6 +577,7 @@ function createFxAutoWiring() {
+     const group = AudioSource.createFxSendGroup({
+         actions: ["FX_SEND_REVERB", "FX_SEND_DELAY"],
+         legacyAction: "MONITOR_FX",
++        timeoutMs: 5000, // MENU-FX-FIX: runtime không trả lời => TIMEOUT (không kẹt hàng đợi, không báo đã gửi)
+         isConfigured: (n) => { const AR = AR0(); const m = AR?.getMidiOutMapping?.(AR.ACTIONS[n]); return !!(m && m.kind && Number.isFinite(m.number)) || !!AR?.getMouseCoordinate?.(AR.ACTIONS[n]); },
+         execute: async (n, target) => {
+             const AR = AR0(); if (!AR?.executeAction) return { ok: false, reason: "NO_ACTION_REGISTRY" };
+@@ -583,21 +587,32 @@ function createFxAutoWiring() {
+             return AR.executeAction(AR.ACTIONS[n], ctx);
+         },
+     });
+-    group.seed(!!fxBtn?.classList.contains("active")); // trạng thái khởi động = trạng thái UI đã lưu (không có feedback DAW)
++    // MENU-FX-FIX (giữ nguyên hành vi AI-FX-01, có chủ ý): trạng thái khởi động = trạng thái nút FX đã lưu. KHÔNG có feedback DAW nên đây là GIẢ ĐỊNH (UNKNOWN),
++    // nhưng bỏ seed sẽ làm Auto gửi lệnh "TẮT" vô cớ lúc khởi động; ở chế độ toggle (mặc định) lệnh đó ĐẢO trạng thái DAW => nguy hiểm hơn.
++    // Nút đã lưu KHÔNG khớp thực tế thì lần chuyển nhạc đầu tiên được xác nhận sẽ sửa (ON lưu + im lặng => gửi OFF; OFF lưu + nhạc => gửi ON).
++    group.seed(!!fxBtn?.classList.contains("active"));
+     window.__fxSendGroup = group;
+     // AI-FIX-06 — TÁCH 3 trạng thái: (1) YÊU CẦU (nút FX sáng/tắt theo nhạc nền ngay khi chuyển trạng thái được xác nhận),
+     // (2) ĐÃ GỬI (group.aggregate(), dùng để quyết định gửi/không gửi lại), (3) DAW ĐÃ XÁC NHẬN (KHÔNG tồn tại: không có feedback).
+     // Trước đây nút chỉ sáng khi gửi MIDI thành công => chưa cấu hình Send / MIDI lỗi => nút KHÔNG BAO GIỜ sáng và không có dấu vết nào.
+     // Trạng thái đồng bộ hiện ở tooltip (title) + data-fx-sync của nút (không đổi HTML/CSS); chuyển trạng thái được ghi vào log telemetry.
+-    const syncText = (info) => {
++    // MENU-FX-FIX: văn bản Send tách khỏi "ai đang điều khiển" để cả Auto lẫn thủ công đều hiện đúng trạng thái Send thật.
++    const sendText = (info) => {
+         const lr = info.lastResult;
+-        if (info.manualOverride) return "FX: điều khiển thủ công (Auto tạm nhường tới lần nhạc đổi trạng thái)";
++        if (info.pending) return "đang gửi lệnh Send — CHƯA có phản hồi, chưa đồng bộ";
++        if (!lr) return null;
++        if (lr.ok) return "đã GỬI lệnh Send Reverb/Delay — DAW chưa xác nhận (không có phản hồi)";
++        if (lr.reason === "NOT_CONFIGURED") return "CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh";
++        if (lr.reason === "TIMEOUT") return "lệnh Send KHÔNG phản hồi (hết thời gian) — DAW có thể chưa đồng bộ";
++        return "gửi lệnh Send LỖI" + (lr.partial ? " một phần" : "") + " — DAW có thể chưa đồng bộ";
++    };
++    const syncText = (info) => {
++        const st = sendText(info);
++        if (info.manualOverride) return "FX THỦ CÔNG (Auto nhường quyền " + Math.round(AudioSource.FX_AUTO_DEFAULTS.manualHoldMs / 1000) + " s kể từ lần bấm) — " + (st || "chưa có kết quả gửi");
+         if (info.musicState === "SOURCE_UNAVAILABLE") return "FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái";
+-        if (!lr) return "FX Auto: đang theo dõi nhạc nền";
+-        if (lr.ok) return "FX Auto: đã GỬI lệnh Send Reverb/Delay — DAW chưa xác nhận (không có phản hồi)";
+-        if (lr.reason === "NOT_CONFIGURED") return "FX Auto: CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh";
+-        return "FX Auto: gửi lệnh Send LỖI" + (lr.partial ? " một phần" : "") + " — DAW có thể chưa đồng bộ";
++        return "FX Auto: " + (st || "đang theo dõi nhạc nền");
+     };
++    const syncKey = (info) => info.pending ? "pending" : (info.lastResult ? (info.lastResult.ok ? "sent-unconfirmed" : (info.lastResult.reason === "NOT_CONFIGURED" ? "not-configured" : (info.lastResult.reason === "TIMEOUT" ? "timeout" : "failed"))) : "idle");
+     let __lastFxLogKey = "";
+     const ctl = AudioSource.createFxAutoController({
+         getFxState: () => group.aggregate(),
+@@ -610,14 +625,30 @@ function createFxAutoWiring() {
+         },
+         onState: (info) => {
+             window.__fxAutoInfo = info;
+-            if (fxBtn) { fxBtn.title = syncText(info); fxBtn.dataset.fxSync = info.manualOverride ? "manual" : (info.lastResult ? (info.lastResult.ok ? "sent-unconfirmed" : (info.lastResult.reason === "NOT_CONFIGURED" ? "not-configured" : "failed")) : "idle"); }
+-            const k = `${info.musicState}|${info.actionState}|${info.fxTarget}|${info.lastResult ? info.lastResult.ok + ":" + info.lastResult.reason : ""}`;
++            if (fxBtn) { fxBtn.title = syncText(info); fxBtn.dataset.fxSync = syncKey(info); fxBtn.dataset.fxControl = info.manualOverride ? "manual" : "auto"; }
++            const k = `${info.musicState}|${info.actionState}|${info.fxTarget}|${info.pending ? "pending" : ""}|${info.lastResult ? info.lastResult.ok + ":" + info.lastResult.reason : ""}`;
+             if (k !== __lastFxLogKey) { __lastFxLogKey = k; window.electronAPI?.sendTelemetry?.({ event: "FX_AUTO", musicState: info.musicState, actionState: info.actionState, target: info.fxTarget, lastResult: info.lastResult, lastDbfs: info.lastDbfs, framesSeen: info.framesSeen, timestamp: Date.now() }); }
+         },
+     });
+     window.__fxAuto = ctl;
++    // MENU-FX-FIX: đường điều khiển THỦ CÔNG duy nhất của nút FX (xem click handler): báo yêu cầu -> gửi -> báo kết quả THẬT cho bộ điều khiển.
++    window.__fxManualToggle = async (target) => {
++        ctl.notifyManual(!!target); const seq = ctl.getManualSeq();
++        let res;
++        try {
++            if (group.managed().some((n) => n !== "MONITOR_FX")) res = await group.apply(!!target, { force: true });
++            else {
++                const AR = AR0();
++                res = AR?.executeAction ? await AR.executeAction(AR.ACTIONS.MONITOR_FX, { reason: "menu-button" }) : { ok: false, reason: "NO_ACTION_REGISTRY" };
++                if (res && res.ok) group.markSent("MONITOR_FX", !!target);
++            }
++        } catch (err) { res = { ok: false, error: String(err) }; }
++        if (!(res && res.ok)) console.warn("[FX] Bấm tay: Send chưa gửi được/chưa cấu hình — nút giữ trạng thái YÊU CẦU, DAW chưa đồng bộ:", res);
++        ctl.reportManualResult(res, seq);
++        return res;
++    };
+     window.__fxAutoDebug = () => Object.assign({}, ctl.getInfo(), { sends: group.getSent(), managed: group.managed(), params: ctl.params });
+-    setInterval(() => { if (getSetting("fxAutoEnabled", true) !== false) ctl.tick(); }, 500); // ĐÚNG 1 interval cho cả vòng đời trang
++    setInterval(() => { if (getSetting("fxAutoEnabled", true) !== false) ctl.tick(); }, 100); // ĐÚNG 1 interval cho cả vòng đời trang
+     return ctl;
+ }
+ createFxAutoWiring();

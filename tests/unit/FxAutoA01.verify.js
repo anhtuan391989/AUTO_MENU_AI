@@ -36,8 +36,8 @@ const SIL = () => -80, MUS = () => -25, NOISE = (t) => -62 + 4 * Math.sin(t * 7)
     ok(r.calls.length === 1 && r.calls[0].target === true, `2. Nhạc ổn định → ON đúng 1 lần (${r.calls.length})`);
     ok(r.ctl.getInfo().actionState === 'SEND_SENT_UNCONFIRMED', '   trạng thái = SEND_SENT_UNCONFIRMED (không "đã xác nhận")');
     await r.run(30, MUS); ok(r.calls.length === 1, '3. Nhạc vẫn chạy → không gửi thêm');
-    await r.run(3, SIL); await r.run(10, MUS); ok(r.calls.length === 1 && r.fx === true, '4. Khoảng lặng 3 s (<6 s) → giữ ON');
-    await r.run(10, SIL); ok(r.calls.length === 2 && r.calls[1].target === false, `5. Im lặng >6 s → OFF đúng 1 lần (${r.calls.length})`);
+    await r.run(0.5, SIL); await r.run(10, MUS); ok(r.calls.length === 1 && r.fx === true, '4. Khoảng lặng 0,5 s (<1 s) → giữ ON [MENU-FX-FIX: ngưỡng tắt 6 s → 1 s theo yêu cầu]');
+    await r.run(10, SIL); ok(r.calls.length === 2 && r.calls[1].target === false, `5. Im lặng ≥1 s → OFF đúng 1 lần (${r.calls.length})`);
     await r.run(20, SIL); ok(r.calls.length === 2, '   im lặng tiếp → không gửi lặp');
     await r.run(5, MUS); ok(r.calls.length === 3 && r.calls[2].target === true, '6. Nhạc phát lại → ON');
     // 7. dao động quanh ngưỡng: -48 (giữa off -52 và on -45) → trạng thái không đổi
@@ -62,11 +62,11 @@ const SIL = () => -80, MUS = () => -25, NOISE = (t) => -62 + 4 * Math.sin(t * 7)
     // 12. thủ công
     r = rig(); await r.run(5, SIL); await r.run(10, MUS); r.fx = false; r.ctl.notifyManual();
     await r.run(20, MUS); ok(r.fx === false && r.calls.length === 1, '12a. User tắt tay khi nhạc chạy → Auto nhường quyền, không ép bật lại');
-    await r.run(10, SIL); await r.run(5, MUS); ok(r.calls.length === 2 && r.fx === true, '12b. Đổi trạng thái nhạc kế tiếp → Auto hoạt động lại');
+    await r.run(45, MUS); ok(r.calls.length === 2 && r.fx === true, '12b. [MENU-FX-FIX] Hết 60 s giữ quyền, nhạc vẫn phát → Auto tiếp quản theo trạng thái HIỆN TẠI (bật lại)');
     // khởi động khi nhạc đang phát và UI đã ON (persisted) → không gửi
     r = rig({ fxInit: true }); await r.run(10, MUS); ok(r.calls.length === 0, 'Khởi động khi nhạc đang phát và FX đã ON → không gửi lệnh');
     // đổi bài: im lặng 2 s
-    r = rig(); await r.run(5, SIL); await r.run(10, MUS); await r.run(2, SIL); await r.run(10, MUS); ok(r.calls.length === 1, 'Chuyển bài (2 s lặng) → không tắt/bật');
+    r = rig(); await r.run(5, SIL); await r.run(10, MUS); await r.run(2, SIL); await r.run(10, MUS); ok(r.calls.length === 3 && r.calls[1].target === false && r.calls[2].target === true, 'Chuyển bài (2 s lặng, > 1 s) → TẮT rồi BẬT lại đúng 1 lần mỗi chiều [MENU-FX-FIX: hệ quả có chủ ý của ngưỡng tắt 1 s]');
     // fade-out dài: 8 s giảm dần
     r = rig(); await r.run(5, SIL); await r.run(10, MUS);
     await r.run(8, (t) => -25 - ((t % 8) / 8) * 40); await r.run(10, SIL);

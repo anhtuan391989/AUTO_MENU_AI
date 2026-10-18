@@ -37,7 +37,7 @@ const SIL = () => -80, MUS = () => -25;
     ok(r.cls.has('active'), '1. Nhạc phát → nút FX tự SÁNG');
     ok(r.executed.length === 2 && r.btn.dataset.fxSync === 'sent-unconfirmed' && /chưa xác nhận/.test(r.btn.title), '   đã gửi Reverb + Delay đúng 1 lệnh mỗi Send; trạng thái = đã gửi, CHƯA xác nhận');
     await r.run(20, MUS); ok(r.executed.length === 2, '2. Nhạc tiếp tục → không gửi lặp');
-    await r.run(3, SIL); await r.run(3, MUS); ok(r.cls.has('active') && r.executed.length === 2, '3. Lặng ngắn → nút vẫn sáng, không gửi');
+    await r.run(0.5, SIL); await r.run(3, MUS); ok(r.cls.has('active') && r.executed.length === 2, '3. Lặng ngắn (0,5 s) → nút vẫn sáng, không gửi');
     await r.run(10, SIL); ok(!r.cls.has('active') && r.executed.length === 4, '4. Nhạc dừng đủ lâu → nút TẮT + 2 lệnh tắt');
     await r.run(30, SIL); ok(r.executed.length === 4 && !r.cls.has('active'), '5. Micro/nhiễu sau khi dừng (không vào bộ phát hiện) → vẫn tắt, không gửi');
     await r.run(5, MUS); ok(r.cls.has('active') && r.executed.length === 6, '6. Nhạc phát lại → sáng lại + bật Send');

@@ -396,9 +396,13 @@
     const FX_AUTO_DEFAULTS = Object.freeze({
         onDbfs: -45,            // trên ngưỡng này = "có tín hiệu hữu ích" (dBFS RMS)
         offDbfs: -52,           // dưới ngưỡng này = "im lặng" (hysteresis 7 dB so với onDbfs)
-        confirmMusicMs: 800,    // cần tín hiệu liên tục gần như đủ trong khoảng này mới coi là có nhạc
+        // MENU-FX-FIX: YÊU CẦU CỦA KHÓI — nhạc xuất hiện => FX BẬT trong ≤ 1 s; im lặng liên tục 1 s => TẮT.
+        // (Trước đây 800 ms/6000 ms + tick 500 ms => bật trễ tới ~1,3 s và tắt sau 6 s.) Ngưỡng dBFS (onDbfs/offDbfs) và tỷ lệ KHÔNG đổi.
+        // Bật: cửa sổ 500 ms + chu kỳ tick 100 ms (renderer) => tối đa ≈ 0,5–0,7 s. Tắt: cửa sổ 1000 ms => ≈ 1,0–1,15 s.
+        confirmMusicMs: 500,    // cần tín hiệu liên tục gần như đủ trong khoảng này mới coi là có nhạc
         confirmMusicRatio: 0.8, // tỷ lệ khung phải vượt onDbfs trong cửa sổ xác nhận có nhạc
-        confirmSilenceMs: 6000, // im lặng phải kéo dài thế này mới tắt (nhịp nghỉ/chuyển bài/fade-out ngắn hơn bị bỏ qua)
+        confirmSilenceMs: 1000, // im lặng liên tục thế này thì tắt (HỆ QUẢ: khoảng lặng/chuyển bài > 1 s sẽ tắt rồi bật lại FX)
+        manualHoldMs: 60000,    // MENU-FX-FIX: người dùng bấm tay => Auto KHÔNG ghi đè trong khoảng này, hết hạn thì tiếp quản theo trạng thái nhạc HIỆN TẠI
         silenceMaxAboveRatio: 0.02, // tối đa 2% khung vượt offDbfs trong cửa sổ im lặng (chịu xung nhiễu lẻ)
         staleMs: 2000,          // không có khung mới quá lâu => nguồn không khả dụng, ĐÓNG BĂNG (không bật/tắt)
         retryMs: 5000,          // gửi lỗi: thử lại sau khoảng này, tối đa maxRetries lần cho cùng 1 mục tiêu
@@ -416,10 +420,11 @@
         let sourceRunning = false, lastFrameAt = null, availableSince = null;
         let manualOverride = false, inflight = false, retries = 0, retryAt = null, lastTarget = null;
         let sentCount = 0, failedCount = 0, lastResult = null, lastDbfs = null, framesSeen = 0;
+        let manualUntil = 0, pending = false, dirty = false, manualSeq = 0; // MENU-FX-FIX
         const notify = () => { try { deps.onState && deps.onState(getInfo()); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } };
 
         function getInfo() {
-            return { musicState, actionState, fxTarget: lastTarget, manualOverride, sentCount, failedCount, retries, lastResult, lastDbfs, framesSeen, sourceRunning };
+            return { musicState, actionState, fxTarget: lastTarget, manualOverride, manualUntil: manualOverride ? manualUntil : null, pending, sentCount, failedCount, retries, lastResult, lastDbfs, framesSeen, sourceRunning };
         }
         function prune(t) {
             const keepFrom = t - Math.max(P.confirmSilenceMs, P.confirmMusicMs) - 500;
@@ -446,8 +451,16 @@
             return n >= 3 ? { n, ratio: above / n } : null;
         }
         function evaluate(t) {
+            // MENU-FX-FIX: hết thời gian giữ quyền thủ công => Auto tiếp quản theo trạng thái nhạc HIỆN TẠI (musicState được cập nhật mỗi tick,
+            // kể cả trong lúc giữ quyền; không dùng trạng thái đã lưu/cũ). Không còn "nhường tới lần chuyển nhạc kế tiếp".
+            let released = false;
+            if (manualOverride && t >= manualUntil) {
+                manualOverride = false; retries = 0; retryAt = null; released = true;
+                if (actionState === FxActionState.MANUAL_OVERRIDE) actionState = FxActionState.IDLE;
+            }
             if (!sourceRunning || lastFrameAt === null || t - lastFrameAt > P.staleMs) {
                 if (musicState !== FxMusicState.SOURCE_UNAVAILABLE) { musicState = FxMusicState.SOURCE_UNAVAILABLE; retryAt = null; notify(); }
+                else if (released) notify();
                 return;
             }
             let next = musicState;
@@ -465,14 +478,12 @@
             }
             if (next !== musicState) {
                 const prev = musicState; musicState = next;
-                if (next === FxMusicState.MUSIC_PRESENT || next === FxMusicState.MUSIC_SILENT) {
-                    // Chuyển trạng thái nhạc đã xác nhận => kết thúc nhường quyền thủ công, tự động hoạt động lại.
-                    manualOverride = false; retries = 0; retryAt = null;
-                    if (actionState === FxActionState.MANUAL_OVERRIDE) actionState = FxActionState.IDLE;
-                }
+                // MENU-FX-FIX: chuyển trạng thái nhạc KHÔNG còn kết thúc quyền thủ công (chỉ hết 60 s mới tiếp quản).
+                if (!manualOverride && (next === FxMusicState.MUSIC_PRESENT || next === FxMusicState.MUSIC_SILENT)) { retries = 0; retryAt = null; }
                 notify();
                 if (prev !== next) reconcile(t);
-            } else if (retryAt !== null && t >= retryAt) { retryAt = null; reconcile(t); }
+            } else if (released) { notify(); reconcile(t); }
+            else if (retryAt !== null && t >= retryAt) { retryAt = null; reconcile(t); }
         }
         function desiredTarget() {
             if (musicState === FxMusicState.MUSIC_PRESENT) return true;
@@ -480,16 +491,27 @@
             return null;
         }
         async function reconcile(t) {
-            if (inflight || manualOverride) return;
+            if (manualOverride) return;
+            if (inflight) { dirty = true; return; } // MENU-FX-FIX: nhạc đổi trạng thái trong lúc lệnh trước chưa trả lời => kiểm lại sau khi nó xong (trước đây bị MẤT)
             const target = desiredTarget();
             if (target === null) return;
-            if (deps.getFxState() === target) { if (actionState === FxActionState.FX_ACTION_FAILED) actionState = FxActionState.IDLE; return; } // đã đúng: KHÔNG gửi
+            if (deps.getFxState() === target) { // đã đúng: KHÔNG gửi
+                if (actionState === FxActionState.FX_ACTION_FAILED) actionState = FxActionState.IDLE;
+                // MENU-FX-FIX: vẫn phải ĐỒNG BỘ NÚT với yêu cầu hiện tại. Trước đây nhánh này thoát sớm nên nút kẹt ở trạng thái cũ
+                // (vd: BẬT bị lỗi/timeout -> trạng thái "đã gửi" vẫn là TẮT -> nhạc dừng -> không gửi và nút KHÔNG được tắt).
+                lastTarget = target; try { deps.onRequest && deps.onRequest(target); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ }
+                notify(); return;
+            }
             if (lastTarget !== target) retries = 0;
-            lastTarget = target; inflight = true;
+            lastTarget = target; inflight = true; pending = true; lastResult = null; // MENU-FX-FIX: chưa có phản hồi => không giữ kết quả cũ (tránh hiện "đã gửi" giả cho yêu cầu mới)
+            const seq = manualSeq;
             try { deps.onRequest && deps.onRequest(target); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } // AI-FIX-06: TRẠNG THÁI YÊU CẦU tách khỏi trạng thái đã gửi
+            notify(); // MENU-FX-FIX: báo ngay "đang gửi, chưa có phản hồi" để UI không giữ kết quả/tooltip cũ trong lúc chờ
             let res;
             try { res = await deps.applyFx(target); } catch (e) { res = { ok: false, error: String(e) }; }
-            inflight = false; lastResult = res ? { ok: !!res.ok, partial: !!res.partial, reason: res.reason || res.status || null } : null;
+            inflight = false; pending = false;
+            if (seq !== manualSeq) { notify(); return; } // người dùng đã bấm tay trong lúc chờ: kết quả Auto cũ không được ghi đè trạng thái hiển thị thủ công
+            lastResult = res ? { ok: !!res.ok, partial: !!res.partial, reason: res.reason || res.status || null } : null;
             if (res && res.ok) {
                 sentCount++; actionState = FxActionState.SEND_SENT_UNCONFIRMED; retryAt = null;
             } else {
@@ -498,11 +520,25 @@
                 if (!nonRetryable && retries < P.maxRetries) { retries++; retryAt = now() + P.retryMs; } else { retryAt = null; }
             }
             notify();
+            if (dirty) { dirty = false; reconcile(now()); }
         }
-        // Người dùng bấm FX tay: nhường quyền cho tới lần chuyển trạng thái nhạc đã xác nhận kế tiếp.
-        function notifyManual() { manualOverride = true; retryAt = null; retries = 0; actionState = FxActionState.MANUAL_OVERRIDE; notify(); }
+        // MENU-FX-FIX: người dùng bấm FX tay => Auto nhường quyền đúng P.manualHoldMs (60 s); bấm tiếp thì tính lại 60 s.
+        // `target` (tuỳ chọn) = trạng thái người dùng yêu cầu. Kết quả gửi báo về qua reportManualResult().
+        function notifyManual(target) {
+            manualOverride = true; manualUntil = now() + P.manualHoldMs; retryAt = null; retries = 0; dirty = false; manualSeq++;
+            actionState = FxActionState.MANUAL_OVERRIDE;
+            if (typeof target === "boolean") { lastTarget = target; pending = true; lastResult = null; }
+            notify();
+        }
+        function reportManualResult(res, seq) {
+            if (seq !== undefined && seq !== manualSeq) return; // phản hồi của lần bấm cũ
+            pending = false;
+            lastResult = res ? { ok: !!res.ok, partial: !!res.partial, reason: res.reason || res.status || null } : null;
+            if (lastResult && lastResult.ok) sentCount++; else failedCount++;
+            notify();
+        }
         function tick(t) { evaluate(t === undefined ? now() : t); }
-        return { feedLevel, setSourceState, tick, notifyManual, getInfo, params: P };
+        return { feedLevel, setSourceState, tick, notifyManual, reportManualResult, getManualSeq: () => manualSeq, getInfo, params: P };
     }
 
 
@@ -519,6 +555,16 @@
             return deps.isConfigured(deps.legacyAction) ? [deps.legacyAction] : [];
         }
         function seed(state) { names.concat([deps.legacyAction]).forEach((n) => { if (sent[n] === undefined) sent[n] = !!state; }); }
+        // MENU-FX-FIX: lệnh không trả lời quá deps.timeoutMs => coi là LỖI (TIMEOUT), không kẹt hàng đợi vĩnh viễn và không báo "đã gửi".
+        function withTimeout(p) {
+            if (!deps.timeoutMs) return p;
+            const setT = deps.setTimer || ((typeof setTimeout === "function") ? setTimeout : null), clrT = deps.clearTimer || ((typeof clearTimeout === "function") ? clearTimeout : null);
+            if (!setT) return p;
+            return new Promise((resolve, reject) => {
+                const h = setT(() => resolve({ ok: false, reason: "TIMEOUT" }), deps.timeoutMs);
+                Promise.resolve(p).then((v) => { clrT && clrT(h); resolve(v); }, (e) => { clrT && clrT(h); reject(e); });
+            });
+        }
         let chain = Promise.resolve(); // hàng đợi tuần tự: Auto + bấm tay không bao giờ chạy chồng nhau
         function apply(target, opts = {}) {
             const p = chain.then(() => applyNow(target, opts), () => applyNow(target, opts));
@@ -531,14 +577,17 @@
             const results = {};
             for (const n of list) {                      // tuần tự, không chồng lệnh
                 if (!opts.force && sent[n] === target) { results[n] = { ok: true, skipped: true }; continue; }
-                let r; try { r = await deps.execute(n, target); } catch (e) { r = { ok: false, error: String(e) }; }
+                let r;
+                try { r = await withTimeout(deps.execute(n, target)); } catch (e) { r = { ok: false, error: String(e) }; }
                 results[n] = r;
                 if (r && r.ok) sent[n] = target;
+                // MENU-FX-FIX: runtime treo => các Send còn lại cũng sẽ treo; không chờ thêm timeout cho từng Send (UI phải báo TIMEOUT sớm).
+                if (r && r.reason === "TIMEOUT") { for (const m of list.slice(list.indexOf(n) + 1)) results[m] = { ok: false, reason: "TIMEOUT", notAttempted: true }; break; }
             }
             const vals = Object.values(results);
             const okAll = vals.every((r) => r.ok), okSome = vals.some((r) => r.ok && !r.skipped);
             const nonRetry = vals.filter((r) => !r.ok).every((r) => r.reason === "NOT_CONFIGURED" || r.status === "NOT_CONFIGURED" || r.status === "MOUSE_DISABLED");
-            return { ok: okAll, partial: !okAll && (okSome || vals.some((r) => r.ok)), reason: okAll ? undefined : (nonRetry ? "NOT_CONFIGURED" : "SEND_FAILED"), results, sends: list.slice() };
+            return { ok: okAll, partial: !okAll && (okSome || vals.some((r) => r.ok)), reason: okAll ? undefined : (nonRetry ? "NOT_CONFIGURED" : (vals.some((r) => r.reason === "TIMEOUT") ? "TIMEOUT" : "SEND_FAILED")), results, sends: list.slice() };
         }
         // Bấm tay: đánh dấu các Send đã gửi theo kết quả thật (deps.execute đã được gọi bên ngoài).
         function markSent(n, state) { sent[n] = state; }

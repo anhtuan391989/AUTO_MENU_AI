@@ -1,7 +1,7 @@
 {
   "schema": "AI-ALG-08/manifest/v2",
   "schema_ext": "AI-ALG-09/10R-FINAL (title,label_state,user_reference,observations{chain,menu_error_note,source_cell_raw},track_group,data_conflicts)",
-  "note": "Nhãn người dùng = UNVERIFIED_REFERENCE; KHÔNG vào số liệu chính. segments[] để trống vì chưa có ranh giới đoạn đã xác minh. Chỉ 14/20 bài được cung cấp trong task AI-ALG-09 (xem báo cáo). Quy tắc chia: sha256(track_id)[0] % 10 < 3 -> test, còn lại dev (cố định trước khi có kết quả).",
+  "note": "Nhãn người dùng = UNVERIFIED_REFERENCE; KHÔNG vào số liệu chính. segments[] để trống vì chưa có ranh giới đoạn đã xác minh. Trạng thái hiện tại: đã nhập đủ 20/20 bài từ bảng nguồn (tools/algbench/source/songs_20_source.csv); nhãn tham chiếu CHƯA được xác minh độc lập (tất cả UNVERIFIED_REFERENCE); chưa có audio hợp lệ (audio_hash = null) nên benchmark vẫn BLOCKED_NO_AUDIO và không công bố accuracy. Ô nguồn 'A# Minnor' (bài gia-vo-thuong-anh-duoc, cột Menu) là lỗi nguồn chưa đọc được, được giữ nguyên, không đoán/sửa. Quy tắc chia: sha256(track_id)[0] % 10 < 3 -> test, còn lại dev (cố định trước khi có kết quả).",
   "tracks": [
     {
       "track_id": "don-dau-vo-cung",

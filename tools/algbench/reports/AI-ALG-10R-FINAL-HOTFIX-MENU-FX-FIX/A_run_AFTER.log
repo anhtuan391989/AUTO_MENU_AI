@@ -1,0 +1,23 @@
+manifest: HỢP LỆ | status=BLOCKED_NO_AUDIO | tracks=20 audio=0 verified=0 evaluated=0
+đủ điều kiện chấm accuracy: 0/20; bị loại: 20
+  - don-dau-vo-cung [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
+  - thuong-em [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
+  - yeu-lai-tu-dau [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
+  - me-em [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
+  - dung-quen-ten-anh [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
+  - sau-nay-em-cuoi-ai [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
+  - luu-nien [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
+  - dem-trang [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
+  - anh-khong-tha-thu [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
+  - anh-khac-hay-em-khac [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
+  - gia-vo-thuong-anh-duoc [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
+  - phia-sau-mot-co-gai [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
+  - vien-da-nho [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED,NO_REFERENCE_LABEL -> test_set_requires_--final-test
+  - hoa-phan-ai-luu [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED,LABEL_NEEDS_CLARIFICATION -> BLOCKED_NO_AUDIO
+  - vu-quy [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
+  - gia-nhu-anh-la-em [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
+  - tung-yeu [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
+  - nguoi-la-thoang-qua [dev/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> BLOCKED_NO_AUDIO
+  - ngay-mai-nguoi-ta-lay-chong [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
+  - cho-em-trong-dem [test/UNVERIFIED_REFERENCE] audio=BLOCKED_NO_AUDIO eligible=false lý do=BLOCKED_NO_AUDIO,LABEL_NOT_VERIFIED -> test_set_requires_--final-test
+run_exit=0
