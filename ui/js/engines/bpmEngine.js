@@ -14,6 +14,7 @@
 const BPMEngine = (() => {
     let analyser = null;
     let dataArray = null;
+    let floatTimeData = null; // MENU-FX-AUTO-OFF — buffer Float32 để đo mức THẬT (không bị cắt 8-bit) cho Auto FX; KHÔNG đổi rms/dbfs/VU cũ
     let timeDataArray = null; // VU METER V2 — buffer RIÊNG cho time-domain data (RMS), KHÔNG dùng chung
                                // với dataArray (frequency-domain, dùng cho flux/beat) — cùng 1 AnalyserNode
                                // vẫn phục vụ được cả 2 loại getter (getByteFrequencyData/getByteTimeDomainData),
@@ -81,6 +82,7 @@ const BPMEngine = (() => {
         analyser.fftSize = 2048; // nhỏ, cập nhật nhanh -> phù hợp dò BEAT (cần độ trễ thấp)
         sourceNode.connect(analyser);
         dataArray = new Uint8Array(analyser.frequencyBinCount);
+        floatTimeData = (typeof analyser.getFloatTimeDomainData === "function") ? new Float32Array(analyser.fftSize) : null;
         timeDataArray = new Uint8Array(analyser.fftSize); // VU METER V2 — buffer time-domain, cấp phát 1 LẦN
 
         beatTimes = [];
@@ -139,13 +141,24 @@ const BPMEngine = (() => {
         // AnalyserNode, không cần AnalyserNode/stream thứ hai. Hoàn toàn KHÔNG dùng bassEnergy/flux.
         analyser.getByteTimeDomainData(timeDataArray);
         const { rms, dbfs, peak, percent: rawVuPercent } = computeRmsDbfsPercent(timeDataArray);
+        // MENU-FX-AUTO-OFF — dBFS THẬT từ getFloatTimeDomainData. getByteTimeDomainData CẮT CỤT về 8-bit nên với MỌI nền nhiễu (kể cả -90 dBFS)
+        // một nửa số mẫu thành 127 => `dbfs` ở trên luôn ≈ -45,1 dBFS khi "im lặng nhưng không phải số 0 tuyệt đối" (đo trên Chromium 141 + log máy
+        // thật của Khói). Giá trị cũ (rms/dbfs/vuPercent) giữ NGUYÊN cho VU/engine khác; chỉ thêm `dbfsFloat` cho Auto FX.
+        let dbfsFloat = dbfs;
+        if (floatTimeData) {
+            analyser.getFloatTimeDomainData(floatTimeData);
+            let ss = 0;
+            for (let i = 0; i < floatTimeData.length; i++) ss += floatTimeData[i] * floatTimeData[i];
+            const rf = Math.sqrt(ss / floatTimeData.length);
+            dbfsFloat = rf > 0 ? 20 * Math.log10(rf) : -Infinity;
+        }
 
         // Smoothing RIÊNG cho VU display (ballistics attack/release) — biến `vuSmoothedPercent`
         // không được đọc/ghi bởi bất kỳ logic BPM/beat nào ở trên hay dưới.
         const vuAlpha = rawVuPercent > vuSmoothedPercent ? VU_ATTACK : VU_RELEASE;
         vuSmoothedPercent = vuSmoothedPercent * vuAlpha + rawVuPercent * (1 - vuAlpha);
 
-        levelListeners.forEach((cb) => cb({ bassEnergy, localAvg, maxByte, rms, dbfs, peak, vuPercent: vuSmoothedPercent }));
+        levelListeners.forEach((cb) => cb({ bassEnergy, localAvg, maxByte, rms, dbfs, dbfsFloat, peak, vuPercent: vuSmoothedPercent }));
 
         const isBeat =
             bassEnergy > BASS_NOISE_FLOOR &&

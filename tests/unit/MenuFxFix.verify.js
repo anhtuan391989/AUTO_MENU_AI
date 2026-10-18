@@ -91,8 +91,8 @@ async function until(r, music, cond, maxMs) { const t0 = r.clock.t; while (r.clo
     const micBlock = ren.slice(ren.indexOf('__micSource = AudioSource.createMicSource()'), ren.indexOf('__micSource.start()'));
     ok(micBlock.length > 100 && !/__fxAuto|feedLevel|createFxAuto/.test(micBlock), '3b. (tĩnh) khối khởi tạo MIC trong renderer.js KHÔNG tham chiếu bộ Auto FX');
     const feedSites = [...ren.matchAll(/__fxAuto\??\.feedLevel/g)].length;
-    const lvlBlock = ren.slice(ren.indexOf('BPMEngine.onLevel(({'), ren.indexOf('BPMEngine.onLevel(({') + 900);
-    ok(feedSites === 1 && /__fxAuto\?\.feedLevel\(dbfs\)/.test(lvlBlock), '3c. (tĩnh) feedLevel chỉ được gọi ĐÚNG 1 chỗ: BPMEngine.onLevel (analyser của SYSTEM_AUDIO)');
+    const lvlBlock = ren.slice(ren.indexOf('BPMEngine.onLevel(({'), ren.indexOf('BPMEngine.onLevel(({') + 1400);
+    ok(feedSites === 1 && /__fxAuto\?\.feedLevel\(dbfsFloat !== undefined \? dbfsFloat : dbfs\)/.test(lvlBlock), '3c. (tĩnh) feedLevel chỉ được gọi ĐÚNG 1 chỗ: BPMEngine.onLevel (analyser của SYSTEM_AUDIO)');
     ok(/BPMEngine\.init\(audioContext, source\)/.test(ren) && /systemAudio\.getRawSourceNodeForAdapter\(\)/.test(ren), '3d. (tĩnh) BPMEngine được nối với nguồn SYSTEM_AUDIO, không phải MIC');
 
     // ---- 4. mic tiếp tục sau khi nhạc dừng → vẫn tắt

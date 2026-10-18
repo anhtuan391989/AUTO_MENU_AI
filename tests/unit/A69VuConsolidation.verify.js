@@ -79,7 +79,7 @@ if (bpmLevelMatch) {
 }
 
 console.log('\n== Test 4: BPM/Key/Mod không bị ảnh hưởng bởi việc xoá Beat VU ==');
-assert(/BPMEngine\.onLevel\(\(\{ bassEnergy, localAvg, maxByte, vuPercent, rms, dbfs, peak \}\)/.test(rendererSrc),
+assert(/BPMEngine\.onLevel\(\(\{ bassEnergy, localAvg, maxByte, vuPercent, rms, dbfs, (dbfsFloat, )?peak \}\)/.test(rendererSrc), // MENU-FX-AUTO-OFF: cho phép THÊM dbfsFloat (additive); các field cũ vẫn bắt buộc đủ
     'BPMEngine.onLevel() vẫn nhận đủ nguyên field cũ (bassEnergy/localAvg/maxByte/vuPercent/rms/dbfs/peak) — không bị "cắt bớt" theo BEAT VU');
 assert(/BPMEngine\.onUpdate\(/.test(rendererSrc), 'BPMEngine.onUpdate() (cập nhật giá trị BPM hiển thị) vẫn còn nguyên');
 assert(/KeyEngine\.onProvisionalEstimate\(/.test(rendererSrc), 'KeyEngine.onProvisionalEstimate() vẫn còn nguyên');

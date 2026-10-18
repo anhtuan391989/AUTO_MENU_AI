@@ -402,6 +402,7 @@
         confirmMusicMs: 500,    // cần tín hiệu liên tục gần như đủ trong khoảng này mới coi là có nhạc
         confirmMusicRatio: 0.8, // tỷ lệ khung phải vượt onDbfs trong cửa sổ xác nhận có nhạc
         confirmSilenceMs: 1000, // im lặng liên tục thế này thì tắt (HỆ QUẢ: khoảng lặng/chuyển bài > 1 s sẽ tắt rồi bật lại FX)
+        diagMs: 30000,          // MENU-FX-AUTO-OFF: chu kỳ ghi log chẩn đoán mức dBFS (chỉ để quan sát, không ảnh hưởng quyết định)
         manualHoldMs: 60000,    // MENU-FX-FIX: người dùng bấm tay => Auto KHÔNG ghi đè trong khoảng này, hết hạn thì tiếp quản theo trạng thái nhạc HIỆN TẠI
         silenceMaxAboveRatio: 0.02, // tối đa 2% khung vượt offDbfs trong cửa sổ im lặng (chịu xung nhiễu lẻ)
         staleMs: 2000,          // không có khung mới quá lâu => nguồn không khả dụng, ĐÓNG BĂNG (không bật/tắt)
@@ -420,11 +421,19 @@
         let sourceRunning = false, lastFrameAt = null, availableSince = null;
         let manualOverride = false, inflight = false, retries = 0, retryAt = null, lastTarget = null;
         let sentCount = 0, failedCount = 0, lastResult = null, lastDbfs = null, framesSeen = 0;
+        let lastDiagAt = null;
         let manualUntil = 0, pending = false, dirty = false, manualSeq = 0; // MENU-FX-FIX
         const notify = () => { try { deps.onState && deps.onState(getInfo()); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } };
 
+        // MENU-FX-AUTO-OFF — số liệu chẩn đoán (KHÔNG dùng để quyết định): mức dBFS min/trung bình/max trong ~1 s gần nhất + tuổi khung cuối.
+        function levelStats(t) {
+            let n = 0, nf = 0, sum = 0, mn = Infinity, mx = -Infinity;
+            for (let i = frames.length - 1; i >= 0 && frames[i].t >= t - 1000; i--) { n++; const d = frames[i].db; if (Number.isFinite(d)) { nf++; sum += d; if (d < mn) mn = d; if (d > mx) mx = d; } }
+            return { n, finite: nf, min: nf ? +mn.toFixed(1) : null, avg: nf ? +(sum / nf).toFixed(1) : null, max: nf ? +mx.toFixed(1) : null, digitalSilence: n - nf };
+        }
         function getInfo() {
-            return { musicState, actionState, fxTarget: lastTarget, manualOverride, manualUntil: manualOverride ? manualUntil : null, pending, sentCount, failedCount, retries, lastResult, lastDbfs, framesSeen, sourceRunning };
+            const tnow = now();
+            return { levelStats: levelStats(tnow), msSinceFrame: lastFrameAt === null ? null : Math.round(tnow - lastFrameAt), musicState, actionState, fxTarget: lastTarget, manualOverride, manualUntil: manualOverride ? manualUntil : null, pending, sentCount, failedCount, retries, lastResult, lastDbfs, framesSeen, sourceRunning };
         }
         function prune(t) {
             const keepFrom = t - Math.max(P.confirmSilenceMs, P.confirmMusicMs) - 500;
@@ -453,6 +462,7 @@
         function evaluate(t) {
             // MENU-FX-FIX: hết thời gian giữ quyền thủ công => Auto tiếp quản theo trạng thái nhạc HIỆN TẠI (musicState được cập nhật mỗi tick,
             // kể cả trong lúc giữ quyền; không dùng trạng thái đã lưu/cũ). Không còn "nhường tới lần chuyển nhạc kế tiếp".
+            if (deps.onDiag) { if (lastDiagAt === null) lastDiagAt = t; else if (t - lastDiagAt >= P.diagMs) { lastDiagAt = t; try { deps.onDiag(getInfo()); } catch (e) { /* chẩn đoán không được làm hỏng bộ điều khiển */ } } }
             let released = false;
             if (manualOverride && t >= manualUntil) {
                 manualOverride = false; retries = 0; retryAt = null; released = true;

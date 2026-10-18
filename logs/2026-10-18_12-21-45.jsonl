@@ -1,0 +1,16 @@
+{"event":"FX_AUTO","musicState":"SOURCE_UNAVAILABLE","actionState":"IDLE","target":null,"lastResult":null,"lastDbfs":null,"framesSeen":0,"timestamp":1792300905319}
+{"event":"FX_AUTO","musicState":"UNKNOWN","actionState":"IDLE","target":null,"lastResult":null,"lastDbfs":null,"framesSeen":5,"timestamp":1792300911879}
+{"event":"FX_AUTO","musicState":"MUSIC_PRESENT","actionState":"IDLE","target":null,"lastResult":null,"lastDbfs":-31.4,"framesSeen":42,"timestamp":1792300912378}
+{"event":"FX_AUTO","musicState":"MUSIC_PRESENT","actionState":"IDLE","target":true,"lastResult":null,"lastDbfs":-31.4,"framesSeen":42,"timestamp":1792300912383}
+{"event":"FX_AUTO","musicState":"MUSIC_PRESENT","actionState":"FX_ACTION_FAILED","target":true,"lastResult":{"ok":false,"partial":false,"reason":"NOT_CONFIGURED"},"lastDbfs":-31.4,"framesSeen":42,"timestamp":1792300912383}
+{"event":"FX_AUTO","musicState":"MUSIC_PRESENT","actionState":"MANUAL_OVERRIDE","target":false,"lastResult":null,"lastDbfs":-33.5,"framesSeen":53,"timestamp":1792300912522}
+{"event":"FX_AUTO","musicState":"MUSIC_PRESENT","actionState":"MANUAL_OVERRIDE","target":false,"lastResult":{"ok":false,"partial":false,"reason":"NOT_CONFIGURED"},"lastDbfs":-33.5,"framesSeen":53,"timestamp":1792300912522}
+{"time":1.5,"top1":"C Major","top2":"C Minor","confidence":0,"margin":0,"stability":0,"top1Stable":0,"decisionScore":0,"votes":0,"window":0,"locked":false}
+{"event":"FIRST_EVIDENCE","frame":189}
+{"event":"FIRST_PROVISIONAL","frame":211,"key":"A Minor","confidence":1.46008214596931}
+{"event":"TOP1_CHANGED","from":"C Major","to":"A Minor","time":1.5}
+{"time":1.5,"top1":"A Minor","top2":"A Major","confidence":1.461601840206991,"margin":0.1843387874606539,"stability":1,"top1Stable":0,"decisionScore":0.9549350591893573,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"event":"TOP1_CHANGED","from":"A Minor","to":"A Major","time":3}
+{"time":3,"top1":"A Major","top2":"A Minor","confidence":1.3984919920257235,"margin":0.025963278302073567,"stability":0.25,"top1Stable":0,"decisionScore":0.48839215554091026,"votes":1,"window":2,"locked":false,"highConfidenceStreak":0}
+{"event":"TOP1_CHANGED","from":"A Major","to":"B Minor","time":4.5}
+{"time":4.5,"top1":"B Minor","top2":"A Minor","confidence":0,"margin":0.011135829211391668,"stability":0,"top1Stable":0,"decisionScore":0.32986901653585965,"votes":0,"window":2,"locked":false}

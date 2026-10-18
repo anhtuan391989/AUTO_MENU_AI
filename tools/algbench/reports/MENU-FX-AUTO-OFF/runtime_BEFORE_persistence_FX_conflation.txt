@@ -1,0 +1,5 @@
+# Electron thật (Linux/Xvfb, mã TRƯỚC khi sửa lưu trạng thái, audio giả đang chạy, Auto FX hoạt động) — ghi nguyên văn từ lần chạy
+# Mục tiêu người dùng: Music ON, Mic1 ON, Mic2 OFF, FX OFF (KHÔNG bấm FX). Auto FX tự bật nút FX theo nhạc.
+fresh start {"music":true,"mic1":false,"mic2":false,"fx":false}
+fresh after clicks {"music":true,"mic1":true,"mic2":false,"fx":true}
+reopen start {"music":true,"mic1":true,"mic2":false,"fx":true}     <-- FX khôi phục ON dù người dùng chưa từng chọn ON (trạng thái Auto bị lưu thành "lựa chọn")

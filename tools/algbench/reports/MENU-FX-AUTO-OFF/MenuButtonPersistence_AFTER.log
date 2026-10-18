@@ -1,0 +1,21 @@
+=== MenuButtonPersistence (logic trên mã thật; DOM/file giả) ===
+  ✅ 0. Lần chạy đầu (chưa có cấu hình): mặc định an toàn Music ON, Mic OFF, FX OFF, không crash
+  ✅ 9. Music ON, Mic1 ON, Mic2 OFF, FX OFF → đóng → mở lại → khôi phục đúng cả 4
+  ✅ 10. 5 tổ hợp khác (gồm FX ON; Music OFF; tất cả OFF) → mỗi lần đóng/mở đều khôi phục đúng
+  ✅ 11. Thoát bình thường: trạng thái đổi ngoài đường click vẫn được chốt khi đóng cửa sổ (beforeunload)
+  ✅ 12a. 8 kiểu cấu hình thiếu/hỏng/phiên bản cũ: không crash
+  ✅ 12b. null/{}/sai kiểu → mặc định an toàn (không đoán "true" từ chuỗi/số)
+  ✅ 12c. Cấu hình cũ chỉ có mic1:true → giữ mic1 ON, phần thiếu dùng mặc định (không mất giá trị hợp lệ)
+  ✅ 12d. knobs/preset hỏng nhưng 4 nút hợp lệ → 4 nút vẫn được khôi phục
+  ✅ 12e. FX khôi phục ON KHÔNG bị trình bày như DAW đã xác nhận: tooltip "CHƯA được xác nhận", data-fx-sync=restored-unconfirmed
+  ✅ 13a. saveData() gọi TRƯỚC khi khôi phục xong KHÔNG ghi mặc định của DOM đè lên giá trị đã lưu
+  ✅ 13b. Sau đó khôi phục vẫn đúng
+  ✅ 13c. Auto FX bật nút (yêu cầu) → lưu fxRequested=true nhưng LỰA CHỌN người dùng fx vẫn false
+  ✅ 13d. Mở lại: FX theo lựa chọn người dùng (OFF), không phải theo yêu cầu Auto lần trước (ON)
+  ✅ 13e. Người dùng BẤM FX ON → lựa chọn được lưu và khôi phục
+  ✅ 13f. Auto FX yêu cầu OFF trước khi khôi phục xong: lựa chọn đã lưu (FX ON, Mic1 ON) không bị đổi
+  ✅ 14a. Ghi file lỗi: không crash, đặt cờ __menuSaveFailed + telemetry MENU_STATE_SAVE_FAILED (không im lặng)
+  ✅ 14b. Khi ghi được trở lại (lần lưu/đóng Menu kế tiếp) → ghi toàn bộ, cờ lỗi được xoá
+  ✅ 15a. (tĩnh) restoreButtonStates() là câu lệnh ĐẦU của DOMContentLoaded (lỗi ở checkAllSystems/applyAudioOutputSetting không làm mất trạng thái)
+  ✅ 15b. (tĩnh) không còn khối khôi phục kiểu chỉ-add (toggle(force) thay thế)
+✅ TẤT CẢ PASS
