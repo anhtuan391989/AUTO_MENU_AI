@@ -3,8 +3,8 @@ setlocal
 cd /d "%~dp0"
 
 rem ===== 2 GITHUB: CU va MOI =====
-set URL_CU=https://github.com/anhtuan391989/AUTO_MENU_AI.git
-set URL_MOI=https://github.com/kennguyen281191-source/AUTO_MENU_AI.git
+set URL_CU=https://anhtuan391989@github.com/anhtuan391989/AUTO_MENU_AI.git
+set URL_MOI=https://kennguyen281191-source@github.com/kennguyen281191-source/AUTO_MENU_AI.git
 set BRANCH=main
 
 where git >nul 2>nul
