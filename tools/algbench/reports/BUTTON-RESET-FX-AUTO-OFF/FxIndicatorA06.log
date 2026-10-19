@@ -1,0 +1,16 @@
+=== FxIndicatorA06 (wiring thật trong renderer.js; synthetic) ===
+  ✅ 1. Nhạc phát → nút FX tự SÁNG
+  ✅    đã gửi Reverb + Delay đúng 1 lệnh mỗi Send; trạng thái = đã gửi, CHƯA xác nhận
+  ✅ 2. Nhạc tiếp tục → không gửi lặp
+  ✅ 3. Lặng ngắn (0,5 s) → nút vẫn sáng, không gửi
+  ✅ 4. Nhạc dừng đủ lâu → nút TẮT + 2 lệnh tắt
+  ✅ 5. Micro/nhiễu sau khi dừng (không vào bộ phát hiện) → vẫn tắt, không gửi
+  ✅ 6. Nhạc phát lại → sáng lại + bật Send
+  ✅ 7a. Chưa cấu hình Send: nút sáng theo YÊU CẦU, KHÔNG có lệnh nào gửi đi
+  ✅ 7b. Trạng thái hiển thị đúng sự thật: chưa cấu hình, DAW không nhận lệnh (không báo thành công giả)
+  ✅ 8. MIDI lỗi: nút theo yêu cầu nhưng trạng thái = LỖI/chưa đồng bộ (không báo đã áp dụng)
+  ✅    thử lại có giới hạn, không lặp vô hạn (4 lệnh thêm)
+  ✅ 9. Nguồn nhạc mất → giữ nguyên trạng thái, báo không khả dụng
+  ✅ 10. Chuyển trạng thái được ghi log FX_AUTO (8 bản ghi, không spam mỗi chu kỳ)
+  ✅     __fxAutoDebug() trả về chẩn đoán (số khung nhận, mức dBFS, Send)
+✅ TẤT CẢ PASS

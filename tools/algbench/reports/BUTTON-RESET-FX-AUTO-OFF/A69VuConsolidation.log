@@ -1,0 +1,52 @@
+== Test 1: Chỉ còn đúng 3 VU (MUSIC/MIC/MASTER), không còn BEAT ==
+  OK   Có đúng 3 .vu-row trong index.html (thực tế: 3)
+  OK   Còn VU MUSIC (vu-music-fill)
+  OK   Còn VU MIC (vu-mic-fill)
+  OK   Còn VU MASTER (vu-master-fill)
+  OK   KHÔNG còn VU BEAT (vu-beat-fill) trong HTML
+  OK   Không còn label text "BEAT" trong khu vực vuGroup
+
+== Test 2: Thứ tự hiển thị MUSIC -> MIC -> MASTER ==
+  OK   Tìm thấy khối #vuGroup trong index.html
+  OK   Cả 3 id đều xuất hiện trong khối #vuGroup
+  OK   Thứ tự DOM đúng MUSIC(108) < MIC(276) < MASTER(443)
+
+== Test 3: MUSIC không lấy tín hiệu MIC (2 nguồn/2 element độc lập) ==
+  OK   Tìm thấy startMicAndMasterVu() trong renderer.js
+  OK   Mic dùng AudioSource.createMicSource() riêng (không đổi từ B58)
+  OK   startMicAndMasterVu() chỉ ghi vào vu-mic-fill, KHÔNG ghi vào vu-music-fill
+  OK   Tìm thấy BPMEngine.onLevel() callback trong renderer.js
+  OK   BPMEngine.onLevel() (nguồn SYSTEM_AUDIO) ghi vào vu-music-fill
+  OK   BPMEngine.onLevel() KHÔNG ghi vào vu-mic-fill (MUSIC không lấy tín hiệu MIC)
+  OK   BPMEngine.onLevel() không còn ghi vào vu-beat-fill (đã bỏ Beat VU)
+
+== Test 4: BPM/Key/Mod không bị ảnh hưởng bởi việc xoá Beat VU ==
+  OK   BPMEngine.onLevel() vẫn nhận đủ nguyên field cũ (bassEnergy/localAvg/maxByte/vuPercent/rms/dbfs/peak) — không bị "cắt bớt" theo BEAT VU
+  OK   BPMEngine.onUpdate() (cập nhật giá trị BPM hiển thị) vẫn còn nguyên
+  OK   KeyEngine.onProvisionalEstimate() vẫn còn nguyên
+  OK   bassEnergy/localAvg vẫn được BPMEngine tính và truyền ra (chỉ bỏ chỗ RENDER ra DOM riêng, không bỏ phép tính)
+
+== Test 5: MUSIC hiển thị "chưa có dữ liệu" khi SYSTEM_AUDIO chưa RUNNING ==
+  OK   Tìm thấy setSystemAudioVuNoData()
+  OK   setSystemAudioVuNoData() chỉ còn danh sách ["vu-music-fill"] (đã bỏ vu-beat-fill)
+  OK   Có gọi setSystemAudioVuNoData(true) (mặc định/NO_DEVICE/mất thiết bị)
+  OK   Có gọi setSystemAudioVuNoData(false) khi SYSTEM_AUDIO RUNNING trở lại
+
+== Test 6: MASTER không hiển thị dữ liệu giả ==
+  OK   Tìm thấy khối khởi tạo Master VU (createDawMasterSource)
+  OK   Master VU được gắn cứng class vu-bar--nodata (không giả lập có tín hiệu)
+  OK   Master VU luôn ép width về "0%" trong onLevel (không lấy số liệu thật/giả từ nguồn khác)
+  OK   Khối khởi tạo Master VU không đọc/ghi vu-music-fill hay vu-mic-fill (không mượn dữ liệu MUSIC/MIC)
+
+== Test 7: Không còn tham chiếu "beat" nào sót lại ở khu vực VU ==
+  OK   style.css không còn RULE .vu-bar--beat{...} (chỉ còn ghi chú lịch sử, không còn style thật)
+  OK   index.html không còn vu-beat-fill/vu-bar--beat
+  OK   renderer.js không còn document.getElementById("vu-beat-fill") nào
+
+== Test 8: File core không bị A69 đụng (kiểm bằng git diff CỐ ĐỊNH ở phạm vi commit A68->A69) ==
+fatal: ambiguous argument '7d49c81..ef4fd14': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+  SKIP  (không chạy được git diff trong môi trường này — máy không có đủ lịch sử 2 commit này: Command failed: git diff --name-only 7d49c81..ef4fd14 )
+
+== KẾT QUẢ: 31 PASS, 0 FAIL ==

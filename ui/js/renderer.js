@@ -18,11 +18,6 @@
 // không bao giờ hiển thị đúng DAW/Auto-Tune/Soundcard đã chọn.
 loadSetup?.();
 
-// MENU-FX-AUTO-OFF: khai báo SỚM (tránh TDZ nếu saveData() bị gọi trước khối SAVE/LOAD DATA bên dưới).
-let __menuStateRestored = false;
-let __fxUserChoice = null; // null = người dùng chưa chọn trong phiên này
-const __asBool = (v) => (typeof v === "boolean" ? v : null);
-
 /* ==========================================================
    TASK A20 — SOUND EFFECT ENGINE (Built-in Clap/Laugh, Internal Audio Backend)
    ----------------------------------------------------------
@@ -539,7 +534,6 @@ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2"
 ["mic1Btn", "mic2Btn", "fxBtn"].forEach(id => {
     document.getElementById(id)?.addEventListener("click", (e) => {
         e.target.classList.toggle("active");
-        if (id === "fxBtn") __fxUserChoice = e.target.classList.contains("active"); // lựa chọn của NGƯỜI DÙNG (Auto FX không đổi biến này)
         saveData();
         if (id === "fxBtn") {
             // MENU-FX-FIX: bấm tay => Auto nhường quyền 60 s (không ghi đè), rồi tiếp quản theo trạng thái nhạc HIỆN TẠI.
@@ -593,9 +587,9 @@ function createFxAutoWiring() {
             return AR.executeAction(AR.ACTIONS[n], ctx);
         },
     });
-    // MENU-FX-FIX (giữ nguyên hành vi AI-FX-01, có chủ ý): trạng thái khởi động = trạng thái nút FX đã lưu. KHÔNG có feedback DAW nên đây là GIẢ ĐỊNH (UNKNOWN),
-    // nhưng bỏ seed sẽ làm Auto gửi lệnh "TẮT" vô cớ lúc khởi động; ở chế độ toggle (mặc định) lệnh đó ĐẢO trạng thái DAW => nguy hiểm hơn.
-    // Nút đã lưu KHÔNG khớp thực tế thì lần chuyển nhạc đầu tiên được xác nhận sẽ sửa (ON lưu + im lặng => gửi OFF; OFF lưu + nhạc => gửi ON).
+    // BUTTON-RESET: nút FX KHÔNG còn được lưu qua phiên => lúc khởi động nút luôn ở MẶC ĐỊNH HTML (TẮT). seed() lấy trạng thái nút này làm
+    // GIẢ ĐỊNH khởi động (UNKNOWN — không có feedback DAW, KHÔNG phải trạng thái DAW đã xác nhận). Giữ seed để Auto không gửi lệnh "TẮT" vô cớ lúc
+    // khởi động (ở chế độ toggle mặc định lệnh đó ĐẢO trạng thái DAW). Nếu DAW thực tế khác giả định, lần chuyển nhạc được xác nhận đầu tiên sẽ gửi lệnh.
     group.seed(!!fxBtn?.classList.contains("active"));
     window.__fxSendGroup = group;
     // AI-FIX-06 — TÁCH 3 trạng thái: (1) YÊU CẦU (nút FX sáng/tắt theo nhạc nền ngay khi chuyển trạng thái được xác nhận),
@@ -615,14 +609,14 @@ function createFxAutoWiring() {
     const syncText = (info) => {
         const st = sendText(info);
         if (info.manualOverride) return "FX THỦ CÔNG (Auto nhường quyền " + Math.round(AudioSource.FX_AUTO_DEFAULTS.manualHoldMs / 1000) + " s kể từ lần bấm) — " + (st || "chưa có kết quả gửi");
-        if (info.musicState === "SOURCE_UNAVAILABLE") return "FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái" + (st ? " — " + st : " (trạng thái nút = lựa chọn đã lưu/yêu cầu; Send DAW CHƯA được xác nhận)");
+        if (info.musicState === "SOURCE_UNAVAILABLE") return "FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái" + (st ? " — " + st : " (trạng thái nút = mặc định lúc mở/yêu cầu; Send DAW CHƯA được xác nhận)");
         return "FX Auto: " + (st || "đang theo dõi nhạc nền");
     };
     const syncKey = (info) => info.pending ? "pending" : (info.lastResult ? (info.lastResult.ok ? "sent-unconfirmed" : (info.lastResult.reason === "NOT_CONFIGURED" ? "not-configured" : (info.lastResult.reason === "TIMEOUT" ? "timeout" : "failed"))) : "idle");
     let __lastFxLogKey = "";
     const ctl = AudioSource.createFxAutoController({
         getFxState: () => group.aggregate(),
-        onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); saveData(); } },
+        onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); } }, // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX
         applyFx: async (target) => {
             if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
             const res = await group.apply(target);
@@ -1693,26 +1687,18 @@ function updateNextModTime() {
 /* ==========================================================
    10. SAVE / LOAD DATA
    ========================================================== */
-// MENU-FX-AUTO-OFF (lưu trạng thái 4 nút) — PHÂN BIỆT 3 trạng thái:
-//   (1) LỰA CHỌN CỦA NGƯỜI DÙNG  = musicDisabled / mic1 / mic2 / fx  (fx CHỈ đổi khi người dùng BẤM nút FX, Auto FX không bao giờ ghi đè)
-//   (2) TRẠNG THÁI YÊU CẦU gửi tới DAW = fxRequested (nút FX đang hiển thị: Auto hoặc tay) — chỉ để tham khảo, KHÔNG dùng để khôi phục lựa chọn
-//   (3) DAW ĐÃ XÁC NHẬN = KHÔNG TỒN TẠI (không có feedback) => không bao giờ lưu/hiển thị như đã xác nhận.
-// Trước khi khôi phục xong (cấu hình chưa đọc), saveData() KHÔNG được ghi giá trị mặc định của DOM đè lên giá trị đã lưu.
+// BUTTON-RESET (yêu cầu chính thức của Khói): 4 nút Music / Mic 1 / Mic 2 / FX KHÔNG được lưu trạng thái qua phiên.
+//   - saveData() KHÔNG ghi 4 nút; loadData() KHÔNG đọc/khôi phục 4 nút; không có beforeunload/Auto FX nào lưu lại chúng.
+//   - Mở lại Menu => 4 nút ở mặc định của HTML (không có class active/disabled): Music = KHÔNG disabled, Mic 1 = tắt, Mic 2 = tắt, FX = tắt.
+//   - Nút khởi tạo ở trạng thái nào cũng KHÔNG có nghĩa DAW đang ở trạng thái đó (không có feedback DAW; trạng thái DAW đã xác nhận không tồn tại).
+// Các cài đặt khác (Key, tone, Mod, preset, knobs) vẫn lưu như cũ.
 
 function saveData() {
-    const prev = (typeof appSettings !== "undefined" && appSettings.autoMenuData && typeof appSettings.autoMenuData === "object") ? appSettings.autoMenuData : {};
-    const keep = (domVal, key) => (__menuStateRestored ? domVal : (__asBool(prev[key]) !== null ? prev[key] : domVal));
-    const fxDom = !!document.getElementById("fxBtn")?.classList.contains("active");
     const data = {
         currentKey: document.getElementById("currentKey")?.textContent,
         tone: document.getElementById("toneSelector")?.value,
         modEnabled: document.getElementById("modPowerBtn")?.classList.contains("active"),
         preset: document.querySelector(".preset-btn.active")?.textContent.trim(),
-        musicDisabled: keep(!!document.getElementById("musicBtn")?.classList.contains("disabled"), "musicDisabled"),
-        mic1: keep(!!document.getElementById("mic1Btn")?.classList.contains("active"), "mic1"),
-        mic2: keep(!!document.getElementById("mic2Btn")?.classList.contains("active"), "mic2"),
-        fx: __fxUserChoice !== null ? __fxUserChoice : (__asBool(prev.fx) !== null ? prev.fx : false),
-        fxRequested: fxDom,
         knobs: knobData.map(k => ({ id: k.id, value: k.value }))
     };
 
@@ -1720,49 +1706,17 @@ function saveData() {
         appSettings.autoMenuData = data;
     }
     const ok = saveSetup?.();
-    if (ok === false) { // ghi file thất bại: không im lặng — lần saveData kế tiếp / lúc đóng cửa sổ sẽ ghi lại toàn bộ
-        window.__menuSaveFailed = true;
-        console.error("[Menu] Không ghi được trạng thái nút (Music/Mic/FX) — sẽ thử lại ở lần lưu kế tiếp/khi đóng Menu.");
+    if (ok === false) { // ghi file thất bại: không im lặng
+        console.error("[Menu] Không ghi được cấu hình Menu (Key/preset/knobs) — sẽ thử lại ở lần lưu kế tiếp.");
         window.electronAPI?.sendTelemetry?.({ event: "MENU_STATE_SAVE_FAILED", timestamp: Date.now() });
-    } else if (window.__menuSaveFailed) { window.__menuSaveFailed = false; }
+    }
     return ok;
 }
 
-// Khôi phục 4 nút từ appSettings.autoMenuData. Idempotent. Giá trị thiếu/sai kiểu (cấu hình cũ/hỏng) => GIỮ mặc định, không crash,
-// không xoá giá trị hợp lệ còn lại. Dùng toggle(force) để KHÔNG phụ thuộc class có sẵn trong HTML.
-function restoreButtonStates() {
-    try {
-        const data = typeof appSettings !== "undefined" ? appSettings.autoMenuData : null;
-        if (data && typeof data === "object") {
-            const md = __asBool(data.musicDisabled); if (md !== null) document.getElementById("musicBtn")?.classList.toggle("disabled", md);
-            const m1 = __asBool(data.mic1); if (m1 !== null) document.getElementById("mic1Btn")?.classList.toggle("active", m1);
-            const m2 = __asBool(data.mic2); if (m2 !== null) document.getElementById("mic2Btn")?.classList.toggle("active", m2);
-            const fx = __asBool(data.fx);
-            if (fx !== null) {
-                __fxUserChoice = fx;
-                const b = document.getElementById("fxBtn");
-                if (b) {
-                    b.classList.toggle("active", fx);
-                    // Lựa chọn đã lưu ≠ DAW đã xác nhận: nói rõ ở tooltip/thuộc tính (Auto FX/bấm tay sẽ ghi đè khi có thông tin mới).
-                    b.dataset.fxSync = "restored-unconfirmed"; b.dataset.fxControl = "restored";
-                    b.title = "FX: khôi phục lựa chọn đã lưu (" + (fx ? "BẬT" : "TẮT") + ") — Send DAW CHƯA được xác nhận";
-                }
-            }
-        }
-    } catch (err) {
-        console.error("[Menu] restoreButtonStates lỗi (giữ mặc định, không mất cấu hình đã lưu):", err);
-        return false;
-    }
-    __menuStateRestored = true;
-    return true;
-}
-window.addEventListener("beforeunload", () => { try { if (__menuStateRestored) saveData(); } catch (e) { /* đóng cửa sổ không được bị chặn */ } }); // chốt lần cuối khi đóng Menu
-
 
 function loadData() {
-    restoreButtonStates(); // MENU-FX-AUTO-OFF: 4 nút khôi phục TRƯỚC mọi bước khác (lỗi ở bước sau không được làm mất trạng thái nút)
     const data = typeof appSettings !== "undefined" ? appSettings.autoMenuData : null;
-    if (!data) { __menuStateRestored = true; return; }
+    if (!data) return;
 
     // TASK A36 (UI Truth State Audit) — BUG THẬT đã tìm thấy và vá: saveData() lưu THẲNG
     // textContent hiển thị của #currentKey (dòng ~1171). Nếu người dùng thao tác bất kỳ gì
@@ -1802,7 +1756,8 @@ function loadData() {
         });
     }
 
-    // (4 nút Music/Mic1/Mic2/FX đã được restoreButtonStates() khôi phục ở đầu hàm này.)
+    // BUTTON-RESET: 4 nút Music/Mic1/Mic2/FX KHÔNG được khôi phục ở đây (yêu cầu chính thức của Khói) — luôn khởi tạo theo mặc định HTML.
+    // Dữ liệu cũ (musicDisabled/mic1/mic2/fx/fxRequested) có thể còn trong file cấu hình: bị BỎ QUA khi đọc và biến mất ở lần saveData() kế tiếp.
 
     if (Array.isArray(data.knobs)) { // MENU-FX-AUTO-OFF: cấu hình hỏng (knobs không phải mảng) không được làm đổ cả khởi tạo
         data.knobs.forEach(saved => {
@@ -2728,7 +2683,6 @@ function updateMainStatus() {
    15. KHỞI TẠO HỆ THỐNG (DOM LOADED)
    ========================================================== */
 document.addEventListener("DOMContentLoaded", () => {
-    restoreButtonStates(); // MENU-FX-AUTO-OFF: khôi phục 4 nút NGAY ĐẦU (checkAllSystems()/applyAudioOutputSetting() có ném lỗi cũng không làm mất trạng thái)
     // Trạng thái ban đầu
     setStatus("dot-daw", "offline");
     setStatus("dot-autotune", "offline");

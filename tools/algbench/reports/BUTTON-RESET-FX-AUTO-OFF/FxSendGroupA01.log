@@ -1,0 +1,24 @@
+=== FxSendGroupA01 (synthetic) ===
+  ✅ 1. Nhạc bắt đầu → CẢ Send Reverb và Delay được bật (mỗi Send đúng 1 lệnh)
+  ✅ 2. Nhạc tiếp tục → không gửi lặp
+  ✅ 3. Khoảng lặng ngắn (0,5 s < 1 s) → Send vẫn bật
+  ✅ 4. Nhạc dừng đủ lâu → CẢ 2 Send tắt
+  ✅ 5/6. Nhạc dừng, micro vẫn nói → Send vẫn tắt, mic không kích hoạt lại
+  ✅    renderer: feedLevel chỉ được gọi đúng 1 chỗ (1)
+  ✅    chỗ đó nằm trong BPMEngine.onLevel (SYSTEM_AUDIO), không phải callback của __micSource
+  ✅    khối MIC không tham chiếu __fxAuto
+  ✅ 7. Nhạc phát lại → bật lại cả 2
+  ✅ 8a. Nhạc nhỏ (-40 dBFS, trên ngưỡng -45) → vẫn bật
+  ✅ 8b. Dao động nhẹ khi nhạc nhỏ → không dao động trạng thái
+  ✅ 9a. Delay gửi lỗi → nút FX KHÔNG hiện bật, trạng thái FX_ACTION_FAILED, không tuyên bố đồng bộ toàn bộ
+  ✅ 9b. Thử lại chỉ Send bị lỗi (Reverb không bị gửi trùng/đảo toggle)
+  ✅ 9c. Chưa cấu hình Send nào → không gửi, không đổi nút, báo lỗi (không giả vờ)
+  ✅    chỉ cấu hình MONITOR_FX cũ → dùng như Send đơn (tương thích)
+  ✅    chỉ Reverb được cấu hình → chỉ điều khiển Reverb (Delay được báo là chưa cấu hình trong báo cáo)
+  ✅ 10. Hai apply đồng thời cùng mục tiêu → hàng đợi tuần tự, mỗi Send đúng 1 lệnh (2)
+  ✅ 11a. Bấm tay tắt → cả 2 Send tắt
+  ✅ 11b. Auto nhường quyền trong lúc nhạc vẫn chạy
+  ✅ 11c. [MENU-FX-FIX] Hết 60 s giữ quyền, nhạc vẫn phát → Auto tiếp quản lại
+  ✅ 12. Khởi động với UI đã ON (seed) rồi apply(ON) → không gửi lệnh
+  ✅ 12. Khởi động lại khi đang im lặng & FX OFF → không phát sinh lệnh
+✅ TẤT CẢ PASS

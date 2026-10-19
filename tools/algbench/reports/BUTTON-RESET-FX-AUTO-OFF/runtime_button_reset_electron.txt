@@ -1,0 +1,52 @@
+### c1 — đặt {"music":false,"mic1":true,"mic2":true,"fx":true} (audio=x, thoát=closeBtn)
+fresh start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"NORM","key":"LISTENING"}
+fresh after clicks {"music":false,"mic1":true,"mic2":true,"fx":true} other {"preset":"RAP","key":"D Major"}
+fresh file keys ["currentKey","tone","modEnabled","preset","knobs"] button keys present: [] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
+fresh fx indicator {"sync":"not-configured","control":"manual","title":"FX THỦ CÔNG (Auto nhường quyền 60 s kể từ lần bấm) — CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh"}
+--- mở lại (không bấm gì)
+reopen start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"RAP","key":"D Major"}
+reopen file keys ["currentKey","tone","modEnabled","preset","knobs"] button keys present: [] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
+reopen fx indicator {"sync":"idle","control":"auto","title":"FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái (trạng thái nút = mặc định lúc mở/yêu cầu; Send DAW CHƯA được xác nhận)"}
+### c2 — đặt {"music":true,"mic1":true,"mic2":false,"fx":false} (audio=x, thoát=quit)
+fresh start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"NORM","key":"LISTENING"}
+fresh after clicks {"music":true,"mic1":true,"mic2":false,"fx":false} other {"preset":"RAP","key":"D Major"}
+fresh file keys ["currentKey","tone","modEnabled","preset","knobs"] button keys present: [] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
+fresh fx indicator {"sync":"idle","control":"auto","title":"FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái (trạng thái nút = mặc định lúc mở/yêu cầu; Send DAW CHƯA được xác nhận)"}
+--- mở lại (không bấm gì)
+reopen start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"RAP","key":"D Major"}
+reopen file keys ["currentKey","tone","modEnabled","preset","knobs"] button keys present: [] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
+reopen fx indicator {"sync":"idle","control":"auto","title":"FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái (trạng thái nút = mặc định lúc mở/yêu cầu; Send DAW CHƯA được xác nhận)"}
+### c3 — đặt {"music":true,"mic1":false,"mic2":true,"fx":true} (audio=audio, thoát=closeBtn)
+fresh start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"NORM","key":"LISTENING"}
+fresh after clicks {"music":true,"mic1":false,"mic2":true,"fx":true} other {"preset":"RAP","key":"A Major"}
+fresh file keys ["currentKey","tone","modEnabled","preset","knobs"] button keys present: [] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
+fresh fx indicator {"sync":"not-configured","control":"manual","title":"FX THỦ CÔNG (Auto nhường quyền 60 s kể từ lần bấm) — CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh"}
+--- mở lại (không bấm gì)
+reopen start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"RAP","key":"D Major"}
+reopen file keys ["currentKey","tone","modEnabled","preset","knobs"] button keys present: [] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
+reopen fx indicator {"sync":"idle","control":"auto","title":"FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái (trạng thái nút = mặc định lúc mở/yêu cầu; Send DAW CHƯA được xác nhận)"}
+### c4 — đặt {"music":false,"mic1":false,"mic2":false,"fx":true} (audio=x, thoát=quit)
+fresh start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"NORM","key":"LISTENING"}
+fresh after clicks {"music":false,"mic1":false,"mic2":false,"fx":true} other {"preset":"RAP","key":"D Major"}
+fresh file keys ["currentKey","tone","modEnabled","preset","knobs"] button keys present: [] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
+fresh fx indicator {"sync":"not-configured","control":"manual","title":"FX THỦ CÔNG (Auto nhường quyền 60 s kể từ lần bấm) — CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh"}
+--- mở lại (không bấm gì)
+reopen start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"RAP","key":"D Major"}
+reopen file keys ["currentKey","tone","modEnabled","preset","knobs"] button keys present: [] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
+reopen fx indicator {"sync":"idle","control":"auto","title":"FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái (trạng thái nút = mặc định lúc mở/yêu cầu; Send DAW CHƯA được xác nhận)"}
+### c5 — file CŨ (Khói đang có): musicDisabled/mic1/mic2/fx/fxRequested = ON hết, preset RAP, key D Major
+reopen start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"RAP","key":"D Major"}
+reopen file keys ["currentKey","tone","modEnabled","preset","knobs","musicDisabled","mic1","mic2","fx","fxRequested"] button keys present: ["musicDisabled","mic1","mic2","fx","fxRequested"] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
+reopen fx indicator {"sync":"idle","control":"auto","title":"FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái (trạng thái nút = mặc định lúc mở/yêu cầu; Send DAW CHƯA được xác nhận)"}
+--- bấm preset (kích hoạt saveData) rồi xem file
+reopen start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"RAP","key":"D Major"}
+reopen after clicks {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"RAP","key":"D Major"}
+reopen file keys ["currentKey","tone","modEnabled","preset","knobs","musicDisabled","mic1","mic2","fx","fxRequested"] button keys present: ["musicDisabled","mic1","mic2","fx","fxRequested"] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
+reopen fx indicator {"sync":"idle","control":"auto","title":"FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái (trạng thái nút = mặc định lúc mở/yêu cầu; Send DAW CHƯA được xác nhận)"}
+--- c5b: file cũ + bấm Mic 1 (kích hoạt saveData) → key cũ phải biến mất, preset/key còn
+reopen start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"RAP","key":"D Major"}
+reopen after clicks {"music":true,"mic1":true,"mic2":false,"fx":false} other {"preset":"RAP","key":"LISTENING"}
+reopen file keys ["currentKey","tone","modEnabled","preset","knobs"] button keys present: [] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
+--- c5c: mở lại
+reopen start {"music":true,"mic1":false,"mic2":false,"fx":false} other {"preset":"RAP","key":"D Major"}
+reopen file keys ["currentKey","tone","modEnabled","preset","knobs"] button keys present: [] preset/key in file: {"preset":"RAP","currentKey":"D Major"}
