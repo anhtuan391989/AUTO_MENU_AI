@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project_Logical_EditorPreset>
+   <list name="Version" type="list">
+      <item>
+         <string name="AppName" value="Cubase"/>
+         <int name="AppVersion" value="14"/>
+      </item>
+   </list>
+   <member name="Attributes">
+      <int name="VersionMagic" value="16384"/>
+      <member name="ExpertSetting">
+         <int name="Value" value="1"/>
+         <int name="Min" value="0"/>
+         <int name="Max" value="1"/>
+      </member>
+      <member name="Info">
+         <string name="s" value="" wide="true"/>
+      </member>
+      <list name="Actions" type="obj">
+         <obj class="leActionTargetTrackOp" ID="3772480624">
+            <int name="Function" value="335"/>
+            <int name="Type" value="4012"/>
+            <obj class="LeGenericOpValue" name="Value1" ID="3671031072">
+               <int name="Val" value="1"/>
+            </obj>
+            <obj class="LeUIntValue" name="Value2" ID="3671032800">
+               <int name="Min" value="1"/>
+               <int name="Max" value="16"/>
+               <int name="Value" value="1"/>
+            </obj>
+         </obj>
+      </list>
+      <list name="Filter" type="obj">
+         <obj class="leToken" ID="3719429968">
+            <int name="Digit" value="101"/>
+         </obj>
+         <obj class="leNameTypeTarget" ID="3772485552">
+            <int name="Digit" value="100"/>
+            <int name="Type" value="200"/>
+            <int name="DomainType" value="0"/>
+            <obj class="UStringValue" name="Value1" ID="3671034048">
+               <string name="String" value="Verb1" wide="true"/>
+            </obj>
+            <obj class="LeUIntValue" name="Value2" ID="3671032224">
+               <int name="Min" value="0"/>
+               <int name="Max" value="255"/>
+               <int name="Value" value="0"/>
+            </obj>
+         </obj>
+         <obj class="leToken" ID="3719428784">
+            <int name="Digit" value="104"/>
+         </obj>
+         <obj class="leNameTypeTarget" ID="3772482912">
+            <int name="Digit" value="100"/>
+            <int name="Type" value="200"/>
+            <int name="DomainType" value="0"/>
+            <obj class="UStringValue" name="Value1" ID="3671031552">
+               <string name="String" value="Delay" wide="true"/>
+            </obj>
+            <obj class="LeUIntValue" name="Value2" ID="3671031648">
+               <int name="Min" value="0"/>
+               <int name="Max" value="255"/>
+               <int name="Value" value="0"/>
+            </obj>
+         </obj>
+         <obj class="leToken" ID="3719429232">
+            <int name="Digit" value="104"/>
+         </obj>
+         <obj class="leNameTypeTarget" ID="3772487488">
+            <int name="Digit" value="100"/>
+            <int name="Type" value="200"/>
+            <int name="DomainType" value="0"/>
+            <obj class="UStringValue" name="Value1" ID="3671031840">
+               <string name="String" value="Verb3" wide="true"/>
+            </obj>
+            <obj class="LeUIntValue" name="Value2" ID="3671029248">
+               <int name="Min" value="0"/>
+               <int name="Max" value="255"/>
+               <int name="Value" value="0"/>
+            </obj>
+         </obj>
+         <obj class="leToken" ID="3719430000">
+            <int name="Digit" value="102"/>
+         </obj>
+      </list>
+      <member name="PostName">
+         <string name="s" value="" wide="true"/>
+      </member>
+      <member name="processType">
+         <int name="Value" value="1"/>
+         <int name="Min" value="0"/>
+         <int name="Max" value="8"/>
+      </member>
+      <member name="Context">
+         <int name="Value" value="1"/>
+         <int name="Min" value="0"/>
+         <int name="Max" value="2"/>
+      </member>
+      <int name="VersionMagic12" value="4608"/>
+      <int name="nPreProcessors" value="4"/>
+      <int name="nPostProcessors" value="4"/>
+      <list name="preCategory" type="string">
+         <item value=""/>
+         <item value=""/>
+         <item value=""/>
+         <item value=""/>
+      </list>
+      <list name="preName" type="string">
+         <item value=""/>
+         <item value=""/>
+         <item value=""/>
+         <item value=""/>
+      </list>
+      <list name="preState" type="int">
+         <item value="0"/>
+         <item value="0"/>
+         <item value="0"/>
+         <item value="0"/>
+      </list>
+      <list name="postCategory" type="string">
+         <item value=""/>
+         <item value=""/>
+         <item value=""/>
+         <item value=""/>
+      </list>
+      <list name="postName" type="string">
+         <item value=""/>
+         <item value=""/>
+         <item value=""/>
+         <item value=""/>
+      </list>
+      <list name="postState" type="int">
+         <item value="0"/>
+         <item value="0"/>
+         <item value="0"/>
+         <item value="0"/>
+      </list>
+   </member>
+   <bin name="Preset">
+		0040000001000000000000000A000000010001000000FEFFFFFF0D0000006C65
+		416374696F6E42617365000000FEFFFFFF09000000436D4F626A656374000000
+		FFFFFFFF160000006C65416374696F6E546172676574547261636B4F70000000
+		7800000000004F010000AC0F0000FEFFFFFF0A00000055496E7456616C756500
+		0000FEFFFFFF070000005556616C7565000000FFFFFFFF110000004C6547656E
+		657269634F7056616C75650000000400000001000000FFFFFFFF0C0000004C65
+		55496E7456616C75650000000C0000000100000010000000010000000A000000
+		010007000000FFFFFFFF080000006C65546F6B656E0000000400000065000000
+		FEFFFFFF120000006C65436F6E646974696F6E546172676574000000FFFFFFFF
+		110000006C654E616D65547970655461726765740000004800000064000000C8
+		00000000000000FFFFFFFF0D00000055537472696E6756616C75650000000D00
+		000009000000566572623100EFBBBFB60000800C00000000000000FF00000000
+		000000E600008004000000680000001C0100803500000064000000C800000000
+		000000470100800D0000000900000044656C617900EFBBBFB60000800C000000
+		00000000FF00000000000000E600008004000000680000001C01008035000000
+		64000000C800000000000000470100800D00000009000000566572623300EFBB
+		BFB60000800C00000000000000FF00000000000000E600008004000000660000
+		0000000000010000000100000000000000001100000000000000000000
+   </bin>
+</Project_Logical_EditorPreset>

@@ -1,0 +1,39 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Macro title="LOFI" group="Custom" description="">
+	<CommandElement category="Track" name="Find Track">
+		<CommandArgument name="Name" value="LOFI"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="0"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Find Track">
+		<CommandArgument name="Name" value="NORM"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Find Track">
+		<CommandArgument name="Name" value="REMIX"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+	<CommandElement category="Console" name="Find Channel">
+		<CommandArgument name="Name" value="DELAY"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="0"/>
+	</CommandElement>
+	<CommandElement category="Console" name="Find Channel">
+		<CommandArgument name="Name" value="VERB1"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="0"/>
+	</CommandElement>
+	<CommandElement category="Console" name="Find Channel">
+		<CommandArgument name="Name" value="VERB2"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="0"/>
+	</CommandElement>
+</Macro>
