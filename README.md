@@ -87,3 +87,52 @@ Các báo cáo nghiên cứu, benchmark và bằng chứng được lưu trong r
 ## Bản quyền và sử dụng
 
 Vui lòng kiểm tra giấy phép của repository và giấy phép của từng dependency hoặc tài nguyên đi kèm trước khi phân phối lại. Không giả định rằng mọi tài nguyên bên thứ ba trong repository đều có cùng giấy phép.
+
+## Quy định bắt buộc dành cho Claude và các AI agent
+
+Các quy định này áp dụng cho mọi task làm việc trong repository, trừ khi Khói chỉ định rõ khác đi.
+
+### 1. Báo cáo luôn phải là Markdown
+
+- Mọi task phải tạo hoặc cập nhật báo cáo dưới dạng file `.md`.
+- Báo cáo phải nằm trong thư mục báo cáo phù hợp của repository; ghi rõ đường dẫn đầy đủ.
+- Không chỉ trả lời tóm tắt trong chat: phải có báo cáo `.md` làm tài liệu bàn giao.
+- Báo cáo phải nêu: mục tiêu, kết quả, file đã tạo/sửa/xóa, lý do thay đổi, module bị ảnh hưởng, cách kiểm thử, kết quả kiểm thử, giới hạn và các mục còn `BLOCKED`/`UNKNOWN`.
+- Không ghi đè báo cáo cũ nếu task yêu cầu báo cáo mới; dùng tên file/task ID mới.
+
+### 2. File thay thế hoặc file cần chép vào thư mục gốc phải đóng gói ZIP
+
+Nếu task tạo ra file để Khói tải về và thay thế, chép vào thư mục gốc dự án hoặc cài đặt vào máy:
+
+- Đóng gói **tất cả file cần bàn giao** vào một file `.zip` duy nhất.
+- Giữ nguyên cấu trúc thư mục đích bên trong ZIP để tránh chép nhầm vị trí.
+- Đặt ZIP trong repository và ghi đường dẫn chính xác của ZIP trong báo cáo.
+- Không yêu cầu Khói tự gom nhiều file rời nếu có thể đóng gói chung.
+- Nếu task chỉ tạo báo cáo/bằng chứng nghiên cứu, không có file triển khai cần thay thế, không bắt buộc tạo ZIP triển khai; báo cáo phải nói rõ điều này.
+
+### 3. Hướng dẫn cài đặt/thay thế phải đủ để làm theo
+
+Báo cáo bắt buộc có mục **HƯỚNG DẪN CÀI ĐẶT / THAY THẾ / CHẠY** khi ZIP có file cần áp dụng. Viết cho người không lập trình và nêu rõ:
+
+1. ZIP nào cần tải và đường dẫn của nó.
+2. Cần sao lưu file/thư mục nào trước khi thay thế.
+3. Giải nén ZIP ở đâu; nêu rõ thư mục gốc đích, ví dụ `G:\\AUTO_MENU_AI\\` nếu đúng với task.
+4. Liệt kê từng file/thư mục trong ZIP và vị trí cần chép vào.
+5. File nào cần thay thế, file nào chỉ thêm mới; có ghi đè hay không.
+6. Cách chạy: nêu chính xác file lệnh hoặc lệnh cần chạy, thư mục làm việc và thứ tự thao tác.
+7. Cách kiểm tra kết quả sau khi chạy và dấu hiệu thành công/thất bại.
+8. Cách khôi phục bản sao lưu nếu có lỗi.
+9. Những yêu cầu phụ thuộc như Node.js, DAW, thiết bị audio/MIDI hoặc quyền Administrator (chỉ nêu khi thực sự cần).
+
+Không viết hướng dẫn chung chung kiểu “chép file vào đúng chỗ” hoặc “chạy thử”. Nếu chưa xác định được vị trí hay cách chạy, ghi rõ `BLOCKED`, không đoán.
+
+### 4. Không giả định và không tuyên bố quá mức
+
+- Đọc GitHub `main` mới nhất và kiểm tra trạng thái mã trước khi bắt đầu.
+- Không bịa đường dẫn, file, lệnh chạy, số MIDI CC/Note, kết quả kiểm thử hoặc trạng thái hoàn thành.
+- Phân biệt rõ kiểm tra tĩnh, mô phỏng/mock và kiểm thử thực tế.
+- Nếu thiếu máy, DAW, thiết bị hoặc dữ liệu để kiểm thử, ghi `BLOCKED` và nêu chính xác thứ cần Khói cung cấp.
+- Không tự ý thay đổi phạm vi task, giao diện, hành vi sản phẩm hoặc ghi đè công việc của task khác.
+- Nếu task không được phép sửa mã hoặc push, phải tuân thủ đúng giới hạn đó.
+
+**Tiêu chí bàn giao:** Khói phải biết chính xác báo cáo `.md` nằm ở đâu, ZIP nào cần dùng, chép/thay thế file tại đâu, chạy bằng cách nào, và kiểm tra kết quả ra sao — không cần tự suy đoán hoặc tự tìm cách ghép file.
