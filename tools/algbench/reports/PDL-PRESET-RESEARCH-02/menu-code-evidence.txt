@@ -1,0 +1,132 @@
+# Menu hiện tại — trích mã kèm số dòng (repo local == GitHub main, so SHA blob từng file ui/js/*.js)
+# Sinh bằng grep -n; không sửa mã.
+
+--- ui/index.html:110-116
+   110	        <!-- PRESET -->
+   111	        <section class="preset-grid">
+   112	            <button class="preset-btn active">NORM</button>
+   113	            <button class="preset-btn">LOFI</button>
+   114	            <button class="preset-btn">RAP</button>
+   115	            <button id="clapPlayBtn" class="preset-sound-btn">
+   116	                <span class="icon">👏</span><span class="text">CLAP</span>
+
+--- ui/js/renderer.js:504-519
+   504	const PRESET_NAME_TO_ACTION = {
+   505	    NORM: "PRESET_NORM",
+   506	    LOFI: "PRESET_LOFI",
+   507	    RAP: "PRESET_RAP",
+   508	};
+   509	document.querySelectorAll(".preset-btn").forEach(btn => {
+   510	    btn.addEventListener("click", (e) => {
+   511	        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+   512	        e.target.classList.add("active");
+   513	        saveData();
+   514	        const actionName = PRESET_NAME_TO_ACTION[e.target.textContent.trim()];
+   515	        if (actionName && window.ActionRegistry?.executeAction) {
+   516	            window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[actionName], { reason: "menu-button" })
+   517	                .catch(err => console.error(`[MenuControl] PRESET (${actionName}) lỗi:`, err));
+   518	        }
+   519	    });
+
+--- ui/js/renderer.js:1699-1704
+  1699	        tone: document.getElementById("toneSelector")?.value,
+  1700	        modEnabled: document.getElementById("modPowerBtn")?.classList.contains("active"),
+  1701	        preset: document.querySelector(".preset-btn.active")?.textContent.trim(),
+  1702	        knobs: knobData.map(k => ({ id: k.id, value: k.value }))
+  1703	    };
+  1704	
+
+--- ui/js/renderer.js:1750-1757
+  1750	    if (data.preset) {
+  1751	        document.querySelectorAll(".preset-btn").forEach(btn => {
+  1752	            btn.classList.remove("active");
+  1753	            if (btn.textContent.trim() === data.preset) {
+  1754	                btn.classList.add("active");
+  1755	            }
+  1756	        });
+  1757	    }
+
+--- ui/js/renderer.js:2518-2531
+  2518	function clickPresetByName(name) {
+  2519	    const btn = [...document.querySelectorAll(".preset-btn")]
+  2520	        .find(b => b.textContent.trim().toUpperCase() === name);
+  2521	    btn?.click();
+  2522	}
+  2523	
+  2524	const SHORTCUT_ACTIONS = {
+  2525	    normal: () => clickPresetByName("NORM"),
+  2526	    lofi: () => clickPresetByName("LOFI"),
+  2527	    rap: () => clickPresetByName("RAP"),
+  2528	    doTone: () => document.getElementById("autoDetectBtn")?.click(),
+  2529	    // Chưa có nút "REMIX" trong giao diện chính hiện tại, nên phím tắt này tạm thời không có hành động.
+  2530	    remix: () => console.warn("Phím tắt REMIX đã lưu nhưng chưa có chế độ REMIX trong menu chính.")
+  2531	};
+
+--- ui/js/actionRegistry.js:45-50
+    45	    // Mục 16/19 — khai báo Logical Action cho preset/clap/laugh để sẵn sàng mapping,
+    46	    // KHÔNG kèm backend audio/preset thật (đó là việc của task khác, đúng Mục 16 XIX).
+    47	    PRESET_NORM: "PRESET_NORM",
+    48	    PRESET_LOFI: "PRESET_LOFI",
+    49	    PRESET_RAP: "PRESET_RAP",
+    50	    CLAP: "CLAP",
+
+--- ui/js/actionRegistry.js:123-128
+   123	function getMidiOutMapping(action) {
+   124	    const daw = getSelectedDaw();
+   125	    if (!daw) return null;
+   126	    const all = (typeof getSetting === "function" ? getSetting("dawMidiOutMappings") : {}) || {};
+   127	    return (all[daw] && all[daw][action]) || null;
+   128	}
+
+--- ui/js/actionRegistry.js:186-206
+   186	async function executeAction(action, context = {}) {
+   187	    const reason = context.reason || action;
+   188	    const log = (status, extra) => console.log(`[ActionExecutor] ${action} (${reason}) -> ${status}`, extra ?? "");
+   189	
+   190	    const midiMap = getMidiOutMapping(action);
+   191	    if (midiMap && midiMap.kind && Number.isFinite(midiMap.number)) {
+   192	        try {
+   193	            let sent = false;
+   194	            // TASK B6 (Beat/Master) — cho phép value ĐỘNG từ caller (vd giá trị Knob 0-100)
+   195	            // ghi đè value TĨNH đã cấu hình trong Setup. Backward-compatible: nếu caller
+   196	            // KHÔNG truyền context.value (mọi Button hiện có — CLAP/LAUGH/PRESET_*/MONITOR_*/
+   197	            // DAW_*), hành vi giữ NGUYÊN 100% như trước (dùng đúng midiMap.value/velocity tĩnh
+   198	            // đã lưu). Chỉ áp dụng khi context.value là number hợp lệ — không đổi field CC/
+   199	            // channel/kind nào, chỉ đổi phần VALUE gửi đi mỗi lần gọi.
+   200	            const dynamicValue = Number.isFinite(context.value) ? context.value : undefined;
+   201	            if (midiMap.kind === "cc" && typeof sendMidiCC === "function") {
+   202	                sent = await sendMidiCC(midiMap.number, dynamicValue ?? midiMap.value ?? 127, (midiMap.channel || 1) - 1);
+   203	            } else if (midiMap.kind === "note" && typeof sendMidiNotePulse === "function") {
+   204	                sent = await sendMidiNotePulse(midiMap.number, dynamicValue ?? midiMap.velocity ?? 100, (midiMap.channel || 1) - 1);
+   205	            } else {
+   206	                throw new Error("Mapping MIDI không hợp lệ (thiếu hàm gửi tương ứng)");
+
+--- ui/js/actionRegistry.js:244-245
+   244	    log(ACTION_STATUS.NOT_CONFIGURED, `(chưa có MIDI mapping lẫn toạ độ cho DAW "${getSelectedDaw() || "(chưa chọn)"}")`);
+   245	    return { ok: false, reason: "NOT_CONFIGURED" };
+
+--- ui/js/setup.js:622-625
+   622	    { action: "PRESET_NORM", label: "PRESET NORM" },
+   623	    { action: "PRESET_LOFI", label: "PRESET LOFI" },
+   624	    { action: "PRESET_RAP", label: "PRESET RAP" },
+   625	    { action: "CLAP", label: "CLAP" },
+
+--- ui/setup.html:73-78
+    73	                    <div class="shortcuts-grid">
+    74	                        <span>Chế độ hát thường</span> <input type="text" id="shortcutNormal" placeholder="Nhấn phím..." readonly>
+    75	                        <span>Chế độ Lofi</span> <input type="text" id="shortcutLofi" placeholder="Nhấn phím..." readonly>
+    76	                        <span>Chế độ Remix</span> <input type="text" id="shortcutRemix" placeholder="Nhấn phím..." readonly>
+    77	                        <span>Chế độ Rap</span> <input type="text" id="shortcutRap" placeholder="Nhấn phím..." readonly>
+    78	                        <span>Dò tone</span> <input type="text" id="shortcutKeyDetect" placeholder="Nhấn phím..." readonly>
+
+--- core/command-engine-js/runtime.js:16-16
+    16	 * Chỉ wire nhóm Transport (transportPlay/transportStop/transportRecord) cho studio_one,
+
+--- tests/ tham chiếu PRESET_NORM/LOFI/RAP:
+(không có test nào)
+--- 'preset' trong core/command-engine-js/runtime.js:
+18: * khác (Menu/Preset/Key-Mod/Plugin) mà Setup đã cho Learn+Save vẫn được LƯU nguyên vẹn,
+--- 'REMIX' trong ui/js + ui/index.html:
+ui/js/renderer.js:2529:    // Chưa có nút "REMIX" trong giao diện chính hiện tại, nên phím tắt này tạm thời không có hành động.
+ui/js/renderer.js:2530:    remix: () => console.warn("Phím tắt REMIX đã lưu nhưng chưa có chế độ REMIX trong menu chính.")
+ui/js/setup.js:807:    { id: "shortcutRemix", key: "remix" },

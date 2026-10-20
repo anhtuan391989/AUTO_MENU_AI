@@ -1,0 +1,22 @@
+== 1. Danh sách action PRESET trong ACTIONS (đọc từ mã thật)
+["PRESET_NORM","PRESET_LOFI","PRESET_RAP"]
+
+== 2. DAW=studio-one, CHƯA có mapping
+PRESET_NORM -> {"ok":false,"reason":"NOT_CONFIGURED"} | MIDI đã gửi (mock): [] | status={"status":"NOT_CONFIGURED","via":null}
+PRESET_LOFI -> {"ok":false,"reason":"NOT_CONFIGURED"} | MIDI đã gửi (mock): [] | status={"status":"NOT_CONFIGURED","via":null}
+PRESET_RAP -> {"ok":false,"reason":"NOT_CONFIGURED"} | MIDI đã gửi (mock): [] | status={"status":"NOT_CONFIGURED","via":null}
+PRESET_REMIX -> "ACTIONS.PRESET_REMIX = undefined (không tồn tại)" | MIDI đã gửi (mock): [] | status=n/a
+
+== 3. CHƯA chọn DAW
+PRESET_RAP -> {"ok":false,"reason":"NOT_CONFIGURED"} | status={"status":"NOT_CONFIGURED","via":null,"reason":"NO_DAW_SELECTED"}
+
+== 4. Có mapping người dùng CC ch1 số 80 value 127 cho PRESET_RAP (số GIẢ để thử đường dẫn, KHÔNG phải số của PDL)
+PRESET_RAP -> {"ok":true,"status":"SUCCESS","via":"midi"} | MIDI mock: [{"kind":"cc","number":80,"value":127,"channel0":0}] | status={"status":"SUCCESS","via":"midi"}
+PRESET_NORM (chưa map) -> {"ok":false,"reason":"NOT_CONFIGURED"} | MIDI mock thêm: []
+
+== 5. Có mapping nhưng cổng MIDI không mở được (mock trả false)
+PRESET_LOFI -> {"ok":false,"status":"NO_DEVICE","via":"midi"}
+
+== 6. Có đường 'gửi phím tắt' trong executeAction không? (tìm trong mã nguồn)
+chuỗi 'hotkey'/'sendKeys'/'send_keys' trong actionRegistry.js: ["Hotkey"]
+ACTION_COORDINATE_KEY có PRESET_*? false

@@ -1,0 +1,70 @@
+# PDL — bằng chứng về CÁCH KÍCH HOẠT (phím / MIDI / chuột). Nguồn: bảng chuỗi giải nén zlib của lib/core_logic.pyd
+# (offset 7168432 của file .pyd; chỉ là chuỗi/tên hằng, KHÔNG phải logic). "off" = vị trí ký tự trong bảng chuỗi giải nén.
+
+[off 72543] PDL có đường GỬI PHÍM TẮT tới cửa sổ Studio One
+    ...Không tìm thấy browser: ❌ Không tìm thấy cửa sổ Studio One❌ Không tìm thấy cửa sổ Studio One để gửi phím tắt❌ Không tìm thấy dữ liệu trình duyệt để sao lưuKhông tìm thấy file: Khôn...
+[off 63861] Nút/hành động gửi F9 tới Sonar (DAW khác)
+    ...HẾ ĐỘ: ] !!!!! GIAO DIEN DUNG G#[General]Ghi đè nút chế độ: Gửi F9 tới Sonar>>> Gửi MIDI: CCGợi ý (ModernToolTip): hiện sau 500 ms, dưới con trỏ.>>> Gửi lại MIDI: CCGiao diện TkGia...
+[off 63842] Nút chế độ có thể bị người dùng ghi đè
+    ...\nHost: GHI ĐÈ NÚT CHẾ ĐỘ: ] !!!!! GIAO DIEN DUNG G#[General]Ghi đè nút chế độ: Gửi F9 tới Sonar>>> Gửi MIDI: CCGợi ý (ModernToolTip): hiện sau 500 ms, dưới con trỏ.>>> Gửi lại MIDI...
+[off 20528] Hành động Tùy biến: "Bật (127)" / "Tắt (0)" => CC giá trị 127/0
+    ...tion\brave.exeBraveSoftware\Brave-Browser\User DataBrave.exeBật (127)Bật TuneBật bèBật chế độ ấn giữBớt mốc cuốiBật micBật / tắt bảng âm thanh nhanh (SFX)Bắt đầu). Bắt đầu giám sát...
+[off 20551] Có chế độ ấn-giữ (A khi ấn, B khi thả)
+    ...ware\Brave-Browser\User DataBrave.exeBật (127)Bật TuneBật bèBật chế độ ấn giữBớt mốc cuốiBật micBật / tắt bảng âm thanh nhanh (SFX)Bắt đầu). Bắt đầu giám sát RAM...🚀 Bắt đầu khôi p...
+[off 70202] Nhãn hành động A/B
+    ...ash - không bao giờ còn đường hầm chạy ngầm sau khi tắt app.KHI ẤN  (Hành động A)KHI THẢ  (Hành động B)\n==================== KHOI DONG Kích cỡ<KeyRelease>Khởi động lại Tiktok Studi...
+[off 77149] Hành động tùy biến gửi CC
+    ...son: Lỗi đọc vị trí cửa sổ: Lỗi chuẩn hoá dữ liệu: Lỗi chạy Lỗi chạy hành động Tùy biến CCLỗi căn kích thước panel: ⚠️ Lỗi dọn bản _broken_ cũ: Lỗi dựng phần giao diện web 'Lỗi for...
+[off 76665] Có đường click chuột theo toạ độ [ToaDo] (mục đích chưa rõ)
+    ...Lỗi AI: Lỗi Autokey: ❌ Lỗi: Cổng MIDI đang bị chiếm!⚠️ Lỗi: Kiểm tra [ToaDo] X1,Y1,X2,Y2 trong INILỗi Mic: Lỗi RegistryLỗi SFX: Lỗi Send tone: Lỗi: Thiếu file dcm.zip hoặc adt.zip!...
+[off 76748] dcm.zip/adt.zip là gói cài macro/phím vào DAW
+    ...X2,Y2 trong INILỗi Mic: Lỗi RegistryLỗi SFX: Lỗi Send tone: Lỗi: Thiếu file dcm.zip hoặc adt.zip!Lỗi Vang: Lỗi backup registry: Lỗi bật/tắt PWA: Lỗi bật/tắt stream: Lỗi đọc Lỗi đọc...
+
+# Tên hàm liên quan (core_logic-mode-related-names.txt trong thư mục 01 có đủ)
+select_mode, select_mode.activate_daw, select_mode.reset_all_modes, send_midi_cc, send_midi_command, cmd_tat_mic, cmd_tat_vang, cmd_tat_tune, cmd_send_f9_sonar, auto_send_f9_sonar, is_studio_one, is_sonar, _nt_mode_set_custom, _nt_mode_custom_knobs, _nt_mode_overrides ...  => chỉ là TÊN.
+
+# Thư viện đi kèm PDL (lib/): mido, rtmidi (MIDI); pyautogui, pygetwindow, pymsgbox, pyperclip, pyscreeze, pytweening, mouseinfo (tự động hoá bàn phím/chuột/cửa sổ); psutil; pygame; sounddevice; webview(pywebview)
+=> PDL CÓ khả năng gửi MIDI (mido/rtmidi) VÀ gửi phím/chuột (pyautogui). Không biết dùng cái nào cho từng chế độ.
+
+# Gói cài kèm: data/loopMIDISetup.exe, data/MIDI-FIX.exe, data/loopMIDI S1.midiremote (Cubase MIDI Remote), data/dcm.zip, data/adt.zip
+
+# config.ini MẶC ĐỊNH trong gói zip (trích, đã bỏ vị trí cửa sổ):
+[VOLUME]
+beat = 64
+[AUTO_OPEN]
+[SETTINGS]
+daw = Studio One.exe
+harmony = track
+midi_port = Microsoft GS Wavetable Synth
+at_version = Auto-Tune Pro
+linkpro = 0
+theme = v
+[PANEL]
+slots = [{"type": "button", "action": "dotone", "label": "", "size": "third"}, {"type": "button", "action": "sendtone", "label": "", "size": "third"}, {"type": "button", "action": "vang", "label": "", "size": "third"}, {"type": "button", "action": "mic", "label": "", "size": "third"}, {"type": "button", "action": "be", "label": "", "size": "third"}, {"type": "button", "action": "tune", "label": "", "size": "third"}, {"type": "knob", "level": "Beat", "label": "Nhạc", "size": "third"}, {"type": "knob", "level": "Mic", "label": "Mic", "size": "third"}, {"type": "knob", "level": "Retune", "label": "Tune", "size": "third"}, {"type": "knob", "level": "Delay", "label": "Nhại", "size": "third"}, {"type": "knob", "level": "Verb 1", "label": "Vang 1", "size": "third"}, {"type": "knob", "level": "Verb 3", "label": "", "size": "third"}]
+[ToaDo]
+[scalelocation]
+
+# config.ini của tác giả trong adt.zip (AutoApp by NTBlog) — trích:
+[VOLUME]
+beat = 100
+mic = 100
+delay = 100
+verb 1 = 100
+verb 2 = 100
+verb 3 = 100
+am = 30
+sang = 50
+be = 60
+retune = 106
+flextune = 50
+[SETTINGS]
+midi_port = loopMIDI Port
+daw = Cubase14.exe
+[ToaDo]
+x1 = 237
+y1 = 123
+x2 = 238
+y2 = 225
+[LICENSE]
+[AUTO_OPEN]
+[scalelocation]

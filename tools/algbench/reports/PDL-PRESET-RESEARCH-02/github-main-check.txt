@@ -1,0 +1,9 @@
+# Kiểm tra GitHub main (anhtuan391989/AUTO_MENU_AI) lúc bắt đầu PDL-PRESET-RESEARCH-02 (2026-10-20)
+- Cách: GitHub MCP (list_commits / get_commit / get_file_contents). KHÔNG dùng git fetch (đã bị từ chối trước đó).
+- HEAD main = d400755c94b52a6496a0c02bd13415d1443dd11e "Auto-sync 20/10/2026 7:40:11,54" (Khói, 2026-10-20T00:40:11Z):
+  thêm PDL-PRESET-RESEARCH-01-REPORT.md + thư mục PDL-PRESET-RESEARCH-01/ (1451 dòng thêm, chỉ tools/algbench/reports).
+- Commit liền trước bcf897c "Auto update": chỉ sửa `push_github 2 git.bat` (4 dòng).
+- So blob SHA (git hash-object local vs sha GitHub main): 15/15 file ui/js/*.js khớp (actionRegistry 2263ad8f, appSettings f6fcb5b1, audioSource 4e21c8e7, midiDriver 1ae4478b, renderer 435ab7c5, setup 012ab8a5, vocalCommandRouter 6fcd53d6, ...), cộng ui/index.html c4b18f91, ui/setup.html 055223a8, core/command-engine-js/runtime.js 3c4d334d: tất cả khớp.
+  (Không so thư mục ui/js/engines và core/command-engine-js/drivers/ — không nằm trong đường dẫn điều khiển preset.)
+=> Mã Menu trên main = mã local đã đọc. Không có commit nào đổi mã Menu sau BUTTON-RESET.
+- Local git HEAD = 84f5810 (commit local cũ, KHÔNG push); main là nguồn dữ liệu; PDL-PRESET-RESEARCH-01-REPORT.md: blob c6092ebacccf05945e6b83f549d855cb2753a2a1 giống hệt giữa local và main (đã so).
