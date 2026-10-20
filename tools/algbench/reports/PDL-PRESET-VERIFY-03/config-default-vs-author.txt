@@ -1,0 +1,74 @@
+PDL-PRESET-VERIFY-03 — So sánh config.ini MẶC ĐỊNH (gói zip) vs config.ini TÁC GIẢ (adt.zip) — nhãn: VERIFIED (đọc file)
+
+sha256 mặc định: b2186f52e081b29833c75f9a3bdad4138398ae885ad1ccab30154d072a273c88
+sha256 tác giả : 461730841f320a1b90f16f92d1739f8b544484fcca1159d84152c8e37fb7585f
+
+[AUTO_OPEN]  mặc định=có  tác giả=có
+   auto_open_project            mặc định='<không có>'                             tác giả='0'   <== KHÁC
+   project_path                 mặc định='<không có>'                             tác giả=''   <== KHÁC
+[LICENSE]  mặc định=KHÔNG  tác giả=có
+[PANEL]  mặc định=có  tác giả=KHÔNG
+   slots                        mặc định='[{"type": "button", "action": "dotone", "label": "", "size": "third"}, {"type": "button", "action": "sendtone", "label": "", "size": "third"}, {"type": "button", "action": "vang", "label": "", "size": "third"}, {"type": "button", "action": "mic", "label": "", "size": "third"}, {"type": "button", "action": "be", "label": "", "size": "third"}, {"type": "button", "action": "tune", "label": "", "size": "third"}, {"type": "knob", "level": "Beat", "label": "Nhạc", "size": "third"}, {"type": "knob", "level": "Mic", "label": "Mic", "size": "third"}, {"type": "knob", "level": "Retune", "label": "Tune", "size": "third"}, {"type": "knob", "level": "Delay", "label": "Nhại", "size": "third"}, {"type": "knob", "level": "Verb 1", "label": "Vang 1", "size": "third"}, {"type": "knob", "level": "Verb 3", "label": "", "size": "third"}]' tác giả='<không có>'   <== KHÁC
+[SETTINGS]  mặc định=có  tác giả=có
+   an_plugin                    mặc định='<không có>'                             tác giả='0'   <== KHÁC
+   at_version                   mặc định='Auto-Tune Pro'                          tác giả='Auto-Tune Pro'
+   browser                      mặc định='Brave'                                  tác giả='<không có>'   <== KHÁC
+   daw                          mặc định='Studio One.exe'                         tác giả='Cubase14.exe'   <== KHÁC
+   harmony                      mặc định='track'                                  tác giả='track'
+   id_pwa                       mặc định='<không có>'                             tác giả='agimnkijcaahngcdmfeangaknmldooml'   <== KHÁC
+   linkpro                      mặc định='0'                                      tác giả='0'
+   midi_port                    mặc định='Microsoft GS Wavetable Synth'           tác giả='loopMIDI Port'   <== KHÁC
+   soundcard                    mặc định='ASIOVADPRO Driver'                      tác giả='<không có>'   <== KHÁC
+   theme                        mặc định='v'                                      tác giả='v'
+   tudo                         mặc định='<không có>'                             tác giả='1'   <== KHÁC
+   ui                           mặc định='<không có>'                             tác giả='web'   <== KHÁC
+   wave_input                   mặc định='<không có>'                             tác giả=''   <== KHÁC
+   wave_input_manual            mặc định='<không có>'                             tác giả='0'   <== KHÁC
+   window_x                     mặc định='1469'                                   tác giả='893'   <== KHÁC
+   window_y                     mặc định='348'                                    tác giả='869'   <== KHÁC
+   yt_height                    mặc định='<không có>'                             tác giả='972'   <== KHÁC
+   yt_left                      mặc định='<không có>'                             tác giả='-3'   <== KHÁC
+   yt_top                       mặc định='<không có>'                             tác giả='4'   <== KHÁC
+   yt_width                     mặc định='<không có>'                             tác giả='703'   <== KHÁC
+[ToaDo]  mặc định=có  tác giả=có
+   x1                           mặc định='<không có>'                             tác giả='237'   <== KHÁC
+   x2                           mặc định='<không có>'                             tác giả='238'   <== KHÁC
+   y1                           mặc định='<không có>'                             tác giả='123'   <== KHÁC
+   y2                           mặc định='<không có>'                             tác giả='225'   <== KHÁC
+[VOLUME]  mặc định=có  tác giả=có
+   am                           mặc định='<không có>'                             tác giả='30'   <== KHÁC
+   be                           mặc định='<không có>'                             tác giả='60'   <== KHÁC
+   beat                         mặc định='64'                                     tác giả='100'   <== KHÁC
+   delay                        mặc định='<không có>'                             tác giả='100'   <== KHÁC
+   flextune                     mặc định='<không có>'                             tác giả='50'   <== KHÁC
+   mic                          mặc định='<không có>'                             tác giả='100'   <== KHÁC
+   retune                       mặc định='<không có>'                             tác giả='106'   <== KHÁC
+   sang                         mặc định='<không có>'                             tác giả='50'   <== KHÁC
+   verb 1                       mặc định='<không có>'                             tác giả='100'   <== KHÁC
+   verb 2                       mặc định='<không có>'                             tác giả='100'   <== KHÁC
+   verb 3                       mặc định='<không có>'                             tác giả='100'   <== KHÁC
+[scalelocation]  mặc định=có  tác giả=có
+   all                          mặc định='15'                                     tác giả='15'
+   chromatic                    mặc định='1'                                      tác giả='1'
+   dorian                       mặc định='6'                                      tác giả='6'
+   major                        mặc định='2'                                      tác giả='2'
+   minor                        mặc định='3'                                      tác giả='3'
+
+Tìm khoá/giá trị liên quan preset/mode/cc/hotkey/macro/f9 trong CẢ HAI file:
+   norm    : không có
+   lofi    : không có
+   rap     : không có
+   remix   : không có
+   mode    : không có
+   preset  : không có
+   macro   : không có
+   hotkey  : không có
+   f9      : không có
+   f10     : không có
+   f11     : không có
+   f12     : không có
+   note    : không có
+   cc      : không có
+
+KẾT LUẬN (VERIFIED): không file config.ini nào chứa lệnh/CC/Note/phím tắt cho NORM/LOFI/RAP/REMIX. Các khác biệt thực tế chỉ thuộc loại: DAW (daw), cổng MIDI (midi_port), mức núm [VOLUME], toạ độ [ToaDo], vị trí cửa sổ/PWA/YouTube, [AUTO_OPEN], bố cục [PANEL] (chỉ có ở bản mặc định). Không khác biệt nào liên quan lệnh preset.
+LƯU Ý: [LICENSE] của bản tác giả là mục TRỐNG (không có khoá nào).

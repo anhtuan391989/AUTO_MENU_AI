@@ -1,0 +1,19 @@
+NHÃN: mock / đọc mã — KHÔNG phải kết quả DAW thật. Đoạn mã trích nguyên văn từ ui/js/renderer.js.
+
+== R1a. DAW=studio-one, CHƯA có mapping -> executeAction trả NOT_CONFIGURED
+   nút sáng sau click: LOFI | saveData gọi: 1 lần
+   executeAction nhận: ["PRESET_LOFI"] -> kết quả: [{"ok":false,"reason":"NOT_CONFIGURED"}] | MIDI giả đã gửi: []
+== R1b. Có mapping CC GIẢ (số 81) nhưng cổng MIDI mở thất bại -> NO_DEVICE
+   nút sáng sau click: LOFI | saveData gọi: 1 lần
+   executeAction nhận: ["PRESET_LOFI"] -> kết quả: [{"ok":false,"status":"NO_DEVICE","via":"midi"}] | MIDI giả đã gửi: [{"kind":"cc","n":81,"v":127,"ch0":0}]
+== R1c. Có mapping CC GIẢ (số 81) và cổng OK -> SUCCESS (đối chứng)
+   nút sáng sau click: LOFI | saveData gọi: 1 lần
+   executeAction nhận: ["PRESET_LOFI"] -> kết quả: [{"ok":true,"status":"SUCCESS","via":"midi"}] | MIDI giả đã gửi: [{"kind":"cc","n":81,"v":127,"ch0":0}]
+
+== R2. Khôi phục preset khi mở app (đoạn restore trích nguyên văn), data.preset = 'RAP'
+   nút sáng sau restore: RAP | executeAction gọi: 0 lần | MIDI giả đã gửi: []
+
+== R3. Phím tắt: SHORTCUT_ACTIONS.remix và nút REMIX
+   gọi SHORTCUT_ACTIONS.remix() -> log: ["WARN Phím tắt REMIX đã lưu nhưng chưa có chế độ REMIX trong menu chính."] | executeAction gọi: 0 | nút sáng: NORM
+   ui/index.html có nút REMIX? KHÔNG có nút REMIX trong ui/index.html
+   ACTIONS có PRESET_REMIX? false

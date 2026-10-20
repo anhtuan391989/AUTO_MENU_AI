@@ -1,0 +1,48 @@
+PDL-PRESET-VERIFY-03 — A. Rà soát bằng chứng cơ chế PDL kích hoạt NORM / LOFI / RAP / REMIX
+Phạm vi: chỉ NORM, LOFI, RAP, REMIX. Không có DÂN CA.
+Nhãn: VERIFIED / PARTIAL / INFERRED / UNKNOWN / BLOCKED. Phân biệt: [ĐỌC FILE] [ĐỌC CHUỖI/TÊN HÀM] [KHÔNG CÓ KẾT QUẢ DAW THẬT]
+
+NGUỒN ĐÃ RÀ
+  - auto-menu-ai-s1.zip (PDL, version.dat = 14.7.9-PDL-STUDIO): lib/core_logic.pyd sha256 5ddfedc0b531bbee20978907232b3c5903834f8efb8748e284a6553e98ad64f1
+    · Cython 3.2.9 biên dịch -> thân hàm là mã máy, KHÔNG đọc được. Chỉ đọc được bảng chuỗi hằng (nén zlib, 483.380 ký tự).
+  - config.ini mặc định (trong zip) và config.ini tác giả (adt.zip) -> xem config-default-vs-author.txt
+  - sounds.json, playlist_index.json, themes.json: không có khoá mode/preset/lệnh.
+  - data/dcm.zip (Studio One macro + song + Cubase PLE), data/adt.zip (keyscheme Studio One 5/6/7, Cubase Key Commands 10–15, config tác giả), data/*.midiremote, MAPPING.png.
+
+TÌM `mode_overrides` TRONG TOÀN GÓI  (kết quả grep đệ quy + bảng chuỗi)
+  - Chỉ xuất hiện trong lib/core_logic.pyd (bảng chuỗi), 5 lần, tất cả là TÊN/CHUỖI LOG, không có GIÁ TRỊ:
+      "Lỗi đọc mode_overrides:" (offset chuỗi 77013), "Lỗi lưu mode_overrides:" (78405),
+      định danh 'mode_overrides' (243517), '_nt_mode_overrides' / '_nt_mode_save_overrides' (205401, 246404).
+  - Không file nào trong gói (config.ini, json, ini, xml, txt) chứa mode_overrides.
+  => VERIFIED: gói không mang theo giá trị mode_overrides. UNKNOWN: tên file, vị trí, định dạng lưu trên máy người dùng (nhiều khả năng sinh ra khi người dùng ghi đè nút chế độ trong PDL). BLOCKED: cần file thật từ máy Khói/PDL đã cấu hình.
+
+BẰNG CHỨNG KHẢ NĂNG (CHỨNG MINH PDL *CÓ THỂ* LÀM, KHÔNG CHỨNG MINH PRESET NÀO DÙNG LỆNH NÀO)
+  Mục                                                    Nguồn / vị trí                      Nhãn
+  Hàm select_mode, select_mode.activate_daw,             tên hàm trong bảng chuỗi            PARTIAL (chỉ có tên)
+    select_mode.reset_all_modes, _nt_mode_*              (docstring offset 62781: "select_mode, cmd_tat_vang, show_message..." là hàm xử lý nút)
+  Hàm send_midi_cc, send_midi_command                    bảng chuỗi (154352)                 PARTIAL (chỉ có tên)
+  "Gửi F9 tới Sonar", "✅ Đã gửi phím F9",               63861, 151222                       PARTIAL (đường gửi phím F9 tồn tại cho SONAR, không phải Studio One/Cubase)
+  "❌ Không tìm thấy cửa sổ Studio One để gửi phím tắt"  72543                               PARTIAL (PDL có đường gửi PHÍM tới cửa sổ Studio One; không nói phím nào, cho việc gì)
+  ">>> Gửi MIDI: CC", "Lỗi chạy hành động Tùy biến CC",  63877, 77149, 20551                 PARTIAL (hành động Tùy biến có CC, "ấn giữ"; không có số CC)
+    "Bật (127)", "Tắt (0)", "Bật chế độ ấn giữ"
+  JS panel: wireMode(): mặc định -> chọn chế độ;         chuỗi JS trong bảng chuỗi (100818)  PARTIAL (mô tả 2 kiểu ghi đè: hold A/B và press gạt A/B)
+    nếu m.cust -> chạy Tùy biến (hold: ẤN A / THẢ B; press: bấm gạt A/B)
+  _nt_mode_custom_knobs                                   205401                               UNKNOWN (liên quan núm tuỳ biến, không rõ vai trò)
+  "[ToaDo] X1,Y1,X2,Y2" + [ToaDo] x1..y2 trong config    76674; config tác giả                PARTIAL (có đường CLICK TOẠ ĐỘ; chưa rõ dùng cho nút nào)
+  Thư viện đi kèm: mido, rtmidi, pyautogui, pygetwindow  lib/                                PARTIAL (có khả năng gửi MIDI VÀ phím/chuột)
+  data/: loopMIDISetup.exe, MIDI-FIX.exe, midiremote     data/                                PARTIAL (hạ tầng cổng MIDI ảo)
+  Studio One macro NORM/LOFI/RAP/REMIX + 4 macro Bat/Tat  dcm.zip                             VERIFIED (nội dung macro) — nhưng KHÔNG nói PDL gọi chúng bằng cách nào
+  Cubase PLE RAP/RAPC (+ Key Commands F9–F12)            dcm.zip/adt.zip                      VERIFIED (nội dung file) — chưa chứng minh PDL gửi F9–F12
+
+BẰNG CHỨNG KHÔNG ĐỦ (theo quy tắc của task: tên hàm, chuỗi log, tên preset, thư viện KHÔNG đủ kết luận lệnh)
+  1. Không có file nào ghi "preset X -> CC n / Note n / phím k / macro M".
+  2. Bảng chuỗi không chứa số CC/Note nào gắn với NORM/LOFI/REMIX/RAP. Các tên NORM (offset 197630), LOFI (197253), REMIX (219750), RAP chỉ xuất hiện như ĐỊNH DANH trong danh sách hằng đã sắp theo bảng chữ cái (ví dụ "...LOFILPARAM...", "...RAPRECTREMIXRGB...", "...NFDNORMNT_NTAudio..."), không có giá trị đi kèm. => chỉ là tên, không phải lệnh.
+  3. Thân hàm select_mode/send_midi_cc không đọc được (mã máy Cython).
+  4. Cả hai config.ini không có khoá liên quan preset/mode/macro/hotkey/CC/Note (xem config-default-vs-author.txt).
+  5. MIDI Remote Cubase (19 núm CC tuyệt đối) là ĐIỀU KHIỂN MỨC/BYPASS PLUGIN, nhãn ghép từ MAPPING.png là INFERRED; không có CC nào được xác minh là "chọn preset".
+
+KẾT LUẬN CHO MỤC 3A
+  Cơ chế PDL kích hoạt từng preset:                            UNKNOWN — BLOCKED (cần chạy PDL thật hoặc file mode_overrides + bắt gói tin MIDI/phím)
+  Lệnh thực tế từng preset (CC/Note/phím/macro):               UNKNOWN — BLOCKED
+  Khác biệt cấu hình mặc định vs tác giả:                      VERIFIED = chỉ khác daw (Studio One.exe -> Cubase14.exe), midi_port (Microsoft GS Wavetable Synth -> loopMIDI Port), mức [VOLUME], [ToaDo], cửa sổ/PWA; KHÔNG có khác biệt về lệnh preset (vì không bản nào chứa lệnh preset)
+  Điểm chỉ xác minh được khi chạy PDL thật:                    (a) PDL gửi gì khi bấm từng nút chế độ — cần bắt MIDI trên cổng loopMIDI và/hoặc bắt phím; (b) tên/vị trí/nội dung mode_overrides sau khi người dùng ghi đè nút; (c) macro Studio One được gọi bằng phím, bằng MIDI hay bằng đường khác; (d) Cubase: PDL gửi F9–F12 hay CC.
