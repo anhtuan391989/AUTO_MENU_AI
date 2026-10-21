@@ -1,0 +1,31 @@
+PDL-PRESET-VERIFY-04 — Kiểm kê bằng chứng THEO TỪNG PHIÊN BẢN DAW có trong gói PDL (adt.zip / dcm.zip). Nhãn: VERIFIED = đọc file. Không phải kết quả chạy DAW.
+
+== Studio One / Fender Studio Pro
+   Studio One 5: user.keyscheme md5=9192f4a8 (78403 ký tự, version="3"), Studio One.settings md5=6f0d6697
+   Studio One 6: user.keyscheme md5=9192f4a8 (78403 ký tự, version="3"), Studio One.settings md5=6f0d6697
+   Studio One 7: user.keyscheme md5=9192f4a8 (78403 ký tự, version="3"), Studio One.settings md5=6f0d6697
+   => VERIFIED: keyscheme và settings của Studio One 5, 6, 7 GIỐNG HỆT nhau (cùng md5) -> đây là BẢN SAO một cấu hình, KHÔNG phải bằng chứng riêng của từng phiên bản.
+   Studio One 8 / Fender Studio Pro 8: KHÔNG có file nào trong gói (không keyscheme, không settings, không macro riêng). => UNKNOWN/BLOCKED.
+   Macro (dcm.zip/Studio One/Macros): 10 file .studioonemacro + commandbar-v3.xml; thư mục không ghi phiên bản.
+   Bài mẫu "NTBlog Project.song": đã giải nén ở thư mục song1/song2; thông tin lấy từ metainfo.xml
+   Bài mẫu "NTBlog Project - VANG NHIEU.song": đã giải nén ở thư mục song1/song2; thông tin lấy từ metainfo.xml
+   Cả hai bài: Document:Generator = "Studio One/5.3.0.65413", Document:FormatVersion = 6 (VERIFIED) => bài mẫu và macro trong gói được tạo/lưu trên Studio One 5.3 (macro đi cùng bài mẫu: INFERRED).
+   Tài liệu hãng/Wikipedia/SoS: Fender Studio Pro 8 = bản đổi tên của dòng Studio One (Studio One 7 -> Studio Pro 8; 8.0.0 ngày 13/01/2026). Cách gọi "song" đổi thành "session" (SoS). Tương thích file macro/keyscheme/bài mẫu 5.3 trên FSP8: UNKNOWN.
+
+== Cubase
+   Cubase 10  : Key Commands.xml md5=6c7e1258; file khác: không có
+   Cubase 10.5: Key Commands.xml md5=6c7e1258; file khác: không có
+   Cubase 11  : Key Commands.xml md5=6c7e1258; file khác: không có
+   Cubase 12  : Key Commands.xml md5=ab86e4aa; file khác: không có
+   Cubase 13  : Key Commands.xml md5=8c09c42f; file khác: ['Defaults.xml', 'Generic Remote.xml', 'Port Setup.xml', 'UserPreferences.xml', 'Default Project Workspace.xml']
+   Cubase 14  : Key Commands.xml md5=8c09c42f; file khác: ['Defaults.xml', 'Generic Remote.xml', 'Port Setup.xml', 'UserPreferences.xml']
+   Cubase 15  : Key Commands.xml md5=8c09c42f; file khác: ['Defaults.xml', 'Generic Remote.xml', 'Port Setup.xml', 'UserPreferences.xml']
+   => VERIFIED: Key Commands: 10/10.5/11 giống nhau (6c7e1258); 12 khác (ab86e4aa); 13/14/15 giống nhau (8c09c42f). Defaults/Generic Remote/Port Setup/UserPreferences của 13/14/15 giống hệt nhau và ghi đường dẫn "Cubase 14_64" -> bản sao một cấu hình (chủ yếu từ Cubase 14).
+   PLE: dcm.zip/Steinberg/Cubase/User Presets/Project Logical Editor/{RAP,RAPC}.xml, AppName=Cubase, AppVersion=14, VersionMagic=16384 (VERIFIED). Lớp đối tượng trong file: leActionTargetTrackOp (1), leNameTypeTarget (3), leToken (4), LeGenericOpValue (1), LeUIntValue (4), UStringValue (3).
+   Tên lớp "leActionTargetTrackOp" cho thấy phần Action là một thao tác kiểu "Track Op"; KHÔNG đủ để nói Function=335/Type=4012/Val=0/1 là gì (UNKNOWN). Cách xác minh đúng: mở preset trong Project Logical Editor trên Cubase thật và đọc chữ hiển thị ở cột Action (CHECKLIST-C của VERIFY-03, mục C4).
+   MIDI Remote (Cubase 12+): 3 file .midiremote (xem báo cáo 01) — 19 núm CC tuyệt đối; nhãn núm ghép từ MAPPING.png là INFERRED.
+   PLE của Cubase 10, 10.5, 11, 12, 13, 15: KHÔNG có trong gói. Chỉ có bản định dạng Cubase 14.
+
+== Tóm tắt phiên bản có bằng chứng THỰC SỰ riêng
+   Studio One 5.3: bài mẫu + macro (nguồn gốc) | Studio One 6/7/8, Fender Studio Pro 8: không có bằng chứng riêng
+   Cubase 10/11: Key Commands (nhóm 6c7e1258) | Cubase 12: Key Commands riêng (ab86e4aa) | Cubase 13/15: chỉ Key Commands (trùng 14) | Cubase 14: Key Commands + PLE RAP/RAPC + Defaults/Generic Remote/Port Setup (nguồn gốc cấu hình tác giả)

@@ -1,0 +1,49 @@
+PDL-PRESET-VERIFY-04 — Cubase: Generic Remote / cổng MIDI trong cấu hình của tác giả PDL (adt.zip). Nhãn: VERIFIED = đọc file; INFERRED = suy luận. KHÔNG phải kết quả chạy DAW thật.
+
+Các file Generic Remote.xml / Defaults.xml / Port Setup.xml / UserPreferences.xml của thư mục "Cubase 13_64", "Cubase 14_64", "Cubase 15_64" trong gói có md5 GIỐNG HỆT nhau:
+   Generic Remote.xml     13:2a286197  14:2a286197  15:2a286197
+   Defaults.xml           13:543e7c4f  14:543e7c4f  15:543e7c4f
+   Port Setup.xml         13:2132b01f  14:2132b01f  15:2132b01f
+   UserPreferences.xml    13:dad0b8c7  14:dad0b8c7  15:dad0b8c7
+   Key Commands.xml       13:8c09c42f  14:8c09c42f  15:8c09c42f
+=> VERIFIED: ba thư mục là BẢN SAO của cùng một cấu hình (đường dẫn bên trong Defaults.xml ghi "Cubase 14_64"). Không phải bằng chứng riêng cho từng phiên bản 13/14/15. Cubase 10/10.5/11/12 chỉ có Key Commands.xml.
+
+A. Generic Remote.xml — bảng "Standard MIDI" (remotedescription version 1.1): 80 điều khiển (VERIFIED)
+   Nhóm      Số lượng  Status  Kênh MIDI(0-based)  CC(addr)  flags
+   Fader           16  [176]  0..15  [7, 23]  [1, 3]
+   Pan             16  [176]  0..15  [10]  [1]
+   Mute            16  [176]  0..15  [64]  [1]
+   Send-1          16  [176]  0..15  [12]  [1]
+   Send-2          16  [176]  0..15  [13]  [1]
+   Ghi chú: status 176 = Control Change. Mỗi điều khiển i dùng kênh MIDI i-1. Ngoại lệ: "Fader 1" dùng CC 23 và flags 3 (các Fader 2–16 dùng CC 7, flags 1) — lý do UNKNOWN.
+
+B. Phần ánh xạ (entry) — điều khiển -> thiết bị "VST Mixer" (VERIFIED):
+   Fader   -> VST Mixer, tag=1025, flags=0, chỉ số kênh mixer 1..63 (63 mục)
+   Pan     -> VST Mixer, tag=1026, flags=0, chỉ số kênh mixer 0..63 (64 mục)
+   Mute    -> VST Mixer, tag=1027, flags=257, chỉ số kênh mixer 0..63 (64 mục)
+   Send-1  -> VST Mixer, tag=1180190512, flags=0, chỉ số kênh mixer 0..63 (64 mục)
+   Send-2  -> VST Mixer, tag=1180190513, flags=0, chỉ số kênh mixer 0..63 (64 mục)
+   Có 4 bank: VST 1-16, VST 17-32, VST 33-48, VST 49-64 (mỗi bank 16 kênh mixer theo THỨ TỰ/VỊ TRÍ, không theo tên).
+   Ý nghĩa của tag (1027, 1180190512, 1180190513…) và flags (0/3/257): UNKNOWN (không giải mã khi chưa có tài liệu/đối chứng). Tên "Mute"/"Send-1"/"Send-2" là tên điều khiển do tác giả file đặt; tag->tham số Cubase chưa được đối chiếu.
+
+C. Defaults.xml — thiết bị "Generic Remote" (VERIFIED):
+   InputDevice  = Windows MIDI
+   InputPort    = loopMIDI Port
+   OutputDevice = Not Connected
+   OutputPort   = Not Connected
+   RemoteScript = Generic Remote.xml (thư mục người dùng đã được che trong báo cáo này), defaultBank = VST 1-16
+
+D. Port Setup.xml — cổng MIDI Windows có trong danh sách (VERIFIED):
+   O|Windows MIDI|LoopBe Internal MIDI
+   O|Windows MIDI|loopMIDI Port
+   O|Windows MIDI|loopMIDI Port 1
+   I|Windows MIDI|LoopBe Internal MIDI
+   I|Windows MIDI|loopMIDI Port
+   I|Windows MIDI|loopMIDI Port 1
+
+E. Đối chiếu (nhãn):
+   - VERIFIED: trong cấu hình Cubase của tác giả, thiết bị Generic Remote NHẬN MIDI từ cổng "loopMIDI Port" (cùng tên cổng với midi_port trong config.ini tác giả PDL).
+   - VERIFIED: bảng Generic Remote có CC cho Mute (CC 64), Send-1 (CC 12), Send-2 (CC 13), Fader (CC 7/23), Pan (CC 10) theo từng kênh mixer (kênh MIDI 1–16 x 4 bank).
+   - INFERRED: đây là hạ tầng để điều khiển Mute/Send của kênh mixer Cubase bằng MIDI CC từ loopMIDI (có thể dùng cho núm âm lượng PDL). CHƯA có bằng chứng PDL dùng các CC này để chọn preset NORM/LOFI/RAP/REMIX.
+   - UNKNOWN: Generic Remote có phải bảng mặc định của Cubase (có sửa Fader 1 -> CC 23) hay bảng do tác giả tạo; PDL gửi CC nào cho núm Beat/Mic/Delay/Verb; kênh mixer nào ứng với "Vang 1/2/3", "Delay".
+   - Khác với phím F9–F12 (Key Commands + PLE, chọn theo TÊN track/kênh), Generic Remote chọn theo VỊ TRÍ kênh mixer: hai cơ chế khác nhau; không được trộn khi thiết kế (ghi nhận cho giai đoạn sau).

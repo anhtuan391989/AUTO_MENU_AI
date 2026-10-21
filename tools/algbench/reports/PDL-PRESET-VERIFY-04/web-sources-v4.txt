@@ -1,0 +1,19 @@
+PDL-PRESET-VERIFY-04 — Nguồn web đã tra (2026-10-20/21). Tất cả chỉ ở mức PARTIAL: tài liệu/nguồn ngoài, CHƯA kiểm thử trên máy Khói. Không dùng nguồn web nào để suy ra lệnh PDL gửi cho từng preset.
+
+1) Wikipedia "Studio Pro" (lịch sử bản Studio One/Fender Studio Pro) — https://en.wikipedia.org/wiki/Studio_Pro
+   - 5.0.0: 07/07/2020 ... 5.5.2: 05/04/2022 (bản 5 cuối)
+   - 6.0.0: 29/09/2022 ... 6.5.0: 26/09/2023
+   - 7.0.0: 09/10/2024 ... 7.2.3: 29/10/2025
+   - 8.0.0: 13/01/2026, đổi tên thành Fender Studio Pro (trước là Studio One Pro); 8.0.1: 27/01/2026; 8.0.2: 03/03/2026. Nguồn ghi: Fender từng nói Studio One 7 là bản đánh số cuối, nhưng bản 8 vẫn giữ số.
+   (Nguồn thứ cấp.)
+2) Sound on Sound — Fender Studio Pro 8 review — https://soundonsound.com/reviews/fender-studio-pro-8
+   - Trình bày FSP8 là bản đổi thương hiệu của Studio One (Studio One Pro 7 -> Fender Studio Pro 8); "song" nay gọi là "session"; macros vẫn có. Không nêu tương thích file macro/key scheme, không nêu tên file chạy/thư mục cài đặt.
+3) Fender Studio Pro manual (8.1) — Macro Toolbar / Key Commands — xem web-sources.txt của VERIFY-03 (macro gán phím, nút Macro Toolbar, gán MIDI qua device map; không nêu đường dẫn thư mục macro; không nêu tên exe).
+4) Steinberg help (Nuendo/Cubase chung, v12 archive) — Setting up Key Commands for Your Presets —
+   https://archive.steinberg.help/nuendo/v12/en/cubase_nuendo/topics/project_logical_editor/project_logical_editor_for_presets_key_commands_setting_up_t.html
+   - Phải lưu preset PLE trước; mở Edit > Key Commands; mở nhóm "Process Logical Preset"; chọn preset; ô "Type in Key"; bấm Assign; OK. Key command lưu trong Preferences, áp dụng mọi dự án.
+   - LƯU Ý: trong file Key Commands.xml của gói PDL, nhóm tên là "Process Project Logical Editor" (không phải "Process Logical Preset"): tên nhóm hiển thị có thể khác theo phiên bản -> hướng dẫn Khói tìm theo TÊN lệnh (NORMC...) thay vì theo tên nhóm.
+   - Đính chính VERIFY-03: CHECKLIST-C ghi "File > Key Commands"; tài liệu Steinberg ghi "Edit > Key Commands". Hướng dẫn mới dùng Edit > Key Commands, nếu không thấy thì tìm trong menu File (không ghi đè checklist cũ).
+5) Steinberg Helpcenter "Location file paths of presets in Cubase and Nuendo" (bản es) — chỉ nêu preset hãng "C:\Program Files\Steinberg\Cubase 9.5\*\Presets"; KHÔNG nêu đường dẫn Project Logical Editor người dùng hay Key Commands.xml.
+6) Diễn đàn Steinberg "Where are presets stored" — một người dùng nêu thư mục preset "…\AppData\Roaming\Steinberg\Cubase14_64\Presets\" (ghi liền "Cubase14_64"; trong gói PDL tên thư mục là "Cubase 14_64" có dấu cách). Nguồn không chính thức -> INFERRED. Hướng dẫn Khói dùng Tìm kiếm của File Explorer thay vì tin đường dẫn.
+7) Tìm kiếm công khai về "Auto Menu AI S1"/"Tune AI S1"/NTBlog: không tìm thấy tài liệu mô tả cách PDL kích hoạt preset. => không có nguồn ngoài nào xác nhận cơ chế PDL.
