@@ -1,0 +1,11 @@
+PDL-PRESET-VERIFY-06 — Nguồn gốc dữ liệu project FSP8 của Khói
+
+- Đường dẫn trong repo (main): "Project FSF8.zip" (thư mục gốc repo). Commit chứa: 7706f3b5 (đổi tên từ "Projeck FSF8.zip" ở d316705f; thêm lần đầu là "save new 2.1.zip" ở aba98c61, 22/10/2026 ~00:20 giờ VN).
+- git blob sha: 3fbf4f881e6dd9082d2844df1e9cfe910776a66e (khớp với bản tải về)
+- sha256: 6b6487b4dc4c6c5bcf1e09f0dcad30bb6b0e0130d8043f26579a38e609d05764
+- Kích thước: 101586 byte. Bên trong: một file "save new 2.1.song" (zip của session Fender Studio Pro / Studio One).
+- metainfo: Document:Generator = Studio Pro/8.0.0.110141 ; FormatVersion = 9 ; 3 track.
+- Đây là DỮ LIỆU THẬT do Khói đưa lên repo, nhưng là file session (trạng thái lúc lưu), KHÔNG phải KET_QUA_VERIFY04 và KHÔNG phải log PDL/MIDI.
+- Không sửa file; không bỏ bản sao vào gói bàn giao (đã nằm trên main).
+- Đã che: tên tác giả/nghệ sĩ trong metainfo, đường dẫn máy người dùng.
+- Đọc bằng tools/fsp8_session_dump.py (chỉ đọc). Kết quả: evidence/fsp8-session-analysis.txt.

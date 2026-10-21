@@ -1,0 +1,102 @@
+== metainfo (chỉ trường kỹ thuật) ==
+  Document:FormatVersion = 9
+  Document:Generator = Studio Pro/8.0.0.110141
+  Media:SampleRate = 48000
+  Media:Tempo = 120
+  Media:TrackCount = 3
+
+== kênh (lớp trong file = tên thẻ XML) ==
+[AudioInputChannel] 'Input L+R' mute=None gain=+0.0dB -> -  (mixer visible=1 order=0)
+[AudioInputChannel] 'Input L' mute=None gain=+0.0dB -> -  (mixer visible=1 order=1)
+     insert FX01 'NS1 Mono' bypass=None
+     insert FX02 'Mượt 3' bypass=None
+[AudioInputChannel] 'Input R' mute=None gain=+0.0dB -> -  (mixer visible=1 order=2)
+     insert FX01 'NS1 Mono 2' bypass=None
+     insert FX02 'Mượt 4' bypass=None
+[AudioOutputChannel] 'Main' mute=0 gain=+0.0dB -> -  (mixer visible=1 order=11)
+     insert FX06 'SSLComp Stereo 2' bypass=None
+     insert FX03 'Vitamin Stereo 2' bypass=None
+     insert FX04 'L2 Stereo' bypass=None
+     insert FX01 'S1 Imager Stereo' bypass=None
+[AudioTrackChannel] 'Beat' mute=0 gain=+0.0dB -> Main  (mixer visible=1 order=3)
+     insert FX01 'Beat' bypass=None
+     insert FX05 'Audio' bypass=None
+     insert FX04 'SoundShifter Pitch Stereo' bypass=1
+     insert FX03 'Auto-Key 2' bypass=1
+     insert FX02 'Auto-Key' bypass=None
+     insert FX06 'Pro-Q 3 (3)' bypass=None
+[AudioTrackChannel] 'Không Dây' mute=1 gain=+0.0dB -> Group Mic  (mixer visible=1 order=5)
+     insert FX10 'Auto-Tune Vocal Compressor' bypass=1
+     insert FX02 'UADx 610-A Preamp and EQ 3' bypass=1
+     insert FX01 'UADx Century Tube Channel Strip 2' bypass=1
+     insert FX07 'UADx LA-2A Tube Compressor 4' bypass=1
+     insert FX03 'Tube-Tech CL 1B mk II' bypass=1
+     insert FX04 'MannyM EQ Mono 2' bypass=1
+     insert FX11 'Pro-Q 3 (2)' bypass=1
+     insert FX08 'Soften' bypass=1
+     insert FX05 'C4 Mono 2' bypass=1
+     insert FX06 'FabFilter Pro-DS' bypass=1
+     insert FX13 'Fresh Air 2' bypass=1
+     insert FX09 'Auto-Tune Vocal EQ' bypass=1
+     insert FX12 'Auto-Tune Pro 2' bypass=1
+     insert FX14 'AutoTune Advanced 2' bypass=1
+[AudioTrackChannel] 'Mic' mute=1 gain=+0.0dB -> Group Mic  (mixer visible=1 order=4)
+     insert FX12 'PSE Mono' bypass=None
+     insert FX09 'Mic Mod' bypass=None
+     insert FX16 'Auto-Tune Vocal Compressor' bypass=None
+     insert FX10 'UADx 610-A Preamp and EQ 2' bypass=None
+     insert FX02 'UADx Century Tube Channel Strip' bypass=None
+     insert FX14 'CLA-2A Mono' bypass=None
+     insert FX07 'Tube-Tech CL 1B mk II' bypass=None
+     insert FX01 'MannyM EQ Mono 3' bypass=None
+     insert FX03 'Pro-Q 3' bypass=None
+     insert FX15 'FabFilter Pro-Q 3' bypass=None
+     insert FX04 'C4 Mono' bypass=None
+     insert FX08 'FabFilter Pro-DS 2' bypass=None
+     insert FX05 'Fresh Air' bypass=None
+     insert FX06 'Auto-Tune Vocal EQ' bypass=None
+     insert FX17 'RBass Mono' bypass=1
+     insert FX13 'AutoTune Advanced' bypass=None
+[AudioGroupChannel] 'Group Mic' mute=0 gain=+0.0dB -> Main  (mixer visible=1 order=6)
+     insert FX01 'Tạo màu' bypass=None
+     insert FX07 'Silk Vocal Live Mono' bypass=None
+     insert FX09 'Lofi' bypass=1
+     insert FX05 'IL Gross Beat' bypass=1
+     insert FX08 'PanCake2-64bit' bypass=1
+     SEND Send01 -> Verb ngắn level=-0.0dB bypass=1 prefader=0
+     SEND Send02 -> Verb dài level=-0.2dB bypass=1 prefader=0
+     SEND Send03 -> Main level=-20.1dB bypass=1 prefader=0
+     SEND Send04 -> Delay level=-0.0dB bypass=1 prefader=0
+     SEND Send05 -> Verb ngắn · Inserts · 2 - C1 gate Stereo/Stereo SideChain level=+0.1dB bypass=1 prefader=0
+     SEND Send06 -> Verb dài · Inserts · 2 - C1 gate Stereo 2/Stereo SideChain level=+0.1dB bypass=1 prefader=0
+     SEND Send08 -> Com Verb level=-6.0dB bypass=1 prefader=0
+[AudioGroupChannel] 'Verb ngắn' mute=0 gain=-12.0dB -> Main  (mixer visible=0 order=8)
+     insert FX06 'VSS4 HD' bypass=None
+     insert FX03 'C1 gate Stereo' bypass=None
+     insert FX02 'Pro-Q 3 (4)' bypass=None
+[AudioGroupChannel] 'Verb dài' mute=0 gain=-18.0dB -> Main  (mixer visible=0 order=9)
+     insert FX06 'VSS4 HD' bypass=None
+     insert FX03 'C1 gate Stereo 2' bypass=None
+     insert FX01 'Pro-Q 3 (5)' bypass=None
+[AudioGroupChannel] 'Delay' mute=0 gain=-22.0dB -> Main  (mixer visible=0 order=7)
+     insert FX02 'ArtsAcousticReverb' bypass=None
+     insert FX04 'Analog Delay' bypass=None
+     insert FX06 'Pro-Q 3 (6)' bypass=None
+[AudioGroupChannel] 'Com Verb' mute=0 gain=-30.0dB -> Main  (mixer visible=0 order=10)
+     insert FX01 'Compressor' bypass=None
+
+== tracks trong song.xml ==
+  Audio 'Beat' mute=None
+  Audio 'Mic' mute=1
+  Audio 'Không Dây' mute=1
+
+== thiết bị ngoài trong surfacemanager.xml (chỉ tên + có/không gán trong session) ==
+  'New Keyboard': trang gán=0, lệnh/điều khiển được gán=0
+  'loop': trang gán=0, lệnh/điều khiển được gán=0
+  'AUTO MENU AI': trang gán=0, lệnh/điều khiển được gán=0
+  'New Keyboard': trang gán=0, lệnh/điều khiển được gán=0
+  'New Control Surface': trang gán=1, lệnh/điều khiển được gán=0
+  'New Control Surface': trang gán=1, lệnh/điều khiển được gán=0
+  'Control': trang gán=1, lệnh/điều khiển được gán=0
+  'Studio Control': trang gán=0, lệnh/điều khiển được gán=0
+  'New Control Surface': trang gán=0, lệnh/điều khiển được gán=0

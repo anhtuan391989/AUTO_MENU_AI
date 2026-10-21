@@ -1,0 +1,56 @@
+== metainfo (chỉ trường kỹ thuật) ==
+  Document:FormatVersion = 6
+  Document:Generator = Studio One/5.3.0.65413
+  Media:SampleRate = 48000
+  Media:Tempo = 74
+  Media:TrackCount = 5
+
+== kênh (lớp trong file = tên thẻ XML) ==
+[AudioInputChannel] 'Input L+R' mute=None gain=+0.0dB -> -  (mixer visible=1 order=0)
+[AudioInputChannel] 'Input L' mute=None gain=+0.0dB -> -  (mixer visible=1 order=1)
+[AudioInputChannel] 'Input R' mute=None gain=+0.0dB -> -  (mixer visible=1 order=2)
+[AudioOutputChannel] 'Main' mute=0 gain=+0.0dB -> -  (mixer visible=1 order=13)
+     insert FX02 'Vitamin Stereo' bypass=None
+     insert FX01 'L2 Stereo' bypass=None
+     insert FX03 'Sessionwire Send' bypass=None
+[AudioOutputChannel] 'LIVE' mute=0 gain=+0.0dB -> -  (mixer visible=1 order=12)
+[AudioTrackChannel] 'Beat' mute=0 gain=-4.0dB -> Main  (mixer visible=1 order=3)
+     insert FX01 'SoundShifter Pitch Stereo' bypass=None
+     insert FX03 'Auto-Key' bypass=None
+[AudioTrackChannel] 'LOFI' mute=1 gain=+0.0dB -> Master Vocal  (mixer visible=1 order=5)
+     insert FX01 'Pro EQ' bypass=None
+[AudioTrackChannel] 'LIVE' mute=0 gain=+0.0dB -> LIVE  (mixer visible=1 order=7)
+[AudioTrackChannel] 'REMIX' mute=1 gain=+0.0dB -> Master Vocal  (mixer visible=1 order=6)
+     insert FX01 'MetaFlanger Stereo' bypass=None
+[AudioTrackChannel] 'NORM' mute=0 gain=+0.0dB -> Master Vocal  (mixer visible=1 order=4)
+[AudioEffectChannel] 'DELAY' mute=0 gain=-14.0dB -> Main  (mixer visible=1 order=8)
+     insert FX01 'SuperTap 2-Taps Stereo' bypass=None
+[AudioEffectChannel] 'VERB1' mute=0 gain=-12.6dB -> Main  (mixer visible=1 order=9)
+     insert FX02 'ArtsAcousticReverb.64' bypass=None
+     insert FX03 'Pro EQ' bypass=None
+[AudioEffectChannel] 'VERB2' mute=0 gain=-8.0dB -> Main  (mixer visible=1 order=10)
+     insert FX02 'ArtsAcousticReverb.64 (2)' bypass=None
+[AudioGroupChannel] 'Master Vocal' mute=0 gain=+0.0dB -> Main  (mixer visible=1 order=11)
+     insert FX01 'NS1 Mono' bypass=None
+     insert FX02 'Renaissance Axx Mono' bypass=None
+     insert FX03 'Equalizor' bypass=None
+     insert FX04 'DeEsser Mono' bypass=None
+     insert FX05 'Aphex Vintage Exciter Mono' bypass=None
+     insert FX06 'RBass Mono' bypass=None
+     insert FX07 'OneKnob Brighter Mono' bypass=None
+     insert FX08 'Làm đều 2' bypass=None
+     insert FX09 'Auto-Tune Pro 2' bypass=None
+     SEND Send01 -> DELAY level=-5.0dB bypass=0 prefader=0
+     SEND Send02 -> VERB1 level=-5.8dB bypass=0 prefader=0
+     SEND Send03 -> VERB2 level=-6.0dB bypass=0 prefader=0
+
+== tracks trong song.xml ==
+  Audio 'Beat' mute=None
+  Audio 'NORM' mute=None
+  Audio 'LOFI' mute=1
+  Audio 'REMIX' mute=1
+  Audio 'LIVE' mute=None
+
+== thiết bị ngoài trong surfacemanager.xml (chỉ tên + có/không gán trong session) ==
+  'Qwerty Keyboard': trang gán=0, lệnh/điều khiển được gán=0
+  'Qwerty Keyboard': trang gán=0, lệnh/điều khiển được gán=0

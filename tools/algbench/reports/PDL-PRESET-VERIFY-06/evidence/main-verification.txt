@@ -1,0 +1,25 @@
+PDL-PRESET-VERIFY-06 — Kiểm tra GitHub main (2026-10-21, qua GitHub API; không chạy DAW/PDL)
+
+1) HEAD main tại thời điểm kiểm: 7cbb22f43f07eecd0aee3812fa9e2ab064f86155 ("Auto-sync 21/10/2026 16:52:03,50").
+   Các commit gần đây: 7cbb22f4 (16:52) · 37dda065 (16:51) · f60e23ad (16:49) · 56dcbb46 "Add files via upload" (16:22 giờ VN, 09:22 UTC) · 1a38571d (VERIFY-04 mốc cũ).
+   HEAD local của sandbox = 84f5810 (cũ, KHÔNG dùng làm gốc).
+2) VERIFY-05 đã vào main: có PDL-PRESET-VERIFY-05-REPORT.md và thư mục PDL-PRESET-VERIFY-05/ (4 tài liệu .md, evidence/ 4 file, tools/).
+   Git blob hash của report + 4 tài liệu .md TRÙNG KHỚP bản đã bàn giao (1364131e…, 4c92c8f4…, 66c3a1eb…, 4673b018…, 71c5be0f…).
+   Commit 56dcbb46 do Khói upload tay các file phẳng; commit 7cbb22f4 (auto-sync) xoá các bản phẳng đó. Kết quả cuối: chỉ còn cấu trúc thư mục đúng.
+   File ZIP PDL-PRESET-VERIFY-05-HANDOVER.zip KHÔNG thấy trong thư mục VERIFY-05 trên main (nội dung giải nén đã có).
+3) KET_QUA_VERIFY04: KHÔNG tìm thấy.
+   - Đĩa sandbox: không có file/thư mục tên *KET_QUA* hay *VERIFY04*.
+   - Thư mục upload của phiên: chỉ có các attachment .txt (nhiệm vụ), không có zip kết quả.
+   - GitHub: search_code "KET_QUA" và "VERIFY04" → 0 kết quả (lưu ý incomplete_results=true: tìm kiếm code chỉ là tham khảo);
+     liệt kê thư mục gốc, tools/algbench/reports/, PDL TOOL AI S1/, artifacts/ → không có tên khớp.
+   - Google Drive: search_files (title chứa KET_QUA / VERIFY04 / VERIFY-04) → rỗng.
+   - logs/ (188 file *.jsonl, mới nhất 2026-10-19_11-16-33) là nhật ký của ứng dụng Menu, KHÔNG phải log PDL; không có tên chứa pdl/preset/midi/verify.
+   => BLOCKED. Đường dẫn cần bổ sung (đề xuất, trong repo): tools/algbench/reports/PDL-PRESET-VERIFY-04/KET_QUA_VERIFY04/  (thư mục đã giải nén) — hoặc gửi file KET_QUA_VERIFY04.zip trực tiếp vào cuộc trò chuyện.
+4) File bằng chứng đính kèm trong cuộc trò chuyện KHÔNG được coi là đã có trong repo nếu chưa xác nhận trên main (đã xác nhận cho VERIFY-05; chưa có gì cho KET_QUA_VERIFY04).
+5) PDL package trong main: "PDL TOOL AI S1/" (MAPPING.png, 4 .midiremote, 3 .cpr, Tune AI PDL Setup.exe, auto-menu-ai-s1.zip, yt-extension/). Đây là nguồn đã dùng cho VERIFY-03/04/05; không chứa log chạy thật của PDL.
+
+== CẬP NHẬT (kiểm lại 22/10/2026, trước khi đóng gói) ==
+HEAD main mới: 7706f3b5cae92d65f10a9045e4fdb6db47a3110f ("Auto-sync 22/10/2026 0:23:14,79").
+Ba commit mới của Khói: aba98c61 (thêm "save new 2.1.zip" ở gốc repo) → d316705f (đổi tên "Projeck FSF8.zip"; xoá push_github*.bat) → 7706f3b5 (đổi tên "Project FSF8.zip").
+=> KẾT QUẢ ĐÍNH CHÍNH mục 3: KET_QUA_VERIFY04 vẫn KHÔNG có (đã tìm lại: đĩa, Drive, thư mục VERIFY-04 trên main), NHƯNG đã có "Project FSF8.zip" (session FSP8 thật). Xem evidence/fsp8-session-provenance.txt.
+Thư mục tools/algbench/reports/PDL-PRESET-VERIFY-04/ trên main vẫn chỉ gồm tài liệu VERIFY-04 (không có KET_QUA_VERIFY04/).
