@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ControlSurface deviceName="AutoTune_KeyControl" vendorName="PhanMemLive">
+  <Controls>
+    <Control name="AutoTune_Key" type="knob" title="Auto-Tune Key">
+      <MidiMessage status="ControlChange" channel="0" address="14"/>
+    </Control>
+    <Control name="AutoTune_Scale" type="knob" title="Auto-Tune Scale">
+      <MidiMessage status="ControlChange" channel="0" address="15"/>
+    </Control>
+  </Controls>
+  <Mappings>
+    <DeviceMapping device="Auto-Tune Pro">
+      <Placement control="AutoTune_Key" target="Key"/>
+      <Placement control="AutoTune_Scale" target="Scale"/>
+    </DeviceMapping>
+  </Mappings>
+</ControlSurface>

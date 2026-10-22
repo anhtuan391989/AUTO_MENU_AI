@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<api version="1.0">
+  <name>AutoTune_KeyControl_Cubase</name>
+  <flags>0</flags>
+  <bank>
+    <name>Bank 1</name>
+    <entry>
+      <name>AutoTune_Key</name>
+      <midi_type>176</midi_type> <!-- Control Change -->
+      <midi_channel>0</midi_channel> <!-- Channel 1 -->
+      <midi_address>14</midi_address> <!-- CC 14 -->
+      <flags>1</flags>
+    </entry>
+    <entry>
+      <name>AutoTune_Scale</name>
+      <midi_type>176</midi_type> <!-- Control Change -->
+      <midi_channel>0</midi_channel> <!-- Channel 1 -->
+      <midi_address>15</midi_address> <!-- CC 15 -->
+      <flags>1</flags>
+    </entry>
+  </bank>
+  <device>
+    <name>Generic Remote</name>
+    <control>
+      <name>AutoTune_Key</name>
+      <target>Selected Track</target>
+      <command>Auto-Tune Pro / Key</command>
+    </control>
+    <control>
+      <name>AutoTune_Scale</name>
+      <target>Selected Track</target>
+      <command>Auto-Tune Pro / Scale</command>
+    </control>
+  </device>
+</api>
