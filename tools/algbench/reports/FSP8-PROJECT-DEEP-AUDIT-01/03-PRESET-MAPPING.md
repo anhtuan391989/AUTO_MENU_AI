@@ -59,3 +59,9 @@ preset "<tên do Khói đặt>":
 4. REMIX = `IL Gross Beat` (preset Remix) + `PanCake2`? Có cần bật/tắt Send nào?
 5. 7 Send: Send nào là "Reverb", Send nào là "Delay"? `Send03 → Main (−20 dB)` và `Send08 → Com Verb` dùng để làm gì?
 6. Khi bấm preset, FX Auto nên làm gì (khoá 60 s, hay chạy tiếp)?
+
+## F. Ghi nhận từ Khói (22/10) — ảnh hưởng tới mô hình preset
+- `VERIFIED_USER_STATEMENT`: Khói bật/tắt FX bằng **Send của `Group Mic`**, **không** dùng Mute trên các kênh FX.
+- Do đó, trên project này, hành động FX của preset nên là **`send_onoff` (và `send_level` nếu cần) trên `Group Mic`**, không phải `mute` bus kiểu PDL. Hàng `mute` trong bảng mục B chỉ còn là tuỳ chọn phụ, **không dùng mặc định**.
+- T2b cho thấy khi Khói "bật FX" thì **cả 7 Send** đổi cùng lúc, kể cả `Send03` (→Main −20 dB), `Send05/06` (sidechain) và `Send08`. Có thể FX Auto/preset = "bật/tắt nhóm Send" (`INFERRED`) — **Khói cần xác nhận** nhóm Send nào thuộc Reverb, Delay, Com Verb; Send03/05/06 đi kèm nhóm nào.
+- FX Auto hiện có 2 hành động (`FX_SEND_REVERB`, `FX_SEND_DELAY`) đã **đúng hướng** (Send), nhưng hiện không biết ánh xạ từng Send cho hai hành động đó (câu hỏi 5 ở mục E vẫn mở).

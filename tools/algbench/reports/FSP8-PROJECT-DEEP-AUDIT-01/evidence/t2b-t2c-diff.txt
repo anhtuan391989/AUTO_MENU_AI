@@ -1,0 +1,39 @@
+So sánh bộ file sạch Khói gửi 22/10 (o2 = save new 2.1 mới; T2b; T2c) — sinh bằng tools/fsp8_audit_dump.py (chỉ đọc). VERIFIED_FILE.
+Chênh lệch kích thước 'state nhị phân' vài byte của Auto-Tune/IL Gross Beat là nhiễu do DAW ghi lại state, không phải thay đổi cấu hình.
+
+=== o2 so với bản gốc đã dùng ở các tài liệu 01-05: sends/channels/inserts/automation/control-surfaces GIỐNG HỆT
+
+=== Send.bypass thô (XML)
+o2: S1=1 S2=1 S3=1 S4=1 S5=1 S6=1 S8=1 
+t2b: S1=0 S2=0 S3=0 S4=0 S5=0 S6=0 S8=0 
+t2c: S1=0 S2=0 S3=0 S4=0 S5=0 S6=0 S8=0 
+
+=== o2 -> t2b : sends + channels (cột quan trọng)
+3,9c3,9
+<  Group Mic | Send01 | {451C4A28-9957-4C16-83AF-3891FFD97CB0} | {11375C89-070B-441D-B720-29D8CA5FA7C4} / Input | 0.99444568157196044921875 | -0.05 dB | 0 | 1 
+<  Group Mic | Send02 | {66B086E2-A204-4A29-B2A6-3292ED5B86F7} | {94208E07-FC35-434C-A7FE-42DCF8AADD77} / Input | 0.981372654438018798828125 | -0.16 dB | 0 | 1 
+<  Group Mic | Send03 | {CC8EE44F-E652-467C-B3FF-47CEC3E5A21F} | {EECFAF83-D060-424A-8F31-B9DD1235C8A5} / Input | 0.098785646259784698486328125 | -20.11 dB | 0 | 1 
+<  Group Mic | Send04 | {22F658C8-ED5E-4AFB-A4FE-59E88E9A0C17} | {C408C505-BD70-46A1-A963-A9DD3C273747} / Input | 0.997191011905670166015625 | -0.02 dB | 0 | 1 
+<  Group Mic | Send05 | {9D3398A5-91F4-4E75-8086-19BCCD679380} | {9EBD4AFE-0E44-4EBB-B023-6DD014A8A651} / AudioInput01 | 1.008804798126220703125 | +0.08 dB | 0 | 1 
+<  Group Mic | Send06 | {D4BFF2C1-C296-4125-B4FA-84E5444BC268} | {8001CB18-D158-454B-BC40-FADDEC40C88B} / AudioInput01 | 1.01047480106353759765625 | +0.09 dB | 0 | 1 
+<  Group Mic | Send08 |  | {CDB25440-EE1A-4E7D-B755-4D768255B0BC} / Input | 0.5 | -6.02 dB | 0 | 1 
+---
+>  Group Mic | Send01 | {451C4A28-9957-4C16-83AF-3891FFD97CB0} | {11375C89-070B-441D-B720-29D8CA5FA7C4} / Input | 0.99444568157196044921875 | -0.05 dB | 0 | 0 
+>  Group Mic | Send02 | {66B086E2-A204-4A29-B2A6-3292ED5B86F7} | {94208E07-FC35-434C-A7FE-42DCF8AADD77} / Input | 0.981372654438018798828125 | -0.16 dB | 0 | 0 
+>  Group Mic | Send03 | {CC8EE44F-E652-467C-B3FF-47CEC3E5A21F} | {EECFAF83-D060-424A-8F31-B9DD1235C8A5} / Input | 0.098785646259784698486328125 | -20.11 dB | 0 | 0 
+>  Group Mic | Send04 | {22F658C8-ED5E-4AFB-A4FE-59E88E9A0C17} | {C408C505-BD70-46A1-A963-A9DD3C273747} / Input | 0.997191011905670166015625 | -0.02 dB | 0 | 0 
+>  Group Mic | Send05 | {9D3398A5-91F4-4E75-8086-19BCCD679380} | {9EBD4AFE-0E44-4EBB-B023-6DD014A8A651} / AudioInput01 | 1.008804798126220703125 | +0.08 dB | 0 | 0 
+>  Group Mic | Send06 | {D4BFF2C1-C296-4125-B4FA-84E5444BC268} | {8001CB18-D158-454B-BC40-FADDEC40C88B} / AudioInput01 | 1.01047480106353759765625 | +0.09 dB | 0 | 0 
+>  Group Mic | Send08 |  | {CDB25440-EE1A-4E7D-B755-4D768255B0BC} / Input | 0.5 | -6.02 dB | 0 | 0 
+--- control-surfaces
+2a3
+> | AUTO MENU AI | 0 | 0 |
+--- bypass của insert: không khác
+=== t2b -> t2c : sends + channels (cột quan trọng)
+13c13
+<  AudioGroupChannel | Delay | Channel04 | 0 | 0 | 0.079432822763919830322265625 | -22.00 dB | 0.5 
+---
+>  AudioGroupChannel | Delay | Channel04 | 1 | 0 | 0.079432822763919830322265625 | -22.00 dB | 0.5 
+--- control-surfaces
+--- bypass của insert: không khác
+=== T2 so với T2c: T2 = T2c + xoá bus Com Verb/Send08 + Verb ngắn -16 dB + Beat/L4 bypass + 12 insert Không Dây bypass->0 + bỏ làn Volume của Mic

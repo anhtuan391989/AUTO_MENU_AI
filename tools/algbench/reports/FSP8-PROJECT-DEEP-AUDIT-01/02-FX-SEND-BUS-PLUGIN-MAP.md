@@ -76,3 +76,9 @@ Hệ quả quan trọng:
 | "Lofi" | bypass insert `Lofi` (Pro-Q 3) trên `Group Mic` | cơ chế bypass insert (key/MIDI/automation) |
 | "Gross Beat" | bypass insert `IL Gross Beat` (preset `Remix`) | như trên; VST2 |
 | "PanCake2" | bypass insert `PanCake2-64bit` | như trên; VST2 |
+
+## E. Cập nhật 22/10 (T2b/T2c — xem `06`)
+- Khói: **bật/tắt FX bằng Send của `Group Mic`, không dùng Mute trên các kênh FX** (`VERIFIED_USER_STATEMENT`).
+- T2b: cả 7 Send đổi `bypass` 1→0, `level` giữ nguyên, không trường nào khác (ngoài hiện bus) đổi (`VERIFIED_FILE`). Chiều 0=bật: `INFERRED` (chờ Khói xác nhận).
+- T2c: chỉ `Delay.mute` 0→1; Send không đổi ⇒ mute bus và Send On/Off là hai trường riêng (`VERIFIED_FILE`). Mute bus **không** phải cách Khói bật/tắt FX.
+- Bảng "On/Off của Send" ở mục A (kết luận `INFERRED`) vẫn đúng nhưng **độ tin cậy cao hơn**; chưa `VERIFIED_RUNTIME`.

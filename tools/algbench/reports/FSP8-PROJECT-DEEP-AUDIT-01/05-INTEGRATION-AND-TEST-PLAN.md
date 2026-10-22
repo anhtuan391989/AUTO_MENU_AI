@@ -64,3 +64,8 @@ Mọi bước "Khói làm" chỉ trên **bản sao** `TEST_PRESET`, đã che d�
 | T9 | FX Auto thời gian | Khói: bật/tắt nhạc 3 lần + bấm tay 1 lần; gửi `logs/*.jsonl` | log | **Q4**: đo ≤1 s / 1 s / 60 s |
 | T10 | Log PDL thật | theo `PDL-PRESET-VERIFY-06/02` | log | **Q6** |
 Chỉ khi T2–T4 hoàn tất mới được coi trường On/Off/Mute/bypass là `VERIFIED_RUNTIME`; T6–T8 quyết định cơ chế gửi nào dùng được.
+
+## D. Cập nhật 22/10 theo lời Khói và T2b/T2c
+- Khói bật/tắt FX bằng **Send trên `Group Mic`, không dùng Mute kênh FX** (`VERIFIED_USER_STATEMENT`) ⇒ trong driver `fsp8`, các lệnh FX mặc định là **`send_onoff` trên `Group Mic`**; hàng "Mute bus (mới)" ở mục A1 là **tuỳ chọn phụ**, không dùng cho preset/FX Auto mặc định.
+- T2 đã nhận (không sạch); **T2b/T2c đã nhận (sạch)**: trường điều khiển = `Send.bypass` (chiều 0=bật `INFERRED`), cả 7 Send đổi cùng lúc; mute bus độc lập (`06`). **T2 = xong một phần**, còn: xác nhận chiều, T2d/T2e (từng Send riêng), T3 (mức Send), T4 (bypass insert), T6–T10.
+- Vẫn **chưa** biết cách gửi lệnh Send On/Off từ ngoài tới FSP8 (không có macro/phím/MIDI mapping trong cả 3 file).

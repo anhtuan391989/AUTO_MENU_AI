@@ -36,3 +36,28 @@ Yêu cầu T2: bản sao của `save new 2.1`, chỉ đổi Send04, lưu. File n
 ## 5. Cần từ Khói (một dữ kiện, rồi một test lại nếu muốn bằng chứng sạch)
 1. **Dữ kiện chốt:** lúc lưu `T2`, trên giao diện FSP8, các Send `Send01–Send06` của `Group Mic` đang **Bật** hay **Tắt**? (Nếu "tất cả đang Bật" ⇒ ghi nhận `VERIFIED_USER_STATEMENT` + `VERIFIED_FILE` rằng `bypass=0` ↔ Send bật; vẫn không tính là `VERIFIED_RUNTIME`.)
 2. **Test sạch (tuỳ chọn, chắc chắn hơn):** mở lại **bản sao nguyên gốc** `save new 2.1.song` → **không đổi gì khác** → bật Send04 **một lần** → Save As `T2b.song` → gửi. Sau đó (cùng cách) tắt lại và lưu `T2c.song`. Claude sẽ so từng cặp.
+
+## 6. Bổ sung 22/10 16:00 — bộ file sạch `save new 2.1` (mới), `T2b`, `T2c` (`VERIFIED_FILE`)
+Bằng chứng: `evidence/t2b-t2c-diff.txt`. Chênh lệch vài byte "state nhị phân" của Auto-Tune/IL Gross Beat là nhiễu do DAW ghi lại state.
+| So sánh | Khác biệt thật |
+|---|---|
+| `save new 2.1` (mới) ↔ bản gốc đã dùng ở `01`–`05` | **Giống hệt** (Sends, kênh, insert, automation, External Device) |
+| `save new 2.1` → **T2b** | **7/7 Send** (Send01–06 **và Send08**) `bypass` **1 → 0**; `level`/`prefader`/`pan` **không đổi**; 4 bus chuyển từ ẩn sang hiện trong mixer; thêm 1 khai báo External Device `AUTO MENU AI` rỗng. **Không** có mute bus, bypass insert hay gain nào đổi |
+| T2b → **T2c** | **Chỉ** `Delay` (bus) `mute` **0 → 1**. 7 Send vẫn `bypass=0`, `level` không đổi |
+| T2 (file trước) ↔ T2c | T2 = T2c **+** xoá bus `Com Verb`/`Send08`, `Verb ngắn` −16 dB, `Beat/L4` bypass, 12 insert `Không Dây` bypass→0, bỏ làn Volume của `Mic` ⇒ T2 là bản đang làm việc, không phải test sạch. Phần Send/`Delay mute` của T2 **trùng** T2c |
+| Macro / phím / MIDI mapping | **Không có** ở cả 3 file (quét y hệt) |
+
+### Khói đã nói (`VERIFIED_USER_STATEMENT`, 22/10)
+> Khói thường bật/tắt FX bằng **Send của `Group Mic`**, **không** dùng **Mute (monitor) trên các kênh FX**.
+
+### Kết luận cập nhật
+- **Trường nào biểu thị "bật/tắt FX" khi Khói thao tác:** trong T2b, thay đổi cấu hình **duy nhất** (ngoài việc hiện bus) là `Send.bypass` của cả 7 Send ⇒ đây là trường tương ứng với thao tác của Khói. Mạnh hơn kết luận trước (`VERIFIED_FILE` cho "trường nào đổi"; hai file độc lập T2 và T2b cho cùng kiểu thay đổi).
+- **Chiều của giá trị:** `bypass=1` = Send **tắt**, `0` = **bật** vẫn là `INFERRED` (rất khớp nhưng cần Khói xác nhận trạng thái hiển thị của `save new 2.1` và `T2b`).
+- **7 Send đổi cùng lúc** (kể cả `Send03`→Main, sidechain `Send05/06`, `Send08`) ⇒ test này **chưa tách riêng từng Send**; "bật/tắt **một** Send độc lập" chưa kiểm (T2d).
+- **Bus mute độc lập với Send:** T2c đổi `mute` bus `Delay` mà không đụng `Send.bypass` nào (`VERIFIED_FILE`). Nhưng cách Khói **dùng thật** là Send, nên **Send On/Off trên `Group Mic` là đích điều khiển mặc định của FX**; Mute bus chỉ là tuỳ chọn phụ.
+- **Hệ quả cho preset:** PDL (Studio One 5) dùng Mute trên track/FX channel; Khói trên FSP8 dùng Send ⇒ **không sao chép kiểu "mute FX channel" của PDL sang FSP8**. Preset NORM/LOFI/RAP/REMIX trên project này nên được mô tả bằng bước `send_onoff` (và `plugin_bypass`), không phải `mute` bus.
+- Điều khiển ngoài: vẫn `UNKNOWN` (không có macro/phím/MIDI mapping nào).
+
+### Còn cần từ Khói
+1. Xác nhận: trong `save new 2.1` các Send đang **Tắt**, trong `T2b` đang **Bật**? (ghi nhận hướng của `bypass`)
+2. **T2d** (nếu muốn tách riêng từng Send): từ `save new 2.1`, chỉ bật **Send04** → Save As `T2d.song`; sau đó chỉ bật thêm Send01 → `T2e.song`.

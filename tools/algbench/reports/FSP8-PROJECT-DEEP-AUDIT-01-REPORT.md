@@ -2,7 +2,7 @@
 
 **Trạng thái cuối: `BLOCKED_USER_TEST`** — đã đọc xong toàn bộ file project (chỉ đọc), nhưng **chưa có bất kỳ test chạy thật nào** với FSP8, nên **chưa được tuyên bố hoàn tất tích hợp**. Không có mục nào đạt `VERIFIED_RUNTIME`.
 
-**Cập nhật (22/10, sau khi nhận `T2.song`):** file T2 **không phải bản chỉ đổi Send04** (≥10 thay đổi khác, gồm xoá bus `Com Verb`/`Send08`) nên chưa chốt được ý nghĩa `bypass`; dấu hiệu chung vẫn **khớp** giả thuyết `bypass=1`=Send tắt (6 Send cùng 1→0, `level` không đổi) → vẫn `INFERRED`. Chi tiết: `FSP8-PROJECT-DEEP-AUDIT-01/06-T2-RESULT.md`. Cần Khói trả lời 1 câu ở mục 5.
+**Cập nhật (22/10):** `T2.song` là bản đang làm việc (không sạch); bộ file sạch `save new 2.1`/`T2b`/`T2c` cho thấy khi Khói bật FX, **7/7 Send** của `Group Mic` đổi `bypass` 1→0 (`level` không đổi), còn mute bus `Delay` là trường riêng. **Khói cho biết: thường bật/tắt FX bằng Send của `Group Mic`, không dùng Mute trên các kênh FX** (`VERIFIED_USER_STATEMENT`) ⇒ đích điều khiển FX mặc định = Send On/Off, không phải mute bus. Chiều `0=bật` vẫn `INFERRED`. Chi tiết: `FSP8-PROJECT-DEEP-AUDIT-01/06-T2-RESULT.md`.
 
 Task chỉ phân tích/báo cáo. Không viết code, không sửa mã nguồn AUTO_MENU_AI, không sửa/lưu project FSP8, không tạo mapping MIDI/preset/macro, không commit/push.
 
@@ -36,9 +36,9 @@ Task chỉ phân tích/báo cáo. Không viết code, không sửa mã nguồn A
 ## 3. Trả lời 8 câu hỏi
 | # | Câu hỏi | Trả lời | Nhãn |
 |---|---|---|---|
-| 1 | Cơ chế bật/tắt từng Send của `Group Mic`? | Trường lưu duy nhất là `Send.bypass` (gốc =1 cho cả 7; trong T2 cả 6 Send còn lại =0, `level` không đổi). Nghĩa On/Off của nó **khớp giả thuyết nhưng chưa chứng minh** (T2 lẫn nhiều thay đổi khác). Cơ chế **điều khiển từ ngoài** (macro/phím/MIDI/click) **chưa biết**. Cần test T2, T6–T8 | `INFERRED` / `UNKNOWN` |
-| 2 | Đổi từng mức Send mà không ảnh hưởng Mute bus / bypass plugin? | Trong file, `Send.level`, `AudioGroupChannel.mute`, `Insert.bypass` là **ba trường riêng** nên về mặt dữ liệu độc lập. Có điều khiển riêng từng cái từ ngoài được không: chưa biết (T3, T4, T7) | `VERIFIED_FILE` (tách riêng) / `UNKNOWN` (điều khiển) |
-| 3 | Bật/tắt bus `Verb ngắn`, `Verb dài`, `Delay`, `Com Verb`? | Mỗi bus có trường `mute` riêng (đang 0). Macro `Mute` của PDL đã gặp ở track/FX channel, **chưa chứng minh áp dụng cho bus `AudioGroupChannel`**. Bus bị ẩn nên click toạ độ mong manh | `UNKNOWN` (T4, T6) |
+| 1 | Cơ chế bật/tắt từng Send của `Group Mic`? | Trường đổi khi Khói bật/tắt FX là `Send.bypass` (gốc =1 cả 7; T2b/T2 =0; `level` không đổi) — `VERIFIED_FILE`. Khói xác nhận dùng Send của `Group Mic` để bật/tắt FX — `VERIFIED_USER_STATEMENT`. Chiều `0=bật` `INFERRED`; bật **riêng một** Send chưa kiểm (7 Send đổi cùng lúc). **Cách gửi lệnh từ ngoài vào FSP8 vẫn chưa biết** | `VERIFIED_FILE` / `VERIFIED_USER_STATEMENT` / `INFERRED` / `UNKNOWN` |
+| 2 | Đổi từng mức Send mà không ảnh hưởng Mute bus / bypass plugin? | Trong file, `Send.level`, `AudioGroupChannel.mute`, `Insert.bypass` là ba trường riêng: T2b đổi `bypass` mà `level` giữ nguyên; T2c đổi `mute` bus mà Send không đổi — `VERIFIED_FILE`. Điều khiển riêng từng cái từ ngoài: chưa biết (T3, T4, T7) | `VERIFIED_FILE` (tách riêng) / `UNKNOWN` (điều khiển) |
+| 3 | Bật/tắt bus `Verb ngắn`, `Verb dài`, `Delay`, `Com Verb`? | Mỗi bus có `mute` riêng (T2c: `Delay` 0→1 mà Send không đổi — `VERIFIED_FILE`). **Khói không dùng Mute kênh FX để bật/tắt FX** (`VERIFIED_USER_STATEMENT`) ⇒ Mute bus chỉ là tuỳ chọn phụ; cách điều khiển từ ngoài và việc macro `Mute` của PDL có áp dụng cho bus `AudioGroupChannel` hay không: `UNKNOWN` (T4, T6). Bus nay hiện trong mixer ở T2b/T2c, nên click toạ độ có thể khả thi hơn nhưng vẫn mong manh | `VERIFIED_FILE` / `VERIFIED_USER_STATEMENT` / `UNKNOWN` |
 | 4 | FX Auto bật sau 1 s có nhạc, tắt sau 1 s im, giữ thủ công 1 phút? | Mã Menu: xác nhận nhạc 500 ms (≈0,5–0,7 s), im lặng 1000 ms (≈1,0–1,15 s), giữ thủ công 60 000 ms. **Logic thời gian có trong mã nhưng chưa đo thật**, và quan trọng hơn **chưa có đường gửi Send tới FSP8** (log toàn `NOT_CONFIGURED`) | mã: `VERIFIED_FILE`; hành vi: `UNKNOWN` (T9) |
 | 5 | Hành động NORM/LOFI/RAP/REMIX trên project này; cái gì chưa xác định? | Xem `03`. Ứng viên: LOFI = bypass `Lofi`(Pro-Q 3); REMIX = bypass `IL Gross Beat`(+`PanCake2`?); RAP = giảm reverb ở bus nào đó (không đoán); NORM = ? **Không xác định được** nếu Khói chưa định nghĩa; tên plugin không phải bằng chứng | `INFERRED` / `UNKNOWN` |
 | 6 | Bằng chứng PDL kích hoạt preset thế nào? | **Không có** trong session FSP8. PDL: chưa có log thật (VERIFY-06). Cần dữ liệu ở `04` mục E và `PDL-PRESET-VERIFY-06/02` | `UNKNOWN` |
@@ -47,7 +47,7 @@ Task chỉ phân tích/báo cáo. Không viết code, không sửa mã nguồn A
 
 ## 4. File đã tạo (tất cả mới, nằm trong `tools/algbench/reports/`)
 - `FSP8-PROJECT-DEEP-AUDIT-01-REPORT.md` (file này)
-- `FSP8-PROJECT-DEEP-AUDIT-01/01-TRACK-ROUTING-MAP.md`, `02-FX-SEND-BUS-PLUGIN-MAP.md`, `03-PRESET-MAPPING.md`, `04-MIDI-EXTERNAL-CONTROL-EVIDENCE.md`, `05-INTEGRATION-AND-TEST-PLAN.md`, `06-T2-RESULT.md` (kết quả T2)
+- `FSP8-PROJECT-DEEP-AUDIT-01/01-TRACK-ROUTING-MAP.md`, `02-FX-SEND-BUS-PLUGIN-MAP.md`, `03-PRESET-MAPPING.md`, `04-MIDI-EXTERNAL-CONTROL-EVIDENCE.md`, `05-INTEGRATION-AND-TEST-PLAN.md`, `06-T2-RESULT.md` (kết quả T2/T2b/T2c; evidence `t2-diff.txt`, `t2b-t2c-diff.txt`)
 - `FSP8-PROJECT-DEEP-AUDIT-01/evidence/` (bảng trích từ session; machineID và đường dẫn riêng đã che)
 - `FSP8-PROJECT-DEEP-AUDIT-01/tools/fsp8_audit_dump.py` (script **chỉ đọc**, chạy lại được: `python3 -I fsp8_audit_dump.py <thư_mục_đã_giải_nén> <thư_mục_ra>`)
 - `FSP8-PROJECT-DEEP-AUDIT-01/FSP8-PROJECT-DEEP-AUDIT-01-HANDOVER.zip`
@@ -55,7 +55,7 @@ Task chỉ phân tích/báo cáo. Không viết code, không sửa mã nguồn A
 Không bao gồm `Project FSF8.zip` trong gói bàn giao (đã có sẵn trên `main`).
 
 ## 5. Việc Khói làm tiếp (theo thứ tự ưu tiên; chỉ trên **bản sao** project, che dữ liệu riêng)
-1. **T2 (đã nhận, chưa sạch):** Khói cho biết lúc lưu `T2`, `Send01–06` trên giao diện đang **Bật hay Tắt**? Nếu muốn chắc: mở lại bản sao nguyên gốc `save new 2.1`, không đổi gì khác, bật Send04 một lần → Save As `T2b.song` → gửi (rồi tắt lại → `T2c.song`).
+1. **T2b/T2c (đã nhận, sạch):** Khói xác nhận: trong `save new 2.1` các Send đang **Tắt** và trong `T2b` đang **Bật**? Nếu muốn tách riêng từng Send: từ `save new 2.1` chỉ bật **Send04** → Save As `T2d.song` (rồi bật thêm Send01 → `T2e.song`).
 2. **T3/T4:** đổi riêng mức Send04; mute bus `Delay`; bypass `Lofi` — mỗi việc lưu 1 file `.song`.
 3. **T6/T7:** chụp Macro Organizer (tìm lệnh `Send`, `Bypass`, `Mute`), panel External (`loop`, `AUTO MENU AI`), Keyboard Shortcuts.
 4. **T0/T1:** tên `.exe` + phiên bản FSP8; ảnh Console (7 Send, 4 bus, 3 insert).
@@ -69,6 +69,9 @@ Không bao gồm `Project FSF8.zip` trong gói bàn giao (đã có sẵn trên `
 - Menu chưa có action cho Mute bus, mức Send, bypass insert, REMIX.
 - Sidechain Send05/06 cấp cho `C1 gate` của reverb: nếu chỉ bật Send01/02 mà không bật 05/06, gate có thể không mở — chưa biết (T5).
 
+## 6b. Ghi nhận cách làm việc của Khói (22/10, `VERIFIED_USER_STATEMENT`)
+Khói thường bật/tắt FX bằng **Send của `Group Mic`**, **không** dùng Mute (monitor) trên các kênh FX. Thiết kế driver/preset FSP8 lấy **Send On/Off trên `Group Mic`** làm đích điều khiển FX mặc định; Mute bus chỉ là tuỳ chọn phụ.
+
 ## 7. Xác nhận không thay đổi
 - Mã nguồn AUTO_MENU_AI, giao diện, HTML: **không đổi**.
 - Project FSP8, cấu hình DAW, macro, phím tắt, MIDI mapping: **không đổi, không lưu**.
@@ -79,7 +82,7 @@ Không bao gồm `Project FSF8.zip` trong gói bàn giao (đã có sẵn trên `
 
 **Claude A : Task A: FSP8-PROJECT-DEEP-AUDIT-01**
 
-1. **File nào đã sửa.** Không sửa file nào có sẵn. Chỉ **tạo mới**: báo cáo này, 5 tài liệu `01`–`05`, thư mục `evidence/`, script đọc-chỉ `tools/fsp8_audit_dump.py`, ZIP bàn giao.
+1. **File nào đã sửa.** Không sửa mã nguồn/project/file có sẵn của repo (chỉ cập nhật các tài liệu của chính task này sau khi nhận T2/T2b/T2c). Chỉ **tạo mới**: báo cáo này, 5 tài liệu `01`–`05`, thư mục `evidence/`, script đọc-chỉ `tools/fsp8_audit_dump.py`, ZIP bàn giao.
 2. **Vì sao sửa.** Để có bản đồ kỹ thuật chính xác (track/bus/Send/plugin/điều khiển ngoài) của project FSP8 thật, làm cơ sở cho Menu điều khiển preset/Mute/FX Send/plugin/volume sau này, và chỉ rõ cái nào đã có bằng chứng, cái nào thiếu, cần test gì.
 3. **Có ảnh hưởng module nào không.** Không. Không đụng mã Menu, FX Auto, UI, MIDI mapping hay DAW.
-4. **Còn việc gì chưa làm.** Toàn bộ test chạy thật (T0–T10; T2 đã nhận nhưng chưa sạch — xem `06`): ý nghĩa `Send.bypass` (cần câu trả lời + T2b/T2c), cơ chế điều khiển Send/bus/insert, tên `.exe`, đo thời gian FX Auto, log PDL thật, định nghĩa 4 preset trên project này, `KET_QUA_VERIFY04`. Chưa được viết code. Trạng thái: **`BLOCKED_USER_TEST`**.
+4. **Còn việc gì chưa làm.** Toàn bộ test chạy thật (T0–T10; T2b/T2c đã nhận và phân tích — xem `06`): xác nhận chiều `bypass` (0=bật?), bật riêng từng Send (T2d/T2e), cơ chế điều khiển Send/bus/insert, tên `.exe`, đo thời gian FX Auto, log PDL thật, định nghĩa 4 preset trên project này, `KET_QUA_VERIFY04`. Chưa được viết code. Trạng thái: **`BLOCKED_USER_TEST`**.
