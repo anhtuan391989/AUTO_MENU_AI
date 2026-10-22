@@ -1,0 +1,37 @@
+Tham số ĐỌC ĐƯỢC của insert native (trích nguyên văn từ file preset trong session; trạng thái lúc lưu)
+
+== Delay/2 - Analog Delay.fxpreset
+<?xml version="1.0" encoding="UTF-8"?>
+<AudioEffectPreset cid="{68B3EB20-DEDC-4809-B23C-BE5BACA5413C}" version="1" algorithmVersion="0">
+	<Attributes x:id="ParameterData" mix="100" sync="1" beatsnu="0.24999998509883880615234375" time="0.3458856046199798583984375"
+	            speed="1" inertia="0.001000000047497451305389404296875" feedback="30.0000019073486328125"
+	            feedbackboost="1" width="80" pingpongmode="1" pingpongswap="0" saturation="10"
+	            filterreso="1" lfosync="1" lfobeatsnu="3.9999997615814208984375" lfotime="0.0306753031909465789794921875"
+	            wave="0" lfowidth="0.204803466796875" locut="600" hicut="5000"/>
+	<Attributes x:id="ComponentData" isLockMix="0"/>
+</AudioEffectPreset>
+
+== Com Verb/1 - Compressor.fxpreset
+<?xml version="1.0" encoding="UTF-8"?>
+<AudioEffectPreset cid="{54F19B72-352C-4AA5-A2AF-67F86F30D6BE}" version="1" algorithmVersion="1">
+	<Attributes x:id="ParameterData" linked="1" lookAhead="1" resetmin="0" mix="1" ratio="0.66666662693023681640625"
+	            threshold="-17.1200008392333984375" knee="5.104500293731689453125" auto="0"
+	            gain="2.2225081920623779296875" ingain="1" autospeed="1" attack="0.015000001527369022369384765625"
+	            release="0.12000004947185516357421875" adaptive="0" internalsidechain="0" sidechainlisten="0"
+	            sidechainfreqlow="20" sidechainfreqhigh="16000" swapfreqs="0"/>
+</AudioEffectPreset>
+
+== Group Mic/1 - Console Shaper.dsppreset
+{
+	"cid": "{64C0D0A1-F21A-42AF-8E30-40FF97591363}",
+	"classname": "Console Shaper",
+	"parameters": 
+	{
+		"preampOn": 1.0,
+		"drive": 0.0,
+		"noiseOn": 0.0,
+		"noise": 0.0,
+		"crosstalkOn": 0.0,
+		"crosstalk": 0.0
+	}
+}

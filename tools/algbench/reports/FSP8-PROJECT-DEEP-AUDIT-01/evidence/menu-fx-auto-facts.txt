@@ -1,0 +1,15 @@
+Sự thật về Menu hiện tại (đọc mã trên main HEAD 29d0f780; VERIFIED_FILE; KHÔNG phải kiểm thử chạy)
+
+ui/js/audioSource.js (FX_AUTO_DEFAULTS, ~dòng 396):
+  onDbfs -45 · offDbfs -52 · confirmMusicMs 500 · confirmMusicRatio 0.8 · confirmSilenceMs 1000 · manualHoldMs 60000 ·
+  silenceMaxAboveRatio 0.02 · staleMs 2000 · retryMs 5000 · maxRetries 2
+ui/js/renderer.js (createFxAutoWiring, dòng ~573-656):
+  - Hành động gửi: FX_SEND_REVERB, FX_SEND_DELAY (legacy MONITOR_FX); tick 100 ms.
+  - Chế độ MIDI "toggle" (mặc định: gửi đúng message như bấm tay => ĐẢO trạng thái DAW) hoặc "absolute" (CC: BẬT = value đã map, TẮT = 0).
+  - Không có phản hồi từ DAW: kết quả tối đa là "đã GỬI, chưa xác nhận" (SEND_SENT_UNCONFIRMED trong comment).
+  - Bấm tay: Auto nhường 60 s (manualHoldMs), hết hạn thì tiếp quản theo trạng thái nhạc hiện tại.
+ui/js/actionRegistry.js:
+  - ACTIONS có PRESET_NORM/PRESET_LOFI/PRESET_RAP (dòng 47-49), KHÔNG có PRESET_REMIX; FX_SEND_REVERB/FX_SEND_DELAY (dòng 76-77).
+  - getMidiOutMapping(action) (dòng 123), getMouseCoordinate(action) (dòng 140); executeAction (dòng ~186-245) trả NOT_CONFIGURED / NO_DEVICE / MOUSE_DISABLED / ERROR.
+  - Không có action Mute bus, Send từng bus, bypass plugin.
+Suy ra thời gian (theo comment trong mã, chưa đo): bật ≈ 0,5–0,7 s sau khi có nhạc; tắt ≈ 1,0–1,15 s sau khi im lặng.

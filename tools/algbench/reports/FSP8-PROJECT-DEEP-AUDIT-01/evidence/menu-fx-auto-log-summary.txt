@@ -1,0 +1,12 @@
+Tóm tắt log Menu (logs/*.jsonl trên main HEAD 29d0f780) — CHỈ 6 file mới nhất đã đọc (2026-10-18_16-14-02 … 2026-10-19_11-16-33); 182 file cũ hơn CHƯA đọc.
+Đây là log do Menu ghi trên máy Khói (hành vi của MENU). Nó KHÔNG chứng minh DAW đã nhận hay đổi gì. Nhãn: VERIFIED_FILE (nội dung log).
+
+Số sự kiện: {'FX_AUTO': 34, 'FX_AUTO_DIAG': 1}
+actionState: {'IDLE': 14, 'FX_ACTION_FAILED': 8, 'MANUAL_OVERRIDE': 12}
+lastResult (ok, reason): {"(False, 'NOT_CONFIGURED')": 14}
+
+Kết luận từ log:
+- Mọi lần Menu gọi lệnh Send trong các log này đều trả ok=false, reason=NOT_CONFIGURED => lúc đó Setup của Menu CHƯA có MIDI mapping/toạ độ cho FX_SEND_REVERB/FX_SEND_DELAY: Menu KHÔNG gửi lệnh nào tới DAW.
+- Không có lần nào ok=true => chưa có bằng chứng log nào về một lệnh Send đã gửi đi.
+- Log chỉ ghi thời điểm CHUYỂN trạng thái; không đủ để đo độ trễ bật/tắt (≤1 s) hay thời gian khoá thủ công (60 s). Cần test T9.
+- Có sự kiện MANUAL_OVERRIDE (bấm tay) trong log, nhưng độ dài khoá không đo được từ các dòng này.

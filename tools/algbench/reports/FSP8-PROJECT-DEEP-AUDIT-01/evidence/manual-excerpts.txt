@@ -1,0 +1,15 @@
+Trích dẫn tài liệu hãng (PARTIAL — tài liệu, KHÔNG phải kiểm thử trên máy Khói). Truy cập 2026-10-22.
+
+1) The Console — https://fenderstudiopromanual.fender.com/en/Content/Mixing_Topics/The_Console.htm
+   - "Prefader buttons and Send Level controls are provided for each Channel."
+   - "When enabled, click the + sign to select an existing destination Channel, add a new one, or make a Sidechain connection."
+   - "Audio can be routed from any Channel through a Send to an FX Channel,"
+   - "Although less common, it is also possible to use Sends to route audio to Bus Channels."
+   - Tài liệu KHÔNG mô tả enable/disable/bypass của Send; KHÔNG nói gì về automation/MIDI/điều khiển từ xa của Send.
+   => Ý nghĩa `bypass` của Send không có trong tài liệu: giữ INFERRED.
+2) Automation Types — https://fenderstudiopromanual.fender.com/en/Content/Automation_Topics/Automation_Types.htm
+   - "Nearly every parameter in Fender Studio Pro can be automated."
+   - "Modify any parameter for an Track or its Inserts or Sends" (chỉ nói thêm automation qua cửa sổ Software Parameter; không liệt kê Send On/Off).
+   => Khả năng automation Send On/Off: chưa xác nhận (cần test).
+3) Macro Toolbar / Key Commands (đã tra ở VERIFY-03/04) — macro gán phím qua Macro Organizer/Keyboard Shortcuts; gán MIDI qua panel External.
+Không tìm thấy trong tài liệu: danh sách lệnh macro có "Send" hay không; cách map CC tới Send On/Off.
