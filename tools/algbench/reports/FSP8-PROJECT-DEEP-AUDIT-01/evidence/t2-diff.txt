@@ -1,0 +1,49 @@
+So sánh gốc (save new 2.1) ↔ T2.song — sinh bằng tools/fsp8_audit_dump.py (chỉ đọc). Nhãn: VERIFIED_FILE.
+
+=== diff sends.md (< gốc, > T2)
+3,9c3,8
+< | Group Mic | Send01 | {451C4A28-9957-4C16-83AF-3891FFD97CB0} | Verb ngắn | {11375C89-070B-441D-B720-29D8CA5FA7C4} / Input | 0.99444568157196044921875 | -0.05 dB | 0 | 1 | 0.4900000095367431640625 | 1 |
+< | Group Mic | Send02 | {66B086E2-A204-4A29-B2A6-3292ED5B86F7} | Verb dài | {94208E07-FC35-434C-A7FE-42DCF8AADD77} / Input | 0.981372654438018798828125 | -0.16 dB | 0 | 1 | 0.4900000095367431640625 | 1 |
+< | Group Mic | Send03 | {CC8EE44F-E652-467C-B3FF-47CEC3E5A21F} | Main | {EECFAF83-D060-424A-8F31-B9DD1235C8A5} / Input | 0.098785646259784698486328125 | -20.11 dB | 0 | 1 | 0.4900000095367431640625 | 1 |
+< | Group Mic | Send04 | {22F658C8-ED5E-4AFB-A4FE-59E88E9A0C17} | Delay | {C408C505-BD70-46A1-A963-A9DD3C273747} / Input | 0.997191011905670166015625 | -0.02 dB | 0 | 1 | 0.4900000095367431640625 | 1 |
+< | Group Mic | Send05 | {9D3398A5-91F4-4E75-8086-19BCCD679380} | Verb ngắn · Inserts · 2 - C1 gate Stereo/Stereo SideChain | {9EBD4AFE-0E44-4EBB-B023-6DD014A8A651} / AudioInput01 | 1.008804798126220703125 | +0.08 dB | 0 | 1 | 0.4900000095367431640625 | 1 
+< | Group Mic | Send06 | {D4BFF2C1-C296-4125-B4FA-84E5444BC268} | Verb dài · Inserts · 2 - C1 gate Stereo 2/Stereo SideChain | {8001CB18-D158-454B-BC40-FADDEC40C88B} / AudioInput01 | 1.01047480106353759765625 | +0.09 dB | 0 | 1 | 0.4900000095367431640625 | 
+< | Group Mic | Send08 |  | Com Verb | {CDB25440-EE1A-4E7D-B755-4D768255B0BC} / Input | 0.5 | -6.02 dB | 0 | 1 | 0.4900000095367431640625 | 1 |
+---
+> | Group Mic | Send01 | {451C4A28-9957-4C16-83AF-3891FFD97CB0} | Verb ngắn | {11375C89-070B-441D-B720-29D8CA5FA7C4} / Input | 0.99444568157196044921875 | -0.05 dB | 0 | 0 | 0.4900000095367431640625 | 1 |
+> | Group Mic | Send02 | {66B086E2-A204-4A29-B2A6-3292ED5B86F7} | Verb dài | {94208E07-FC35-434C-A7FE-42DCF8AADD77} / Input | 0.981372654438018798828125 | -0.16 dB | 0 | 0 | 0.4900000095367431640625 | 1 |
+> | Group Mic | Send03 | {CC8EE44F-E652-467C-B3FF-47CEC3E5A21F} | Main | {EECFAF83-D060-424A-8F31-B9DD1235C8A5} / Input | 0.098785646259784698486328125 | -20.11 dB | 0 | 0 | 0.4900000095367431640625 | 1 |
+> | Group Mic | Send04 | {22F658C8-ED5E-4AFB-A4FE-59E88E9A0C17} | Delay | {C408C505-BD70-46A1-A963-A9DD3C273747} / Input | 0.997191011905670166015625 | -0.02 dB | 0 | 0 | 0.4900000095367431640625 | 1 |
+> | Group Mic | Send05 | {9D3398A5-91F4-4E75-8086-19BCCD679380} | Verb ngắn · Inserts · 2 - C1 gate Stereo/Stereo SideChain | {9EBD4AFE-0E44-4EBB-B023-6DD014A8A651} / AudioInput01 | 1.008804798126220703125 | +0.08 dB | 0 | 0 | 0.4900000095367431640625 | 1 
+> | Group Mic | Send06 | {D4BFF2C1-C296-4125-B4FA-84E5444BC268} | Verb dài · Inserts · 2 - C1 gate Stereo 2/Stereo SideChain | {8001CB18-D158-454B-BC40-FADDEC40C88B} / AudioInput01 | 1.01047480106353759765625 | +0.09 dB | 0 | 0 | 0.4900000095367431640625 | 
+=== diff channels.md (< gốc, > T2)
+6c6
+< | AudioOutputChannel | Main | Channel01 | {EECFAF83-D060-424A-8F31-B9DD1235C8A5} | 0 | 0 | 1 | +0.00 dB | - | - / - | 1/11 |
+---
+> | AudioOutputChannel | Main | Channel01 | {EECFAF83-D060-424A-8F31-B9DD1235C8A5} | 0 | 0 | 1 | +0.00 dB | - | - / - | 1/10 |
+11,14c11,13
+< | AudioGroupChannel | Verb ngắn | Channel02 | {11375C89-070B-441D-B720-29D8CA5FA7C4} | 0 | 0 | 0.25118863582611083984375 | -12.00 dB | 0.5 | Main / Input | 0/8 |
+< | AudioGroupChannel | Verb dài | Channel03 | {94208E07-FC35-434C-A7FE-42DCF8AADD77} | 0 | 0 | 0.12589253485202789306640625 | -18.00 dB | 0.5 | Main / Input | 0/9 |
+< | AudioGroupChannel | Delay | Channel04 | {C408C505-BD70-46A1-A963-A9DD3C273747} | 0 | 0 | 0.079432822763919830322265625 | -22.00 dB | 0.5 | Main / Input | 0/7 |
+< | AudioGroupChannel | Com Verb | Channel05 | {CDB25440-EE1A-4E7D-B755-4D768255B0BC} | 0 | 0 | 0.031622776601683791342090046327939489856362342834473 | -30.00 dB | 0.5 | Main / Input | 0/10 |
+---
+> | AudioGroupChannel | Verb ngắn | Channel02 | {11375C89-070B-441D-B720-29D8CA5FA7C4} | 0 | 0 | 0.15848931924611134314240246112603927031159400939941 | -16.00 dB | 0.5 | Main / Input | 1/8 |
+> | AudioGroupChannel | Verb dài | Channel03 | {94208E07-FC35-434C-A7FE-42DCF8AADD77} | 0 | 0 | 0.12589253485202789306640625 | -18.00 dB | 0.5 | Main / Input | 1/9 |
+> | AudioGroupChannel | Delay | Channel04 | {C408C505-BD70-46A1-A963-A9DD3C273747} | 1 | 0 | 0.079432822763919830322265625 | -22.00 dB | 0.5 | Main / Input | 1/7 |
+=== diff automation.md (< gốc, > T2)
+6d5
+< | Mic | MediaTrack | Volume | `param:///AudioMixer/{ABB57F27-49C9-46EC-B5BD-E7E87258BAEE}/volume` | 0 | Envelopes/Mic/Volume.envelopex | 12 B |
+12d10
+< | Com Verb | AutomationTrack | Volume | `param:///AudioMixer/{CDB25440-EE1A-4E7D-B755-4D768255B0BC}/volume` | 0 | Envelopes/Com Verb/Volume.envelopex | 12 B |
+=== diff control-surfaces.md (< gốc, > T2)
+2a3
+> | AUTO MENU AI | 0 | 0 |
+=== Beat/Group Mic/bus inserts: bypass khác nhau
+2c2
+<  Beat | 2 | FX05 | Audio | (không có = 0) 
+---
+>  Beat | 2 | FX05 | Audio | 1 
+21d20
+<  Com Verb | 1 | FX01 | Compressor | (không có = 0) 
+=== Không Dây: 12 insert bypass 1 (gốc) -> không có (T2)
+=== XML thô Send T2 (dòng 1824-1869): bypass="0" cho Send01..06; gốc Send08: bypass="1"
