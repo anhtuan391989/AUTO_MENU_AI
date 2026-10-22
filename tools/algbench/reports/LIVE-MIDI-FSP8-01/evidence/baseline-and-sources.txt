@@ -1,0 +1,59 @@
+LIVE-MIDI-FSP8-01 — bằng chứng nền (chỉ đọc; không sửa file nào của repo)
+Ngày: 2026-10-22
+
+1) BASELINE GITHUB
+   Repo: anhtuan391989/AUTO_MENU_AI, branch main
+   HEAD: f848307a19fb873fabd9a62ba20d39fcb9c007e9  ("Auto-sync 22/10/2026 16:40:05,27")
+   Cách lấy: git clone mới + checkout main (không dùng sandbox cũ). Nhãn: VERIFIED_FILE
+
+2) FILE PROJECT TRÊN main (sha256)
+   Project FSF8.zip         6b6487b4dc4c6c5bcf1e09f0dcad30bb6b0e0130d8043f26579a38e609d05764   (commit 7706f3b5)
+     └ save new 2.1.song    fbead89cacd24c518119f45924f4adbf64f733bcf2d179e886c689aef32a9225   (bản BÊN TRONG zip)
+   save new 2.1.song (gốc repo) 76279d62ecc34d793873d2ad2f2eb9674e45f241e5a1bef3967cdbe2d20c2f6a   (commit f848307a)
+   => HAI file cùng tên nhưng KHÁC NỘI DUNG (hash khác).
+
+3) KHÁC BIỆT GIỮA 2 BẢN `save new 2.1.song` (so XML bên trong; VERIFIED_FILE)
+   Số file nội bộ khác nhau: 10/98 (Devices/audiomixer.xml, mixerconsole.xml, surfacemanager.xml,
+   Song/song.xml, Song/mediapool.xml, Workspace/perspective.xml và 4 file preset).
+   Giống nhau: tên/loại 9 kênh, Mute của 9 kênh (Beat=0, Mic=1, Không Dây=1, Group Mic=0, 4 bus=0),
+               monitorActive=1 cả 3 track.
+                          | bản trong zip          | bản gốc repo (f848307a)
+   7 Send của Group Mic   | bypass=1               | bypass=0  (level không đổi)
+   14 insert FX01..FX14   | bypass=1               | không còn thuộc tính bypass
+   4 bus hiệu ứng (UI)    | ẩn trong mixer         | hiện trong mixer
+   External Device        | 1 khai báo AUTO MENU AI| thêm 1 khai báo AUTO MENU AI (rỗng, 0 lệnh gán)
+   Macro/phím/MIDI mapping| không có               | không có
+   => Bản gốc repo hiện ở trạng thái "FX bật" (Send bypass=0), khác mô tả trong
+      FSP8-PROJECT-DEEP-AUDIT-01 (Send bypass=1). Chưa rõ bản nào Khói coi là chuẩn => cần Khói xác nhận.
+
+4) TRƯỜNG DỮ LIỆU LIÊN QUAN (VERIFIED_FILE, Devices/audiomixer.xml)
+   Monitor track : <Attributes x:id="data" recordArmed="1" monitorActive="1"/> (RecordUnit của Beat, Mic, Không Dây)
+   Mute bus      : AudioGroupChannel[label="Verb ngắn|Verb dài|Delay|Com Verb"].mute
+   Send On/Off   : Send.bypass (chiều 0=bật là INFERRED)
+   RemoteBank    : 8 kênh (Beat, Mic, Không Dây, Group Mic, Delay, Verb ngắn, Verb dài, Com Verb)
+   Điều khiển ngoài: không macro / phím / MIDI mapping nào được lưu trong file project.
+
+5) MÃ AUTO_MENU_AI (VERIFIED_FILE, đọc tại f848307a; KHÔNG sửa)
+   ui/index.html:223-226            4 nút musicBtn, mic1Btn, mic2Btn, fxBtn
+   ui/js/renderer.js:524-566        click handler 4 nút
+   ui/js/renderer.js:568-650        FX Auto + nhóm Send (createFxAutoWiring, __fxManualToggle)
+   ui/js/actionRegistry.js          ACTIONS, executeAction(), getMidiOutMapping() (dawMidiOutMappings[daw][action])
+   ui/js/appSettings.js:375-430     getSelectedMidiOutput(), sendMidiCC(), sendMidiNotePulse() (Web MIDI)
+   ui/js/audioSource.js:559-609     createFxSendGroup()
+   ui/js/setup.js:615-650           danh sách action cấu hình trong Setup (MONITOR_*, FX_SEND_*)
+   core/command-engine-js/runtime.js  đường MIDI Input -> dispatch ở main process (easymidi); KHÔNG dùng cho 4 nút LIVE
+
+6) TÀI LIỆU HÃNG (VERIFIED_DOCUMENTATION; đọc 2026-10-22; chỉ diễn giải)
+   - Mackie Control Support: https://fenderstudiopromanual.fender.com/en/Content/Control_Link_Topics/Mackie_Control.htm
+       Mute/Solo/Rec cho từng kênh có nút riêng; KHÔNG có nút Input Monitor riêng — Monitor là tham số V-Pot
+       của kênh đang chọn; có chế độ xem Bus; thứ tự kênh theo Remote Bank.
+   - Macro Toolbar: https://fenderstudiopromanual.fender.com/en/Content/Editing_Topics/Macro_Toolbar.htm
+       Macro gán được phím hoặc điều khiển phần cứng qua "map" của thiết bị; điều khiển lạ vẫn dùng được nếu gửi MIDI CC.
+       Tài liệu KHÔNG nói có lệnh Mute/Monitor cho track/bus chỉ định hay không. Macro lưu dạng file XML riêng (có vẻ toàn ứng dụng).
+   - Key Commands: https://fenderstudiopromanual.fender.com/en/Content/Fundamentals_Topics/Key_Commands.htm
+       Chỉ mô tả gán tổ hợp phím bàn phím; không liệt kê lệnh Monitor/Mute; có "Find Command".
+   - Set Up Your MIDI Devices: https://fenderstudiopromanual.fender.com/en/Content/Setup_Topics/Set_Up_Your_MIDI_Devices.htm
+       Thiết bị khai báo qua External Devices (Keyboard/Instrument/Control Surface); định nghĩa thiết bị mang tính toàn ứng dụng;
+       không nói nơi lưu ánh xạ điều khiển.
+   - Control Link (trang mở đầu): https://fenderstudiopromanual.fender.com/en/Content/Control_Link_Topics/Chapter-Control_Link.htm
+       Chỉ là trang giới thiệu; KHÔNG trả lời được Mute/Monitor.
