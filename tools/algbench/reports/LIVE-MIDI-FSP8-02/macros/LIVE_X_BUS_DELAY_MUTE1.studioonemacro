@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Macro title="LIVE_X_BUS_DELAY_MUTE1" group="LIVE_TEST" description="THU NGHIEM X2 - chi Mute bus Delay (State 1): kiem tra Find Channel tren bus AudioGroupChannel">
+	<CommandElement category="Console" name="Find Channel">
+		<CommandArgument name="Name" value="Delay"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+</Macro>

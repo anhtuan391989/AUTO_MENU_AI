@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Macro title="LIVE_X_MON_BEAT_TOGGLE" group="LIVE_TEST" description="THU NGHIEM X1 - Monitor Beat, State rong (co the dao): kiem tra Monitor co tac dung len track vua Find Track">
+	<CommandElement category="Track" name="Find Track">
+		<CommandArgument name="Name" value="Beat"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Monitor">
+		<CommandArgument name="State" value=""/>
+	</CommandElement>
+</Macro>

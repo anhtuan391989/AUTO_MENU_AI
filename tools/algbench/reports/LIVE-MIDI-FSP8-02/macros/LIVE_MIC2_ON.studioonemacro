@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Macro title="LIVE_MIC2_ON" group="LIVE_TEST" description="EXPERIMENTAL - State 0/1 cho Track|Monitor chua duoc xac minh (chi co State rong trong macro goc)">
+	<CommandElement category="Track" name="Find Track">
+		<CommandArgument name="Name" value="Không Dây"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Monitor">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+</Macro>
