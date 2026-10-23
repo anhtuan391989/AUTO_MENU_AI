@@ -93,6 +93,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- TASK B2: Auto Connect (discover + ensure AUTO MENU AI + connect) + Verification thật ----
     autoConnectMidi: (opts) => ipcRenderer.invoke("midi-auto-connect", opts),
     verifyMidiOutput: () => ipcRenderer.invoke("midi-verify"),
+    // ---- MIDI-RECOVERY-01: cổng thật của backend (easymidi) + đường gửi Note/CC có thẩm quyền ----
+    listMidiPorts: () => ipcRenderer.invoke("midi-list-ports"),
+    sendMidiMessage: (msg) => ipcRenderer.invoke("midi-send", msg),
 
     // ---- TASK A71: trạng thái RUNTIME của SYSTEM_AUDIO (sống trong renderer cửa sổ chính) cần
     // phản ánh sang cửa sổ Setup — main.js chỉ đóng vai trò relay + cache lại giá trị mới nhất. ----

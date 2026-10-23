@@ -62,6 +62,17 @@ let configuredPortName = null; // portName OUTPUT đọc từ settings tại l�
 // TASK B2 Mục 4 — tách input khỏi output. configuredInputPortName THEO SAU migration fallback
 // (settings.midiInputPort || settings.midiOutputPort) — xem resolveInputPortName().
 let configuredInputPortName = null;
+// MIDI-RECOVERY-01 — chi tiết lỗi THEO BƯỚC (giữ nguyên message gốc của easymidi/RtMidi, KHÔNG thay bằng
+// câu chung chung). stage: 'detect' (tên không có trong danh sách backend) | 'open' (tạo Input/Output, gồm openPort
+// của RtMidi — nơi "Internal RtMidi error" phát sinh) | 'listen' (gắn listener) | 'config' (chưa có tên cổng).
+let lastOutputErrorDetail = null; // { stage, message, portName, available, at, attempt } | null
+let lastInputErrorDetail = null;
+let openInputPortName = null;  // tên cổng mà midiInput ĐANG mở (để biết có cần đóng/mở lại hay không)
+let openOutputPortName = null; // tên cổng mà midiDriverInstance ĐANG mở
+let connectAttemptSeq = 0;     // tăng mỗi lần THỰC SỰ thử mở 1 cổng (không tăng khi tái sử dụng) — để chẩn đoán mở trùng
+let autoConnectStats = { calls: 0, coalesced: 0 };
+let lastAutoConnect = null;    // { at, key, result } — gộp các lần gọi dồn dập trong COALESCE_MS
+const AUTO_CONNECT_COALESCE_MS = 400;
 let lastPortResolution = null; // kết quả resolvePortSelection() gần nhất — để getHealth()/report biết NGUỒN của port đang dùng (user-selected / auto-menu-ai / fallback / none)
 
 function log(...args) {
@@ -178,7 +189,9 @@ function ensureAutoMenuAiPort() {
 function verifyMidiOutput({ timeoutMs = 800 } = {}) {
     return new Promise((resolve) => {
         if (!midiDriverInstance || !midiInput) {
-            resolve({ verified: false, reason: "NOT_CONNECTED", detail: "Output hoặc Input chưa mở — không thể verify." });
+            const o = midiDriverInstance ? "mở" : `ĐÓNG (${lastOutputError || "chưa mở"})`;
+            const i = midiInput ? "mở" : `ĐÓNG (${lastInputError || "chưa mở"})`;
+            resolve({ verified: false, reason: "NOT_CONNECTED", detail: `Output: ${o}; Input: ${i} — không thể verify.`, output: !!midiDriverInstance, input: !!midiInput });
             return;
         }
         const probeChannel = 16; // channel 16 hiếm khi trùng mapping thật của user — giảm khả năng gây nhiễu dispatch thật trong lúc verify
@@ -279,41 +292,115 @@ async function dispatchFromMidi(msg) {
     log("dispatch", key, "->", target.capabilityId, "(" + target.action + ")", result);
 }
 
-function openMidiInput(portName) {
+function makeErrorDetail(stage, message, portName, available) {
+    return { stage, message, portName: portName || null, available: Array.isArray(available) ? available.slice() : null, at: Date.now(), attempt: connectAttemptSeq };
+}
+
+/**
+ * MIDI-RECOVERY-01 — mở MIDI Input. Trả về { ok, reused?, stage?, error? }.
+ *  - Cùng cổng + đang mở -> TÁI SỬ DỤNG, KHÔNG đóng/mở lại (trước đây mỗi lần Setup lưu / Auto Connect đều
+ *    close()+new Input() => cổng đang tốt bị phá, nếu mở lại lỗi thì midiInput=null và Verify trả NOT_CONNECTED).
+ *  - Message lỗi gốc giữ nguyên trong lastInputError; bước lỗi nằm trong lastInputErrorDetail.stage.
+ */
+function openMidiInput(portName, { force = false } = {}) {
     if (!portName) {
         log("Chưa có midiOutputPort trong settings — bỏ qua mở MIDI Input thật.");
         lastInputError = "Chưa có midiOutputPort trong settings.";
-        return;
+        lastInputErrorDetail = makeErrorDetail("config", lastInputError, null, null);
+        return { ok: false, stage: "config", error: lastInputError };
     }
+    if (!force && midiInput && openInputPortName === portName) {
+        return { ok: true, reused: true };
+    }
+    let easymidi;
+    let inputs = [];
     try {
         // eslint-disable-next-line global-require
-        const easymidi = require("easymidi");
-        const inputs = easymidi.getInputs();
-        if (!inputs.includes(portName)) {
-            const detail = `Cổng "${portName}" không có trong danh sách MIDI Input thật (${inputs.join(", ") || "không có cổng nào"}).`;
-            log(`${detail} — bỏ qua, không bịa kết nối.`);
-            lastInputError = detail;
-            return;
-        }
-        if (midiInput) {
-            midiInput.close();
-            midiInput = null;
-        }
-        midiInput = new easymidi.Input(portName);
-        midiInput.on("noteon", (m) => dispatchFromMidi({ type: "note", channel: m.channel + 1, number: m.note, value: m.velocity }));
-        midiInput.on("cc", (m) => dispatchFromMidi({ type: "cc", channel: m.channel + 1, number: m.controller, value: m.value }));
-        log(`Đã mở MIDI Input thật: "${portName}".`);
-        lastInputError = null; // mở thành công lần này -> xoá lỗi cũ (nếu có) để health phản ánh đúng hiện tại
+        easymidi = require("easymidi");
+        inputs = easymidi.getInputs();
+    } catch (err) {
+        log("Không liệt kê được MIDI Input:", err.message);
+        lastInputError = err.message;
+        lastInputErrorDetail = makeErrorDetail("detect", err.message, portName, null);
+        return { ok: false, stage: "detect", error: err.message };
+    }
+    if (!inputs.includes(portName)) {
+        const detail = `Cổng "${portName}" không có trong danh sách MIDI Input thật (${inputs.join(", ") || "không có cổng nào"}).`;
+        log(`${detail} — bỏ qua, không bịa kết nối.`);
+        lastInputError = detail;
+        lastInputErrorDetail = makeErrorDetail("detect", detail, portName, inputs);
+        return { ok: false, stage: "detect", error: detail };
+    }
+    if (midiInput) {
+        try { midiInput.close(); } catch (err) { log("Đóng MIDI Input cũ lỗi (bỏ qua):", err.message); }
+        midiInput = null;
+        openInputPortName = null;
+    }
+    connectAttemptSeq += 1;
+    let created = null;
+    try {
+        created = new easymidi.Input(portName); // openPort() của RtMidi chạy ở đây
     } catch (err) {
         log("Không mở được MIDI Input thật:", err.message);
-        lastInputError = err.message;
+        lastInputError = err.message; // giữ NGUYÊN message gốc (vd "Internal RtMidi error")
+        lastInputErrorDetail = makeErrorDetail("open", err.message, portName, inputs);
         midiInput = null;
+        openInputPortName = null;
+        return { ok: false, stage: "open", error: err.message };
     }
+    try {
+        created.on("noteon", (m) => dispatchFromMidi({ type: "note", channel: m.channel + 1, number: m.note, value: m.velocity }));
+        created.on("cc", (m) => dispatchFromMidi({ type: "cc", channel: m.channel + 1, number: m.controller, value: m.value }));
+    } catch (err) {
+        log("Mở được Input nhưng gắn listener lỗi:", err.message);
+        try { created.close(); } catch { /* bỏ qua */ }
+        lastInputError = err.message;
+        lastInputErrorDetail = makeErrorDetail("listen", err.message, portName, inputs);
+        midiInput = null;
+        openInputPortName = null;
+        return { ok: false, stage: "listen", error: err.message };
+    }
+    midiInput = created;
+    openInputPortName = portName;
+    log(`Đã mở MIDI Input thật: "${portName}".`);
+    lastInputError = null; // mở thành công lần này -> xoá lỗi cũ (nếu có) để health phản ánh đúng hiện tại
+    lastInputErrorDetail = null;
+    return { ok: true };
 }
 
 function closeMidiInput() {
     try { midiInput?.close(); } catch { /* bỏ qua */ }
     midiInput = null;
+    openInputPortName = null;
+}
+
+/**
+ * MIDI-RECOVERY-01 — mở MidiDriver OUTPUT (dùng chung cho start()/reopenOutputDriver()/sendMidi()).
+ * Giữ NGUYÊN message lỗi gốc; ghi bước lỗi vào lastOutputErrorDetail. Không đổi cách đăng ký driver/alias 'mcu'.
+ */
+function tryOpenOutput(portName) {
+    connectAttemptSeq += 1;
+    try {
+        const driver = new MidiDriver(portName, false);
+        midiDriverInstance = driver;
+        openOutputPortName = portName;
+        engine.registerDriver(driver); // đăng ký dưới tên 'midi'
+        engine.drivers.set("mcu", driver); // ALIAS — studio_one dùng tên 'mcu'
+        lastOutputError = null;
+        lastOutputErrorDetail = null;
+        return { ok: true };
+    } catch (err) {
+        midiDriverInstance = null;
+        openOutputPortName = null;
+        lastOutputError = err.message;
+        // easymidi tự kiểm tên và ném "No MIDI output found with name: X" => bước 'detect'; lỗi khác (vd
+        // "Internal RtMidi error" từ openPort) => bước 'open'.
+        const stage = /^No MIDI output found/i.test(err.message) ? "detect" : "open";
+        let available = null;
+        try { available = require("easymidi").getOutputs(); } catch { /* bỏ qua */ }
+        lastOutputErrorDetail = makeErrorDetail(stage, err.message, portName, available);
+        return { ok: false, stage, error: err.message };
+    }
 }
 
 /**
@@ -349,20 +436,16 @@ function start({ readSettingsFile }) {
             // ảnh hưởng driver 'mcu'; KHÔNG được nuốt luôn bước nạp D1 + mở MIDI Input ở dưới
             // (2 việc đó không phụ thuộc Output). Trước bản vá này, MidiDriver() throw làm nhảy
             // thẳng xuống catch bên dưới -> d1State kẹt "not-loaded", Input không bao giờ mở.
-            try {
-                midiDriverInstance = new MidiDriver(portName, false);
-                engine.registerDriver(midiDriverInstance); // đăng ký dưới tên 'midi'
-                engine.drivers.set("mcu", midiDriverInstance); // ALIAS — studio_one dùng tên 'mcu', không phải 'midi'
+            const opened = tryOpenOutput(portName);
+            if (opened.ok) {
                 log(`MidiDriver (mở lại cổng có sẵn "${portName}") sẵn sàng, alias 'mcu'.`);
-                lastOutputError = null;
-            } catch (err) {
-                log("Không mở được MidiDriver OUTPUT lúc start() — driver 'mcu' tạm không sẵn sàng, tự fallback 'hotkey'. Lỗi:", err.message);
-                lastOutputError = err.message;
-                midiDriverInstance = null;
+            } else {
+                log("Không mở được MidiDriver OUTPUT lúc start() — driver 'mcu' tạm không sẵn sàng, tự fallback 'hotkey'. Lỗi:", opened.error);
             }
         } else {
             log("Chưa có midiOutputPort đã lưu — driver 'mcu' sẽ không sẵn sàng, capabilityRegistry tự fallback sang 'hotkey'.");
             lastOutputError = "Chưa có midiOutputPort đã lưu.";
+            lastOutputErrorDetail = makeErrorDetail("config", lastOutputError, null, null);
         }
         // TASK B38 — nạp D1 THẬT, bất đồng bộ, không chặn start(). Fail-closed mặc định
         // (d1GatedMappingIndex đã khởi tạo rỗng ở khai báo biến) cho tới khi Promise này resolve.
@@ -388,16 +471,13 @@ function start({ readSettingsFile }) {
  */
 function reopenOutputDriver(portName) {
     // TASK B61.5 — chỉ bỏ qua khi cổng KHÔNG đổi VÀ driver đang thật sự sống (hoặc đã bỏ chọn cổng).
-    // Trước bản vá này điều kiện chỉ là `portName === configuredPortName` -> nếu lần mở đầu thất bại
-    // (cổng chưa tồn tại lúc start()/lần reload trước), configuredPortName vẫn đã bị gán => mọi lần
-    // reloadMappings()/autoConnect() sau đó (cùng tên cổng) đều return sớm, không bao giờ thử mở lại
-    // dù cổng đã xuất hiện — chỉ thoát được bằng cách restart app hoặc đổi sang cổng khác.
-    if (portName === configuredPortName && (midiDriverInstance || !portName)) return; // cổng không đổi + driver còn sống -> không đóng/mở lại, tránh nhấp nháy port thật
+    if (portName === configuredPortName && (midiDriverInstance || !portName)) return { ok: !!midiDriverInstance, reused: true }; // cổng không đổi + driver còn sống -> không đóng/mở lại, tránh nhấp nháy port thật
     configuredPortName = portName || null;
 
     if (midiDriverInstance) {
         try { midiDriverInstance.close(); } catch (err) { log("Đóng MidiDriver cũ lỗi (bỏ qua):", err.message); }
         midiDriverInstance = null;
+        openOutputPortName = null;
         engine.drivers.delete("midi");
         engine.drivers.delete("mcu");
     }
@@ -405,20 +485,14 @@ function reopenOutputDriver(portName) {
     if (!portName) {
         log("Đã bỏ chọn midiOutputPort — driver 'mcu'/'midi' không còn sẵn sàng cho tới khi chọn lại.");
         lastOutputError = "Chưa có midiOutputPort đã lưu.";
-        return;
+        lastOutputErrorDetail = makeErrorDetail("config", lastOutputError, null, null);
+        return { ok: false, stage: "config", error: lastOutputError };
     }
 
-    try {
-        midiDriverInstance = new MidiDriver(portName, false);
-        engine.registerDriver(midiDriverInstance);
-        engine.drivers.set("mcu", midiDriverInstance);
-        log(`Đã mở lại MidiDriver OUTPUT theo cổng mới "${portName}", alias 'mcu'.`);
-        lastOutputError = null;
-    } catch (err) {
-        log(`Không mở lại được MidiDriver OUTPUT cho cổng "${portName}":`, err.message);
-        lastOutputError = err.message;
-        midiDriverInstance = null;
-    }
+    const opened = tryOpenOutput(portName);
+    if (opened.ok) log(`Đã mở lại MidiDriver OUTPUT theo cổng mới "${portName}", alias 'mcu'.`);
+    else log(`Không mở lại được MidiDriver OUTPUT cho cổng "${portName}":`, opened.error);
+    return opened;
 }
 
 /** reloadMappings() — gọi lại khi Setup lưu mapping/port mới (hook vào ipcMain.on("setup-changed")). */
@@ -451,10 +525,49 @@ function reloadMappings() {
  * CHƯA có UI bật/tắt mode này ở B2, xem Remaining Risks trong báo cáo — hàm nhận tham số để
  * sẵn sàng, không tự quyết định mode).
  */
+/**
+ * MIDI-RECOVERY-01 — trạng thái kết nối THEO TỪNG BACKEND (hàm THUẦN, test trực tiếp được).
+ *   CONNECTED    : Output VÀ Input đều mở thật.
+ *   OUTPUT_READY : chỉ Output mở (Input lỗi/chưa mở)  -> partial.
+ *   INPUT_READY  : chỉ Input mở (Output lỗi/chưa mở)  -> partial.
+ *   ERROR        : không phía nào mở được dù đã resolve được tên cổng và có lỗi cụ thể.
+ *   DISCONNECTED : không phía nào mở và không có cổng/lỗi cụ thể để kết luận ERROR.
+ * "Tìm thấy tên cổng" KHÔNG BAO GIỜ đủ để lên CONNECTED.
+ */
+function deriveBackendStatus({ outputReady, inputOpen, outputError, inputError, resolvedPortName }) {
+    const o = !!outputReady;
+    const i = !!inputOpen;
+    if (o && i) return { status: "CONNECTED", partial: false };
+    if (o) return { status: "OUTPUT_READY", partial: true };
+    if (i) return { status: "INPUT_READY", partial: true };
+    if (resolvedPortName && (outputError || inputError)) return { status: "ERROR", partial: false };
+    return { status: "DISCONNECTED", partial: false };
+}
+
+function sideReport(ready, port, error, detail) {
+    return { ready: !!ready, port: port || null, error: error || null, detail: detail || null };
+}
+
+/**
+ * MIDI-RECOVERY-01 — danh sách cổng THẬT mà backend gửi/nhận (easymidi/RtMidi, main process) nhìn thấy.
+ * Đây mới là danh sách đúng cho Output vì MidiDriver (easymidi) là bên gửi; Web MIDI của Chromium có thể
+ * không liệt kê cùng tập cổng (bằng chứng 23/10/2026: Web MIDI outputs thiếu "AUTO MENU AI").
+ */
+function listPorts() {
+    try {
+        // eslint-disable-next-line global-require
+        const easymidi = require("easymidi");
+        return { ok: true, outputs: easymidi.getOutputs(), inputs: easymidi.getInputs(), error: null };
+    } catch (err) {
+        return { ok: false, outputs: [], inputs: [], error: err.message };
+    }
+}
+
 function autoConnect({ mode = "manual" } = {}) {
     if (!started || !deps) {
-        return { ok: false, detail: "CommandRuntime chưa start()." };
+        return { ok: false, resolved: false, status: "DISCONNECTED", connected: false, partial: false, detail: "CommandRuntime chưa start()." };
     }
+    autoConnectStats.calls += 1;
     let discoveredOutputs = [];
     let discoveredInputs = [];
     let discoveryError = null;
@@ -467,9 +580,19 @@ function autoConnect({ mode = "manual" } = {}) {
         discoveryError = err.message;
     }
 
+    const settings = deps.readSettingsFile() || {};
+
+    // MIDI-RECOVERY-01 — GỘP các lần gọi dồn dập (nhấn đúp / phím lặp): cùng mode + cùng cấu hình + cùng danh sách
+    // cổng + cùng trạng thái mở và vừa chạy xong < AUTO_CONNECT_COALESCE_MS => trả lại kết quả vừa có, KHÔNG thử
+    // mở lại cổng. Khác bất kỳ yếu tố nào (vd cổng vừa xuất hiện) => chạy thật.
+    const key = JSON.stringify([mode, settings.midiOutputPort || null, settings.midiInputPort || null, discoveredOutputs, discoveredInputs, !!midiDriverInstance, !!midiInput, discoveryError]);
+    if (lastAutoConnect && lastAutoConnect.key === key && Date.now() - lastAutoConnect.at < AUTO_CONNECT_COALESCE_MS) {
+        autoConnectStats.coalesced += 1;
+        return { ...lastAutoConnect.result, coalesced: true, health: getHealth() };
+    }
+
     const virtualPortResult = ensureAutoMenuAiPort();
-    // Nếu vừa tạo/xác nhận virtual port thành công, danh sách discover CŨ (lấy trước đó) có thể
-    // chưa thấy nó -> discover lại 1 lần nữa cho chắc (chỉ khi platform hỗ trợ và không lỗi).
+    // Nếu vừa tạo/xác nhận virtual port thành công, danh sách discover CŨ có thể chưa thấy nó -> discover lại 1 lần.
     if (virtualPortResult.ok && !discoveryError) {
         try {
             // eslint-disable-next-line global-require
@@ -479,7 +602,6 @@ function autoConnect({ mode = "manual" } = {}) {
         } catch { /* giữ danh sách cũ nếu discover lại lỗi */ }
     }
 
-    const settings = deps.readSettingsFile() || {};
     const resolution = resolvePortSelection({
         mode,
         savedPortName: settings.midiOutputPort || null,
@@ -488,19 +610,79 @@ function autoConnect({ mode = "manual" } = {}) {
     lastPortResolution = resolution;
 
     reopenOutputDriver(resolution.portName);
-    const inputCandidate = resolution.portName; // TASK B2: auto-connect coi input/output cùng tên khi ở mode auto/đã resolve (đúng kiến trúc 1-cổng hiện tại)
+    // Input: dùng ĐÚNG midiInputPort nếu user đã chọn riêng (KHÔNG bị ghi đè bằng tên Output); chỉ khi chưa cấu hình
+    // Input riêng mới fallback theo tên Output đã resolve (tương thích cũ).
+    const inputCandidate = settings.midiInputPort || resolution.portName || null;
     configuredInputPortName = inputCandidate;
     openMidiInput(inputCandidate);
 
-    return {
+    const health = getHealth();
+    const { status, partial } = deriveBackendStatus({
+        outputReady: health.outputReady,
+        inputOpen: health.inputOpen,
+        outputError: health.lastOutputError,
+        inputError: health.lastInputError,
+        resolvedPortName: resolution.portName || inputCandidate,
+    });
+    const result = {
+        // `ok` GIỮ NGUYÊN nghĩa cũ (chỉ "đã phân giải được tên cổng") để không phá consumer cũ — KHÔNG dùng làm
+        // bằng chứng đã kết nối. Dùng `connected`/`status`/`output.ready`/`input.ready` bên dưới.
         ok: !!resolution.portName,
+        resolved: !!resolution.portName,
+        status,
+        partial,
+        connected: status === "CONNECTED",
+        output: sideReport(health.outputReady, health.configuredPortName, health.lastOutputError, health.lastOutputErrorDetail),
+        input: sideReport(health.inputOpen, health.configuredInputPortName, health.lastInputError, health.lastInputErrorDetail),
         resolution,
         virtualPort: virtualPortResult,
         discoveredOutputs,
         discoveredInputs,
         discoveryError,
-        health: getHealth(),
+        coalesced: false,
+        health,
     };
+    lastAutoConnect = { at: Date.now(), key: JSON.stringify([mode, settings.midiOutputPort || null, settings.midiInputPort || null, discoveredOutputs, discoveredInputs, !!midiDriverInstance, !!midiInput, discoveryError]), result };
+    return result;
+}
+
+/**
+ * MIDI-RECOVERY-01 — ĐƯỜNG GỬI MIDI CÓ THẨM QUYỀN DUY NHẤT cho Note/CC từ renderer (Setup Test, actionRegistry,
+ * vocalCommandRouter): gửi bằng MidiDriver (easymidi) ở main process — cùng backend/cùng cổng với dispatch thật và
+ * Verify. Trả { ok, via, port, bytes?, delivery, reason?, detail? }. ok=true CHỈ nghĩa "output.send() không ném";
+ * delivery:"UNCONFIRMED" (không có xác nhận phía DAW/loopMIDI).
+ * Tham số khớp byte-for-byte sender Web MIDI cũ: status|channel&0x0f, number&0x7f, value&0x7f; channel 0-based.
+ */
+async function sendMidi({ kind, number, value = 127, channel = 0 } = {}) {
+    const via = "main-midi-driver";
+    if (!started || !engine) return { ok: false, via, reason: "NOT_STARTED", detail: "CommandRuntime chưa start()." };
+    if (!["cc", "noteon", "noteoff"].includes(kind) || !Number.isFinite(number) || !Number.isFinite(value) || !Number.isFinite(channel)) {
+        return { ok: false, via, reason: "INVALID_PARAMS", detail: "Cần kind ∈ {cc,noteon,noteoff}, number/value/channel là số." };
+    }
+    const num = number & 0x7f;
+    const val = value & 0x7f;
+    const ch = channel & 0x0f;
+
+    // Output chưa mở (vd loopMIDI khởi động sau app) -> thử mở theo cổng ĐÃ LƯU, 1 lần cho mỗi lệnh gửi.
+    if (!midiDriverInstance) {
+        const savedPort = (deps?.readSettingsFile?.() || {}).midiOutputPort || null;
+        if (savedPort) reopenOutputDriver(savedPort);
+    }
+    if (!midiDriverInstance) {
+        return { ok: false, via, reason: "OUTPUT_NOT_OPEN", port: configuredPortName, detail: lastOutputError || "Output chưa mở.", errorDetail: lastOutputErrorDetail };
+    }
+
+    const params = kind === "cc"
+        ? { cc: num, value: val, channel: ch + 1 }
+        : kind === "noteon"
+            ? { note: num, velocity: val, channel: ch + 1 }
+            : { noteoff: num, velocity: val, channel: ch + 1 };
+    const bytes = [(kind === "cc" ? 0xb0 : kind === "noteon" ? 0x90 : 0x80) | ch, num, val];
+    const r = await midiDriverInstance.execute(params);
+    if (!r || r.ok !== true) {
+        return { ok: false, via, reason: "SEND_FAILED", port: openOutputPortName, bytes, detail: r && r.detail, delivery: "NOT_SENT" };
+    }
+    return { ok: true, via, port: openOutputPortName, bytes, delivery: "UNCONFIRMED" };
 }
 
 /**
@@ -518,6 +700,13 @@ function getHealth() {
         inputOpen: !!midiInput,
         lastOutputError,
         lastInputError,
+        // MIDI-RECOVERY-01 — lỗi gốc + BƯỚC phát sinh, cổng thực sự đang mở, thống kê Auto Connect
+        lastOutputErrorDetail,
+        lastInputErrorDetail,
+        openOutputPortName,
+        openInputPortName,
+        connectAttempts: connectAttemptSeq,
+        autoConnectStats: { ...autoConnectStats },
         mappingCount: d1GatedMappingIndex.size, // TASK B38-FIX — trỏ thẳng D1-gated (nguồn mapping duy nhất, không còn field legacy riêng)
         driversRegistered: engine ? [...engine.drivers.keys()] : [],
         lastPortResolution, // { portName, source } từ autoConnect() gần nhất, null nếu chưa gọi lần nào
@@ -554,7 +743,7 @@ function stop() {
 }
 
 module.exports = {
-    start, stop, dispatch, reloadMappings, getHealth, autoConnect, verifyMidiOutput,
+    start, stop, dispatch, reloadMappings, getHealth, autoConnect, verifyMidiOutput, sendMidi, listPorts, deriveBackendStatus,
     // Xuất thêm các hàm THUẦN (không I/O) để LOGIC-TEST trực tiếp, không cần mock easymidi
     // cho riêng phần policy — xem tests/unit/PortSelectionPolicy.verify.js.
     resolvePortSelection, resolveInputPortName,

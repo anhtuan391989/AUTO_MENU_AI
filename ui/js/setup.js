@@ -1126,6 +1126,7 @@ function initMidiSection() {
             return;
         }
         saveSetting("midiOutputPort", select.value); // lưu tạm để hàm gửi MIDI dùng đúng cổng đang chọn lúc test
+        notifySetupChanged(); // MIDI-RECOVERY-01 — báo main process mở lại driver theo cổng vừa chọn TRƯỚC khi gửi (IPC giữ đúng thứ tự)
 
         const note = parseInt(document.getElementById("midiTestNote")?.value, 10) || 0;
         const ok = await sendMidiNotePulse(note, 100, 0, 150);
@@ -1134,7 +1135,8 @@ function initMidiSection() {
         // API không bị từ chối ở tầng trình duyệt — KHÔNG xác nhận phần cứng/DAW đã nhận được.
         window.MidiMonitor?.logTestResult("NOTE", note, ok, ok ? null : "kiểm tra lại cổng MIDI đã chọn");
         if (!ok) {
-            alert("Không gửi được — kiểm tra lại cổng MIDI đã chọn.");
+            const r = window.getLastMidiSendResult?.();
+            alert("Không gửi được" + (r && r.reason ? ` (${r.reason}${r.detail ? ": " + r.detail : ""})` : "") + " — xem dòng log trong Monitor để biết tầng lỗi.");
         }
     });
 
@@ -1144,13 +1146,15 @@ function initMidiSection() {
             return;
         }
         saveSetting("midiOutputPort", select.value);
+        notifySetupChanged(); // MIDI-RECOVERY-01 — như nút Test Note
 
         const cc = parseInt(document.getElementById("midiTestCC")?.value, 10) || 0;
         const value = parseInt(document.getElementById("midiTestCCValue")?.value, 10) || 0;
         const ok = await sendMidiCC(cc, value, 0);
         window.MidiMonitor?.logTestResult(`CC${cc}`, value, ok, ok ? null : "kiểm tra lại cổng MIDI đã chọn");
         if (!ok) {
-            alert("Không gửi được — kiểm tra lại cổng MIDI đã chọn.");
+            const r = window.getLastMidiSendResult?.();
+            alert("Không gửi được" + (r && r.reason ? ` (${r.reason}${r.detail ? ": " + r.detail : ""})` : "") + " — xem dòng log trong Monitor để biết tầng lỗi.");
         }
     });
 

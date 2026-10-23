@@ -31,6 +31,9 @@
         CONFIGURED: "CONFIGURED",     // CONNECTED + đã có mapping đã lưu (mappingCount > 0)
         VERIFIED: "VERIFIED",         // CHƯA có nhánh nào dẫn tới state này — cần Phase Verification thật (Mục 16), chưa làm ở B1 này
         ERROR: "ERROR",               // có lỗi thật từ 1 trong 2 backend khi mở port đã chọn
+        // MIDI-RECOVERY-01 — trạng thái MỘT PHÍA (partial). Không phá hợp đồng cũ: các giá trị ở trên giữ nguyên.
+        OUTPUT_READY: "OUTPUT_READY", // Output mở thật ở main process; Input lỗi/chưa mở (partial)
+        INPUT_READY: "INPUT_READY",   // Input mở thật; Output lỗi/chưa mở (partial)
     });
 
     async function getRendererPortLists() {
@@ -62,81 +65,125 @@
         }
     }
 
+    // MIDI-RECOVERY-01 — danh sách cổng của BACKEND thật (easymidi, main process). Trước đây "detected" chỉ dựa vào
+    // Web MIDI (Chromium) => Output "AUTO MENU AI" bị báo det=✕ dù backend gửi mở được.
+    async function getMainPortLists() {
+        if (!window.electronAPI?.listMidiPorts) return { available: false, inputs: [], outputs: [], error: null };
+        try {
+            const r = await window.electronAPI.listMidiPorts();
+            if (r && r.ok) return { available: true, inputs: r.inputs || [], outputs: r.outputs || [], error: null };
+            return { available: false, inputs: [], outputs: [], error: (r && r.error) || "listMidiPorts lỗi" };
+        } catch (err) {
+            return { available: false, inputs: [], outputs: [], error: err.message };
+        }
+    }
+
     // B1-B — tính riêng input.{detected,selected,connected} và output.{detected,selected,connected}.
     // "detected" = tên port có THẬT trong danh sách backend trả về (không đoán).
     // "selected" = có portName đã lưu trong settings (kể cả khi KHÔNG detected — đúng B1-C
     //              "Port đã lưu nhưng hiện không tồn tại" phải phân biệt được với "chưa chọn gì").
     // "connected" = xem ghi chú kiến trúc đầu file (input dựa main-only, output dựa cả 2 backend).
-    function buildSide(kind, portName, rendererPorts, main) {
-        const detected = !!portName && rendererPorts.includes(portName);
+    // MIDI-RECOVERY-01 — mỗi phía mang theo bằng chứng RIÊNG của nó:
+    //   detectedByMain (easymidi) / detectedByRenderer (Web MIDI) / detected (ưu tiên main nếu có) / connected (main mở thật,
+    //   đúng tên cổng CỦA PHÍA ĐÓ — Input so với configuredInputPortName, không còn so với tên Output) / error (message gốc).
+    function buildSide(kind, portName, rendererPorts, mainPorts, main) {
         const selected = !!portName;
-        let connected;
+        const detectedByRenderer = selected && rendererPorts.includes(portName);
+        const mainList = kind === "output" ? mainPorts.outputs : mainPorts.inputs;
+        const detectedByMain = mainPorts.available ? (selected && mainList.includes(portName)) : null;
+        const detected = detectedByMain !== null ? detectedByMain : detectedByRenderer;
+        let configured;
+        let open;
+        let error;
+        let errorDetail;
         if (kind === "output") {
-            connected = selected && detected && main.available && main.outputReady === true && main.configuredPortName === portName;
+            configured = main.configuredPortName;
+            open = main.outputReady === true;
+            error = main.available ? (main.lastOutputError || null) : null;
+            errorDetail = main.available ? (main.lastOutputErrorDetail || null) : null;
         } else {
-            // input: chỉ main process có listener thật thường trực — xem ghi chú đầu file.
-            connected = selected && main.available && main.inputOpen === true && main.configuredPortName === portName;
+            // Input: dùng configuredInputPortName; main cũ chưa có field này -> rơi về configuredPortName.
+            configured = main.configuredInputPortName !== undefined ? main.configuredInputPortName : main.configuredPortName;
+            open = main.inputOpen === true;
+            error = main.available ? (main.lastInputError || null) : null;
+            errorDetail = main.available ? (main.lastInputErrorDetail || null) : null;
         }
-        return { detected, selected, connected };
+        const connected = selected && main.available === true && open && configured === portName;
+        return { detected, selected, connected, detectedByMain, detectedByRenderer, error, errorDetail, configuredByMain: configured || null };
     }
 
-    function deriveStatus(input, output, main, portName) {
-        if (!portName) return MIDI_STATE.DISCOVERING;
+    // Trạng thái tổng hợp TỪ HAI PHÍA. "Tìm thấy tên cổng" (detected) không bao giờ đủ để CONNECTED.
+    function deriveStatus(input, output, main) {
+        if (!input.selected && !output.selected) return MIDI_STATE.DISCOVERING;
 
-        const outputError = main.available && !!main.lastOutputError && main.configuredPortName === portName;
-        const inputError = main.available && !!main.lastInputError && main.configuredPortName === portName;
-        if (outputError || inputError) {
-            // Có bằng chứng lỗi THẬT (không chỉ "chưa kết nối") -> ERROR, không lùi về DISCONNECTED
-            // để UI biết đây là port CÓ tồn tại nhưng mở thất bại, khác với "port biến mất".
-            if (output.detected || input.detected) return MIDI_STATE.ERROR;
+        const o = output.connected;
+        const i = input.connected;
+        if (o && i) {
+            const hasMapping = main.available && (main.mappingCount || 0) > 0;
+            return hasMapping ? MIDI_STATE.CONFIGURED : MIDI_STATE.CONNECTED;
         }
+        if (o) return MIDI_STATE.OUTPUT_READY;
+        if (i) return MIDI_STATE.INPUT_READY;
 
-        if (!output.detected) return MIDI_STATE.DISCONNECTED; // port đã lưu nhưng không có trong danh sách thật (B1-C)
-
-        if (!output.connected) return MIDI_STATE.CONNECTING; // port tồn tại, chưa xác nhận mở xong cả 2 backend
-
-        const hasMapping = main.available && (main.mappingCount || 0) > 0;
-        return hasMapping ? MIDI_STATE.CONFIGURED : MIDI_STATE.CONNECTED;
+        const anyDetected = output.detected || input.detected;
+        if ((output.error || input.error) && anyDetected) return MIDI_STATE.ERROR;
+        if (!anyDetected) return MIDI_STATE.DISCONNECTED; // port đã lưu nhưng không có trong danh sách thật (B1-C)
+        return MIDI_STATE.CONNECTING; // port tồn tại, chưa có phía nào mở (và chưa có lỗi cụ thể)
 
         // VERIFIED: cố ý không có nhánh nào dẫn tới — cần cơ chế test thật (Mục 16), chưa có ở B1.
     }
 
     async function getMidiHealth() {
-        const [rendererPorts, main] = await Promise.all([getRendererPortLists(), getMainMidiHealth()]);
+        const [rendererPorts, main, mainPorts] = await Promise.all([getRendererPortLists(), getMainMidiHealth(), getMainPortLists()]);
         // Kiến trúc hiện tại dùng CHUNG 1 portName cho input/output (xem ghi chú đầu file).
         // TASK B2 Mục 4 — nếu user đã cấu hình midiInputPort riêng, dùng đúng nó cho phía INPUT;
         // OUTPUT vẫn luôn đọc midiOutputPort (không đổi ý nghĩa field cũ).
         const outputPortName = typeof getSetting === "function" ? getSetting("midiOutputPort") : "";
         const inputPortName = (typeof getSetting === "function" ? getSetting("midiInputPort") : "") || outputPortName;
 
-        const output = buildSide("output", outputPortName, rendererPorts.outputs, main);
-        const input = buildSide("input", inputPortName, rendererPorts.inputs, main);
-        const status = deriveStatus(input, output, main, outputPortName);
+        const output = buildSide("output", outputPortName, rendererPorts.outputs, mainPorts, main);
+        const input = buildSide("input", inputPortName, rendererPorts.inputs, mainPorts, main);
+        const status = deriveStatus(input, output, main);
 
-        const error = main.available
-            ? (main.lastOutputError || main.lastInputError || null)
-            : (main.reason || rendererPorts.error || null);
+        // `error` (chuỗi, giữ tương thích): 1 phía lỗi -> message GỐC nguyên văn; cả 2 phía lỗi -> có nhãn OUT/IN để
+        // KHÔNG che lỗi nào. Lỗi từng phía luôn có riêng ở `errors` / output.error / input.error.
+        let error;
+        if (main.available) {
+            if (main.lastOutputError && main.lastInputError) error = `OUT: ${main.lastOutputError} | IN: ${main.lastInputError}`;
+            else error = main.lastOutputError || main.lastInputError || null;
+        } else {
+            error = main.reason || rendererPorts.error || null;
+        }
 
         return {
             input,
             output,
             verified: false, // luôn false ở B1/B2 client-side — verification thật (loopback) chạy ở main process qua electronAPI.verifyMidiOutput(), không tự suy ở renderer
             status,
+            partial: status === MIDI_STATE.OUTPUT_READY || status === MIDI_STATE.INPUT_READY,
             error,
+            errors: { output: output.error, input: input.error },
             // Chi tiết thô — KHÔNG thuộc shape bắt buộc của B1-B, giữ lại để UI/Setup hiển thị lý
             // do cụ thể (vd "cổng đã lưu không có trong danh sách renderer") mà không phải đoán.
-            _detail: { portName: outputPortName || null, inputPortName: inputPortName || null, rendererSupported: rendererPorts.supported, main },
+            _detail: { portName: outputPortName || null, inputPortName: inputPortName || null, rendererSupported: rendererPorts.supported, rendererPorts: { inputs: rendererPorts.inputs, outputs: rendererPorts.outputs }, mainPorts, main },
         };
     }
 
     // TASK B2 Mục 10 — nút "🔄 Auto Connect": gọi main process discover+ensure+connect, rồi
     // đọc lại getMidiHealth() để UI cập nhật NGAY (không cần chờ lần refresh định kỳ tiếp theo).
+    // MIDI-RECOVERY-01 — SINGLE-FLIGHT: đang có 1 lần Auto Connect chạy thì các lần bấm thêm DÙNG CHUNG kết quả của
+    // lần đó (không phát thêm IPC/thao tác mở cổng). Hết lần chạy mới cho phép lần mới.
+    let autoConnectInFlight = null;
     async function autoConnect(opts) {
         if (!window.electronAPI?.autoConnectMidi) {
-            return { ok: false, detail: "electronAPI.autoConnectMidi không tồn tại (không phải Electron renderer?)." };
+            return { ok: false, resolved: false, status: "DISCONNECTED", connected: false, partial: false, detail: "electronAPI.autoConnectMidi không tồn tại (không phải Electron renderer?)." };
         }
-        const result = await window.electronAPI.autoConnectMidi(opts);
-        return result;
+        if (autoConnectInFlight) return autoConnectInFlight;
+        autoConnectInFlight = (async () => {
+            try { return await window.electronAPI.autoConnectMidi(opts); }
+            finally { autoConnectInFlight = null; }
+        })();
+        return autoConnectInFlight;
     }
 
     // TASK B2 Mục 6/9 — verification thật (loopback), KHÔNG suy đoán ở renderer.

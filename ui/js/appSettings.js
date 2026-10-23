@@ -342,6 +342,21 @@ function getMidiAccess() {
 
 // Liệt kê tất cả cổng MIDI output đang có trên máy (vd cổng ảo tạo bằng loopMIDI)
 async function listMidiOutputs() {
+    // MIDI-RECOVERY-01 — trong Electron, danh sách Output phải là danh sách THẬT của backend sẽ GỬI (easymidi ở main
+    // process), không phải của Web MIDI (Chromium có thể không liệt kê "AUTO MENU AI" dù backend gửi được).
+    // Không có electronAPI/IPC lỗi -> rơi về Web MIDI như cũ (trình duyệt thường, test).
+    try {
+        if (typeof window !== "undefined" && window.electronAPI?.listMidiPorts) {
+            const r = await window.electronAPI.listMidiPorts();
+            if (r && r.ok && Array.isArray(r.outputs)) {
+                window.__midiOutputListSource = "main-easymidi";
+                return r.outputs.map((name) => ({ id: name, name }));
+            }
+        }
+    } catch (err) {
+        console.warn("listMidiPorts (main) lỗi, dùng Web MIDI:", err);
+    }
+    if (typeof window !== "undefined") window.__midiOutputListSource = "web-midi";
     try {
         const access = await getMidiAccess();
         return [...access.outputs.values()].map((o) => ({ id: o.id, name: o.name }));
@@ -405,13 +420,41 @@ function __midiSend(output, bytes, label) {
     return true;
 }
 
+// MIDI-RECOVERY-01 — ĐƯỜNG GỬI CÓ THẨM QUYỀN: trong Electron mọi Note/CC (Setup Test, actionRegistry,
+// vocalCommandRouter — tất cả đều đi qua sendMidiCC/sendMidiNoteOn/Off/Pulse bên dưới) gửi qua IPC tới MidiDriver
+// (easymidi) ở main process — cùng backend/cổng với dispatch thật và Verify. Web MIDI chỉ còn là đường dự phòng khi
+// KHÔNG có electronAPI.sendMidiMessage (trình duyệt thường/test). Khi main trả lỗi thì KHÔNG tự rơi sang Web MIDI
+// (tránh gửi mù sang cổng khác). Trả true = "send() không ném" (chưa xác nhận DAW nhận), false = chắc chắn không gửi.
+// Kết quả chi tiết (tầng, lý do, lỗi gốc) ở window.__lastMidiSendResult / getLastMidiSendResult().
+let __lastMidiSendResult = null;
+function getLastMidiSendResult() { return __lastMidiSendResult; }
+if (typeof window !== "undefined") window.getLastMidiSendResult = getLastMidiSendResult;
+
+async function __midiSendViaMain(kind, number, value, channel) {
+    if (typeof window === "undefined" || !window.electronAPI?.sendMidiMessage) return undefined; // không có đường main -> caller dùng Web MIDI
+    let r;
+    try {
+        r = await window.electronAPI.sendMidiMessage({ kind, number, value, channel });
+    } catch (err) {
+        r = { ok: false, via: "main-midi-driver", reason: "IPC_ERROR", detail: String(err && err.message || err) };
+    }
+    __lastMidiSendResult = { sender: "main-midi-driver (easymidi)", kind, ...r };
+    midiDiag(r.ok ? "MIDI_SENT_UNCONFIRMED" : "MIDI_SEND_FAILED", { via: "main", kind, port: r.port || null, reason: r.reason || null, error: r.detail || null });
+    return !!r.ok;
+}
+
 async function sendMidiNoteOn(noteNumber, velocity = 100, channel = 0) {
+    const viaMain = await __midiSendViaMain("noteon", noteNumber, velocity, channel);
+    if (viaMain !== undefined) return viaMain;
+    __lastMidiSendResult = { sender: "web-midi (fallback, không có main IPC)", kind: "noteon" };
     const output = await getSelectedMidiOutput();
     if (!output) return false;
     return __midiSend(output, [0x90 | (channel & 0x0f), noteNumber & 0x7f, velocity & 0x7f], "NOTE_ON");
 }
 
 async function sendMidiNoteOff(noteNumber, channel = 0) {
+    const viaMain = await __midiSendViaMain("noteoff", noteNumber, 0, channel);
+    if (viaMain !== undefined) return viaMain;
     const output = await getSelectedMidiOutput();
     if (!output) return false;
     return __midiSend(output, [0x80 | (channel & 0x0f), noteNumber & 0x7f, 0], "NOTE_OFF");
@@ -426,6 +469,9 @@ async function sendMidiNotePulse(noteNumber, velocity = 100, channel = 0, durati
 }
 
 async function sendMidiCC(ccNumber, value, channel = 0) {
+    const viaMain = await __midiSendViaMain("cc", ccNumber, value, channel);
+    if (viaMain !== undefined) return viaMain;
+    __lastMidiSendResult = { sender: "web-midi (fallback, không có main IPC)", kind: "cc" };
     const output = await getSelectedMidiOutput();
     if (!output) return false;
     return __midiSend(output, [0xb0 | (channel & 0x0f), ccNumber & 0x7f, value & 0x7f], "CC");

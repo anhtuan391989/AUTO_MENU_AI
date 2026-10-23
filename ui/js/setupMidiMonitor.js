@@ -35,7 +35,16 @@
     window.MidiMonitor = {
         pushLine,
         logTestResult(kind, label, ok, detail) {
-            pushLine(ok ? `${kind} ${label} → ✅ SUCCESS` : `${kind} ${label} → ❌ FAILURE${detail ? " (" + detail + ")" : ""}`);
+            // MIDI-RECOVERY-01 — ghi rõ SENDER và tầng lỗi (từ getLastMidiSendResult()); SUCCESS chỉ nghĩa API gửi
+            // không ném lỗi, KHÔNG xác nhận DAW/loopMIDI đã nhận.
+            const r = typeof window.getLastMidiSendResult === "function" ? window.getLastMidiSendResult() : null;
+            const sender = r?.sender ? ` [sender: ${r.sender}]` : "";
+            if (ok) {
+                pushLine(`${kind} ${label} → ✅ SUCCESS (API send OK, chưa xác nhận DAW nhận)${sender}${r?.port ? ` [port: ${r.port}]` : ""}`);
+            } else {
+                const why = r && r.reason ? ` ${r.reason}${r.detail ? ": " + r.detail : ""}` : (detail ? " " + detail : "");
+                pushLine(`${kind} ${label} → ❌ FAILURE${sender}${why ? " —" + why : ""}`);
+            }
         },
     };
 
@@ -49,6 +58,9 @@
         CONNECTED: "● CONNECTED — output đã xác nhận mở ở cả renderer và main process.",
         CONFIGURED: "● CONFIGURED — đã kết nối và có mapping đã lưu.",
         VERIFIED: "● VERIFIED",
+        // MIDI-RECOVERY-01 — trạng thái MỘT PHÍA: nói rõ phía nào chạy, phía nào lỗi.
+        OUTPUT_READY: "◐ OUTPUT_READY — Output đã mở (main process), Input CHƯA mở (xem lỗi Input bên dưới).",
+        INPUT_READY: "◐ INPUT_READY — Input đã mở, Output CHƯA mở (xem lỗi Output bên dưới).",
         ERROR: "❌ ERROR — xem chi tiết bên dưới.",
     };
 
@@ -63,8 +75,18 @@
         try {
             const health = await window.MidiHealth.getMidiHealth();
             let text = `Status: ${STATE_LABEL[health.status] || health.status}`;
-            if (health.error) text += ` — ${health.error}`;
-            text += ` [IN: det=${health.input.detected ? "✓" : "✕"} conn=${health.input.connected ? "✓" : "✕"} · OUT: det=${health.output.detected ? "✓" : "✕"} conn=${health.output.connected ? "✓" : "✕"}]`;
+            // MIDI-RECOVERY-01 — lỗi TỪNG phía hiển thị riêng, message gốc nguyên văn (không gộp làm mất lỗi nào).
+            const outErr = health.errors?.output;
+            const inErr = health.errors?.input;
+            if (outErr) text += ` — OUT lỗi: ${outErr}${health.output.errorDetail ? ` (bước: ${health.output.errorDetail.stage})` : ""}`;
+            if (inErr) text += ` — IN lỗi: ${inErr}${health.input.errorDetail ? ` (bước: ${health.input.errorDetail.stage})` : ""}`;
+            if (!outErr && !inErr && health.error) text += ` — ${health.error}`;
+            const det = (side) => {
+                const m = side.detectedByMain === null || side.detectedByMain === undefined ? "?" : (side.detectedByMain ? "✓" : "✕");
+                const r = side.detectedByRenderer ? "✓" : "✕";
+                return `det=${side.detected ? "✓" : "✕"}(main ${m}/web ${r}) conn=${side.connected ? "✓" : "✕"}`;
+            };
+            text += ` [IN: ${det(health.input)} · OUT: ${det(health.output)}]`;
             if (!health._detail?.main?.available) {
                 text += " [main-process health không khả dụng]";
             }
@@ -91,12 +113,27 @@
         btn.disabled = true;
         try {
             const result = await window.MidiHealth.autoConnect({ mode: "auto" });
-            if (result.ok) {
-                pushLine(`AUTO CONNECT → ✅ đã kết nối "${result.resolution.portName}" (nguồn: ${result.resolution.source}).`);
-            } else {
+            // MIDI-RECOVERY-01 — KHÔNG dùng result.ok (chỉ nghĩa "đã phân giải được tên cổng") để báo thành công.
+            // Báo theo kết quả MỞ THẬT của từng phía (result.output.ready / result.input.ready).
+            const port = result.resolution?.portName;
+            const sideTxt = (label, side) => side
+                ? `${label} ${side.ready ? "✅ mở" : "❌ KHÔNG mở"}${side.error ? ` (${side.error}${side.detail?.stage ? ` · bước ${side.detail.stage}` : ""})` : ""}`
+                : `${label} ?`;
+            const detailTxt = `${sideTxt("OUT", result.output)} · ${sideTxt("IN", result.input)}`;
+            const note = result.coalesced ? " [gộp: lần bấm dồn dập, không mở lại]" : "";
+            if (result.status === "CONNECTED") {
+                pushLine(`AUTO CONNECT → ✅ CONNECTED "${port}" (nguồn: ${result.resolution.source}) — ${detailTxt}${note}`);
+            } else if (result.status === "OUTPUT_READY" || result.status === "INPUT_READY") {
+                pushLine(`AUTO CONNECT → ⚠ ${result.status} (một phía) "${port || "?"}" — ${detailTxt}${note}`);
+            } else if (result.status) {
                 const vp = result.virtualPort;
-                let reason = vp && !vp.ok ? ` — ${vp.detail}` : " — không tìm thấy port khả dụng.";
-                pushLine(`AUTO CONNECT → ❌ KHÔNG kết nối được${reason}`);
+                const why = !port ? (vp && !vp.ok ? ` — ${vp.detail}` : " — không tìm thấy port khả dụng.") : "";
+                pushLine(`AUTO CONNECT → ❌ ${result.status} "${port || "-"}" — ${detailTxt}${why}${note}`);
+            } else {
+                // main cũ (không có result.status) — giữ nhánh cũ nhưng nói rõ chưa xác nhận mở cổng.
+                pushLine(result.ok
+                    ? `AUTO CONNECT → ⚠ đã phân giải tên "${port}" nhưng KHÔNG có xác nhận mở cổng (main cũ).`
+                    : "AUTO CONNECT → ❌ KHÔNG kết nối được — không tìm thấy port khả dụng.");
             }
             await refreshMidiStatus();
         } catch (err) {

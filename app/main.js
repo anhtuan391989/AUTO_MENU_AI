@@ -520,7 +520,26 @@ ipcMain.handle("midi-auto-connect", async (event, opts) => {
     try {
         return CommandRuntime.autoConnect(opts || {});
     } catch (err) {
-        return { ok: false, detail: err.message };
+        return { ok: false, resolved: false, status: "ERROR", connected: false, partial: false, detail: err.message };
+    }
+});
+
+// MIDI-RECOVERY-01 — danh sách cổng THẬT của backend gửi/nhận (easymidi, main process).
+ipcMain.handle("midi-list-ports", async () => {
+    try {
+        return CommandRuntime.listPorts();
+    } catch (err) {
+        return { ok: false, outputs: [], inputs: [], error: err.message };
+    }
+});
+
+// MIDI-RECOVERY-01 — gửi Note/CC bằng MidiDriver (easymidi) ở main process: đường gửi có thẩm quyền duy nhất
+// cho renderer. Không đổi mapping/giao thức; ok=true chỉ nghĩa output.send() không ném (delivery UNCONFIRMED).
+ipcMain.handle("midi-send", async (event, msg) => {
+    try {
+        return await CommandRuntime.sendMidi(msg || {});
+    } catch (err) {
+        return { ok: false, via: "main-midi-driver", reason: "IPC_ERROR", detail: err.message };
     }
 });
 

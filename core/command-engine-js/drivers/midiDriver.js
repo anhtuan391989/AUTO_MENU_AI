@@ -30,7 +30,7 @@ class MidiDriver extends BaseDriver {
   }
 
   async execute(params) {
-    // params: { cc, channel, value } hoặc { note, channel, velocity }
+    // params: { cc, channel, value } hoặc { note, channel, velocity } hoặc { noteoff, channel, velocity }
     try {
       if (params.cc !== undefined) {
         this.output.send('cc', {
@@ -42,6 +42,13 @@ class MidiDriver extends BaseDriver {
         this.output.send('noteon', {
           note: params.note,
           velocity: params.velocity ?? 100,
+          channel: (params.channel ?? 1) - 1,
+        });
+      } else if (params.noteoff !== undefined) {
+        // MIDI-RECOVERY-01 — Note Off (0x80) cho sendMidiNotePulse: thêm nhánh MỚI, không đổi cc/note cũ.
+        this.output.send('noteoff', {
+          note: params.noteoff,
+          velocity: params.velocity ?? 0,
           channel: (params.channel ?? 1) - 1,
         });
       } else {
