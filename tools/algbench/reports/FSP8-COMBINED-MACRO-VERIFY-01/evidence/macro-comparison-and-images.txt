@@ -1,0 +1,25 @@
+FSP8-COMBINED-MACRO-VERIFY-01 — bang chung (HEAD 78ad6e3bfe0c9622bb985da140bfaf669e43d63a, 24/10/2026 23:16)
+
+A. SO SANH XML (VERIFIED_FILE, doc bang cat -A; ban tren may Khoi = ban repo + CR vi Explorer 415 B = 406 B LF + 9 CR)
+ Ban goc (Anh/Macros.zip)           BatMic / TatMic                         DIAG_A1_MIC_UNMUTE / DIAG_A2_MIC_MUTE
+ BOM UTF-8                          co                                      co
+ Thu tu lenh                        Find Track -> Mute                      Find Track -> Mute            (GIONG)
+ Find Track: category/name          Track / Find Track                      Track / Find Track            (GIONG)
+ Find Track: tham so                Name="VOCAL"                            Name="Mic"                    (KHAC ten doi tuong - co chu y)
+ Mute: category/name                Track / Mute                            Track / Mute                  (GIONG)
+ Mute: tham so                      State="0" (Bat) / "1" (Tat)             State="0" / "1"               (GIONG)
+ Thut dong, tab, CRLF               tab, CRLF                               tab, CRLF tren may Khoi       (GIONG)
+ group / description                "Custom" / ""                           "DIAG_TEST" / co chu           (KHAC, khong lien quan lenh)
+ => Khong co khac biet cau truc nao co the giai thich "khong tac dung". Khac biet duy nhat co nghia: gia tri Name.
+ Gioi han: BatMic/TatMic nham muc tieu "VOCAL" (track KHONG ton tai trong LIVE_TEST: Beat, Mic, Khong Day, MIDI test) => khong the lay lam bang chung "chay duoc" trong du an nay; chi la VERIFIED_FILE ve cau truc. Khong co xac nhan cua Khoi rang chung dang chay tot.
+
+B. ANH STATE-VERIFY (Anh/222.jpg 23:14:17, 333.jpg 23:14:32, 444.jpg 23:14:48, 555.jpg 23:15:03) — USER_REPORTED + Claude doc anh
+ Track dang chon (hang sang) = "Khong Day" (hang 3), KHONG PHAI Mic. Macro khong co Find Track.
+ 222: M cua Khong Day = BAT | 333: BAT | 444: TAT | 555: TAT. Beat va Mic: M tat o ca 4 anh.
+ Thu tu thoi gian khop chuoi State1 x2 -> State0 x2 (anh 0 khong co trong repo). Khoi bao da thu tren tat ca track => USER_REPORTED_PASS.
+ => Mute State "1" dat BAT, chay lai van BAT; State "0" dat TAT, chay lai van TAT (tren track chon tay). Chua phai bang chung cho macro ket hop.
+
+C. KIEM TRA "phep thu ket hop da co ket qua ro chua?"
+ Quet repo (md/txt + toan bo Anh/): KHONG co anh hay ghi chu truoc/sau cua bat ky macro ket hop (DIAG_A1/A2, LIVE_*) chay bang Action.
+ Chi co cau "M1–M5 / D1–D5 khong co hien tuong" (USER_REPORTED, khong anh, thoi diem chua biet phai chay bang nut Action, chua biet track nao dang chon, chua biet Mic dang Mute hay khong).
+ => Chua co bang chung ro => can DUNG MOT phep thu ket hop.
