@@ -1,0 +1,40 @@
+FSP8-MACRO-RESOLUTION-01 — bang chung da xem (Claude chi DOC anh/file, KHONG tu quan sat DAW)
+
+HEAD main da dung: 86c2b41a7a7fc3f36db4e112737c6028c59afb0f (24/10/2026 16:28 +0700)
+
+ANH (thu muc Anh/ cua repo) — USER_REPORTED, Claude doc noi dung anh:
+ 1792833871245_...38b33bf6...jpg : Macro Organizer + cua so "Edit Macro" cua LIVE_MUSIC_ON.
+    Thay: nhom LIVE_TEST (11 macro) trong danh sach; lenh "Track|Find Track  Name("Beat")" va "Track|Monitor  State("1")".
+ 1792834063306_...96f76ce3...jpg : 16:27:36 24/10/2026, cua so "Studio Pro - LIVE_TEST*" (co dau * = chua luu), Mixer.
+    Thay: 8 kenh Beat, Mic, Khong Day, Group Mic, Delay, Verb ngan, Verb dai, Com Verb DEU HIEN trong Mixer (4 bus hien).
+    3 track Beat/Mic/Khong Day: nut record-arm do; nut Monitor (nua hinh tron) khong sang; nut M/S khong sang o ca 8 kenh.
+    Fader: Beat 0dB, Mic +1.0, Khong Day 0dB; Delay -22, Verb ngan -12, Verb dai -16, Com Verb -30.
+    Luu y: file audit 20/10 ghi Mic gain 0, Verb dai -18, Mic/Khong Day Mute=1, monitorActive=1 => ban LIVE_TEST KHAC trang thai audit; khong so sanh duoc.
+ 1792833763715_...a03c530e...jpg : Macro Organizer thay 5 macro DIAG_TEST (A1,A2,B1,B2,C1); cot Shortcut: F5 TatMic, F7 TatVang, F8 BatVang, F9 NORM, F10 LOFI, F11 REMIX, F12 RAP.
+ 1792833772775_...44bdc9b9...jpg : Macro Organizer; nut New/Edit/Shortcut/Delete/Refresh; nhom LIVE_TEST.
+ 1792833802936_...ab9f357e...jpg + 1792833810579_...d0d1ef86...jpg : Explorer "C:\Nguoi dung\Khoi\Tai lieu\Studio One\Macros" (252 muc); co DIAG_* (24/10 16:12) va LIVE_* (23/10 02:40), Monitor.studioonemacro (22/10 17:00), BatMic (17/04/2026), commandbar-v3.xml (24/10 16:20).
+ 1792729096796_...9b91f49b...jpg : Options > External Devices: thiet bi "New Control Surface", Send To/Receive From = AUTO MENU AI; loopMIDI cong "AUTO MENU AI".
+ 1792724135414_...0f12bb94...jpg : Macro Organizer cu (cung noi dung).
+ 1792729613311_...5d300ef4...jpg : Menu System Center (MIDI RtMidi — thuoc MIDI-RECOVERY-01, khong xet lai).
+ (2 anh con lai: khong doc)
+
+FILE (Anh/Macros.zip, repo, 23/10/2026 09:55 — 247 file): thu muc macro THAT cua Khoi.
+ - LIVE_* trong zip == LIVE_* trong repo, chi khac CR (CRLF) => khong khac noi dung.
+ - Ngay file: BatMic/TatMic 2026-04-17; BatVang4/TatVang4 2026-05-28; NORM/LOFI/RAP/REMIX 2025-10-12; Monitor + "User Macro" 2026-10-22 17:00.
+ - Monitor.studioonemacro = Track|Monitor State "" + Console|Enable Direct Monitoring State "" ; "User Macro" = Track|Mute State "" + Track|Select Muted Tracks. Ca hai co dang GUI mac dinh (group rong) => INFERRED: do Khoi tao bang giao dien FSP8 8 ngay 22/10.
+ - SUA SAI cua FSP8-MACRO-DIAG-01: bao cao do ghi 236 macro la "Studio One 5.x tu goi PDL" — DUNG LA thu muc macro that cua Khoi (da kiem ngay file).
+
+TAI LIEU NGOAI:
+ [OK] https://fenderstudiopromanual.fender.com/en/Content/Editing_Topics/Macro_Toolbar.htm
+   - Action button: "Clicking on any item in this list performs the associated Macro."
+   - "Key commands can be associated with your Macros ... assign a key command by typing into the Enter Key field and clicking on Assign."
+   - "Macros can be mapped to your MIDI hardware ... so long as the desired controls transmit MIDI CC values."
+   - Macro Organizer: nut "Shortcut" nhay den Keyboard Shortcuts; "Show Macros Folder in Explorer/Finder" o cuoi cua so.
+   - Khong noi: State/Name, Monitor, Mute, Find Track, Find Channel, toggle chung, chay tren track dang chon, Refresh.
+ [OK] https://support.presonus.com/hc/en-us/articles/210040403-MIDI-Transport-Control-Assignment-MIDI-Learn (Studio One 2.0.4+, CU)
+   - Console > External > double-click thiet bi > "MIDI Learn" > bam nut > chuot phai control > "Assign" > tim lenh Studio One. Thiet bi trong bai: New Keyboard. Khong noi macro, khong noi CC/Note, khong noi Control Surface.
+ [OK] https://fenderstudiopromanual.fender.com/en/Content/Setup_Topics/Set_Up_Your_MIDI_Devices.htm : 3 loai External Device (Keyboard/Instrument/Control Surface); khong co "Assign"/"MIDI Learn"/"Macro".
+ [OK] https://fenderstudiopromanual.fender.com/en/Content/Fundamentals_Topics/Key_Commands.htm : gan phim bang Enter Key + Assign; khong noi MIDI, Monitor, Mute, track dang chon; khong link Key Command Sheet.
+ [OK] https://www.soundonsound.com/techniques/studio-one-macro-machines : State=1 buoc luon mo thay vi dao (vi du lenh Editor); "Macros can be a bit of a dark art"; co tuy chon khong tac dung.
+ [KHONG DOC DUOC] Key Command Sheet PDF (fmicassets.com) va Release Notes PDF (ctfassets.net): bi chan "URL_NOT_ON_ALLOWLIST". KHONG co ket luan nao tu hai PDF nay.
+ [KHONG LIEN QUAN] https://support.fender.com/en-us/knowledgebase/article/KA-02275 : Release Notes cua "Fender Studio" 1.0–1.1.1 (san pham khac Studio Pro 8); khong co muc Macro/Find Track/Monitor/Mute => khong dung lam bang chung.
