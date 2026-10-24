@@ -11,7 +11,8 @@ const html = fs.readFileSync(path.resolve(__dirname, '../../ui/index.html'), 'ut
 let fail = 0; const ok = (c, m) => { console.log(`  ${c ? '✅' : '❌'} ${m}`); if (!c) fail++; };
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-const clickA = ren.indexOf('document.getElementById("musicBtn")?.addEventListener("click"');
+// MIDI-DAW-CONTROL-01: khối nút nay bắt đầu từ hàm tiện ích reportDawStateResult (tooltip kết quả gửi) đặt ngay trước handler MUSIC.
+const clickA = ren.indexOf('// MIDI-DAW-CONTROL-01 — hiển thị kết quả gửi lệnh ON/OFF');
 const clickB = ren.indexOf('\n// ==========================================================\n// TASK AI-FX-01 — AUTO FX/SEND theo NHẠC');
 const saveA = ren.indexOf('// BUTTON-RESET (yêu cầu chính thức của Khói)');
 const loadA = ren.indexOf('function loadData() {');

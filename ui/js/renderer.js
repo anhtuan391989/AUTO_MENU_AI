@@ -521,16 +521,29 @@ document.querySelectorAll(".preset-btn").forEach(btn => {
 
 document.getElementById("autoDetectBtn")?.classList.add("active");
 
+// MIDI-DAW-CONTROL-01 — hiển thị kết quả gửi lệnh ON/OFF trên tooltip của nút (KHÔNG đổi HTML/CSS). Chỉ nói "đã GỬI lệnh":
+// Menu không có phản hồi từ Studio One nên KHÔNG BAO GIỜ hiện "DAW đã xác nhận".
+function reportDawStateResult(btn, control, promise) {
+    Promise.resolve(promise).then((res) => {
+        if (!btn || !res) return;
+        btn.title = res.text || "";
+        btn.dataset.dawSync = res.ok ? "sent-unconfirmed" : (res.reason === "NOT_CONFIGURED" || res.status === "NOT_CONFIGURED" ? "not-configured" : "failed");
+        return res;
+    }).catch((err) => console.error(`[MenuControl] ${control} lỗi:`, err));
+}
+
 document.getElementById("musicBtn")?.addEventListener("click", (e) => {
     e.target.classList.toggle("disabled");
     saveData();
-    // TASK B12 — nối song song executeAction() (không thay đổi hành vi toggle CSS đã có).
-    // NOT_CONFIGURED mặc định — chỉ hoạt động thật nếu user tự cấu hình MIDI qua Setup.
-    window.ActionRegistry?.executeAction?.(window.ActionRegistry.ACTIONS.MONITOR_BEAT_TOGGLE, { reason: "menu-button" })
-        ?.catch?.((err) => console.error("[MenuControl] MONITOR_BEAT_TOGGLE lỗi:", err));
+    // MIDI-DAW-CONTROL-01 — ý nghĩa class (VERIFIED_FILE: style.css #musicBtn / #musicBtn.disabled): KHÔNG có class
+    // "disabled" = sáng = MUSIC BẬT; có "disabled" = mờ = MUSIC TẮT. Trạng thái ĐÍCH đọc SAU khi toggle ở trên.
+    // setDawControlState() gửi đúng MỘT lệnh: ON/OFF riêng nếu đã cấu hình, nếu chưa thì lệnh toggle cũ như trước.
+    const targetOn = !e.target.classList.contains("disabled");
+    reportDawStateResult(e.target, "MUSIC", window.ActionRegistry?.setDawControlState?.("MUSIC", targetOn, { reason: "menu-button" }));
 });
 
 const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2", fxBtn: "MONITOR_FX" };
+const MONITOR_BTN_TO_CONTROL = { mic1Btn: "MIC1", mic2Btn: "MIC2", fxBtn: "FX" }; // MIDI-DAW-CONTROL-01
 ["mic1Btn", "mic2Btn", "fxBtn"].forEach(id => {
     document.getElementById(id)?.addEventListener("click", (e) => {
         e.target.classList.toggle("active");
@@ -540,6 +553,11 @@ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2"
             // Toàn bộ đường gửi + báo kết quả (đã gửi/chưa cấu hình/lỗi) nằm trong __fxManualToggle để UI không tự suy diễn.
             if (window.__fxManualToggle) { window.__fxManualToggle(e.target.classList.contains("active")); return; }
             window.__fxAuto?.notifyManual();
+            // MIDI-DAW-CONTROL-01 — đã cấu hình FX ON/OFF (mute bus) => dùng nó, KHÔNG gửi thêm Send/toggle cũ cho cùng cú bấm.
+            if (window.ActionRegistry?.getDawStateMode?.("FX") === "explicit") {
+                reportDawStateResult(e.target, "FX", window.ActionRegistry.setDawControlState("FX", e.target.classList.contains("active"), { reason: "menu-button" }));
+                return;
+            }
             // Nếu đã cấu hình Send Reverb/Delay: bấm tay cũng điều khiển ĐÚNG các Send đó (nhất quán với Auto) thay vì
             // chỉ MONITOR_FX cũ. Chưa cấu hình => hành vi cũ giữ NGUYÊN (rơi xuống executeAction MONITOR_FX bên dưới).
             const grp = window.__fxSendGroup;
@@ -550,13 +568,11 @@ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2"
                 return;
             }
         }
-        // MIDI-MASTER-01 / MENU-CONTROL-01 — nối SONG SONG tới executeAction() (không thay
-        // thế toggle CSS). Chưa có audio-routing backend thật (BACKEND_MISSING — xem báo cáo),
-        // nên executeAction() sẽ trả NOT_CONFIGURED trừ khi user tự gán MIDI/mouse trong Setup.
-        const actionName = MONITOR_BTN_TO_ACTION[id];
-        if (actionName && window.ActionRegistry?.executeAction) {
-            window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[actionName], { reason: "menu-button" })
-                .catch(err => console.error(`[MenuControl] ${actionName} lỗi:`, err));
+        // MIDI-DAW-CONTROL-01 — "active" = BẬT (VERIFIED_FILE: style.css .control-btn.active). Trạng thái ĐÍCH đọc SAU toggle.
+        // setDawControlState(): ON/OFF riêng nếu đã cấu hình; chưa cấu hình => lệnh toggle cũ (MONITOR_*) như trước. MỘT lệnh/cú bấm.
+        const control = MONITOR_BTN_TO_CONTROL[id];
+        if (control && window.ActionRegistry?.setDawControlState) {
+            reportDawStateResult(e.target, control, window.ActionRegistry.setDawControlState(control, e.target.classList.contains("active"), { reason: "menu-button" }));
         }
     });
 });
@@ -598,6 +614,10 @@ function createFxAutoWiring() {
     // Trạng thái đồng bộ hiện ở tooltip (title) + data-fx-sync của nút (không đổi HTML/CSS); chuyển trạng thái được ghi vào log telemetry.
     // MENU-FX-FIX: văn bản Send tách khỏi "ai đang điều khiển" để cả Auto lẫn thủ công đều hiện đúng trạng thái Send thật.
     const sendText = (info) => {
+        // MIDI-DAW-CONTROL-01 — lần bấm tay gần nhất đi đường FX ON/OFF (mute bus): hiển thị đúng kết quả của đường đó, không nói "Send".
+        if (window.__fxLastManualVia === "daw-state" && info.manualOverride && window.__dawStateLast?.FX) {
+            return info.pending ? "đang gửi lệnh FX ON/OFF (mute bus) — CHƯA có phản hồi" : window.__dawStateLast.FX.text;
+        }
         const lr = info.lastResult;
         if (info.pending) return "đang gửi lệnh Send — CHƯA có phản hồi, chưa đồng bộ";
         if (!lr) return null;
@@ -638,6 +658,16 @@ function createFxAutoWiring() {
         ctl.notifyManual(!!target); const seq = ctl.getManualSeq();
         let res;
         try {
+            // MIDI-DAW-CONTROL-01 — FX ON/OFF (mute 4 bus) đã cấu hình => CHỈ gửi lệnh đó cho cú bấm này (không gửi thêm Send/toggle cũ,
+            // không đụng nhóm Send của FX Auto). Mốc 60 s "Auto nhường quyền" (notifyManual) giữ nguyên như trước.
+            if (AR0()?.getDawStateMode?.("FX") === "explicit") {
+                window.__fxLastManualVia = "daw-state";
+                res = await AR0().setDawControlState("FX", !!target, { reason: "menu-button" });
+                if (fxBtn) { fxBtn.title = res.text || ""; fxBtn.dataset.dawSync = res.ok ? "sent-unconfirmed" : (res.reason === "NOT_CONFIGURED" ? "not-configured" : "failed"); }
+                ctl.reportManualResult(res, seq);
+                return res;
+            }
+            window.__fxLastManualVia = "send";
             if (group.managed().some((n) => n !== "MONITOR_FX")) res = await group.apply(!!target, { force: true });
             else {
                 const AR = AR0();

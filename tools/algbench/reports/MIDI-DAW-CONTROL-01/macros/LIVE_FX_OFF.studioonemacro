@@ -1,0 +1,27 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Macro title="LIVE_FX_OFF" group="LIVE_TEST" description="EXPERIMENTAL - chua chay thuc te; Mute State 0=bo mute, 1=mute (INFERRED tu macro PDL), Find Channel tren bus chua kiem">
+	<CommandElement category="Console" name="Find Channel">
+		<CommandArgument name="Name" value="Delay"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+	<CommandElement category="Console" name="Find Channel">
+		<CommandArgument name="Name" value="Verb ngắn"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+	<CommandElement category="Console" name="Find Channel">
+		<CommandArgument name="Name" value="Verb dài"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+	<CommandElement category="Console" name="Find Channel">
+		<CommandArgument name="Name" value="Com Verb"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+</Macro>

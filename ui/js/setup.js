@@ -640,7 +640,36 @@ const DAW_MIDI_ACTIONS = [
     // TASK AI-FX-01 — 2 Send do nút FX quản lý (Auto theo nhạc nền). Không có CC mặc định.
     { action: "FX_SEND_REVERB", label: "FX SEND REVERB" },
     { action: "FX_SEND_DELAY", label: "FX SEND DELAY" },
+    // MIDI-DAW-CONTROL-01 — TÁM lệnh ON/OFF đặt trạng thái đích (Studio One 8). Mỗi hàng một mapping RIÊNG, không mặc định.
+    // Khi đã lưu ÍT NHẤT một chiều (ON hoặc OFF) cho một nút, nút đó dùng chế độ "đặt đích danh" và KHÔNG còn gửi lệnh toggle cũ.
+    { action: "MUSIC_ON", label: "MUSIC ON (Monitor Beat bật)" },
+    { action: "MUSIC_OFF", label: "MUSIC OFF (Monitor Beat tắt)" },
+    { action: "MIC1_ON", label: "MIC 1 ON (Monitor Mic bật)" },
+    { action: "MIC1_OFF", label: "MIC 1 OFF (Monitor Mic tắt)" },
+    { action: "MIC2_ON", label: "MIC 2 ON (Monitor Không Dây bật)" },
+    { action: "MIC2_OFF", label: "MIC 2 OFF (Monitor Không Dây tắt)" },
+    { action: "FX_ON", label: "FX ON (bỏ Mute 4 bus)" },
+    { action: "FX_OFF", label: "FX OFF (Mute 4 bus)" },
 ];
+
+// MIDI-DAW-CONTROL-01 — bộ CC GỢI Ý (kênh 16, giá trị 127) khớp 8 macro LIVE_* của LIVE-MIDI-FSP8-02.
+// Đây là bộ thử nghiệm, KHÔNG tự áp dụng: chỉ được lưu khi người dùng bấm nút và xác nhận.
+const DAW_STATE_SUGGESTED = Object.freeze({
+    MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109,
+});
+const DAW_STATE_ACTION_SET = new Set(Object.keys(DAW_STATE_SUGGESTED));
+const DAW_STATE_SUGGESTED_CHANNEL = 16;
+const DAW_STATE_SUGGESTED_VALUE = 127;
+
+// Hai action ON/OFF (hoặc bất kỳ cặp nào trong 8) KHÔNG được trùng cùng kind+channel+number — trùng sẽ làm Studio One chạy nhầm macro.
+function findDawStateMappingConflict(action, mapping) {
+    for (const other of DAW_STATE_ACTION_SET) {
+        if (other === action) continue;
+        const m = getDawMidiOutMapping(other);
+        if (m && m.kind === mapping.kind && Number(m.channel) === Number(mapping.channel) && Number(m.number) === Number(mapping.number)) return other;
+    }
+    return null;
+}
 
 function isMouseControlEnabledLocal() {
     const v = getSetting("mouseControlEnabled");
@@ -682,6 +711,41 @@ function initDawMidiOutputMappingSection() {
         }
 
         container.innerHTML = "";
+
+        // MIDI-DAW-CONTROL-01 — ghi chú + nút điền bộ CC gợi ý cho 8 lệnh ON/OFF (tạo bằng JS, không đổi HTML).
+        const liveBox = document.createElement("div");
+        liveBox.className = "hint-text";
+        liveBox.innerHTML = `
+            <b>8 lệnh ON/OFF điều khiển Studio One (MUSIC / MIC 1 / MIC 2 / FX):</b> ở cuối danh sách. Mỗi nút Menu gửi lệnh theo <b>trạng thái đích sau cú bấm</b>.
+            Menu chỉ <b>gửi</b> lệnh — <b>không đọc được trạng thái thật</b> của Studio One, nên lúc mở app hoặc khi bạn đổi trực tiếp trong DAW, nút Menu có thể lệch DAW.
+            <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ CC gợi ý LIVE (CC 102–109, kênh 16, giá trị 127)</button>
+            <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
+            <span id="liveCcStatus"></span>`;
+        container.appendChild(liveBox);
+        liveBox.querySelector("#btnFillLiveCc").addEventListener("click", () => {
+            const overwrite = [...DAW_STATE_ACTION_SET].filter((a) => getDawMidiOutMapping(a));
+            const msg = "Lưu 8 mapping gợi ý (CC 102–109, kênh 16, giá trị 127)? Đây là bộ CC THỬ NGHIỆM khớp macro LIVE_*; "
+                + "bạn vẫn phải gán từng CC vào đúng macro trong Studio One." + (overwrite.length ? `\nSẽ GHI ĐÈ ${overwrite.length} mapping ON/OFF đã lưu.` : "");
+            if (!confirm(msg)) return;
+            for (const [a, cc] of Object.entries(DAW_STATE_SUGGESTED)) {
+                setDawMidiOutMapping(a, { kind: "cc", channel: DAW_STATE_SUGGESTED_CHANNEL, number: cc, value: DAW_STATE_SUGGESTED_VALUE });
+            }
+            notifySetupChanged();
+            render();
+            renderMappingOverview();
+        });
+
+        // Khôi phục: xoá CHỈ 8 mapping ON/OFF mới; mapping cũ (toggle MONITOR_*, Send, PLAY...) không bị đụng.
+        liveBox.querySelector("#btnClearLiveCc").addEventListener("click", () => {
+            const saved = [...DAW_STATE_ACTION_SET].filter((a) => getDawMidiOutMapping(a));
+            if (!saved.length) { alert("Chưa có mapping ON/OFF nào để xoá."); return; }
+            if (!confirm(`Xoá ${saved.length} mapping ON/OFF? Các nút MUSIC/MIC/FX sẽ quay về lệnh toggle cũ (nếu bạn đã cấu hình), mapping cũ không bị đụng.`)) return;
+            DAW_STATE_ACTION_SET.forEach((a) => setDawMidiOutMapping(a, null));
+            notifySetupChanged();
+            render();
+            renderMappingOverview();
+        });
+
         DAW_MIDI_ACTIONS.forEach(({ action, label }) => {
             const existing = getDawMidiOutMapping(action);
             const row = document.createElement("div");
@@ -696,7 +760,7 @@ function initDawMidiOutputMappingSection() {
                 <input class="mo-number" type="number" min="0" max="127" placeholder="Số" value="${existing?.number ?? ""}">
                 <input class="mo-value" type="number" min="0" max="127" placeholder="Value/Vel" value="${existing?.kind === "note" ? (existing?.velocity ?? "") : (existing?.value ?? "")}">
                 <button class="setup-btn mo-save">💾 Lưu</button>
-                <span class="badge ${existing ? "badge-live" : "badge-warn"} mo-status">${existing ? "Đã cấu hình" : "NOT_CONFIGURED"}</span>
+                <span class="badge ${existing ? "badge-live" : "badge-warn"} mo-status">${existing ? (DAW_STATE_ACTION_SET.has(action) ? "Đã lưu — chỉ gửi lệnh, DAW chưa xác nhận" : "Đã cấu hình") : "NOT_CONFIGURED"}</span>
             `;
 
             row.querySelector(".mo-save").addEventListener("click", () => {
@@ -712,6 +776,13 @@ function initDawMidiOutputMappingSection() {
                 if (kind === "note") mapping.velocity = Number.isFinite(val) ? val : 100;
                 else mapping.value = Number.isFinite(val) ? val : 127;
 
+                if (DAW_STATE_ACTION_SET.has(action)) {
+                    const clash = findDawStateMappingConflict(action, mapping);
+                    if (clash) {
+                        alert(`Không lưu: ${kind === "note" ? "Note" : "CC"} ${number} kênh ${channel} đã dùng cho ${clash}. Mỗi lệnh ON/OFF phải có CC/Note riêng.`);
+                        return;
+                    }
+                }
                 setDawMidiOutMapping(action, mapping);
                 notifySetupChanged();
                 render();
@@ -756,7 +827,7 @@ function renderMappingOverview() {
 
         // Đúng thứ tự getActionStatus(): MIDI output trước, rồi mouse, rồi NOT_CONFIGURED.
         let status;
-        if (outputMap) status = "SUCCESS (MIDI)";
+        if (outputMap) status = DAW_STATE_ACTION_SET.has(action) ? "ĐÃ LƯU (MIDI) — chỉ gửi lệnh, DAW chưa xác nhận" : "SUCCESS (MIDI)";
         else if (coord) status = mouseOn ? "SUCCESS (Mouse)" : "MOUSE_DISABLED";
         else status = "NOT_CONFIGURED";
 

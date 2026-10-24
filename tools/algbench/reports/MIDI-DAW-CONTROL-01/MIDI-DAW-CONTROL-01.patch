@@ -1,0 +1,421 @@
+diff --git a/tests/unit/MenuButtonReset.verify.js b/tests/unit/MenuButtonReset.verify.js
+index 90a3280..c756c83 100644
+--- a/tests/unit/MenuButtonReset.verify.js
++++ b/tests/unit/MenuButtonReset.verify.js
+@@ -11,7 +11,8 @@ const html = fs.readFileSync(path.resolve(__dirname, '../../ui/index.html'), 'ut
+ let fail = 0; const ok = (c, m) => { console.log(`  ${c ? '✅' : '❌'} ${m}`); if (!c) fail++; };
+ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+ 
+-const clickA = ren.indexOf('document.getElementById("musicBtn")?.addEventListener("click"');
++// MIDI-DAW-CONTROL-01: khối nút nay bắt đầu từ hàm tiện ích reportDawStateResult (tooltip kết quả gửi) đặt ngay trước handler MUSIC.
++const clickA = ren.indexOf('// MIDI-DAW-CONTROL-01 — hiển thị kết quả gửi lệnh ON/OFF');
+ const clickB = ren.indexOf('\n// ==========================================================\n// TASK AI-FX-01 — AUTO FX/SEND theo NHẠC');
+ const saveA = ren.indexOf('// BUTTON-RESET (yêu cầu chính thức của Khói)');
+ const loadA = ren.indexOf('function loadData() {');
+diff --git a/tests/unit/MonitorBeatToggle.verify.js b/tests/unit/MonitorBeatToggle.verify.js
+index 4bf965a..3ad20c5 100644
+--- a/tests/unit/MonitorBeatToggle.verify.js
++++ b/tests/unit/MonitorBeatToggle.verify.js
+@@ -25,36 +25,43 @@ const marker = 'document.getElementById("musicBtn")?.addEventListener("click"';
+ const start = source.indexOf(marker);
+ if (start === -1) throw new Error('Không tìm thấy handler #musicBtn trong renderer.js.');
+ const end = source.indexOf('});', start) + 3;
+-const block = source.slice(start, end);
++// MIDI-DAW-CONTROL-01: handler nay gọi reportDawStateResult() (đặt ngay trước nó) và ActionRegistry.setDawControlState().
++const helperStart = source.indexOf('// MIDI-DAW-CONTROL-01 — hiển thị kết quả gửi lệnh ON/OFF');
++if (helperStart === -1 || helperStart > start) throw new Error('Không tìm thấy reportDawStateResult trong renderer.js.');
++const block = source.slice(helperStart, end);
+ 
+ class FakeElement {
+-    constructor() { this._handlers = {}; this.classList = { toggled: false, toggle() { this.toggled = !this.toggled; } }; }
++    constructor() { this._handlers = {}; this._cls = new Set(); this.dataset = {}; this.title = ''; const cls = this._cls; this.classList = { get toggled() { return cls.has('disabled'); }, toggle(c) { cls.has(c) ? cls.delete(c) : cls.add(c); }, contains: (c) => cls.has(c) }; }
+     addEventListener(evt, fn) { (this._handlers[evt] = this._handlers[evt] || []).push(fn); }
+     dispatch(evt) { (this._handlers[evt] || []).forEach((fn) => fn({ target: this })); }
+ }
+ 
+-console.log('== musicBtn click -> dispatch đúng MONITOR_BEAT_TOGGLE, giữ nguyên toggle CSS cũ ==');
++console.log('== musicBtn click -> dispatch đúng 1 lệnh (legacy MONITOR_BEAT_TOGGLE khi chưa cấu hình ON/OFF), giữ nguyên toggle CSS cũ ==');
+ {
+-    const calls = [];
++    // Dùng actionRegistry.js THẬT (chế độ legacy: chỉ có mapping toggle cũ) — mock chỉ ở tầng gửi MIDI.
++    const sent = [];
++    const store = { selectedDAW: 'studio-one', dawMidiOutMappings: { 'studio-one': { MONITOR_BEAT_TOGGLE: { kind: 'cc', channel: 1, number: 20, value: 127 } } } };
+     const musicBtn = new FakeElement();
+     const sandbox = {
+-        console,
++        console: { log() {}, error: console.error, warn() {} },
+         document: { getElementById: (id) => (id === 'musicBtn' ? musicBtn : null) },
+         saveData: () => {},
+-        window: {
+-            ActionRegistry: {
+-                ACTIONS: { MONITOR_BEAT_TOGGLE: 'MONITOR_BEAT_TOGGLE' },
+-                executeAction: (action, ctx) => { calls.push({ action, ctx }); return Promise.resolve({ ok: true }); },
+-            },
+-        },
++        getSetting: (k, f) => (store[k] === undefined ? f : store[k]),
++        setSetting: (k, v) => { store[k] = v; },
++        sendMidiCC: async (n, v, ch) => { sent.push({ n, v, ch }); return true; },
++        sendMidiNotePulse: async () => true,
+     };
++    sandbox.window = sandbox;
+     vm.createContext(sandbox);
++    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', '..', 'ui', 'js', 'actionRegistry.js'), 'utf8'), sandbox);
+     vm.runInContext(block, sandbox);
+     musicBtn.dispatch('click');
+-    assert(musicBtn.classList.toggled === true, 'toggle CSS "disabled" vẫn hoạt động như cũ (không bị thay thế)');
+-    assert(calls.length === 1, `executeAction gọi đúng 1 lần (thực tế: ${calls.length})`);
+-    assert(calls[0].action === 'MONITOR_BEAT_TOGGLE', `action = MONITOR_BEAT_TOGGLE (thực tế: ${calls[0].action})`);
++    setTimeout(() => {
++        assert(musicBtn.classList.toggled === true, 'toggle CSS "disabled" vẫn hoạt động như cũ (không bị thay thế)');
++        assert(sent.length === 1, `gửi đúng 1 lệnh MIDI (thực tế: ${sent.length})`);
++        assert(sent[0] && sent[0].n === 20 && sent[0].ch === 0, `lệnh = mapping MONITOR_BEAT_TOGGLE cũ (CC 20, kênh 1) (thực tế: ${JSON.stringify(sent[0])})`);
++        assert(sandbox.__dawStateLast && sandbox.__dawStateLast.MUSIC && sandbox.__dawStateLast.MUSIC.action === 'MONITOR_BEAT_TOGGLE' && sandbox.__dawStateLast.MUSIC.mode === 'legacy', 'ghi nhận mode=legacy, action=MONITOR_BEAT_TOGGLE');
++        console.log(`\n${pass} PASS, ${fail} FAIL`);
++        process.exit(fail > 0 ? 1 : 0);
++    }, 20);
+ }
+-
+-console.log(`\n${pass} PASS, ${fail} FAIL`);
+-process.exit(fail > 0 ? 1 : 0);
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index 2263ad8..0af98a5 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -81,7 +81,28 @@ const ACTIONS = Object.freeze({
+     // LEVEL", không phải cùng 1 khái niệm. Không tự đặt CC — user tự cấu hình qua Setup
+     // (bảng DAW_MIDI_ACTIONS đã mở rộng, xem ui/js/setup.js), giống hệt cơ chế Button.
+     BEAT_INPUT_VOLUME: "BEAT_INPUT_VOLUME",
+-    MASTER_OUTPUT_VOLUME: "MASTER_OUTPUT_VOLUME"
++    MASTER_OUTPUT_VOLUME: "MASTER_OUTPUT_VOLUME",
++    // MIDI-DAW-CONTROL-01 — TÁM lệnh ĐẶT TRẠNG THÁI ĐÍCH (ON và OFF là hai action RIÊNG, mỗi cái một mapping riêng),
++    // thay cho lệnh toggle không xác định. MUSIC = Monitor track "Beat"; MIC1 = Monitor track "Mic"; MIC2 = Monitor
++    // track "Không Dây"; FX = Mute bus Delay/Verb ngắn/Verb dài/Com Verb (FX ON = bỏ mute, FX OFF = mute). Không có
++    // mapping mặc định — người dùng tự lưu trong Setup (không tự gán CC không có bằng chứng). Các action cũ
++    // (MONITOR_BEAT_TOGGLE/MONITOR_MIC1/MONITOR_MIC2/MONITOR_FX) GIỮ NGUYÊN để tương thích ngược.
++    MUSIC_ON: "MUSIC_ON",
++    MUSIC_OFF: "MUSIC_OFF",
++    MIC1_ON: "MIC1_ON",
++    MIC1_OFF: "MIC1_OFF",
++    MIC2_ON: "MIC2_ON",
++    MIC2_OFF: "MIC2_OFF",
++    FX_ON: "FX_ON",
++    FX_OFF: "FX_OFF"
++});
++
++// MIDI-DAW-CONTROL-01 — nút Menu -> cặp action ON/OFF + action toggle CŨ (dùng khi người dùng CHƯA cấu hình ON/OFF).
++const DAW_STATE_CONTROLS = Object.freeze({
++    MUSIC: Object.freeze({ on: "MUSIC_ON", off: "MUSIC_OFF", legacy: "MONITOR_BEAT_TOGGLE", label: "MUSIC (Monitor Beat)" }),
++    MIC1: Object.freeze({ on: "MIC1_ON", off: "MIC1_OFF", legacy: "MONITOR_MIC1", label: "MIC 1 (Monitor Mic)" }),
++    MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", label: "MIC 2 (Monitor Không Dây)" }),
++    FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" })
+ });
+ 
+ // Action nào đã có Mouse Coordinate key tương ứng (Mục 8, ưu tiên DAW Play/Stop/Record —
+@@ -245,6 +266,83 @@ async function executeAction(action, context = {}) {
+     return { ok: false, reason: "NOT_CONFIGURED" };
+ }
+ 
++// ---------------------------------------------------------
++// MIDI-DAW-CONTROL-01 — ĐẶT TRẠNG THÁI ĐÍCH (ON/OFF) cho 4 nút Menu.
++//
++// Quy tắc (đã kiểm bằng test):
++//  * `targetOn` là trạng thái ĐÍCH SAU cú bấm (renderer đọc class SAU khi toggle), KHÔNG phải trạng thái trước.
++//  * Chế độ "explicit": nếu người dùng đã lưu ÍT NHẤT MỘT trong hai mapping ON/OFF của nút -> chỉ gửi đúng mapping của
++//    chiều đích. Thiếu mapping chiều đó => NOT_CONFIGURED (KHÔNG rơi xuống lệnh toggle cũ — toggle không xác định
++//    sẽ đảo ngược trạng thái). Mỗi cú bấm gửi ĐÚNG MỘT lệnh; lặp ON/ON hay OFF/OFF đều gửi lại lệnh đích.
++//  * Chế độ "legacy": chưa cấu hình ON/OFF nào -> hành vi CŨ giữ nguyên 100% (executeAction lệnh toggle cũ).
++//  * Không có phản hồi từ Studio One: kết quả `ok` chỉ nghĩa "lệnh đã được đưa vào MIDI Output" (delivery UNCONFIRMED),
++//    KHÔNG BAO GIỜ là DAW_CONFIRMED. Lịch sử kết quả: window.__dawStateLast[control].
++// ---------------------------------------------------------
++function isMidiMappingConfigured(action) {
++    const m = getMidiOutMapping(action);
++    return !!(m && m.kind && Number.isFinite(m.number));
++}
++
++function getDawStateMode(control) {
++    const def = DAW_STATE_CONTROLS[control];
++    if (!def) return "legacy";
++    return (isMidiMappingConfigured(def.on) || isMidiMappingConfigured(def.off)) ? "explicit" : "legacy";
++}
++
++function describeDawStateResult(control, targetOn, res, mode) {
++    const def = DAW_STATE_CONTROLS[control];
++    const dir = targetOn ? "ON" : "OFF";
++    if (mode === "legacy") {
++        if (res && res.ok) return `đã GỬI lệnh toggle cũ (${def.legacy}) — DAW chưa xác nhận; chưa cấu hình ON/OFF riêng`;
++        if (res && (res.reason === "NOT_CONFIGURED" || res.status === "NOT_CONFIGURED")) return `CHƯA cấu hình ${def.label} ON/OFF trong Setup — DAW KHÔNG nhận lệnh`;
++        return `gửi lệnh toggle cũ (${def.legacy}) LỖI${res && res.status ? " (" + res.status + ")" : ""}`;
++    }
++    if (res && res.ok) return `đã GỬI lệnh ${def.label} ${dir} — DAW chưa xác nhận (Menu không đọc được trạng thái Studio One)`;
++    if (res && (res.reason === "NOT_CONFIGURED" || res.status === "NOT_CONFIGURED")) return `CHƯA cấu hình lệnh ${def.label} ${dir} trong Setup — DAW KHÔNG nhận lệnh`;
++    return `gửi lệnh ${def.label} ${dir} LỖI${res && res.status ? " (" + res.status + ")" : ""} — DAW KHÔNG nhận lệnh`;
++}
++
++async function setDawControlState(control, targetOn, context = {}) {
++    const def = DAW_STATE_CONTROLS[control];
++    if (!def) return { ok: false, reason: "UNKNOWN_CONTROL", control };
++    const mode = getDawStateMode(control);
++    const reason = context.reason || "menu-button";
++    let res;
++    let action;
++    if (mode === "explicit") {
++        action = targetOn ? def.on : def.off;
++        if (!isMidiMappingConfigured(action)) {
++            res = { ok: false, status: ACTION_STATUS.NOT_CONFIGURED, reason: "NOT_CONFIGURED" };
++        } else {
++            res = await executeAction(action, { reason });
++        }
++    } else {
++        action = def.legacy;
++        res = await executeAction(action, { reason });
++    }
++    const out = {
++        ...res,
++        control,
++        target: targetOn ? "ON" : "OFF",
++        mode,
++        action,
++        delivery: res && res.ok ? "UNCONFIRMED" : "NOT_SENT",
++        dawConfirmed: false, // không có phản hồi từ Studio One => KHÔNG BAO GIỜ true
++        text: describeDawStateResult(control, targetOn, res, mode)
++    };
++    // Lỗi gửi: nêu tầng + lỗi gốc của đường gửi main-process (appSettings.js::getLastMidiSendResult), không che.
++    if (!out.ok && out.status === ACTION_STATUS.NO_DEVICE && typeof window !== "undefined" && typeof window.getLastMidiSendResult === "function") { // chỉ khi THỰC SỰ đã thử gửi (không dùng kết quả cũ cho NOT_CONFIGURED)
++        const lr = window.getLastMidiSendResult();
++        if (lr && lr.reason) { out.sendError = { reason: lr.reason, detail: lr.detail || null }; out.text += ` [${lr.reason}${lr.detail ? ": " + lr.detail : ""}]`; }
++    }
++    if (typeof window !== "undefined") {
++        window.__dawStateLast = window.__dawStateLast || {};
++        window.__dawStateLast[control] = { target: out.target, ok: !!out.ok, mode, action, status: out.status || out.reason || null, text: out.text, at: Date.now() };
++    }
++    console.log(`[DawState] ${control} -> ${out.target} (${mode}, ${action}): ${out.text}`);
++    return out;
++}
++
+ // ==========================================================
+ // GHI CHÚ QUAN TRỌNG (đã tự sửa lại sau khi phát hiện trùng lặp — xem báo cáo Task B V1):
+ // File này BAN ĐẦU có thêm 1 dispatcher lắng nghe MIDI Input (Web MIDI, renderer) để tự gọi
+@@ -271,5 +369,9 @@ window.ActionRegistry = {
+     getMidiOutMapping,
+     setMidiOutMapping,
+     getMouseCoordinate,
+-    isMouseControlEnabled
++    isMouseControlEnabled,
++    // MIDI-DAW-CONTROL-01
++    DAW_STATE_CONTROLS,
++    getDawStateMode,
++    setDawControlState
+ };
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 435ab7c..6142d79 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -521,16 +521,29 @@ document.querySelectorAll(".preset-btn").forEach(btn => {
+ 
+ document.getElementById("autoDetectBtn")?.classList.add("active");
+ 
++// MIDI-DAW-CONTROL-01 — hiển thị kết quả gửi lệnh ON/OFF trên tooltip của nút (KHÔNG đổi HTML/CSS). Chỉ nói "đã GỬI lệnh":
++// Menu không có phản hồi từ Studio One nên KHÔNG BAO GIỜ hiện "DAW đã xác nhận".
++function reportDawStateResult(btn, control, promise) {
++    Promise.resolve(promise).then((res) => {
++        if (!btn || !res) return;
++        btn.title = res.text || "";
++        btn.dataset.dawSync = res.ok ? "sent-unconfirmed" : (res.reason === "NOT_CONFIGURED" || res.status === "NOT_CONFIGURED" ? "not-configured" : "failed");
++        return res;
++    }).catch((err) => console.error(`[MenuControl] ${control} lỗi:`, err));
++}
++
+ document.getElementById("musicBtn")?.addEventListener("click", (e) => {
+     e.target.classList.toggle("disabled");
+     saveData();
+-    // TASK B12 — nối song song executeAction() (không thay đổi hành vi toggle CSS đã có).
+-    // NOT_CONFIGURED mặc định — chỉ hoạt động thật nếu user tự cấu hình MIDI qua Setup.
+-    window.ActionRegistry?.executeAction?.(window.ActionRegistry.ACTIONS.MONITOR_BEAT_TOGGLE, { reason: "menu-button" })
+-        ?.catch?.((err) => console.error("[MenuControl] MONITOR_BEAT_TOGGLE lỗi:", err));
++    // MIDI-DAW-CONTROL-01 — ý nghĩa class (VERIFIED_FILE: style.css #musicBtn / #musicBtn.disabled): KHÔNG có class
++    // "disabled" = sáng = MUSIC BẬT; có "disabled" = mờ = MUSIC TẮT. Trạng thái ĐÍCH đọc SAU khi toggle ở trên.
++    // setDawControlState() gửi đúng MỘT lệnh: ON/OFF riêng nếu đã cấu hình, nếu chưa thì lệnh toggle cũ như trước.
++    const targetOn = !e.target.classList.contains("disabled");
++    reportDawStateResult(e.target, "MUSIC", window.ActionRegistry?.setDawControlState?.("MUSIC", targetOn, { reason: "menu-button" }));
+ });
+ 
+ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2", fxBtn: "MONITOR_FX" };
++const MONITOR_BTN_TO_CONTROL = { mic1Btn: "MIC1", mic2Btn: "MIC2", fxBtn: "FX" }; // MIDI-DAW-CONTROL-01
+ ["mic1Btn", "mic2Btn", "fxBtn"].forEach(id => {
+     document.getElementById(id)?.addEventListener("click", (e) => {
+         e.target.classList.toggle("active");
+@@ -540,6 +553,11 @@ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2"
+             // Toàn bộ đường gửi + báo kết quả (đã gửi/chưa cấu hình/lỗi) nằm trong __fxManualToggle để UI không tự suy diễn.
+             if (window.__fxManualToggle) { window.__fxManualToggle(e.target.classList.contains("active")); return; }
+             window.__fxAuto?.notifyManual();
++            // MIDI-DAW-CONTROL-01 — đã cấu hình FX ON/OFF (mute bus) => dùng nó, KHÔNG gửi thêm Send/toggle cũ cho cùng cú bấm.
++            if (window.ActionRegistry?.getDawStateMode?.("FX") === "explicit") {
++                reportDawStateResult(e.target, "FX", window.ActionRegistry.setDawControlState("FX", e.target.classList.contains("active"), { reason: "menu-button" }));
++                return;
++            }
+             // Nếu đã cấu hình Send Reverb/Delay: bấm tay cũng điều khiển ĐÚNG các Send đó (nhất quán với Auto) thay vì
+             // chỉ MONITOR_FX cũ. Chưa cấu hình => hành vi cũ giữ NGUYÊN (rơi xuống executeAction MONITOR_FX bên dưới).
+             const grp = window.__fxSendGroup;
+@@ -550,13 +568,11 @@ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2"
+                 return;
+             }
+         }
+-        // MIDI-MASTER-01 / MENU-CONTROL-01 — nối SONG SONG tới executeAction() (không thay
+-        // thế toggle CSS). Chưa có audio-routing backend thật (BACKEND_MISSING — xem báo cáo),
+-        // nên executeAction() sẽ trả NOT_CONFIGURED trừ khi user tự gán MIDI/mouse trong Setup.
+-        const actionName = MONITOR_BTN_TO_ACTION[id];
+-        if (actionName && window.ActionRegistry?.executeAction) {
+-            window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[actionName], { reason: "menu-button" })
+-                .catch(err => console.error(`[MenuControl] ${actionName} lỗi:`, err));
++        // MIDI-DAW-CONTROL-01 — "active" = BẬT (VERIFIED_FILE: style.css .control-btn.active). Trạng thái ĐÍCH đọc SAU toggle.
++        // setDawControlState(): ON/OFF riêng nếu đã cấu hình; chưa cấu hình => lệnh toggle cũ (MONITOR_*) như trước. MỘT lệnh/cú bấm.
++        const control = MONITOR_BTN_TO_CONTROL[id];
++        if (control && window.ActionRegistry?.setDawControlState) {
++            reportDawStateResult(e.target, control, window.ActionRegistry.setDawControlState(control, e.target.classList.contains("active"), { reason: "menu-button" }));
+         }
+     });
+ });
+@@ -598,6 +614,10 @@ function createFxAutoWiring() {
+     // Trạng thái đồng bộ hiện ở tooltip (title) + data-fx-sync của nút (không đổi HTML/CSS); chuyển trạng thái được ghi vào log telemetry.
+     // MENU-FX-FIX: văn bản Send tách khỏi "ai đang điều khiển" để cả Auto lẫn thủ công đều hiện đúng trạng thái Send thật.
+     const sendText = (info) => {
++        // MIDI-DAW-CONTROL-01 — lần bấm tay gần nhất đi đường FX ON/OFF (mute bus): hiển thị đúng kết quả của đường đó, không nói "Send".
++        if (window.__fxLastManualVia === "daw-state" && info.manualOverride && window.__dawStateLast?.FX) {
++            return info.pending ? "đang gửi lệnh FX ON/OFF (mute bus) — CHƯA có phản hồi" : window.__dawStateLast.FX.text;
++        }
+         const lr = info.lastResult;
+         if (info.pending) return "đang gửi lệnh Send — CHƯA có phản hồi, chưa đồng bộ";
+         if (!lr) return null;
+@@ -638,6 +658,16 @@ function createFxAutoWiring() {
+         ctl.notifyManual(!!target); const seq = ctl.getManualSeq();
+         let res;
+         try {
++            // MIDI-DAW-CONTROL-01 — FX ON/OFF (mute 4 bus) đã cấu hình => CHỈ gửi lệnh đó cho cú bấm này (không gửi thêm Send/toggle cũ,
++            // không đụng nhóm Send của FX Auto). Mốc 60 s "Auto nhường quyền" (notifyManual) giữ nguyên như trước.
++            if (AR0()?.getDawStateMode?.("FX") === "explicit") {
++                window.__fxLastManualVia = "daw-state";
++                res = await AR0().setDawControlState("FX", !!target, { reason: "menu-button" });
++                if (fxBtn) { fxBtn.title = res.text || ""; fxBtn.dataset.dawSync = res.ok ? "sent-unconfirmed" : (res.reason === "NOT_CONFIGURED" ? "not-configured" : "failed"); }
++                ctl.reportManualResult(res, seq);
++                return res;
++            }
++            window.__fxLastManualVia = "send";
+             if (group.managed().some((n) => n !== "MONITOR_FX")) res = await group.apply(!!target, { force: true });
+             else {
+                 const AR = AR0();
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index e09ce1c..40fae2d 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -640,8 +640,37 @@ const DAW_MIDI_ACTIONS = [
+     // TASK AI-FX-01 — 2 Send do nút FX quản lý (Auto theo nhạc nền). Không có CC mặc định.
+     { action: "FX_SEND_REVERB", label: "FX SEND REVERB" },
+     { action: "FX_SEND_DELAY", label: "FX SEND DELAY" },
++    // MIDI-DAW-CONTROL-01 — TÁM lệnh ON/OFF đặt trạng thái đích (Studio One 8). Mỗi hàng một mapping RIÊNG, không mặc định.
++    // Khi đã lưu ÍT NHẤT một chiều (ON hoặc OFF) cho một nút, nút đó dùng chế độ "đặt đích danh" và KHÔNG còn gửi lệnh toggle cũ.
++    { action: "MUSIC_ON", label: "MUSIC ON (Monitor Beat bật)" },
++    { action: "MUSIC_OFF", label: "MUSIC OFF (Monitor Beat tắt)" },
++    { action: "MIC1_ON", label: "MIC 1 ON (Monitor Mic bật)" },
++    { action: "MIC1_OFF", label: "MIC 1 OFF (Monitor Mic tắt)" },
++    { action: "MIC2_ON", label: "MIC 2 ON (Monitor Không Dây bật)" },
++    { action: "MIC2_OFF", label: "MIC 2 OFF (Monitor Không Dây tắt)" },
++    { action: "FX_ON", label: "FX ON (bỏ Mute 4 bus)" },
++    { action: "FX_OFF", label: "FX OFF (Mute 4 bus)" },
+ ];
+ 
++// MIDI-DAW-CONTROL-01 — bộ CC GỢI Ý (kênh 16, giá trị 127) khớp 8 macro LIVE_* của LIVE-MIDI-FSP8-02.
++// Đây là bộ thử nghiệm, KHÔNG tự áp dụng: chỉ được lưu khi người dùng bấm nút và xác nhận.
++const DAW_STATE_SUGGESTED = Object.freeze({
++    MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109,
++});
++const DAW_STATE_ACTION_SET = new Set(Object.keys(DAW_STATE_SUGGESTED));
++const DAW_STATE_SUGGESTED_CHANNEL = 16;
++const DAW_STATE_SUGGESTED_VALUE = 127;
++
++// Hai action ON/OFF (hoặc bất kỳ cặp nào trong 8) KHÔNG được trùng cùng kind+channel+number — trùng sẽ làm Studio One chạy nhầm macro.
++function findDawStateMappingConflict(action, mapping) {
++    for (const other of DAW_STATE_ACTION_SET) {
++        if (other === action) continue;
++        const m = getDawMidiOutMapping(other);
++        if (m && m.kind === mapping.kind && Number(m.channel) === Number(mapping.channel) && Number(m.number) === Number(mapping.number)) return other;
++    }
++    return null;
++}
++
+ function isMouseControlEnabledLocal() {
+     const v = getSetting("mouseControlEnabled");
+     return v === undefined || v === null || v === "" ? true : !!v;
+@@ -682,6 +711,41 @@ function initDawMidiOutputMappingSection() {
+         }
+ 
+         container.innerHTML = "";
++
++        // MIDI-DAW-CONTROL-01 — ghi chú + nút điền bộ CC gợi ý cho 8 lệnh ON/OFF (tạo bằng JS, không đổi HTML).
++        const liveBox = document.createElement("div");
++        liveBox.className = "hint-text";
++        liveBox.innerHTML = `
++            <b>8 lệnh ON/OFF điều khiển Studio One (MUSIC / MIC 1 / MIC 2 / FX):</b> ở cuối danh sách. Mỗi nút Menu gửi lệnh theo <b>trạng thái đích sau cú bấm</b>.
++            Menu chỉ <b>gửi</b> lệnh — <b>không đọc được trạng thái thật</b> của Studio One, nên lúc mở app hoặc khi bạn đổi trực tiếp trong DAW, nút Menu có thể lệch DAW.
++            <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ CC gợi ý LIVE (CC 102–109, kênh 16, giá trị 127)</button>
++            <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
++            <span id="liveCcStatus"></span>`;
++        container.appendChild(liveBox);
++        liveBox.querySelector("#btnFillLiveCc").addEventListener("click", () => {
++            const overwrite = [...DAW_STATE_ACTION_SET].filter((a) => getDawMidiOutMapping(a));
++            const msg = "Lưu 8 mapping gợi ý (CC 102–109, kênh 16, giá trị 127)? Đây là bộ CC THỬ NGHIỆM khớp macro LIVE_*; "
++                + "bạn vẫn phải gán từng CC vào đúng macro trong Studio One." + (overwrite.length ? `\nSẽ GHI ĐÈ ${overwrite.length} mapping ON/OFF đã lưu.` : "");
++            if (!confirm(msg)) return;
++            for (const [a, cc] of Object.entries(DAW_STATE_SUGGESTED)) {
++                setDawMidiOutMapping(a, { kind: "cc", channel: DAW_STATE_SUGGESTED_CHANNEL, number: cc, value: DAW_STATE_SUGGESTED_VALUE });
++            }
++            notifySetupChanged();
++            render();
++            renderMappingOverview();
++        });
++
++        // Khôi phục: xoá CHỈ 8 mapping ON/OFF mới; mapping cũ (toggle MONITOR_*, Send, PLAY...) không bị đụng.
++        liveBox.querySelector("#btnClearLiveCc").addEventListener("click", () => {
++            const saved = [...DAW_STATE_ACTION_SET].filter((a) => getDawMidiOutMapping(a));
++            if (!saved.length) { alert("Chưa có mapping ON/OFF nào để xoá."); return; }
++            if (!confirm(`Xoá ${saved.length} mapping ON/OFF? Các nút MUSIC/MIC/FX sẽ quay về lệnh toggle cũ (nếu bạn đã cấu hình), mapping cũ không bị đụng.`)) return;
++            DAW_STATE_ACTION_SET.forEach((a) => setDawMidiOutMapping(a, null));
++            notifySetupChanged();
++            render();
++            renderMappingOverview();
++        });
++
+         DAW_MIDI_ACTIONS.forEach(({ action, label }) => {
+             const existing = getDawMidiOutMapping(action);
+             const row = document.createElement("div");
+@@ -696,7 +760,7 @@ function initDawMidiOutputMappingSection() {
+                 <input class="mo-number" type="number" min="0" max="127" placeholder="Số" value="${existing?.number ?? ""}">
+                 <input class="mo-value" type="number" min="0" max="127" placeholder="Value/Vel" value="${existing?.kind === "note" ? (existing?.velocity ?? "") : (existing?.value ?? "")}">
+                 <button class="setup-btn mo-save">💾 Lưu</button>
+-                <span class="badge ${existing ? "badge-live" : "badge-warn"} mo-status">${existing ? "Đã cấu hình" : "NOT_CONFIGURED"}</span>
++                <span class="badge ${existing ? "badge-live" : "badge-warn"} mo-status">${existing ? (DAW_STATE_ACTION_SET.has(action) ? "Đã lưu — chỉ gửi lệnh, DAW chưa xác nhận" : "Đã cấu hình") : "NOT_CONFIGURED"}</span>
+             `;
+ 
+             row.querySelector(".mo-save").addEventListener("click", () => {
+@@ -712,6 +776,13 @@ function initDawMidiOutputMappingSection() {
+                 if (kind === "note") mapping.velocity = Number.isFinite(val) ? val : 100;
+                 else mapping.value = Number.isFinite(val) ? val : 127;
+ 
++                if (DAW_STATE_ACTION_SET.has(action)) {
++                    const clash = findDawStateMappingConflict(action, mapping);
++                    if (clash) {
++                        alert(`Không lưu: ${kind === "note" ? "Note" : "CC"} ${number} kênh ${channel} đã dùng cho ${clash}. Mỗi lệnh ON/OFF phải có CC/Note riêng.`);
++                        return;
++                    }
++                }
+                 setDawMidiOutMapping(action, mapping);
+                 notifySetupChanged();
+                 render();
+@@ -756,7 +827,7 @@ function renderMappingOverview() {
+ 
+         // Đúng thứ tự getActionStatus(): MIDI output trước, rồi mouse, rồi NOT_CONFIGURED.
+         let status;
+-        if (outputMap) status = "SUCCESS (MIDI)";
++        if (outputMap) status = DAW_STATE_ACTION_SET.has(action) ? "ĐÃ LƯU (MIDI) — chỉ gửi lệnh, DAW chưa xác nhận" : "SUCCESS (MIDI)";
+         else if (coord) status = mouseOn ? "SUCCESS (Mouse)" : "MOUSE_DISABLED";
+         else status = "NOT_CONFIGURED";
+ 
