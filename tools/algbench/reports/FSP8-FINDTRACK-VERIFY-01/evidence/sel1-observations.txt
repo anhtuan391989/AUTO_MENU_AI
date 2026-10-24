@@ -1,0 +1,15 @@
+SEL-1 — Claude doc 3 anh (Anh/1.jpg 16:57:33, 2.jpg 16:57:41, 3.jpg 16:58:01, 24/10/2026), cua so "Studio Pro - LIVE_TEST*"
+(USER_REPORTED + anh; Claude khong tu quan sat DAW)
+
+Anh 1 (truoc):   Track list: nut M cua Mic = tat. O thanh tren-trai (o hien tham so) ghi "Input / Khong Day / Input L" (tham so cham gan nhat, cu).
+Anh 2 (sau lan 1): nut M cua Mic = DO (bat) o ca track list lan Mixer; o tham so ghi "Mute / Mic / 1".
+Anh 3 (sau lan 2): nut M cua Mic = tat; o tham so ghi "Mute / Mic / 0".
+Beat va Khong Day: nut M khong doi o ca 3 anh (VERIFIED qua anh).
+=> SEL-1 PASS: macro chay (Action), Track|Mute tac dong track dang chon. Khop voi bao cao cua Khoi.
+=> Ghi chu phu (INFERRED): o tham so thanh tren-trai la "tham so cham gan nhat"; no cho thay Mute cua Mic nhan gia tri 1 khi bat. Do la gia tri State RONG (dao), nen KHONG chung minh Mute State "1"/"0" dat dich danh.
+
+CHI BAO "DANG CHON TRACK" quan sat duoc trong cac anh (Claude doc, xem sel1-tracklist-crop-frames-1-2-3.png):
+ - Hang track dang chon (Mic) co nen SANG/BAO HOA hon hang cung mau khong chon (Khong Day nen xanh dam hon). Ro nhat o ca 3 anh.
+ - KHONG phai chi bao: o tham so tren-trai (no hien tham so vua cham, khong phai track dang chon); Find Track chi chon track nen no se khong doi.
+ - Tai lieu hang: Inspector (F4 hoac nut "i" duoi Arrange) hien yeu to ban "bam vao" (clicking a Track ... brings that element into focus in the Inspector) — chua co nguon noi Find Track cung dua track vao Inspector => chi dung lam chi bao PHU.
+ https://fenderstudiopromanual.fender.com/en/Content/Editing_Topics/Track_and_Event_Inspectors.htm
