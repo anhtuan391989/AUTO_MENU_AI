@@ -1,0 +1,29 @@
+FSP8-FX-MASTER-MACRO-VERIFY-01 — kiem toan cau truc LIVE_FX_ON/OFF (VERIFIED_FILE + VERIFIED_TEST: Python minidom, moi truong Claude, khong DAW)
+HEAD main: f5f6a2a22ffd3f03f1b1bbead00bd6c5722bb9dc (24/10/2026 23:41)
+
+Bang lenh (2 macro cung thu tu bus; chi khac State):
+ #  Lenh                                   Name          LIVE_FX_ON State   LIVE_FX_OFF State
+ 1  Console|Find Channel                   Delay         —                  —
+ 2  Track|Mute                                           0 (bo mute)        1 (mute)
+ 3  Console|Find Channel                   Verb ngắn     —                  —
+ 4  Track|Mute                                           0                  1
+ 5  Console|Find Channel                   Verb dài      —                  —
+ 6  Track|Mute                                           0                  1
+ 7  Console|Find Channel                   Com Verb      —                  —
+ 8  Track|Mute                                           0                  1
+ => 8 lenh moi macro, luan phien Find Channel -> Mute (dung 4 cap). Khong co lenh nao khac (khong Send, gain, bypass, Monitor, Find Track, kenh Group Mic/Beat/Mic/Khong Day).
+ => FX ON = Mute OFF (State 0); FX OFF = Mute ON (State 1) — dung ngu nghia Menu (FX ON = bo mute).
+
+Ten bus: NFC; bytes: Delay=44656c6179 | Verb ngắn=56657262206e67e1baaf6e | Verb dài=566572622064c3a069 | Com Verb=436f6d2056657262.
+ Khop nhan trong project (audit channels.md): Delay Channel04, Verb ngan Channel02, Verb dai Channel03, Com Verb Channel05. Moi ten la chuoi rieng.
+ Name trong LIVE_FX_ON/OFF TRUNG TUNG BYTE voi Name trong macro tung bus da duoc Khoi bao pass: Delay (DIAG_DELAY_UNMUTE0), Verb ngan (LIVE_X_BUS_VERBNGAN_MUTE1), Verb dai (DIAG_VERBDAI_*), Com Verb (DIAG_COMVERB_*).
+ (3 file DIAG_* nay chua co tren main luc kiem tra; doi chieu voi ban Claude da gui — SHA256 trong ZIP cua task truoc.)
+
+Nhat quan voi phep thu da PASS: cung co che Find Channel + Mute State tung bus (USER_REPORTED_PASS: Delay co anh x1–x6; ba bus con lai chi la loi xac nhan cua Khoi, khong anh).
+Ban tren may Khoi (Anh/Macros.zip, 23/10) == ban repo (tru CR).
+
+DIEM CHUA CHUNG MINH (ly do can phep thu):
+ 1. 4 cap Find Channel+Mute NOI TIEP trong MOT macro chua duoc thu (cac phep thu truoc chay 1 cap/1 macro). Ket hop Find Track+Mute trong 1 macro da PASS (USER_REPORTED_PASS) nhung la 1 cap.
+ 2. Chua co anh Mixer cho ba bus; Khoi xac nhan bang loi.
+ 3. description trong ca hai macro con ghi "chua chay thuc te ... Find Channel tren bus chua kiem" — DA LOI THOI (chi la chu thich, khong anh huong chay); KHONG sua macro trong task nay.
+ Khong co diem sai cau truc nao duoc phat hien => KHONG BLOCKED; READY_FOR_TARGETED_USER_TEST.
