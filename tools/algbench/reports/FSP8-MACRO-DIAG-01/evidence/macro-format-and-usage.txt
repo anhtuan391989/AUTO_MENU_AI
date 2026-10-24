@@ -1,0 +1,17 @@
+So sanh dinh dang file macro (VERIFIED_FILE, doc bang script)
+BatMic.studioonemacro | BOM=efbbbf | CRLF_lines=9 | bytes=342
+Monitor.studioonemacro | BOM=efbbbf | CRLF_lines=9 | bytes=351
+LIVE_MUSIC_ON.studioonemacro | BOM=efbbbf | CRLF_lines=0 | bytes=442
+LIVE_FX_ON.studioonemacro | BOM=efbbbf | CRLF_lines=0 | bytes=1175
+DIAG_A1_MIC_UNMUTE.studioonemacro | BOM=efbbbf | CRLF_lines=9 | bytes=417
+
+Tan suat lenh trong 236 macro mau Studio One 5.x (thu muc /tmp/mac/Macros tu goi PDL):
+     41 CommandElement category="Track" name="Mute"
+     26 CommandElement category="Console" name="Find Channel"
+     14 CommandElement category="Track" name="Find Track"
+      1 CommandElement category="Track" name="Monitor"
+      1 CommandElement category="Console" name="Enable Direct Monitoring"
+
+Gia tri State cua Track|Mute trong 236 macro: 0 x23, 1 x17, rong x1
+Track|Monitor: DUY NHAT 1 lan (Monitor.studioonemacro, State rong). Khong co macro mau nao dung Monitor voi State 0/1 hoac Find Track + Monitor.
+Ten track/bus trong macro LIVE khop NFC voi nhan trong project (Beat, Mic, Khong Day, Delay, Verb ngan, Verb dai, Com Verb): DUNG
