@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Macro title="DIAG_VERBDAI_MUTE1" group="DIAG_TEST" description="Chan doan - Find Channel + Mute State 1 tren bus Verb dai; chua xac minh runtime">
+	<CommandElement category="Console" name="Find Channel">
+		<CommandArgument name="Name" value="Verb dài"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+</Macro>
