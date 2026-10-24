@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Macro title="DIAG_A2_MIC_MUTE" group="DIAG_TEST" description="D2: dang TatMic goc (Find Track + Mute State 1) nhung Name=Mic">
+	<CommandElement category="Track" name="Find Track">
+		<CommandArgument name="Name" value="Mic"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Mute">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+</Macro>
