@@ -1,0 +1,11 @@
+FSP8-FINDCHANNEL-VERIFY-01 — phan tich (HEAD 2f1bc343162d7941a9c7865d7288e7940a50d576, 24/10/2026 23:30)
+
+1. LIVE_X_BUS_DELAY_MUTE1 (VERIFIED_FILE): dung 2 lenh: Console|Find Channel Name="Delay" -> Track|Mute State="1". Ban tren may Khoi (Anh/Macros.zip) == ban repo (chi khac CR).
+2. Ten "Delay" trong project (audit channels.md, VERIFIED_FILE, trang thai LUC LUU 20/10): AudioGroupChannel, noi bo Channel04, UID {C408C505-BD70-46A1-A963-A9DD3C273747}, dich Main. Khac:
+   Verb ngan Channel02 {11375C89-...}; Verb dai Channel03 {94208E07-...}; Com Verb Channel05 {CDB25440-...}; Group Mic Channel01 {1877C4FD-...} (AudioGroupChannel nhung la nhom Mic, khong phai bus FX).
+   Ten hien thi "Delay" la chuoi duy nhat khong trung/khong la chuoi con cua ten khac (Group Mic chua "Mic" nhung khong chua "Delay").
+3. Cot Mute cua audit: Delay = 0 luc luu. Truong "visible" trong file audit la trang thai LUC LUU, KHONG dung de khang dinh bus dang an trong phien hien tai (anh Mixer 24/10 cho thay 4 bus co hien trong Mixer).
+4. Mute bus != Send On/Off: audit 02 (T2c) — Delay.mute va Send04 la hai truong rieng. Task nay chi dong cham Mute cua bus.
+5. Macro goc cua Khoi BatVang4/TatVang4 (Find Channel + Mute State 0/1) dung Name="DELAY" (CHU HOA) cho du an cu; project hien tai ten "Delay". Chua co nguon ve phan biet hoa/thuong cua Find Channel => la UNKNOWN, ghi nhan; phep thu dung dung chuoi "Delay" khop nhan hien thi hien tai.
+6. Anh moi doc: 111.jpg, 01–04.jpg (23:06–23:13, chuoi thu truoc, khong lien quan bus): o Mixer nut M cua Delay/Verb ngan/Verb dai/Com Verb deu TAT (nen dung lam trang thai nen), kenh "Mai Tai"/Beat co M do o mot so anh. 222–555 da xet o task truoc (State PASS). Khong co anh nao ve bus Delay duoc chay macro.
+7. Tep thieu tren main: REPORT.md va ZIP cua FSP8-MACRO-DIAG-01, -MACRO-RESOLUTION-01, -FINDTRACK-VERIFY-01, -STATE-VERIFY-01, -COMBINED-MACRO-VERIFY-01 khong co tren main (chi co USER-TEST-GUIDE/macro/evidence trong ZIP; REPORT.md duoc gui rieng ngoai ZIP theo quy uoc cua Khoi). Khong gia dinh da ban giao.
