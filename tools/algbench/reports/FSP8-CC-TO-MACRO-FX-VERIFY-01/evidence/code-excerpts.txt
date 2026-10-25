@@ -1,0 +1,152 @@
+=== ui/js/actionRegistry.js lines 96-106
+96:     FX_ON: "FX_ON",
+97:     FX_OFF: "FX_OFF"
+98: });
+99: 
+100: // MIDI-DAW-CONTROL-01 — nút Menu -> cặp action ON/OFF + action toggle CŨ (dùng khi người dùng CHƯA cấu hình ON/OFF).
+101: const DAW_STATE_CONTROLS = Object.freeze({
+102:     MUSIC: Object.freeze({ on: "MUSIC_ON", off: "MUSIC_OFF", legacy: "MONITOR_BEAT_TOGGLE", label: "MUSIC (Monitor Beat)" }),
+103:     MIC1: Object.freeze({ on: "MIC1_ON", off: "MIC1_OFF", legacy: "MONITOR_MIC1", label: "MIC 1 (Monitor Mic)" }),
+104:     MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", label: "MIC 2 (Monitor Không Dây)" }),
+105:     FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" })
+106: });
+
+=== ui/js/actionRegistry.js lines 281-290
+281: function isMidiMappingConfigured(action) {
+282:     const m = getMidiOutMapping(action);
+283:     return !!(m && m.kind && Number.isFinite(m.number));
+284: }
+285: 
+286: function getDawStateMode(control) {
+287:     const def = DAW_STATE_CONTROLS[control];
+288:     if (!def) return "legacy";
+289:     return (isMidiMappingConfigured(def.on) || isMidiMappingConfigured(def.off)) ? "explicit" : "legacy";
+290: }
+
+=== ui/js/actionRegistry.js lines 305-325
+305: async function setDawControlState(control, targetOn, context = {}) {
+306:     const def = DAW_STATE_CONTROLS[control];
+307:     if (!def) return { ok: false, reason: "UNKNOWN_CONTROL", control };
+308:     const mode = getDawStateMode(control);
+309:     const reason = context.reason || "menu-button";
+310:     let res;
+311:     let action;
+312:     if (mode === "explicit") {
+313:         action = targetOn ? def.on : def.off;
+314:         if (!isMidiMappingConfigured(action)) {
+315:             res = { ok: false, status: ACTION_STATUS.NOT_CONFIGURED, reason: "NOT_CONFIGURED" };
+316:         } else {
+317:             res = await executeAction(action, { reason });
+318:         }
+319:     } else {
+320:         action = def.legacy;
+321:         res = await executeAction(action, { reason });
+322:     }
+323:     const out = {
+324:         ...res,
+325:         control,
+
+=== ui/js/renderer.js lines 545-562
+545: const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2", fxBtn: "MONITOR_FX" };
+546: const MONITOR_BTN_TO_CONTROL = { mic1Btn: "MIC1", mic2Btn: "MIC2", fxBtn: "FX" }; // MIDI-DAW-CONTROL-01
+547: ["mic1Btn", "mic2Btn", "fxBtn"].forEach(id => {
+548:     document.getElementById(id)?.addEventListener("click", (e) => {
+549:         e.target.classList.toggle("active");
+550:         saveData();
+551:         if (id === "fxBtn") {
+552:             // MENU-FX-FIX: bấm tay => Auto nhường quyền 60 s (không ghi đè), rồi tiếp quản theo trạng thái nhạc HIỆN TẠI.
+553:             // Toàn bộ đường gửi + báo kết quả (đã gửi/chưa cấu hình/lỗi) nằm trong __fxManualToggle để UI không tự suy diễn.
+554:             if (window.__fxManualToggle) { window.__fxManualToggle(e.target.classList.contains("active")); return; }
+555:             window.__fxAuto?.notifyManual();
+556:             // MIDI-DAW-CONTROL-01 — đã cấu hình FX ON/OFF (mute bus) => dùng nó, KHÔNG gửi thêm Send/toggle cũ cho cùng cú bấm.
+557:             if (window.ActionRegistry?.getDawStateMode?.("FX") === "explicit") {
+558:                 reportDawStateResult(e.target, "FX", window.ActionRegistry.setDawControlState("FX", e.target.classList.contains("active"), { reason: "menu-button" }));
+559:                 return;
+560:             }
+561:             // Nếu đã cấu hình Send Reverb/Delay: bấm tay cũng điều khiển ĐÚNG các Send đó (nhất quán với Auto) thay vì
+562:             // chỉ MONITOR_FX cũ. Chưa cấu hình => hành vi cũ giữ NGUYÊN (rơi xuống executeAction MONITOR_FX bên dưới).
+
+=== ui/js/renderer.js lines 657-668
+657:     window.__fxManualToggle = async (target) => {
+658:         ctl.notifyManual(!!target); const seq = ctl.getManualSeq();
+659:         let res;
+660:         try {
+661:             // MIDI-DAW-CONTROL-01 — FX ON/OFF (mute 4 bus) đã cấu hình => CHỈ gửi lệnh đó cho cú bấm này (không gửi thêm Send/toggle cũ,
+662:             // không đụng nhóm Send của FX Auto). Mốc 60 s "Auto nhường quyền" (notifyManual) giữ nguyên như trước.
+663:             if (AR0()?.getDawStateMode?.("FX") === "explicit") {
+664:                 window.__fxLastManualVia = "daw-state";
+665:                 res = await AR0().setDawControlState("FX", !!target, { reason: "menu-button" });
+666:                 if (fxBtn) { fxBtn.title = res.text || ""; fxBtn.dataset.dawSync = res.ok ? "sent-unconfirmed" : (res.reason === "NOT_CONFIGURED" ? "not-configured" : "failed"); }
+667:                 ctl.reportManualResult(res, seq);
+668:                 return res;
+
+=== ui/js/appSettings.js lines 471-477
+471: async function sendMidiCC(ccNumber, value, channel = 0) {
+472:     const viaMain = await __midiSendViaMain("cc", ccNumber, value, channel);
+473:     if (viaMain !== undefined) return viaMain;
+474:     __lastMidiSendResult = { sender: "web-midi (fallback, không có main IPC)", kind: "cc" };
+475:     const output = await getSelectedMidiOutput();
+476:     if (!output) return false;
+477:     return __midiSend(output, [0xb0 | (channel & 0x0f), ccNumber & 0x7f, value & 0x7f], "CC");
+
+=== core/command-engine-js/runtime.js lines 656-686
+656: async function sendMidi({ kind, number, value = 127, channel = 0 } = {}) {
+657:     const via = "main-midi-driver";
+658:     if (!started || !engine) return { ok: false, via, reason: "NOT_STARTED", detail: "CommandRuntime chưa start()." };
+659:     if (!["cc", "noteon", "noteoff"].includes(kind) || !Number.isFinite(number) || !Number.isFinite(value) || !Number.isFinite(channel)) {
+660:         return { ok: false, via, reason: "INVALID_PARAMS", detail: "Cần kind ∈ {cc,noteon,noteoff}, number/value/channel là số." };
+661:     }
+662:     const num = number & 0x7f;
+663:     const val = value & 0x7f;
+664:     const ch = channel & 0x0f;
+665: 
+666:     // Output chưa mở (vd loopMIDI khởi động sau app) -> thử mở theo cổng ĐÃ LƯU, 1 lần cho mỗi lệnh gửi.
+667:     if (!midiDriverInstance) {
+668:         const savedPort = (deps?.readSettingsFile?.() || {}).midiOutputPort || null;
+669:         if (savedPort) reopenOutputDriver(savedPort);
+670:     }
+671:     if (!midiDriverInstance) {
+672:         return { ok: false, via, reason: "OUTPUT_NOT_OPEN", port: configuredPortName, detail: lastOutputError || "Output chưa mở.", errorDetail: lastOutputErrorDetail };
+673:     }
+674: 
+675:     const params = kind === "cc"
+676:         ? { cc: num, value: val, channel: ch + 1 }
+677:         : kind === "noteon"
+678:             ? { note: num, velocity: val, channel: ch + 1 }
+679:             : { noteoff: num, velocity: val, channel: ch + 1 };
+680:     const bytes = [(kind === "cc" ? 0xb0 : kind === "noteon" ? 0x90 : 0x80) | ch, num, val];
+681:     const r = await midiDriverInstance.execute(params);
+682:     if (!r || r.ok !== true) {
+683:         return { ok: false, via, reason: "SEND_FAILED", port: openOutputPortName, bytes, detail: r && r.detail, delivery: "NOT_SENT" };
+684:     }
+685:     return { ok: true, via, port: openOutputPortName, bytes, delivery: "UNCONFIRMED" };
+686: }
+
+=== core/command-engine-js/drivers/midiDriver.js lines 30-36
+30:   }
+31: 
+32:   async execute(params) {
+33:     // params: { cc, channel, value } hoặc { note, channel, velocity } hoặc { noteoff, channel, velocity }
+34:     try {
+35:       if (params.cc !== undefined) {
+36:         this.output.send('cc', {
+
+=== ui/js/setup.js lines 657-662
+657: const DAW_STATE_SUGGESTED = Object.freeze({
+658:     MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109,
+659: });
+660: const DAW_STATE_ACTION_SET = new Set(Object.keys(DAW_STATE_SUGGESTED));
+661: const DAW_STATE_SUGGESTED_CHANNEL = 16;
+662: const DAW_STATE_SUGGESTED_VALUE = 127;
+
+=== ui/js/setup.js lines 725-733
+725:         liveBox.querySelector("#btnFillLiveCc").addEventListener("click", () => {
+726:             const overwrite = [...DAW_STATE_ACTION_SET].filter((a) => getDawMidiOutMapping(a));
+727:             const msg = "Lưu 8 mapping gợi ý (CC 102–109, kênh 16, giá trị 127)? Đây là bộ CC THỬ NGHIỆM khớp macro LIVE_*; "
+728:                 + "bạn vẫn phải gán từng CC vào đúng macro trong Studio One." + (overwrite.length ? `\nSẽ GHI ĐÈ ${overwrite.length} mapping ON/OFF đã lưu.` : "");
+729:             if (!confirm(msg)) return;
+730:             for (const [a, cc] of Object.entries(DAW_STATE_SUGGESTED)) {
+731:                 setDawMidiOutMapping(a, { kind: "cc", channel: DAW_STATE_SUGGESTED_CHANNEL, number: cc, value: DAW_STATE_SUGGESTED_VALUE });
+732:             }
+733:             notifySetupChanged();
+

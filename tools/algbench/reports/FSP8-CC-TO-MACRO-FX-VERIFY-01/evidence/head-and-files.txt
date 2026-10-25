@@ -1,0 +1,16 @@
+HEAD main: e57054297956bd6e9b1038c921ca6aa0c10e5c4a
+node --check actionRegistry/renderer/setup/runtime: OK
+431c86dc024f533a ui/js/actionRegistry.js
+104ba60ea9f20c32 ui/js/renderer.js
+d6eb070118d8dbc5 ui/js/setup.js
+c26d90de3c7df66b ui/js/appSettings.js
+c5251d5f40624c30 core/command-engine-js/runtime.js
+221cabe12f830a72 core/command-engine-js/drivers/midiDriver.js
+a0be0be0a7b541f3 ui/js/midiDriver.js
+
+ui/js/midiDriver.js (task path) EXISTS but is renderer-side file; real send driver = core/command-engine-js/drivers/midiDriver.js
+const easymidi = require('easymidi'); // npm install easymidi
+const BaseDriver = require('./baseDriver');
+
+class MidiDriver extends BaseDriver {
+  constructor(portName = 'Auto Menu AI Virtual Port', virtual = true) {
