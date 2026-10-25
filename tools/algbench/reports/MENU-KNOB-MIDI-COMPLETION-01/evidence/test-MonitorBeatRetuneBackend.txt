@@ -1,0 +1,21 @@
+== Chưa chọn DAW -> cả 3 action báo NOT_CONFIGURED thật (getActionStatus), không giả PASS ==
+  OK   MONITOR_BEAT_TOGGLE: NOT_CONFIGURED/NO_DAW_SELECTED khi chưa chọn DAW (thực tế: {"status":"NOT_CONFIGURED","via":null,"reason":"NO_DAW_SELECTED"})
+  OK   RETUNE_SPEED_MIC1: NOT_CONFIGURED/NO_DAW_SELECTED khi chưa chọn DAW (thực tế: {"status":"NOT_CONFIGURED","via":null,"reason":"NO_DAW_SELECTED"})
+  OK   RETUNE_SPEED_MIC2: NOT_CONFIGURED/NO_DAW_SELECTED khi chưa chọn DAW (thực tế: {"status":"NOT_CONFIGURED","via":null,"reason":"NO_DAW_SELECTED"})
+
+== Đã chọn DAW nhưng chưa cấu hình mapping -> vẫn NOT_CONFIGURED thật (không phải lỗi ngầm) ==
+  OK   MONITOR_BEAT_TOGGLE: NOT_CONFIGURED khi có DAW nhưng chưa có mapping (thực tế: {"status":"NOT_CONFIGURED","via":null})
+  OK   RETUNE_SPEED_MIC1: NOT_CONFIGURED khi có DAW nhưng chưa có mapping (thực tế: {"status":"NOT_CONFIGURED","via":null})
+  OK   RETUNE_SPEED_MIC2: NOT_CONFIGURED khi có DAW nhưng chưa có mapping (thực tế: {"status":"NOT_CONFIGURED","via":null})
+
+== Có mapping thật (giả lập) -> dispatch THẬT sự gọi sendMidiCC đúng CC của TỪNG action, MIC1 ≠ MIC2 ==
+  OK   MONITOR_BEAT_TOGGLE: getActionStatus báo SUCCESS/midi khi ĐÃ có mapping thật (thực tế: {"status":"SUCCESS","via":"midi"})
+  OK   RETUNE_SPEED_MIC1: getActionStatus báo SUCCESS/midi khi ĐÃ có mapping thật (thực tế: {"status":"SUCCESS","via":"midi"})
+  OK   RETUNE_SPEED_MIC2: getActionStatus báo SUCCESS/midi khi ĐÃ có mapping thật (thực tế: {"status":"SUCCESS","via":"midi"})
+[ActionExecutor] RETUNE_SPEED_MIC1 (RETUNE_SPEED_MIC1) -> SUCCESS 
+[ActionExecutor] RETUNE_SPEED_MIC2 (RETUNE_SPEED_MIC2) -> SUCCESS 
+  OK   đúng 2 lần gửi (thực tế: 2)
+  OK   MIC1 gửi đúng CC60=42 (thực tế: CC60=42)
+  OK   MIC2 gửi đúng CC61=77, KHÔNG lẫn với MIC1 (thực tế: CC61=77)
+
+12 PASS, 0 FAIL

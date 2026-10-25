@@ -1,0 +1,73 @@
+== 1. Chuyển đổi 0–100 -> CC 0–127 (mã THẬT executeAction) ==
+  OK   Knob 0 -> CC 0
+  OK   Knob 25 -> CC 32
+  OK   Knob 50 -> CC 64
+  OK   Knob 75 -> CC 95
+  OK   Knob 100 -> CC 127
+  OK   mọi giá trị 0..100: đúng round(v×127/100), nằm trong 0..127, không giảm
+  OK   ngoài miền -5 -> kẹp an toàn thành CC 0 (không tràn 0x7F)
+  OK   ngoài miền 150 -> kẹp an toàn thành CC 127 (không tràn 0x7F)
+  OK   ngoài miền 1000 -> kẹp an toàn thành CC 127 (không tràn 0x7F)
+  OK   value không hợp lệ (NaN) -> không scale, dùng giá trị tĩnh đã lưu (hành vi cũ), không gửi rác
+  OK   Action khác / reason khác KHÔNG bị scale (giữ hành vi cũ)
+
+== 2. Bốn Knob MIDI -> đúng bốn Action, độc lập (khối Knob THẬT + ActionRegistry THẬT) ==
+  OK   musicKnob -> BEAT_INPUT_VOLUME -> CC20=116
+  OK   masterKnob -> MASTER_OUTPUT_VOLUME -> CC21=116
+  OK   retune1 -> RETUNE_SPEED_MIC1 -> CC22=27
+  OK   retune2 -> RETUNE_SPEED_MIC2 -> CC23=27
+  OK   đúng 4 lệnh, 4 CC khác nhau, không gửi nhầm Action của Knob khác
+  OK   giá trị UI độc lập (0–100 vẫn hiển thị)
+  OK   xoay Beat không đổi giá trị/Action của Master
+
+== 3. Wheel / kéo chuột / double-click; KHÔNG gửi lặp khi giá trị không đổi ==
+  OK   wheel lên ở 100 (biên), lần đầu trong phiên: UI giữ 100, gửi 1 lần CC 127
+  OK   wheel lên tiếp ở biên 100 (giá trị không đổi): KHÔNG gửi lặp (trước đây gửi mỗi nấc)
+  OK   wheel xuống 100->99: gửi đúng 1 lệnh CC 126
+  OK   wheel xuống ở 0 (biên): gửi 1 lần CC 0 rồi không gửi lặp
+  OK   double-click lặp tại mặc định: UI giữ 90, chỉ 1 lệnh CC 114
+  OK   double-click từ 30 về 90 khi DAW đã nhận CC 114: không gửi lại cùng giá trị CC
+  OK   đổi sang giá trị khác rồi về mặc định: gửi đúng từng giá trị (CC 65 rồi 114)
+  OK   kéo chuột: đúng 1 lệnh, đứng yên không gửi thêm
+  OK   kéo vượt biên: UI kẹp 100, chỉ gửi khi giá trị thực sự đổi
+  OK   mỗi nấc wheel (giá trị khác nhau) gửi đúng 1 lệnh
+
+== 4. Thiếu mapping / lỗi cổng: Knob vẫn xoay, không báo thành công giả ==
+  OK   chưa cấu hình: UI vẫn xoay (91), 0 lệnh MIDI
+  OK   executeAction trả NOT_CONFIGURED (không ok)
+  OK   cổng MIDI lỗi: UI vẫn xoay, có thử gửi 1 lần
+  OK   gửi lỗi trả NO_DEVICE (không ok) và lần sau cùng giá trị VẪN gửi lại (không nhớ lần lỗi)
+  OK   gửi OK rồi cùng giá trị: lần 2 bỏ qua (skipped), tổng 3 lệnh
+  OK   không có trường "DAW đã xác nhận" trong kết quả Knob
+
+== 5. Mapping độc lập theo DAW; đổi mapping thì gửi lại ==
+  OK   studio-one -> CC20 ch1(index0); cubase -> CC40 ch3(index2)
+  OK   đổi DAW và xoay Knob KHÔNG làm mất/đổi mapping của DAW nào
+  OK   quay lại studio-one: dùng đúng mapping riêng của nó
+  OK   DAW chưa có mapping: không gửi (NOT_CONFIGURED), không mượn mapping DAW khác
+
+== 6. Xung đột CC với 8 mapping LIVE và nhau (hàm THẬT trong setup.js) ==
+  OK   nhóm bảo vệ = 4 Knob + 8 LIVE
+  OK   Retune 1 đặt CC102 ch16 -> xung đột với MUSIC_ON (bị chặn)
+  OK   LIVE đặt CC20 ch1 -> xung đột với Knob Beat
+  OK   Knob trùng Knob khác -> bị chặn
+  OK   Knob trùng action cũ (MONITOR_FX CC22 ch2) -> bị chặn
+  OK   khác kênh hoặc khác loại (Note) -> không xung đột
+  OK   lưu lại đúng mapping của chính mình -> không tự xung đột
+  OK   kiểm tra chỉ ĐỌC: mapping đã lưu không bị đổi
+  OK   nút 💾 Lưu và nút "Điền bộ CC gợi ý" đều gọi kiểm xung đột (static)
+
+== 7. Clap / Laugh: SoundEffectEngine nội bộ, KHÔNG MIDI, KHÔNG scale, độc lập ==
+  OK   Clap/Laugh không phát MIDI
+  OK   SoundEffectEngine.setVolume nhận giá trị 0–100 NGUYÊN (41/39/38), không scale 127
+  OK   Clap và Laugh không dùng chung giá trị
+  OK   kể cả khi có mapping CLAP (nút phát) thì Knob Clap vẫn không gửi MIDI
+  OK   KNOB_ID_TO_ACTION (static) có 4 Knob MIDI, không có clapKnob/laughKnob
+
+== 8. Lưu/khôi phục 6 Knob: không gửi MIDI, không đụng Key/BPM/MOD/preset/nút LIVE ==
+  OK   saveData lưu đúng {id,value} của cả 6 Knob (knobData.map)
+  OK   khôi phục Knob KHÔNG gọi MIDI/Action (không tự gửi lúc khởi động; UI không giả vờ DAW đã xác nhận)
+  OK   phần khôi phục Knob chỉ đặt giá trị Knob (không đụng nút LIVE/Key/BPM/MOD/preset)
+  OK   nút LIVE vẫn không được khôi phục từ file (BUTTON-RESET giữ nguyên)
+
+56 PASS, 0 FAIL

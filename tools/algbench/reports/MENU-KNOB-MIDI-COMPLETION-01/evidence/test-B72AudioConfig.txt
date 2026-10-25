@@ -1,0 +1,75 @@
+== 1. SoundEffectEngine.setOutputDevice — hành vi THẬT với Audio/setSinkId giả ==
+  OK   Engine tạo đúng 2 audio element (CLAP, LAUGH)
+  OK   Chọn thiết bị hợp lệ -> cả 2 element nhận sinkId thật, ok:true
+  OK   Thiết bị không tồn tại -> ok:false kèm lỗi thật (không giả thành công)
+  OK   Khi setSinkId thất bại KHÔNG tự rơi về thiết bị khác/mặc định — sink cũ được giữ nguyên
+  OK   None ("") -> trả về output mặc định OS, ok:true
+  OK   getOutputDeviceId() trả sinkId THẬT của element
+  OK   Môi trường không có setSinkId -> ok:false + nói rõ lý do, không giả lập
+
+== 2. applyAudioOutputSetting — trạng thái báo về Setup phản ánh kết quả THẬT ==
+  OK   Trích được applyAudioOutputSetting() từ renderer.js
+  OK   None + setSinkId ok -> DEFAULT, báo qua IPC đúng 1 lần
+  OK   Đã chọn + sinkId thật khớp -> APPLIED
+  OK   setSinkId resolve nhưng sinkId thật KHÔNG khớp -> ERROR (không tin setting đã lưu)
+  OK   Thiết bị mất -> ERROR kèm lý do thật
+
+== 3. Setup: MIC Input / SYSTEM_AUDIO Input / Audio Output ghi ĐÚNG key, độc lập nhau ==
+  OK   Chọn MIC -> chỉ ghi selectedMicDeviceId="mic-1"
+  OK   Chọn MIC KHÔNG đụng selectedSystemAudioDeviceId (không dùng chung/fallback)
+  OK   selectedSoundcardId cũ giữ nguyên, không bị ghi đè/chuyển
+  OK   Chọn SYSTEM_AUDIO -> ghi key riêng, MIC giữ nguyên "mic-1" (độc lập 2 chiều)
+  OK   Chọn Output -> chỉ ghi selectedAudioOutputDeviceId, không đụng MIC/SYSTEM_AUDIO
+  OK   MIC chọn None -> lưu "" hợp lệ (không bị chặn), SYSTEM_AUDIO không đổi
+  OK   SYSTEM_AUDIO đặt về None -> "" ; Output không đổi
+  OK   Mỗi lần lưu đều gọi notifySetupChanged() để Menu áp dụng (thực tế 5 lần)
+  OK   Không có lần ghi nào vào selectedSoundcardId trong toàn bộ thao tác mới
+
+== 4. Reconnect: handler onSetupChanged của Menu — dừng nguồn cũ, không tạo trùng, độc lập ==
+  OK   Trích được handler onSetupChanged từ renderer.js
+  OK   Không đổi gì -> KHÔNG stop/start nguồn nào, không áp dụng lại output
+  OK   Đổi MIC -> MIC stop() RỒI start() đúng 1 lần, SYSTEM_AUDIO không bị đụng (thực tế: MIC.stop,MIC.start)
+  OK   Gọi lại handler khi id không đổi -> không start() trùng lần 2 (không tạo nguồn trùng)
+  OK   SYSTEM_AUDIO chọn None -> SYS stop() rồi start() (start() sẽ về NO_DEVICE), MIC không đụng
+  OK   Đổi Output -> chỉ áp dụng setSinkId, không đụng MIC/SYSTEM_AUDIO
+
+== 5. Menu status: updateAudioInterfaceDot đọc AudioSourceState THẬT, không đọc tên đã lưu ==
+  OK   Trích được updateAudioInterfaceDot()
+  OK   RUNNING -> online
+  OK   STARTING -> pending
+  OK   ERROR -> offline
+  OK   Có selectedSoundcard "Mix 01" đã lưu nhưng mic NO_DEVICE -> vẫn offline (KHÔNG xanh chỉ vì đã lưu tên)
+  OK   Mic chưa khởi tạo (null) + đã lưu tên -> offline
+  OK   Đã lưu MIC Input nhưng NO_DEVICE -> tooltip "không khả dụng" (khác "chưa chọn")
+  OK   Chưa từng chọn MIC -> KHÔNG báo "không khả dụng"
+  OK   RUNNING phân biệt mic mặc định vs mic đã chọn trong tooltip
+  OK   Không còn dòng code cũ ghi dot-audio theo tên soundcard đã lưu
+
+== 6. AudioSource thật: SYSTEM_AUDIO không fallback MIC; MASTER không giả lập ==
+  OK   audioSource.js nạp được vào sandbox
+  OK   SYSTEM_AUDIO chưa chọn (dù MIC + soundcard cũ đều đã lưu) -> NO_DEVICE
+  OK   SYSTEM_AUDIO None -> KHÔNG gọi getUserMedia (không mở mic/thiết bị nào thay thế)
+  OK   getSystemAudioDeviceId()="" ; getMicDeviceId()="mic-1" — 2 key hoàn toàn độc lập
+  OK   SYSTEM_AUDIO đã chọn -> getUserMedia với ĐÚNG deviceId sys-9 (không phải mic-1)
+  OK   getUserMedia thất bại -> ERROR/NO_DEVICE thật, KHÔNG giả RUNNING
+  OK   DAW_MASTER = NO_DEVICE (chưa có capture)
+  OK   DAW_MASTER chỉ phát level rỗng (vuPercent 0, noDevice:true) — không giả số liệu
+  OK   renderer.js: MASTER VU luôn 0% + vu-bar--nodata
+
+== 7. Persistence: mặc định, thiếu key, key cũ không tự chuyển ==
+  OK   DEFAULT_APP_SETTINGS.selectedMicDeviceId === ""
+  OK   DEFAULT_APP_SETTINGS.selectedSystemAudioDeviceId === ""
+  OK   DEFAULT_APP_SETTINGS.selectedAudioOutputDeviceId === ""
+  OK   File cũ chỉ có selectedSoundcardId -> giữ nguyên, 3 key mới KHÔNG bị tự gán từ nó
+
+== 8. IPC: 3 luồng (system-audio / mic / output) relay đúng chiều Menu -> Setup ==
+  OK   preload.js: kênh system-audio-state-changed + get-system-audio-state
+  OK   main.js: relay system-audio -> setupWin + handler cache
+  OK   preload.js: kênh mic-state-changed + get-mic-state
+  OK   main.js: relay mic -> setupWin + handler cache
+  OK   preload.js: kênh output-state-changed + get-output-state
+  OK   main.js: relay output -> setupWin + handler cache
+  OK   main.js: trạng thái Output khởi tạo "UNKNOWN" (không mặc định báo thành công)
+  OK   renderer.js: số listener systemAudio.onStateChange vẫn đúng 2 (giữ hợp đồng A71/A56)
+
+== KẾT QUẢ: 58 PASS, 0 FAIL ==

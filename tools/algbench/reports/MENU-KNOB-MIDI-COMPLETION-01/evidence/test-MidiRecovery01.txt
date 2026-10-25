@@ -1,0 +1,98 @@
+== 1. Cổng đã lưu KHÔNG tồn tại -> không được báo CONNECTED ==
+  OK   status = DISCONNECTED, connected=false
+  OK   output.ready=false và input.ready=false
+  OK   0 Output/0 Input được mở
+
+== 2+5. Output mở OK, Input lỗi "Internal RtMidi error" -> OUTPUT_READY (partial), lỗi gốc giữ nguyên ==
+  OK   status = OUTPUT_READY, partial=true, connected=false
+  OK   output.ready=true, input.ready=false
+  OK   input.error === "Internal RtMidi error" NGUYÊN VĂN (không bị thay bằng câu chung chung)
+  OK   input.detail.stage === "open" (lỗi ở bước mở cổng, không phải dò tên)
+  OK   getHealth().lastInputError nguyên văn + lastInputErrorDetail có available[]
+  OK   result.ok (nghĩa cũ "đã phân giải tên") vẫn true nhưng KHÔNG được dùng làm bằng chứng: connected=false
+  OK   Verify: NOT_CONNECTED và detail nêu rõ Input ĐÓNG + lỗi gốc
+
+== 3. Input mở OK, Output lỗi -> INPUT_READY, không báo kết nối toàn bộ ==
+  OK   status = INPUT_READY, partial=true, connected=false
+  OK   output.error giữ nguyên "Internal RtMidi error", output.detail.stage="open"
+[CommandRuntime] Không mở lại được MidiDriver OUTPUT cho cổng "AUTO MENU AI": Internal RtMidi error
+  OK   sendMidi khi Output đóng -> ok=false reason=OUTPUT_NOT_OPEN kèm lỗi gốc (không báo thành công)
+
+== 4. Output + Input đều mở OK -> CONNECTED ==
+  OK   status = CONNECTED, connected=true, partial=false
+  OK   Verify khi cả hai mở: không phải NOT_CONNECTED (TIMEOUT là đúng vì fake không loopback)
+  OK   deriveBackendStatus thuần: 4 tổ hợp
+
+== 6. Auto Connect liên tiếp: không tạo driver/listener trùng, không chập chờn ==
+  OK   3 lần liên tiếp: cùng status CONNECTED
+  OK   lần 2,3 được GỘP (coalesced) — không thao tác mở cổng thật
+  OK   chỉ tạo 1 Output + 1 Input (start() 1 lần, Auto Connect 0 lần mở lại)
+  OK   chỉ 1 Output + 1 Input đang mở
+  OK   Sau khi hết cửa sổ gộp: chạy thật nhưng tái sử dụng cổng -> vẫn CONNECTED, created không tăng
+  OK   reloadMappings x3 khi cổng KHÔNG đổi: Input vẫn mở (không close+mở lại), created.input vẫn 1
+  OK   autoConnectStats ghi nhận calls=4, coalesced=2
+
+== 9. midiInputPort riêng không bị Auto Connect ghi đè bằng tên Output ==
+  OK   Output = AUTO MENU AI, Input = StudioRack (riêng biệt)
+  OK   Auto Connect KHÔNG ghi settings (midiInputPort/midiOutputPort nguyên vẹn)
+  OK   Input riêng không có trong danh sách -> lỗi rõ ràng, KHÔNG âm thầm đổi sang tên Output
+  OK   Chưa cấu hình midiInputPort -> fallback theo tên Output (tương thích cũ)
+
+== 10. Byte Note/CC/channel của đường main KHỚP đường Web MIDI cũ ==
+  OK   sendMidi {"kind":"cc","number":20,"value":127,"channel":0} -> byte [176,20,127]
+  OK   sendMidi {"kind":"cc","number":119,"value":42,"channel":15} -> byte [191,119,42]
+  OK   sendMidi {"kind":"noteon","number":60,"value":100,"channel":0} -> byte [144,60,100]
+  OK   sendMidi {"kind":"noteoff","number":60,"value":0,"channel":0} -> byte [128,60,0]
+  OK   sendMidi {"kind":"cc","number":200,"value":300,"channel":17} -> byte [177,72,44]
+  OK   kind lạ -> INVALID_PARAMS, không gửi
+  OK   normalizeMidiMessage (đường nhận/D1) không đổi: CC ch1 #20 v127
+
+== 8. Test Note/CC: renderer gửi qua BACKEND main (không phụ thuộc Web MIDI) ==
+  OK   sendMidiCC OK dù Web MIDI không liệt kê "AUTO MENU AI" (trước đây: MIDI_PORT_NOT_FOUND)
+[CommandRuntime] [D1] Validate PASS — 8 capability, 0 binding được cài vào mapping thật, 0 binding bị loại (xem lý do trong rejected). []
+[CommandRuntime] [D1] Validate PASS — 8 capability, 0 binding được cài vào mapping thật, 0 binding bị loại (xem lý do trong rejected). []
+[CommandRuntime] [D1] Validate PASS — 8 capability, 0 binding được cài vào mapping thật, 0 binding bị loại (xem lý do trong rejected). []
+  OK   sendMidiNotePulse OK: Note On rồi Note Off đều tới cổng AUTO MENU AI qua MidiDriver
+  OK   KHÔNG đụng Web MIDI để gửi (requestMIDIAccess 0 lần, send Web 0 lần)
+  OK   getLastMidiSendResult ghi rõ sender = main-midi-driver (easymidi)
+  OK   Danh sách Output cho dropdown lấy từ backend thật (có "AUTO MENU AI"), nguồn main-easymidi
+[CommandRuntime] Không mở lại được MidiDriver OUTPUT cho cổng "AUTO MENU AI": Internal RtMidi error
+[MIDI-DIAG] {
+  t: 1792971785028,
+  state: 'MIDI_SEND_FAILED',
+  corr: null,
+  via: 'main',
+  kind: 'cc',
+  port: 'AUTO MENU AI',
+  reason: 'OUTPUT_NOT_OPEN',
+  error: 'Internal RtMidi error'
+}
+  OK   Output main lỗi -> sendMidiCC=false, reason=OUTPUT_NOT_OPEN, lỗi gốc giữ nguyên
+  OK   và KHÔNG gửi mù qua Web MIDI dù Web MIDI có cổng cùng tên
+  OK   Không có main IPC -> fallback Web MIDI (tương thích test/trình duyệt cũ)
+
+== C. midiHealth.js: trạng thái từng phía, bằng chứng từng backend ==
+  OK   Output: detectedByMain=true, detectedByRenderer=false -> detected=true (backend gửi thấy cổng)
+  OK   Output connected=true dù Web MIDI không thấy (main đã mở thật)
+  OK   Input connected=false + error nguyên văn "Internal RtMidi error"
+  OK   status = OUTPUT_READY, partial=true (không còn ERROR/CONNECTING chung chung)
+  OK   errors.output=null, errors.input="Internal RtMidi error" tách riêng
+  OK   Cả hai lỗi -> ERROR, chuỗi error có nhãn OUT/IN (không che lỗi nào)
+  OK   Input riêng (IN-B) so với configuredInputPortName, không so với tên Output -> CONNECTED (trước đây Input luôn conn=✕)
+  OK   Cổng đã lưu không còn tồn tại -> DISCONNECTED (không CONNECTED)
+
+== 7. Một lần bấm Auto Connect = một luồng thao tác ==
+[CommandRuntime] [D1] Validate PASS — 8 capability, 0 binding được cài vào mapping thật, 0 binding bị loại (xem lý do trong rejected). []
+  OK   11 lần bấm dồn dập (như log 11 dòng/2 giây) -> đúng 1 IPC autoConnectMidi
+  OK   cả 11 nhận CÙNG một kết quả nhất quán
+  OK   sau khi xong, lần bấm mới chạy lại bình thường (ipcCalls=2)
+  OK   STATIC: setupMidiMonitor.js chỉ được nạp 1 lần trong setup.html
+  OK   STATIC: chỉ có 1 addEventListener cho #btnAutoConnectMidi, và 1 nút trong HTML
+  OK   STATIC: không file JS nào khác gọi autoConnectMidi/.click() lên nút
+  OK   STATIC: UI Auto Connect không còn dùng result.ok làm điều kiện báo ✅
+
+== Phạm vi: không đổi HTML / D1 / mapping ==
+  OK   git diff KHÔNG chứa file .html
+  OK   git diff KHÔNG chứa d1Loader/commandEngine/capabilityRegistry/docs/d1
+
+59 PASS, 0 FAIL

@@ -1,0 +1,23 @@
+== Test 1: Setup lưu mapping -> "reload" (đọc lại từ disk) -> Runtime đọc thấy đúng mapping ==
+  OK   Runtime đọc đúng mapping Setup đã lưu sau "reload" (thực tế: {"kind":"cc","channel":3,"number":15,"value":0,"source":"USER_DEFINED"})
+
+== Test 2: Action chưa từng có mapping -> Runtime báo NOT_CONFIGURED thật (không giả PASS) ==
+  OK   NOT_CONFIGURED khi chưa từng lưu gì (thực tế: {"status":"NOT_CONFIGURED","via":null})
+
+== Test 3: Mapping hợp lệ -> dispatch thật gọi đúng sendMidiCC ==
+[ActionExecutor] MASTER_OUTPUT_VOLUME (MASTER_OUTPUT_VOLUME) -> SUCCESS 
+  OK   dispatch thật đúng CC7=88 (thực tế: [{"num":7,"val":88,"ch":0}])
+
+== Test 4: Mapping bị xoá (Setup ghi lại rỗng) -> action trở lại NOT_CONFIGURED, KHÔNG giữ mapping cũ trong memory âm thầm ==
+  OK   mapping thực sự đã tồn tại trước khi xoá (tiền điều kiện hợp lệ)
+  OK   trở lại NOT_CONFIGURED sau khi xoá mapping (thực tế: {"status":"NOT_CONFIGURED","via":null})
+
+== Mục 5: Beat = CC7/Channel A, Master = CC7/Channel B -> VẪN là 2 mapping độc lập, không gộp thành VOLUME ==
+[ActionExecutor] BEAT_INPUT_VOLUME (BEAT_INPUT_VOLUME) -> SUCCESS 
+[ActionExecutor] MASTER_OUTPUT_VOLUME (MASTER_OUTPUT_VOLUME) -> SUCCESS 
+  OK   2 lần dispatch riêng biệt dù cùng CC (thực tế: 2)
+  OK   Beat: CC7, channel index 0 (=channel 1 user-facing), value=30 (thực tế: {"num":7,"val":30,"ch":0})
+  OK   Master: CC7, channel index 1 (=channel 2 user-facing), value=60 — KHÁC channel với Beat dù cùng CC (thực tế: {"num":7,"val":60,"ch":1})
+  OK   getMidiOutMapping trả đúng 2 entry riêng, không gộp
+
+9 PASS, 0 FAIL

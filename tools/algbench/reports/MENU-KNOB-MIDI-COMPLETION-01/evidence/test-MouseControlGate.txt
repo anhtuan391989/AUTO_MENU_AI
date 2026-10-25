@@ -1,0 +1,25 @@
+  OK   [sanity] vocalCommandRouter.js có định nghĩa sendKeyToAutotune()
+  OK   [sanity] vocalCommandRouter.js có định nghĩa sendToneStep()
+  OK   [sanity] vocalCommandRouter.js có định nghĩa isMouseFallbackAllowed()
+  OK   [sanity] vocalCommandRouter.js có định nghĩa parseCapturedPoint()
+  OK   [sanity] vocalCommandRouter.js có định nghĩa delay()
+  OK   Case1: Mouse OFF + không MIDI -> sendKeyToAutotune KHÔNG gọi clickAtPoint
+  OK   Case1: trả về status=MOUSE_DISABLED, ok=false (không giả PASS)
+  OK   Case2: Mouse OFF + không MIDI -> sendToneStep KHÔNG gọi clickAtPoint
+  OK   Case2: trả về status=MOUSE_DISABLED, ok=false
+  OK   Case3a: Mouse OFF nhưng MIDI configured -> sendKeyToAutotune vẫn gửi MIDI thành công
+  OK   Case3b: Mouse OFF nhưng MIDI configured -> sendToneStep vẫn gửi MIDI thành công
+  OK   Case3a: đúng note MIDI được gửi (D=2, theo NOTE_MAP thật của vocalCommandRouter.js)
+  OK   Case3b: đúng số lần gửi CC (1 bước = 1 lần)
+  OK   Case3: clickAtPoint KHÔNG được gọi khi MIDI đã lo xong (không lẫn 2 driver)
+  OK   Case4: Mouse ON + không MIDI -> sendKeyToAutotune click thành công qua mouse
+  OK   Case4: click ĐÚNG toạ độ đã capture (autotunekey)
+  OK   Case5a: TRƯỚC khi bật ON -> chưa click lần nào
+  OK   Case5b: NGAY SAU khi bật ON -> bắt đầu click được (đọc state runtime mới, không cache)
+  OK   Case5c: tắt lại OFF -> ngừng click ngay (không có click thứ 2)
+  OK   Case6a: setting chưa từng set (undefined) -> mặc định cho phép (giữ hành vi cũ)
+  OK   Case6b: setting = false -> gate chặn (đọc đúng giá trị thật)
+  OK   Case6c: setting = true -> gate cho phép (đọc đúng giá trị thật)
+  OK   actionRegistry.js vẫn còn gate riêng của nó (không bị patch A29-B đụng vào)
+
+23 PASS / 0 FAIL

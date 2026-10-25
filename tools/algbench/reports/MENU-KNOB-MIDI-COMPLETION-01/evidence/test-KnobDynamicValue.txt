@@ -1,0 +1,25 @@
+== Case: value=0 (biên) -> KHÔNG fallback về midiMap.value tĩnh ==
+[ActionExecutor] TEST_ACTION (TEST_ACTION) -> SUCCESS 
+  OK   sendMidiCC được gọi đúng 1 lần
+  OK   gửi ĐÚNG value=0 động, KHÔNG fallback về midiMap.value=127 tĩnh (thực tế gửi: 0)
+
+== Case: value hợp lệ khác (vd 55) -> dùng đúng giá trị động, không phải giá trị tĩnh ==
+[ActionExecutor] TEST_ACTION (TEST_ACTION) -> SUCCESS 
+  OK   gửi đúng value=55 động, không phải value=10 tĩnh đã cấu hình (thực tế: 55)
+
+== Case: KHÔNG truyền context.value (Button cũ, vd CLAP) -> vẫn dùng đúng midiMap.value tĩnh như trước B6/B7 (backward-compat) ==
+[ActionExecutor] TEST_ACTION (menu-button) -> SUCCESS 
+  OK   không có context.value -> dùng đúng midiMap.value=42 tĩnh, hành vi Button KHÔNG đổi (thực tế: 42)
+
+== Case: Action KHÔNG phải Knob MIDI (context không có reason "knob"/action ngoài 4 Knob) vẫn gửi context.value NGUYÊN VĂN — MENU-KNOB-MIDI-COMPLETION-01 chỉ scale 0-100→0-127 cho 4 Knob (xem KnobMidiCompletion01.verify.js) ==
+[ActionExecutor] TEST_ACTION (TEST_ACTION) -> SUCCESS 
+  OK   Knob giá trị 100 (max) được gửi nguyên văn là 100, KHÔNG tự đổi thành 127 (thực tế: 100) — quyết định scale đã chốt ở MENU-KNOB-MIDI-COMPLETION-01: chỉ áp dụng cho 4 Knob MIDI khi reason="knob"; Action khác không đổi
+
+== Case: Beat rồi Master gọi liên tiếp -> không chia sẻ dynamic state, mỗi lần dùng đúng mapping/value của chính nó ==
+[ActionExecutor] BEAT_INPUT_VOLUME (BEAT_INPUT_VOLUME) -> SUCCESS 
+[ActionExecutor] MASTER_OUTPUT_VOLUME (MASTER_OUTPUT_VOLUME) -> SUCCESS 
+  OK   đúng 2 lần gửi (thực tế: 2)
+  OK   Beat gửi đúng CC 20 với value 33 (thực tế: CC20=33)
+  OK   Master gửi đúng CC 30 với value 77, không lẫn với Beat (thực tế: CC30=77)
+
+8 PASS, 0 FAIL
