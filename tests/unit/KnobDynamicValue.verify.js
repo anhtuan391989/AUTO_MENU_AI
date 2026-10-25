@@ -4,10 +4,8 @@
  * Trích xuất verbatim executeAction() (ui/js/actionRegistry.js) — xác nhận:
  *   - context.value ĐỘNG luôn được dùng khi hợp lệ, KHÔNG fallback về midiMap.value tĩnh
  *     (kể cả tại value=0, trường hợp dễ vỡ với toán tử `||` — ở đây dùng `??` nên an toàn).
- *   - Giá trị 0-100 từ Knob được gửi NGUYÊN VĂN (không tự scale sang 0-127) — ghi nhận đây là
- *     hành vi THẬT hiện tại, KHÔNG phải sửa hộ, vì quyết định scale 0-100↔0-127 vẫn là OPEN
- *     DECISION (xem TASK_B5_REPORT.md Mục 7) — B7 không tự quyết định, chỉ xác nhận đúng
- *     hành vi đang chạy.
+ *   - Action KHÔNG phải Knob MIDI gửi context.value NGUYÊN VĂN. (Quyết định scale 0-100→0-127 trước đây là OPEN DECISION;
+ *     MENU-KNOB-MIDI-COMPLETION-01 đã chốt: chỉ scale cho 4 Knob MIDI khi reason="knob" — test riêng KnobMidiCompletion01.verify.js.)
  *   - Beat và Master không chia sẻ dynamic state (gọi liên tiếp, giá trị không lẫn lộn).
  *
  * Chạy: node tests/unit/KnobDynamicValue.verify.js
@@ -119,7 +117,7 @@ function buildSandbox({ mapping, sendMidiCCSpy }) {
         assert(calls[0].val === 42, `không có context.value -> dùng đúng midiMap.value=42 tĩnh, hành vi Button KHÔNG đổi (thực tế: ${calls[0].val})`);
     }
 
-    console.log('\n== Case: giá trị 0-100 từ Knob được gửi NGUYÊN VĂN, KHÔNG tự scale sang 0-127 (ghi nhận hành vi thật, không phải quyết định của B7) ==');
+    console.log('\n== Case: Action KHÔNG phải Knob MIDI (context không có reason "knob"/action ngoài 4 Knob) vẫn gửi context.value NGUYÊN VĂN — MENU-KNOB-MIDI-COMPLETION-01 chỉ scale 0-100→0-127 cho 4 Knob (xem KnobMidiCompletion01.verify.js) ==');
     {
         const calls = [];
         const sandbox = buildSandbox({
@@ -127,7 +125,7 @@ function buildSandbox({ mapping, sendMidiCCSpy }) {
             sendMidiCCSpy: async (num, val, ch) => { calls.push({ num, val, ch }); return true; },
         });
         await sandbox.executeAction('TEST_ACTION', { value: 100 }); // knob max = 100
-        assert(calls[0].val === 100, `Knob giá trị 100 (max) được gửi nguyên văn là 100, KHÔNG tự đổi thành 127 (thực tế: ${calls[0].val}) — CẦN QUYẾT ĐỊNH từ Khói xem có nên scale không, xem TASK_B5_REPORT.md Mục 7`);
+        assert(calls[0].val === 100, `Knob giá trị 100 (max) được gửi nguyên văn là 100, KHÔNG tự đổi thành 127 (thực tế: ${calls[0].val}) — quyết định scale đã chốt ở MENU-KNOB-MIDI-COMPLETION-01: chỉ áp dụng cho 4 Knob MIDI khi reason="knob"; Action khác không đổi`);
     }
 
     console.log('\n== Case: Beat rồi Master gọi liên tiếp -> không chia sẻ dynamic state, mỗi lần dùng đúng mapping/value của chính nó ==');

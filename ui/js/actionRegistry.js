@@ -219,7 +219,26 @@ async function executeAction(action, context = {}) {
             // đã lưu). Chỉ áp dụng khi context.value là number hợp lệ — không đổi field CC/
             // channel/kind nào, chỉ đổi phần VALUE gửi đi mỗi lần gọi.
             const dynamicValue = Number.isFinite(context.value) ? context.value : undefined;
-            if (midiMap.kind === "cc" && typeof sendMidiCC === "function") {
+            // MENU-KNOB-MIDI-COMPLETION-01 — 4 Knob MIDI (Beat/Master/Retune 1/Retune 2) có thang UI 0–100 nhưng CC chuẩn là 0–127:
+            // đổi TUYẾN TÍNH ccValue = round(clamp(v,0,100) × 127 / 100) (0→0, 25→32, 50→64, 75→95, 100→127). CHỈ áp dụng khi caller là Knob
+            // (context.reason === "knob") VÀ action thuộc 4 Knob này VÀ mapping là CC; mọi Action khác dùng context.value như cũ (không đổi).
+            // Không gửi lặp: nếu cùng action + cùng mapping (kind/kênh/số) + cùng ccValue với lần gửi THÀNH CÔNG gần nhất thì bỏ qua (trả ok, skipped).
+            // Lần gửi lỗi thì xoá bộ nhớ đệm để lần sau gửi lại. Không gửi gì lúc khởi động/khôi phục giá trị đã lưu (chỉ handler Knob gọi hàm này).
+            const isKnobCc = midiMap.kind === "cc" && dynamicValue !== undefined && context.reason === "knob"
+                && (action === ACTIONS.BEAT_INPUT_VOLUME || action === ACTIONS.MASTER_OUTPUT_VOLUME
+                    || action === ACTIONS.RETUNE_SPEED_MIC1 || action === ACTIONS.RETUNE_SPEED_MIC2);
+            if (isKnobCc && typeof sendMidiCC === "function") {
+                const ccValue = Math.round(Math.max(0, Math.min(100, dynamicValue)) * 127 / 100);
+                const sig = `${midiMap.kind}|${midiMap.channel || 1}|${midiMap.number}`;
+                const cache = (window.__knobLastCc = window.__knobLastCc || {});
+                if (cache[action] && cache[action].sig === sig && cache[action].cc === ccValue) {
+                    log(ACTION_STATUS.SUCCESS, `bỏ qua: giá trị CC ${ccValue} không đổi`);
+                    return { ok: true, status: ACTION_STATUS.SUCCESS, via: "midi", skipped: "DUPLICATE_VALUE", ccValue };
+                }
+                sent = await sendMidiCC(midiMap.number, ccValue, (midiMap.channel || 1) - 1);
+                if (sent) cache[action] = { sig, cc: ccValue }; else delete cache[action];
+                if (sent) { log(ACTION_STATUS.SUCCESS, `knob ${dynamicValue} -> CC ${ccValue}`); return { ok: true, status: ACTION_STATUS.SUCCESS, via: "midi", ccValue }; }
+            } else if (midiMap.kind === "cc" && typeof sendMidiCC === "function") {
                 sent = await sendMidiCC(midiMap.number, dynamicValue ?? midiMap.value ?? 127, (midiMap.channel || 1) - 1);
             } else if (midiMap.kind === "note" && typeof sendMidiNotePulse === "function") {
                 sent = await sendMidiNotePulse(midiMap.number, dynamicValue ?? midiMap.velocity ?? 100, (midiMap.channel || 1) - 1);

@@ -671,6 +671,20 @@ function findDawStateMappingConflict(action, mapping) {
     return null;
 }
 
+// MENU-KNOB-MIDI-COMPLETION-01 — 4 Knob MIDI + 8 lệnh LIVE ON/OFF là nhóm "bảo vệ": một CC/Note (cùng kind+kênh+số) KHÔNG được dùng chung giữa
+// một trong 12 action này và BẤT KỲ action khác đã lưu (nếu không, một cú xoay Knob có thể kích hoạt macro hoặc ngược lại).
+// Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
+const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2"]);
+const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET]);
+function findMidiOutMappingConflict(action, mapping) {
+    for (const { action: other } of DAW_MIDI_ACTIONS) {
+        if (other === action) continue;
+        const m = getDawMidiOutMapping(other);
+        if (m && m.kind === mapping.kind && Number(m.channel) === Number(mapping.channel) && Number(m.number) === Number(mapping.number)) return other;
+    }
+    return null;
+}
+
 function isMouseControlEnabledLocal() {
     const v = getSetting("mouseControlEnabled");
     return v === undefined || v === null || v === "" ? true : !!v;
@@ -726,6 +740,9 @@ function initDawMidiOutputMappingSection() {
             const overwrite = [...DAW_STATE_ACTION_SET].filter((a) => getDawMidiOutMapping(a));
             const msg = "Lưu 8 mapping gợi ý (CC 102–109, kênh 16, giá trị 127)? Đây là bộ CC THỬ NGHIỆM khớp macro LIVE_*; "
                 + "bạn vẫn phải gán từng CC vào đúng macro trong Studio One." + (overwrite.length ? `\nSẽ GHI ĐÈ ${overwrite.length} mapping ON/OFF đã lưu.` : "");
+            // MENU-KNOB-MIDI-COMPLETION-01 — bộ gợi ý (CC102–109 kênh 16) không được đè lên CC đang dùng cho Knob/Action khác.
+            const liveClash = Object.entries(DAW_STATE_SUGGESTED).map(([a, cc]) => [a, findMidiOutMappingConflict(a, { kind: "cc", channel: DAW_STATE_SUGGESTED_CHANNEL, number: cc })]).filter(([, o]) => o && !DAW_STATE_ACTION_SET.has(o));
+            if (liveClash.length) { alert("Không lưu bộ gợi ý: CC kênh 16 đã dùng cho action khác — " + liveClash.map(([a, o]) => `${a} ↔ ${o}`).join(", ") + ". Đổi mapping của action kia trước."); return; }
             if (!confirm(msg)) return;
             for (const [a, cc] of Object.entries(DAW_STATE_SUGGESTED)) {
                 setDawMidiOutMapping(a, { kind: "cc", channel: DAW_STATE_SUGGESTED_CHANNEL, number: cc, value: DAW_STATE_SUGGESTED_VALUE });
@@ -776,8 +793,8 @@ function initDawMidiOutputMappingSection() {
                 if (kind === "note") mapping.velocity = Number.isFinite(val) ? val : 100;
                 else mapping.value = Number.isFinite(val) ? val : 127;
 
-                if (DAW_STATE_ACTION_SET.has(action)) {
-                    const clash = findDawStateMappingConflict(action, mapping);
+                if (MIDI_CONFLICT_GUARD_SET.has(action)) {
+                    const clash = findMidiOutMappingConflict(action, mapping);
                     if (clash) {
                         alert(`Không lưu: ${kind === "note" ? "Note" : "CC"} ${number} kênh ${channel} đã dùng cho ${clash}. Mỗi lệnh ON/OFF phải có CC/Note riêng.`);
                         return;
