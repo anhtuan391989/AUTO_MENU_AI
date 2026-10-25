@@ -1,0 +1,20 @@
+=== MenuButtonReset (logic trên mã thật; DOM/file giả) ===
+  ✅ 0a. (HTML) 4 nút không có class active/disabled mặc định → Music = KHÔNG disabled, Mic 1/Mic 2/FX = tắt
+  ✅ 0b. Lần chạy đầu (chưa có cấu hình): {"music":true,"mic1":false,"mic2":false,"fx":false}
+  ✅ 6a. 16/16 tổ hợp Music/Mic1/Mic2/FX (gồm FX ON): đóng hẳn rồi mở lại → cả 4 nút về mặc định, KHÔNG khôi phục trạng thái cũ
+  ✅ 6b. Sau khi bấm cả 4 nút + đóng: app-settings.autoMenuData KHÔNG chứa musicDisabled/mic1/mic2/fx/fxRequested (keys: currentKey,tone,modEnabled,preset,knobs)
+  ✅ 6c. Key/tone/preset/knobs ĐƯỢC giữ qua phiên ({"key":"D Minor","tone":"E","preset":"C","knobs":[77,33]}) trong khi 4 nút về mặc định
+  ✅ 6d-1. File cũ có musicDisabled/mic1/mic2/fx/fxRequested = ON hết → mở lên vẫn mặc định (bỏ qua dữ liệu cũ)
+  ✅ 6d-2. Cùng file cũ: Key/tone/preset/knob vẫn được đọc đúng
+  ✅ 6d-3. Chưa lưu gì → file chưa bị đụng (không xoá cấu hình ngoài ý muốn)
+  ✅ 6d-4. Lần saveData() kế tiếp: key cũ của 4 nút biến mất, cài đặt khác giữ nguyên
+  ✅ 6e-1. Không còn handler beforeunload lưu trạng thái
+  ✅ 6e-2. Đóng Menu sau khi nút bị đổi ngoài click: không ghi gì ra file
+  ✅ 7. 7 kiểu cấu hình thiếu/hỏng/cũ (gồm knobs sai kiểu): không crash, 4 nút mặc định
+  ✅ 8a. Sau khi mở: nút FX không được gắn nhãn đồng bộ/xác nhận (data-fx-sync trống) — mặc định lúc mở ≠ DAW đã xác nhận
+  ✅ 8b. (tĩnh) Mã lưu/đọc không có chuỗi "confirmed/đã xác nhận" nào trình bày trạng thái nút như DAW đã xác nhận
+  ✅ 9a. (tĩnh) Không còn restoreButtonStates / __fxUserChoice / __menuStateRestored / beforeunload trong renderer.js (ngoài comment)
+  ✅ 9b. (tĩnh) saveData() và loadData() không tham chiếu 4 nút
+  ✅ 9c. (tĩnh) Auto FX onRequest (đổi nút FX) không gọi saveData()
+  ✅ 9d. (tĩnh, đối chứng) Bấm nút vẫn gọi saveData() cho các cài đặt khác — nhưng saveData() không ghi 4 nút (đã kiểm ở 6b)
+✅ TẤT CẢ PASS

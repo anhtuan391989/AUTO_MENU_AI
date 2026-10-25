@@ -1,0 +1,110 @@
+== 1. Tám action ON/OFF được phân biệt ==
+  OK   ACTIONS có đủ 8 tên, giá trị khác nhau từng đôi
+  OK   4 nút -> 4 cặp (on/off) riêng, không trùng nhau và không trùng action toggle cũ
+  OK   Action cũ còn nguyên: MONITOR_BEAT_TOGGLE/MIC1/MIC2/FX
+
+== 2-4. Bấm ON chọn mapping ON, OFF chọn mapping OFF; lặp ON/ON, OFF/OFF; CC/channel/value/số lần ==
+  OK   MUSIC ON -> đúng 1 lệnh CC 102 ch16(index 15) value 127
+  OK   MUSIC ON lần 2 vẫn gửi lại lệnh ON (không bỏ qua, không đảo)
+  OK   MUSIC OFF ×2 -> 2 lệnh CC 103 (cả hai lần đều là OFF)
+  OK   MUSIC: mỗi cú bấm đúng MỘT lệnh, không có lệnh toggle cũ kèm theo
+  OK   MUSIC: kết quả mode=explicit, target ON/OFF đúng, ok
+  OK   MIC1 ON -> đúng 1 lệnh CC 104 ch16(index 15) value 127
+  OK   MIC1 ON lần 2 vẫn gửi lại lệnh ON (không bỏ qua, không đảo)
+  OK   MIC1 OFF ×2 -> 2 lệnh CC 105 (cả hai lần đều là OFF)
+  OK   MIC1: mỗi cú bấm đúng MỘT lệnh, không có lệnh toggle cũ kèm theo
+  OK   MIC1: kết quả mode=explicit, target ON/OFF đúng, ok
+  OK   MIC2 ON -> đúng 1 lệnh CC 106 ch16(index 15) value 127
+  OK   MIC2 ON lần 2 vẫn gửi lại lệnh ON (không bỏ qua, không đảo)
+  OK   MIC2 OFF ×2 -> 2 lệnh CC 107 (cả hai lần đều là OFF)
+  OK   MIC2: mỗi cú bấm đúng MỘT lệnh, không có lệnh toggle cũ kèm theo
+  OK   MIC2: kết quả mode=explicit, target ON/OFF đúng, ok
+  OK   FX ON -> đúng 1 lệnh CC 108 ch16(index 15) value 127
+  OK   FX ON lần 2 vẫn gửi lại lệnh ON (không bỏ qua, không đảo)
+  OK   FX OFF ×2 -> 2 lệnh CC 109 (cả hai lần đều là OFF)
+  OK   FX: mỗi cú bấm đúng MỘT lệnh, không có lệnh toggle cũ kèm theo
+  OK   FX: kết quả mode=explicit, target ON/OFF đúng, ok
+  OK   MIC1 chỉ phát CC 104/105 (không chạm MUSIC/MIC2/FX)
+
+== FX: một lệnh cho 4 bus; không đụng Send/FX Auto ==
+  OK   FX ON/OFF mỗi lần đúng 1 CC (108/109); KHÔNG gửi FX_SEND_REVERB(20)/FX_SEND_DELAY(21)/MONITOR_FX(22) dù đã cấu hình
+
+== 5-7. Chế độ legacy / nửa cấu hình / chưa cấu hình ==
+  OK   Chưa cấu hình ON/OFF -> mode legacy
+  OK   legacy: mỗi cú bấm đúng 1 lệnh toggle cũ (CC 20) cho cả ON và OFF — như trước task
+  OK   legacy: text nói rõ "toggle cũ" + chưa xác nhận DAW
+  OK   Có MUSIC_ON -> mode explicit
+  OK   Thiếu MUSIC_OFF: NOT_CONFIGURED, 0 lệnh gửi, KHÔNG rơi xuống toggle cũ (toggle sẽ đảo trạng thái)
+  OK   MUSIC ON vẫn gửi đúng CC 102
+  OK   Chưa cấu hình gì: ok=false, 0 lệnh, delivery NOT_SENT, nói rõ DAW KHÔNG nhận lệnh
+  OK   Chưa chọn DAW: không gửi gì, không báo thành công
+
+== 8. Lỗi gửi / thành công: không bao giờ báo DAW đã xác nhận ==
+  OK   Gửi lỗi: ok=false status NO_DEVICE delivery NOT_SENT
+  OK   Text nêu lỗi gốc của tầng gửi (OUTPUT_NOT_OPEN: Internal RtMidi error) và "DAW KHÔNG nhận lệnh"
+  OK   dawConfirmed luôn false, __dawStateLast ghi ok=false
+  OK   Gửi OK: delivery=UNCONFIRMED, dawConfirmed=false, text "DAW chưa xác nhận"
+  OK   Lệnh chưa cấu hình KHÔNG dùng kết quả gửi cũ của lần khác (không kèm lỗi lạ)
+
+== 9. Dữ liệu cũ vẫn đọc được (không cần migration vì không đổi schema) ==
+  OK   getMidiOutMapping đọc đúng mapping cũ
+  OK   Lưu mapping mới KHÔNG làm mất/đổi mapping cũ
+  OK   Nút chưa có ON/OFF vẫn legacy (FX có MONITOR_FX cũ -> legacy)
+  OK   FX legacy gửi đúng mapping cũ (CC 22 ch2 -> index 1, value 100? value giữ 100)
+
+== Nút Menu (renderer.js THẬT): trạng thái ĐÍCH sau cú bấm, ý nghĩa class ==
+  OK   STATIC: #musicBtn.disabled = mờ (TẮT), .control-btn.active = sáng (BẬT)
+  OK   Trích được khối nút MUSIC/MIC1/MIC2/FX từ renderer.js
+  OK   MUSIC mặc định (không class disabled = BẬT): bấm lần 1 -> TẮT -> gửi MUSIC_OFF (CC 103), đúng 1 lệnh
+  OK   MUSIC bấm lần 2 -> BẬT -> MUSIC_ON (CC 102)
+  OK   Tooltip nút MUSIC: "đã GỬI … DAW chưa xác nhận", dataset.dawSync=sent-unconfirmed
+  OK   MIC1: bấm -> active -> ON(104); bấm -> OFF(105). MIC2: ON(106), OFF(107). Mỗi cú bấm 1 lệnh
+  OK   FX (đường dự phòng không có __fxManualToggle): ON(108) rồi OFF(109), mỗi lần 1 lệnh
+  OK   Legacy qua nút MIC1: mỗi cú bấm đúng 1 CC 20 (toggle cũ), không có ON/OFF mới
+  OK   Gửi lỗi: tooltip nói "KHÔNG nhận lệnh", dataset.dawSync=failed
+  OK   Chưa cấu hình: tooltip "CHƯA cấu hình", dataset.dawSync=not-configured, 0 lệnh
+  OK   STATIC: không có nơi nào gửi lệnh ON/OFF khi KHỞI ĐỘNG (setDawControlState chỉ gọi trong handler click/__fxManualToggle)
+
+== FX: __fxManualToggle thật — đúng 1 lệnh, FX Auto/Send/60 s không bị gọi thêm ==
+  OK   Wiring FX Auto thật được tạo, đúng 1 setInterval
+  OK   FX ON thủ công (explicit): đúng 1 lệnh CC 108; KHÔNG gửi Send Reverb(20)/Delay(21)
+  OK   Mốc 60 s "Auto nhường quyền" vẫn được bật; kết quả báo về controller đúng 1 lần (sentCount=1)
+  OK   Tooltip FX: nói lệnh FX ON/mute bus, "DAW chưa xác nhận", KHÔNG nói "Send Reverb/Delay" đã gửi
+  OK   FX OFF thủ công: CC 109, tổng 2 lệnh, vẫn không có Send
+  OK   Legacy FX (chưa cấu hình FX_ON/OFF): vẫn gửi 2 Send (20,21) như trước, không có CC 108/109
+
+== Chuỗi đầy đủ: Menu -> ActionRegistry -> appSettings -> IPC -> main MidiDriver (easymidi giả) ==
+  OK   MUSIC ON -> 1 IPC {kind:cc, number:102, value:127, channel:15} -> byte [0xBF,102,127] tới "AUTO MENU AI"
+  OK   MUSIC OFF -> 1 IPC {kind:cc, number:103, value:127, channel:15} -> byte [0xBF,103,127] tới "AUTO MENU AI"
+  OK   MIC1 ON -> 1 IPC {kind:cc, number:104, value:127, channel:15} -> byte [0xBF,104,127] tới "AUTO MENU AI"
+  OK   MIC1 OFF -> 1 IPC {kind:cc, number:105, value:127, channel:15} -> byte [0xBF,105,127] tới "AUTO MENU AI"
+  OK   MIC2 ON -> 1 IPC {kind:cc, number:106, value:127, channel:15} -> byte [0xBF,106,127] tới "AUTO MENU AI"
+  OK   MIC2 OFF -> 1 IPC {kind:cc, number:107, value:127, channel:15} -> byte [0xBF,107,127] tới "AUTO MENU AI"
+  OK   FX ON -> 1 IPC {kind:cc, number:108, value:127, channel:15} -> byte [0xBF,108,127] tới "AUTO MENU AI"
+  OK   FX OFF -> 1 IPC {kind:cc, number:109, value:127, channel:15} -> byte [0xBF,109,127] tới "AUTO MENU AI"
+  OK   Không dùng đường Web MIDI độc lập khi main IPC hoạt động (requestMIDIAccess 0 lần)
+  OK   Kết quả gửi ghi rõ sender main-midi-driver (easymidi)
+
+== Setup → MIDI: 8 dòng riêng, bộ CC gợi ý khớp bảng, chặn trùng ==
+  OK   DAW_MIDI_ACTIONS có đủ 8 dòng ON/OFF
+  OK   Bộ CC gợi ý trong Setup khớp bảng 8 lệnh của task (102–109), kênh 16, value 127
+  OK   Bộ gợi ý CHỈ áp dụng khi người dùng bấm nút + xác nhận (confirm), không tự lưu lúc mở
+  OK   Có nút khôi phục: xoá CHỈ 8 mapping ON/OFF (setDawMidiOutMapping(a, null)) sau confirm
+  OK   Chặn trùng: MUSIC_OFF dùng lại CC 102 ch16 -> báo xung đột với MUSIC_ON; CC khác -> không xung đột
+  OK   Trạng thái hiển thị 8 dòng: "Đã lưu — chỉ gửi lệnh, DAW chưa xác nhận" (không "đã thực thi")
+
+== Macro LIVE_* (STATIC trên XML — KHÔNG chứng minh Studio One chạy đúng) ==
+  OK   LIVE_MUSIC_ON: đúng 2 lệnh — Find Track "Beat" rồi Track|Monitor State=1; không lệnh nào khác (Mute/Send/gain)
+  OK   LIVE_MUSIC_OFF: đúng 2 lệnh — Find Track "Beat" rồi Track|Monitor State=0; không lệnh nào khác (Mute/Send/gain)
+  OK   LIVE_MIC1_ON: đúng 2 lệnh — Find Track "Mic" rồi Track|Monitor State=1; không lệnh nào khác (Mute/Send/gain)
+  OK   LIVE_MIC1_OFF: đúng 2 lệnh — Find Track "Mic" rồi Track|Monitor State=0; không lệnh nào khác (Mute/Send/gain)
+  OK   LIVE_MIC2_ON: đúng 2 lệnh — Find Track "Không Dây" rồi Track|Monitor State=1; không lệnh nào khác (Mute/Send/gain)
+  OK   LIVE_MIC2_OFF: đúng 2 lệnh — Find Track "Không Dây" rồi Track|Monitor State=0; không lệnh nào khác (Mute/Send/gain)
+  OK   LIVE_FX_ON: Find Channel + Track|Mute State=0 cho đúng 4 bus (Delay, Verb ngắn, Verb dài, Com Verb), không lệnh khác
+  OK   LIVE_FX_OFF: Find Channel + Track|Mute State=1 cho đúng 4 bus (Delay, Verb ngắn, Verb dài, Com Verb), không lệnh khác
+
+== Phạm vi: không đổi D1 / CommandRuntime / HTML / AI Key-BPM-MOD / audioSource ==
+  OK   git diff KHÔNG chứa HTML/D1/CommandRuntime/main/preload/audioSource/engines/appSettings
+  OK   actionRegistry.js (mã, không tính chú thích) không có đường Web MIDI/dispatcher mới: không requestMIDIAccess/onmidimessage/easymidi
+
+85 PASS, 0 FAIL

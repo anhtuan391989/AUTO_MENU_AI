@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Macro title="LIVE_V2_MIC2_OFF" group="LIVE_TEST_V2" description="UPLOAD CHO THU NGHIEM - chi dung neu LIVE_MIC2_OFF lan dau chi chon track (Find Track hai lan roi Monitor State=0, KHONG Mute)">
+	<CommandElement category="Track" name="Find Track">
+		<CommandArgument name="Name" value="Không Dây"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Find Track">
+		<CommandArgument name="Name" value="Không Dây"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Monitor">
+		<CommandArgument name="State" value="0"/>
+	</CommandElement>
+</Macro>

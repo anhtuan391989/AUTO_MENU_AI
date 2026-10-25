@@ -1,0 +1,24 @@
+=== MenuFxAutoOff ===
+  ✅ 1a. Nền nhiễu -76 dBFS: dbfs (8-bit, giữ NGUYÊN) = -45.1 ≈ -45 (đúng hiện tượng đo trên Chromium/máy thật của Khói)
+  ✅ 1b. dbfsFloat (mới) = -76.0 ≈ -76 (mức thật)
+  ✅ 1c. Nền nhiễu -90 dBFS: 8-bit -45.2 (vẫn ≈ -45) vs float -89.9
+  ✅ 2. Số 0 tuyệt đối: cả hai = -Infinity
+  ✅ 3. Tín hiệu -20 dBFS: 8-bit -19.98 ≈ float -20.00 (không đổi ngưỡng BẬT)
+  ✅ 3b. Tín hiệu -40 dBFS: sai lệch 0.27 dB (<1)
+  ✅ 4a. Mọi trường onLevel cũ (rms/dbfs/peak/vuPercent/…) vẫn còn — chỉ THÊM dbfsFloat
+  ✅ 4b. Analyser không có getFloatTimeDomainData → dbfsFloat = dbfs (fallback an toàn, không crash)
+  ✅ 5a. (cũ) nhạc → FX BẬT
+  ✅ 5b. (cũ, tái hiện lỗi) 60 s nền nhiễu -76 dBFS: FX KHÔNG tắt, musicState=MUSIC_PRESENT (đo ≈ -45 dBFS nằm trong dải trễ -52…-45)
+  ✅ 6a. (mới) nhạc → FX BẬT
+  ✅ 6b. (mới) nhạc dừng, nền -76 dBFS: FX TẮT sau 992 ms (đích ≈ 1000 ms)
+  ✅ 6c. Không gửi lặp khi nền nhiễu tiếp tục
+  ✅ 7. (mới) nhạc quay lại → BẬT sau 416 ms (≤ 1000)
+  ✅ 8a. Nhạc -30 dBFS → BẬT
+  ✅ 8b. Nhạc nhỏ -48 dBFS (trong dải trễ -52…-45) → giữ nguyên BẬT, không chập chờn
+  ✅ 8c. Xuống -60 dBFS (< ngưỡng tắt -52) → TẮT
+  ✅ 9. Mic hoạt động (không nạp vào controller) + hệ thống im lặng → FX không bật
+  ✅ 10a. getInfo() có levelStats (n=63, min=-75.9, avg=-75.9, max=-75.9) + msSinceFrame
+  ✅ 10b. onDiag được gọi định kỳ ~30 s (3 lần trong ~97 s)
+  ✅ 11a. Không có khung 20 s → SOURCE_UNAVAILABLE, đóng băng (không tắt/bật mù quáng)
+  ✅ 11b. Khung quay lại + nhạc đã dừng → TẮT sau 96 ms (không kẹt ở trạng thái cũ)
+✅ TẤT CẢ PASS

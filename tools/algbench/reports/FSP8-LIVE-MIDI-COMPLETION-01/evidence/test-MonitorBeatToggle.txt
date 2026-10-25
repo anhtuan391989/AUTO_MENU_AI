@@ -1,0 +1,7 @@
+== musicBtn click -> dispatch đúng 1 lệnh (legacy MONITOR_BEAT_TOGGLE khi chưa cấu hình ON/OFF), giữ nguyên toggle CSS cũ ==
+  OK   toggle CSS "disabled" vẫn hoạt động như cũ (không bị thay thế)
+  OK   gửi đúng 1 lệnh MIDI (thực tế: 1)
+  OK   lệnh = mapping MONITOR_BEAT_TOGGLE cũ (CC 20, kênh 1) (thực tế: {"n":20,"v":127,"ch":0})
+  OK   ghi nhận mode=legacy, action=MONITOR_BEAT_TOGGLE
+
+4 PASS, 0 FAIL

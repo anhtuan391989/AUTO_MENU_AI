@@ -1,0 +1,44 @@
+== 1. Bảng gợi ý trong Setup khớp bảng mục tiêu (CC, kênh 16, value 127) ==
+  OK   DAW_STATE_SUGGESTED = 8 mapping đúng bảng
+  OK   kênh gợi ý 16, value 127
+  OK   điền bộ CC gợi ý CHỈ khi người dùng xác nhận (không ghi đè ngầm)
+
+== 2. Mã THẬT: 8 mapping -> 8 byte, kênh 16 -> index 15 (0xBF) ==
+  OK   MUSIC ON -> [0xBF,102,127], delivery=UNCONFIRMED, dawConfirmed=false
+  OK   MUSIC OFF -> [0xBF,103,127], delivery=UNCONFIRMED, dawConfirmed=false
+  OK   MIC1 ON -> [0xBF,104,127], delivery=UNCONFIRMED, dawConfirmed=false
+  OK   MIC1 OFF -> [0xBF,105,127], delivery=UNCONFIRMED, dawConfirmed=false
+  OK   MIC2 ON -> [0xBF,106,127], delivery=UNCONFIRMED, dawConfirmed=false
+  OK   MIC2 OFF -> [0xBF,107,127], delivery=UNCONFIRMED, dawConfirmed=false
+  OK   FX ON -> [0xBF,108,127], delivery=UNCONFIRMED, dawConfirmed=false
+  OK   FX OFF -> [0xBF,109,127], delivery=UNCONFIRMED, dawConfirmed=false
+  OK   thiếu mapping -> NOT_CONFIGURED, không gửi gì
+
+== 3. Macro LIVE_* trong repo: đúng track/bus, đúng loại lệnh ==
+  OK   LIVE_MUSIC_ON tồn tại, title khớp (CC102)
+  OK   LIVE_MUSIC_ON: Find Track "Beat" -> Monitor State=1; KHÔNG Mute, KHÔNG track khác
+  OK   LIVE_MUSIC_OFF tồn tại, title khớp (CC103)
+  OK   LIVE_MUSIC_OFF: Find Track "Beat" -> Monitor State=0; KHÔNG Mute, KHÔNG track khác
+  OK   LIVE_MIC1_ON tồn tại, title khớp (CC104)
+  OK   LIVE_MIC1_ON: Find Track "Mic" -> Monitor State=1; KHÔNG Mute, KHÔNG track khác
+  OK   LIVE_MIC1_OFF tồn tại, title khớp (CC105)
+  OK   LIVE_MIC1_OFF: Find Track "Mic" -> Monitor State=0; KHÔNG Mute, KHÔNG track khác
+  OK   LIVE_MIC2_ON tồn tại, title khớp (CC106)
+  OK   LIVE_MIC2_ON: Find Track "Không Dây" -> Monitor State=1; KHÔNG Mute, KHÔNG track khác
+  OK   LIVE_MIC2_OFF tồn tại, title khớp (CC107)
+  OK   LIVE_MIC2_OFF: Find Track "Không Dây" -> Monitor State=0; KHÔNG Mute, KHÔNG track khác
+  OK   LIVE_FX_ON tồn tại, title khớp (CC108)
+  OK   LIVE_FX_ON: đúng 4 bus (có dấu), Mute State=0 (ON=bỏ Mute), không lệnh khác
+  OK   LIVE_FX_OFF tồn tại, title khớp (CC109)
+  OK   LIVE_FX_OFF: đúng 4 bus (có dấu), Mute State=1 (ON=bỏ Mute), không lệnh khác
+  OK   8 CC khác nhau từng đôi (không trùng macro)
+
+== 4. Macro V2 thử nghiệm (nếu có): không ghi đè LIVE_*, chỉ Find Track x2 + Monitor ==
+  OK   LIVE_V2_MUSIC_ON: tên khác bản LIVE, đúng track "Beat", Monitor State=1, không Mute
+  OK   LIVE_V2_MUSIC_OFF: tên khác bản LIVE, đúng track "Beat", Monitor State=0, không Mute
+  OK   LIVE_V2_MIC1_ON: tên khác bản LIVE, đúng track "Mic", Monitor State=1, không Mute
+  OK   LIVE_V2_MIC1_OFF: tên khác bản LIVE, đúng track "Mic", Monitor State=0, không Mute
+  OK   LIVE_V2_MIC2_ON: tên khác bản LIVE, đúng track "Không Dây", Monitor State=1, không Mute
+  OK   LIVE_V2_MIC2_OFF: tên khác bản LIVE, đúng track "Không Dây", Monitor State=0, không Mute
+
+35 PASS, 0 FAIL

@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Macro title="LIVE_V2_MUSIC_ON" group="LIVE_TEST_V2" description="UPLOAD CHO THU NGHIEM - chi dung neu LIVE_MUSIC_ON lan dau chi chon track (Find Track hai lan roi Monitor State=1, KHONG Mute)">
+	<CommandElement category="Track" name="Find Track">
+		<CommandArgument name="Name" value="Beat"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Find Track">
+		<CommandArgument name="Name" value="Beat"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Monitor">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+</Macro>
