@@ -1,0 +1,24 @@
+=== FxAutoA01 (synthetic) ===
+  ✅ 1. Không nhạc, FX đã OFF → không gửi gì
+  ✅ 2. Nhạc ổn định → ON đúng 1 lần (1)
+  ✅    trạng thái = SEND_SENT_UNCONFIRMED (không "đã xác nhận")
+  ✅ 3. Nhạc vẫn chạy → không gửi thêm
+  ✅ 4. Khoảng lặng 0,5 s (<1 s) → giữ ON [MENU-FX-FIX: ngưỡng tắt 6 s → 1 s theo yêu cầu]
+  ✅ 5. Im lặng ≥1 s → OFF đúng 1 lần (2)
+  ✅    im lặng tiếp → không gửi lặp
+  ✅ 6. Nhạc phát lại → ON
+  ✅ 7. Dao động quanh ngưỡng (trong dải hysteresis) → không bật/tắt (0 lệnh thêm)
+  ✅    từ im lặng, dao động trong dải hysteresis → không bật
+  ✅ 8. Nhiễu nền -62±4 dBFS → không chuyển trạng thái giả
+  ✅ xung lẻ xen im lặng: OFF tối đa 1 lần, không dao động (1 lệnh thêm)
+  ✅ 9. Gửi thất bại → UI giữ OFF, trạng thái FX_ACTION_FAILED (không giả vờ)
+  ✅    thử lại có giới hạn (3 lần, tối đa 1 + maxRetries)
+  ✅ 10. Mất rồi nối lại nguồn khi nhạc vẫn chạy → không gửi trùng
+  ✅    nguồn không khả dụng → đóng băng, KHÔNG tắt FX
+  ✅ 11. Wiring: đúng 1 setInterval và có chốt chống tạo controller thứ hai
+  ✅ 12a. User tắt tay khi nhạc chạy → Auto nhường quyền, không ép bật lại
+  ✅ 12b. [MENU-FX-FIX] Hết 60 s giữ quyền, nhạc vẫn phát → Auto tiếp quản theo trạng thái HIỆN TẠI (bật lại)
+  ✅ Khởi động khi nhạc đang phát và FX đã ON → không gửi lệnh
+  ✅ Chuyển bài (2 s lặng, > 1 s) → TẮT rồi BẬT lại đúng 1 lần mỗi chiều [MENU-FX-FIX: hệ quả có chủ ý của ngưỡng tắt 1 s]
+  ✅ Fade-out → OFF đúng 1 lần sau khi im lặng xác nhận
+✅ TẤT CẢ PASS

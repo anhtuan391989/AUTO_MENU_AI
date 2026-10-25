@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Macro title="DIAG_MON_MIC_1" group="DIAG_MON" description="DIAG - Find Track Mic roi Monitor State=1">
+	<CommandElement category="Track" name="Find Track">
+		<CommandArgument name="Name" value="Mic"/>
+	</CommandElement>
+	<CommandElement category="Track" name="Monitor">
+		<CommandArgument name="State" value="1"/>
+	</CommandElement>
+</Macro>

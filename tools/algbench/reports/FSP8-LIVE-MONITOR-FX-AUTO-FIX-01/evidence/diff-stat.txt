@@ -1,0 +1,6 @@
+ tests/unit/FxAutoBusFix01.verify.js   | 177 ++++++++++++++++++++++++++++++++++
+ tests/unit/FxIndicatorA06.verify.js   |  33 ++++---
+ tests/unit/MenuFxFix.verify.js        |  25 +++--
+ tests/unit/MidiDawControl01.verify.js |   2 +-
+ ui/js/renderer.js                     |  50 +++++++---
+ 5 files changed, 254 insertions(+), 33 deletions(-)

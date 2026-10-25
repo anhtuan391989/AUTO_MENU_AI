@@ -1,0 +1,59 @@
+== 1. FX Auto: có nhạc -> đúng 1 lệnh FX_ON; hết nhạc -> đúng 1 lệnh FX_OFF (mã THẬT, byte đo được) ==
+  OK   khởi động im lặng: nút TẮT, 0 lệnh (nút lưu = TẮT, không gửi OFF vô cớ)
+  FAIL  nhạc phát -> nút SÁNG + đúng 1 CC108 ch16 v127 [0xBF,108,127] []
+  FAIL  tooltip: đã GỬI lệnh FX, "chưa xác nhận", KHÔNG nói Send Reverb/Delay "FX Auto: CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh"
+  FAIL  nhạc tiếp tục: không gửi lặp 
+  FAIL  lặng ngắn 0,5 s: không tắt, không gửi 
+  FAIL  im lặng > 1 s -> nút TẮT + đúng 1 CC109 ch16 [0xBF,109,127] []
+  FAIL  nhạc lại -> FX_ON lần nữa 
+  OK   không có CC nào của FX_SEND_REVERB/DELAY/MONITOR_FX
+
+== 2. Thời gian xác nhận giữ nguyên (nhạc ≈500 ms, im lặng ≈1000 ms) ==
+  FAIL  FX_ON gửi sau null ms kể từ khi nhạc xuất hiện 
+  FAIL  FX_OFF gửi sau null ms kể từ khi im lặng 
+
+== 3. Bấm tay: Auto nhường quyền 60 s, hết 60 s tiếp quản theo trạng thái nhạc HIỆN TẠI; nút thủ công cũng đúng 1 lệnh ==
+  OK   bấm tay BẬT -> đúng 1 CC108
+  OK   59 s im lặng sau bấm tay: Auto KHÔNG tắt, không gửi
+  FAIL  hết 60 s + im lặng -> Auto tiếp quản: CC109, không sớm hơn mốc 60 s [{"n":108,"v":127,"ch":15,"t":5008,"bytes":[191,108,127]}]
+  OK   bấm tay BẬT rồi nhạc phát đúng suốt: sau 60 s KHÔNG gửi trùng FX_ON (trạng thái đã gửi khớp)
+  FAIL  Auto BẬT rồi bấm tay TẮT -> CC109 
+  FAIL  59 s nhạc vẫn phát: Auto KHÔNG bật lại 
+  FAIL  hết 60 s -> Auto tiếp quản theo nhạc hiện tại: CC108 
+
+== 4. Thiếu mapping / lỗi gửi / hết thời gian: KHÔNG báo thành công giả ==
+  FAIL  chưa cấu hình FX ON/OFF: nút theo YÊU CẦU, 0 lệnh, NOT_CONFIGURED rõ ràng {"t":"FX Auto: CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh","s":[]}
+  FAIL  chỉ có Send/MONITOR_FX cũ (chưa có FX ON/OFF): Auto KHÔNG âm thầm gửi Send/toggle (0 lệnh, NOT_CONFIGURED) [{"n":20,"v":127,"ch":1,"t":5504,"bytes":[177,20,127]},{"n":21,"v":127,"ch":1,"t":5600,"bytes":[177,21,127]},{"n":20,"v":127,"ch":1,"t":9008,"bytes":[177,20,127]},{"n":21,"v":127,"ch":1,"t":9104,"bytes":[177,21,127]},{"n":20,"v":127,"ch":1,"t":18512,"bytes":[177,20,127]},{"n":21,"v":127,"ch":1,"t":18608,"bytes":[177,21,127]}]
+  FAIL  chỉ lưu FX_ON: bật gửi CC108; tắt = NOT_CONFIGURED, KHÔNG rơi sang toggle/Send []
+  FAIL  gửi lỗi: nút theo yêu cầu, trạng thái = LỖI, không nói đã gửi "FX Auto: CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh"
+  OK   thử lại có giới hạn (0 lệnh thêm)
+  FAIL  runtime treo: trạng thái "đang gửi, chưa phản hồi", không phải đã gửi 
+  FAIL  quá 5 s: TIMEOUT hiển thị rõ {"s":"not-configured","t":"FX Auto: CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh"}
+  OK   bấm tay + gửi lỗi: dawSync=failed, không báo đã gửi
+
+== 5. Gửi lỗi/NOT_CONFIGURED lúc bấm tay không làm Auto tin trạng thái sai ==
+  FAIL  bấm tay BẬT bị lỗi (không đánh dấu đã gửi) -> sau 60 s Auto gửi lại FX_ON khi có nhạc [{"n":108,"v":127,"ch":15,"t":5008,"bytes":[191,108,127]}]
+
+== 6. MUSIC / MIC 1 / MIC 2 đặt trạng thái đích danh, độc lập (mã THẬT) ==
+  OK   MUSIC ON -> đúng 1 lệnh CC102
+  OK   MIC1 ON -> đúng 1 lệnh CC104
+  OK   MIC2 ON -> đúng 1 lệnh CC106
+  OK   MIC1 OFF -> đúng 1 lệnh CC105
+  OK   MUSIC OFF -> đúng 1 lệnh CC103
+  OK   MIC2 OFF -> đúng 1 lệnh CC107
+  OK   MIC1 ON -> đúng 1 lệnh CC104
+  OK   MIC1 ON -> đúng 1 lệnh CC104
+  OK   CC103 (MUSIC_OFF) chỉ xuất hiện đúng 1 lần — khi chính nút MUSIC OFF được bấm; bấm MIC 1 KHÔNG sinh lệnh nào tắt MUSIC/Beat
+  OK   MIC 1 chỉ phát CC104/105; MUSIC chỉ CC102/103
+  OK   chỉ lưu MIC1_ON: bấm OFF = NOT_CONFIGURED, không toggle cũ
+
+== 7. Macro LIVE_* (tệp trong repo): mỗi macro chỉ chạm ĐÚNG track của nó, dùng Monitor chứ không dùng Mute ==
+  OK   LIVE_MUSIC_ON: Find Track "Beat" -> Monitor State=1 (không Mute, không track khác)
+  OK   LIVE_MUSIC_OFF: Find Track "Beat" -> Monitor State=0 (không Mute, không track khác)
+  OK   LIVE_MIC1_ON: Find Track "Mic" -> Monitor State=1 (không Mute, không track khác)
+  OK   LIVE_MIC1_OFF: Find Track "Mic" -> Monitor State=0 (không Mute, không track khác)
+  OK   LIVE_MIC2_ON: Find Track "Không Dây" -> Monitor State=1 (không Mute, không track khác)
+  OK   LIVE_MIC2_OFF: Find Track "Không Dây" -> Monitor State=0 (không Mute, không track khác)
+
+24 PASS, 19 FAIL
+exit=1 (kỳ vọng 1: test phải FAIL trên code cũ)
