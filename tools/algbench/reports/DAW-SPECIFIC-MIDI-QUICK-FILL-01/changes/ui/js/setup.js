@@ -1,0 +1,2089 @@
+(function loadAppSettingsModule() {
+    if (typeof loadSetup === "function") {
+        return;
+    }
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", "appSettings.js", false);
+    xhr.send();
+
+    if (xhr.status >= 200 && xhr.status < 300) {
+        Function(xhr.responseText)();
+    }
+})();
+
+loadSetup?.();
+
+function saveSetting(key, value) {
+    // TASK A-SETUP: trả về kết quả lưu THẬT (true/false) — caller cũ bỏ qua giá trị trả về nên không bị ảnh hưởng.
+    return setSetting(key, value);
+}
+
+function loadSetting(key, fallback = "Chưa chọn") {
+    return getSetting(key, fallback);
+}
+
+/* Gọi notifySetupChanged() một cách an toàn (electronAPI có thể chưa sẵn sàng) */
+function notifySetupChanged() {
+    if (window.electronAPI?.notifySetupChanged) {
+        window.electronAPI.notifySetupChanged();
+    } else {
+        console.warn("electronAPI.notifySetupChanged không khả dụng");
+    }
+}
+
+function initModal(openId, modalId, closeId) {
+    const openBtn = document.getElementById(openId);
+    const modal = document.getElementById(modalId);
+    const closeBtn = closeId ? document.getElementById(closeId) : null;
+
+    if (openBtn && modal) {
+        openBtn.addEventListener("click", () => {
+            modal.classList.add("show");
+        });
+    }
+
+    if (closeBtn && modal) {
+        closeBtn.addEventListener("click", () => {
+            modal.classList.remove("show");
+        });
+    }
+}
+
+function restoreRadioSelection(radioName, storageKey) {
+    const saved = getSetting(storageKey);
+    if (!saved) {
+        return;
+    }
+
+    const radio = document.querySelector(
+        `input[name="${radioName}"][value="${saved}"]`
+    );
+    if (radio) {
+        radio.checked = true;
+    }
+}
+
+function setupRadioSetting({
+    openBtnId,
+    modalId,
+    closeBtnId,
+    saveBtnId,
+    radioName,
+    storageKey,
+    displayId
+}) {
+    initModal(openBtnId, modalId, closeBtnId);
+    const saveBtn = document.getElementById(saveBtnId);
+    const display = document.getElementById(displayId);
+    if (display) {
+        display.textContent = loadSetting(storageKey);
+    }
+    if (saveBtn) {
+        saveBtn.addEventListener("click", () => {
+            const selected = document.querySelector(
+                `input[name="${radioName}"]:checked`
+            );
+            if (!selected) {
+                return;
+            }
+
+            saveSetting(storageKey, selected.value);
+            updateSetupStatus();
+            updateSetupProgress();
+            notifySetupChanged();
+
+            if (display) {
+                display.textContent = selected.value;
+            }
+
+            document.getElementById(modalId)?.classList.remove("show");
+        });
+    }
+}
+
+function initSetupPage() {
+
+    restoreRadioSelection("daw", "selectedDAW");
+    restoreRadioSelection("autokey", "selectedAutoKey");
+    restoreRadioSelection("autotune", "selectedAutoTune");
+    restoreRadioSelection("beMethod", "selectedBeMethod");
+    restoreRadioSelection("fixMethod", "selectedFixMethod");
+
+    setupRadioSetting({
+        openBtnId: "selectDawBtn",
+        modalId: "dawModal",
+        closeBtnId: "closeDawBtn",
+        saveBtnId: "saveDawBtn",
+        radioName: "daw",
+        storageKey: "selectedDAW",
+        displayId: "currentDaw"
+    });
+
+    setupRadioSetting({
+        openBtnId: "selectAutoKeyBtn",
+        modalId: "autoKeyModal",
+        closeBtnId: "closeAutoKeyBtn",
+        saveBtnId: "saveAutoKeyBtn",
+        radioName: "autokey",
+        storageKey: "selectedAutoKey",
+        displayId: "currentAutoKey"
+    });
+
+    setupRadioSetting({
+        openBtnId: "selectAutoTuneBtn",
+        modalId: "autoTuneModal",
+        closeBtnId: "closeAutoTuneBtn",
+        saveBtnId: "saveAutoTuneBtn",
+        radioName: "autotune",
+        storageKey: "selectedAutoTune",
+        displayId: "currentAutoTune"
+    });
+
+    /* ================= BROWSER MODAL ================= */
+    initModal("openBrowserModal", "browserModal", "closeBrowserBtn");
+
+    const savedBrowser = getSetting("selectedBrowser");
+    if (savedBrowser) {
+        const radio = document.querySelector(
+            `input[name="browser"][value="${savedBrowser}"]`
+        );
+        if (radio) {
+            radio.checked = true;
+        }
+    }
+
+    const savedYoutubeId = getSetting("youtubePwaId");
+    if (savedYoutubeId) {
+        const ytInput = document.getElementById("youtubeIdInput");
+        if (ytInput) ytInput.value = savedYoutubeId;
+    }
+
+    const browserPathDisplay = document.getElementById("browserPathDisplay");
+    if (browserPathDisplay) {
+        const savedPath = getSetting("selectedBrowserPath");
+        browserPathDisplay.textContent = savedPath || "❌ Chưa thiết lập";
+
+        // TASK B30.2: re-validate đường dẫn đã lưu CÒN TỒN TẠI THẬT trên đĩa hay không mỗi khi mở
+        // Setup — trước đây chỉ hiển thị lại chuỗi cũ, không biết file đã bị xoá/di chuyển hay chưa.
+        if (savedPath && window.electronAPI?.checkPathExists) {
+            window.electronAPI.checkPathExists(savedPath).then((exists) => {
+                setBrowserPathAvailabilityHint(exists);
+                if (!exists) {
+                    browserPathDisplay.textContent = "⚠ " + savedPath + " (file không còn tồn tại — hãy chọn lại)";
+                }
+                updateSetupStatus();
+                updateSetupProgress();
+            }).catch((err) => {
+                console.error("checkPathExists lỗi:", err);
+            });
+        }
+    }
+
+    // Tự động dò đường dẫn cài đặt ngay khi tích chọn 1 trình duyệt.
+    // Không tìm thấy thì báo để bạn dùng nút "Chọn đường dẫn trình duyệt" bên dưới (thủ công).
+    document.querySelectorAll('input[name="browser"]').forEach((radio) => {
+        radio.addEventListener("change", async () => {
+            if (!radio.checked) return;
+
+            if (browserPathDisplay) {
+                browserPathDisplay.textContent = "⏳ Đang dò đường dẫn...";
+            }
+
+            if (!window.electronAPI?.findBrowserPath) {
+                if (browserPathDisplay) browserPathDisplay.textContent = "❌ Chưa thiết lập";
+                return;
+            }
+
+            try {
+                const found = await window.electronAPI.findBrowserPath(radio.value);
+
+                if (found) {
+                    saveSetting("selectedBrowserPath", found);
+                    setBrowserPathAvailabilityHint(true); // TASK B30.2: main.js vừa fs.existsSync() xong mới trả về found
+                    if (browserPathDisplay) browserPathDisplay.textContent = found;
+                } else {
+                    saveSetting("selectedBrowserPath", "");
+                    setBrowserPathAvailabilityHint(null); // TASK B30.2: path rỗng, hint không còn ý nghĩa
+                    if (browserPathDisplay) {
+                        browserPathDisplay.textContent = '❌ Không tự tìm thấy — hãy bấm "Chọn đường dẫn trình duyệt" bên dưới';
+                    }
+                }
+            } catch (err) {
+                console.error("findBrowserPath lỗi:", err);
+                if (browserPathDisplay) browserPathDisplay.textContent = "❌ Chưa thiết lập";
+            }
+
+            updateSetupStatus();
+            updateSetupProgress();
+        });
+    });
+
+    document.getElementById("btnSelectBrowserPath")?.addEventListener("click", async () => {
+        if (!window.electronAPI?.selectFile) {
+            console.warn("electronAPI.selectFile không khả dụng");
+            alert("Chức năng chọn file chưa khả dụng");
+            return;
+        }
+
+        try {
+            const filePath = await window.electronAPI.selectFile({
+                filters: [{ name: "Ứng dụng", extensions: ["exe"] }]
+            });
+            if (filePath) {
+                saveSetting("selectedBrowserPath", filePath);
+                setBrowserPathAvailabilityHint(true); // TASK B30.2: vừa chọn từ dialog file thật, chắc chắn tồn tại
+                if (browserPathDisplay) browserPathDisplay.textContent = filePath;
+                updateSetupStatus();
+                updateSetupProgress();
+                notifySetupChanged();
+            }
+        } catch (err) {
+            console.error("Chọn đường dẫn trình duyệt lỗi:", err);
+        }
+    });
+
+    document.getElementById("saveBrowserBtn")?.addEventListener("click", () => {
+        const browser = document.querySelector('input[name="browser"]:checked');
+        if (!browser) {
+            return;
+        }
+
+        saveSetting("selectedBrowser", browser.value);
+        saveSetting(
+            "youtubePwaId",
+            document.getElementById("youtubeIdInput")?.value ?? ""
+        );
+
+        if (!getSetting("selectedBrowserPath")) {
+            alert('Đã lưu trình duyệt, nhưng CHƯA có đường dẫn — Browser sẽ chưa tính là "xong" trong Trạng thái Setup cho tới khi có đường dẫn (tự dò hoặc chọn tay).');
+        }
+
+        // Đồng bộ với DAW/Auto-Key/Auto-Tune: cập nhật status, progress và báo cho renderer
+        updateSetupStatus();
+        updateSetupProgress();
+        notifySetupChanged();
+
+        document.getElementById("browserModal")?.classList.remove("show");
+    });
+
+    /* ================= CÁC MODAL KHÁC ================= */
+    initModal("openShortcutsBtn", "shortcutsModal", "closeShortcuts");
+    initShortcutsSection();
+    initModal("openProjectModal", "projectModal", "btnClosePj");
+    initProjectSection();
+    initModal("openSoundcardModal", "soundcardModal", "closeSoundcardBtn");
+    initSoundcardSection();
+    initSystemAudioSection(); // TASK A71
+    initMicSection(); // TASK A76-FIX
+    initOutputSection(); // TASK A76-FIX
+    initModal("openMidiModal", "midiModal", "closeMidiBtn");
+    initMidiSection();
+    initLinkProSection();
+    initModal("openBeModal", "beModal", "closeBeBtn");
+    initModal("openFixMeoModal", "fixMeoModal", "closeFixMeoBtn");
+
+    document.getElementById("beModal")?.classList.remove("show");
+    document.getElementById("fixMeoModal")?.classList.remove("show");
+
+    document.getElementById("saveBeBtn")?.addEventListener("click", () => {
+        const selected = document.querySelector('input[name="beMethod"]:checked');
+        if (!selected) {
+            return;
+        }
+
+        saveSetting("selectedBeMethod", selected.value);
+        updateSetupStatus();
+        updateSetupProgress();
+        notifySetupChanged();
+
+        document.getElementById("beModal")?.classList.remove("show");
+    });
+
+    document.getElementById("saveFixMeoBtn")?.addEventListener("click", () => {
+        const selected = document.querySelector('input[name="fixMethod"]:checked');
+        if (!selected) {
+            return;
+        }
+
+        saveSetting("selectedFixMethod", selected.value);
+        updateSetupStatus();
+        updateSetupProgress();
+        notifySetupChanged();
+
+        document.getElementById("fixMeoModal")?.classList.remove("show");
+    });
+
+    /* ================= NÚT CÀI ĐẶT (tự tải + tự mở trình cài đặt) ================= */
+    setupDownloadInstallButton(
+        "btnAutoTune11",
+        "https://mega.nz/file/e1ZE1B4D#HkxyQVYtfKQ3GQ3p01NnWS-qVwAJXGoCpS6VIGA5jBg",
+        "AutoTune11Setup"
+    );
+    setupDownloadInstallButton(
+        "btnJbridge",
+        "https://mega.nz/file/f9p03RpY#5QSPbICOXBSkIzEv5s8BI_ZATbR97zxTeSL0vKR8X3g",
+        "jBridgeSetup"
+    );
+
+    // VST2: tải file .zip (đã nén cả bộ plugin) từ Mega rồi giải nén vào C:\Program Files\VstPlugins
+    const VST2_ZIP_URL = "https://mega.nz/file/6l432ZgJ#yYDrbnGwBnf_BHwfI_eQTOSW3QliMF7oRZS5GUf0_zg";
+    document.getElementById("btnVst2")?.addEventListener("click", async () => {
+        if (!VST2_ZIP_URL) {
+            alert("Chưa có link file .zip VST2 — gửi link cho Claude để hoàn thiện nút này.");
+            return;
+        }
+
+        if (!window.electronAPI?.downloadVst2) {
+            alert("Chức năng tải VST2 chưa khả dụng");
+            return;
+        }
+
+        if (!confirm("Tải và cài Plugins VST2 vào C:\\Program Files\\VstPlugins?\nSẽ có popup xin quyền Admin, bấm Yes để tiếp tục.")) {
+            return;
+        }
+
+        const btn = document.getElementById("btnVst2");
+        const originalText = btn.textContent;
+        btn.textContent = "⏳ Đang tải VST2...";
+        btn.disabled = true;
+
+        try {
+            const result = await window.electronAPI.downloadVst2(VST2_ZIP_URL);
+            if (result.success) {
+                alert("Đã cài xong VST2 vào:\n" + result.path);
+            } else {
+                alert("Lỗi: " + result.error);
+            }
+        } catch (err) {
+            console.error("downloadVst2 lỗi:", err);
+            alert("Có lỗi xảy ra khi tải/cài VST2");
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById("btnInstallBrave")?.addEventListener("click", async () => {
+        if (!window.electronAPI?.downloadBrave) {
+            alert("Chức năng tải Brave chưa khả dụng");
+            return;
+        }
+
+        if (!confirm("Tải và cài Brave (trình duyệt không quảng cáo)?")) {
+            return;
+        }
+
+        const btn = document.getElementById("btnInstallBrave");
+        const originalText = btn.textContent;
+        btn.textContent = "⏳ Đang tải Brave...";
+        btn.disabled = true;
+
+        try {
+            const result = await window.electronAPI.downloadBrave();
+            if (result.success) {
+                alert("Đã tải xong, trình cài đặt Brave đang mở — làm theo hướng dẫn trên màn hình.");
+            } else {
+                alert("Lỗi: " + result.error);
+            }
+        } catch (err) {
+            console.error("downloadBrave lỗi:", err);
+            alert("Có lỗi xảy ra khi tải Brave");
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById("btnInstallLoopMidi")?.addEventListener("click", async () => {
+        if (!window.electronAPI?.openExternalUrl) {
+            alert("Chức năng mở trang tải chưa khả dụng");
+            return;
+        }
+
+        if (!confirm('Mở trang tải loopMIDI (phần mềm tạo cổng MIDI ảo, miễn phí)?\nSau khi trang mở ra, bấm "Download" trên đó rồi tự cài như bình thường.')) {
+            return;
+        }
+
+        await window.electronAPI.openExternalUrl("https://www.tobias-erichsen.de/software/loopmidi.html");
+    });
+
+    document.getElementById("btnContactKhoi")?.addEventListener("click", async () => {
+        const phone = "034.9644.194";
+        try {
+            await navigator.clipboard.writeText(phone.replace(/\./g, ""));
+            alert("Đã copy số điện thoại: " + phone);
+        } catch (err) {
+            console.warn("Không copy được vào clipboard:", err);
+            alert("Số điện thoại: " + phone);
+        }
+    });
+
+    /* ================= NÚT LẤY TỌA ĐỘ ================= */
+    // Lưu ý: mỗi nút chỉ được gắn DUY NHẤT một handler qua setupCaptureButton
+    // (bản cũ có thêm 1 handler thủ công riêng cho btnAutoKey1 gây gọi capture 2 lần — đã bỏ)
+    setupCaptureButton("btnAutoKey1", "autokey1");
+    setupCaptureButton("btnAutoKey2", "autokey2");
+    setupCaptureButton("btnAutoTuneKey", "autotunekey");
+    setupCaptureButton("btnChromatic", "chromatic");
+    // Task B/B2 — DAW Action Mapping (Mục V/X): tái dùng ĐÚNG cơ chế setupCaptureButton +
+    // coordinateProfiles[selectedDAW] đã có sẵn, chỉ thêm 3 key mới (daw_play/daw_stop/
+    // daw_record), không đụng autokey1/autokey2/autotunekey/chromatic (Key/Tone Plugin).
+    setupCaptureButton("btnCaptureDawPlay", "daw_play");
+    setupCaptureButton("btnCaptureDawStop", "daw_stop");
+    setupCaptureButton("btnCaptureDawRecord", "daw_record");
+    initMouseControlToggle();
+    initDawActionMappingStatus();
+    initDawMidiOutputMappingSection();
+    initAhkPathSection();
+
+    updateSetupStatus();
+    updateSetupProgress();
+
+    /* ================= LAUNCH DAW CÙNG MENU ================= */
+    const launchDawCheckbox = document.getElementById("launchDawOnStartup");
+    if (launchDawCheckbox) {
+        launchDawCheckbox.checked =
+            getSetting("launchDAW", false) === true ||
+            getSetting("launchDAW") === "true";
+
+        launchDawCheckbox.addEventListener("change", () => {
+            saveSetting("launchDAW", launchDawCheckbox.checked);
+        });
+    }
+
+    /* ================= PRESET ================= */
+    document.getElementById("savePresetBtn")?.addEventListener("click", savePreset);
+    document.getElementById("loadPresetBtn")?.addEventListener("click", loadPreset);
+
+    /* ================= ĐƯỜNG DẪN DAW ================= */
+    // Sửa id cho khớp với setup.html: browseDawBtn / currentDawPath
+    // (bản cũ trỏ tới btnSelectDawPath / displayDawPath — không tồn tại nên tính năng này chết hoàn toàn)
+    const browseDawBtn = document.getElementById("browseDawBtn");
+    const currentDawPath = document.getElementById("currentDawPath");
+
+    if (browseDawBtn) {
+        browseDawBtn.addEventListener("click", async () => {
+            if (!window.electronAPI?.selectFile) {
+                console.warn("electronAPI.selectFile không khả dụng");
+                return;
+            }
+
+            try {
+                const path = await window.electronAPI.selectFile();
+                if (path) {
+                    setSetting("selectedDAWPath", path);
+                    if (currentDawPath) currentDawPath.textContent = path;
+                }
+            } catch (err) {
+                console.error("Chọn đường dẫn DAW lỗi:", err);
+            }
+        });
+    }
+
+    if (currentDawPath) {
+        currentDawPath.textContent = getSetting("selectedDAWPath", "❌ Chưa thiết lập");
+    }
+}
+
+function addConfirmAction(btnId, message) {
+    const btn = document.getElementById(btnId);
+    if (!btn) {
+        return;
+    }
+
+    btn.addEventListener("click", () => {
+        if (confirm(message)) {
+            alert("Đang thực hiện...");
+        }
+    });
+}
+
+// Nút "tự tải file từ Google Drive rồi tự mở trình cài đặt lên"
+function setupDownloadInstallButton(btnId, driveUrl, label) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+
+    btn.addEventListener("click", async () => {
+        if (!window.electronAPI?.downloadAndInstall) {
+            alert("Chức năng tải & cài đặt chưa khả dụng");
+            return;
+        }
+
+        if (!confirm(`Tải và cài "${label}"?`)) {
+            return;
+        }
+
+        const originalText = btn.textContent;
+        btn.textContent = "⏳ Đang tải...";
+        btn.disabled = true;
+
+        try {
+            const result = await window.electronAPI.downloadAndInstall(driveUrl, label);
+            if (result.success) {
+                alert("Đã tải xong, trình cài đặt đang mở — làm theo hướng dẫn trên màn hình.");
+            } else {
+                alert("Lỗi: " + result.error);
+            }
+        } catch (err) {
+            console.error(`downloadAndInstall(${label}) lỗi:`, err);
+            alert("Có lỗi xảy ra khi tải/cài đặt");
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    });
+}
+
+function setupCaptureButton(buttonId, captureName) {
+    const btn = document.getElementById(buttonId);
+    if (!btn) {
+        return;
+    }
+
+    btn.addEventListener("click", async () => {
+        if (!getSetting("selectedDAW")) {
+            alert('Hãy chọn DAW ở mục "Thiết lập AutoMenu" trước — tọa độ được lưu riêng theo từng DAW.');
+            return;
+        }
+
+        if (!window.electronAPI?.setupCapture) {
+            console.warn("electronAPI.setupCapture không khả dụng");
+            alert("Không lấy được tọa độ");
+            return;
+        }
+
+        try {
+            const result = await window.electronAPI.setupCapture({ name: captureName });
+            setCoordinate(captureName, result);
+            updateSetupStatus();
+            updateSetupProgress();
+            notifySetupChanged();
+            alert(`Đã lưu tọa độ "${captureName}" cho ${getSetting("selectedDAW")}`);
+        } catch (err) {
+            console.error(err);
+            alert("Không lấy được tọa độ");
+        }
+    });
+}
+
+/* ================= TASK B/B2 — MOUSE CONTROL ON/OFF + DAW ACTION MAPPING STATUS ================= */
+// Mục VI (B2): Mouse Control ON/OFF. Đọc/ghi đúng key "mouseControlEnabled" đã thêm trong
+// appSettings.js (mặc định true). CHỈ ảnh hưởng ActionRegistry.executeAction() (Task B) —
+// không đụng gì tới clickAtPoint() gốc trong vocalCommandRouter.js (Key/Tone Plugin).
+function initMouseControlToggle() {
+    const btn = document.getElementById("btnMouseControlToggle");
+    const badge = document.getElementById("mouseControlBadge");
+    if (!btn || !badge) return;
+
+    function render() {
+        const enabled = getSetting("mouseControlEnabled");
+        const isOn = enabled === undefined || enabled === null || enabled === "" ? true : !!enabled;
+        badge.textContent = isOn ? "ON" : "OFF";
+        badge.className = isOn ? "badge badge-live" : "badge badge-unwired";
+        btn.textContent = isOn ? "Tắt Mouse Control" : "Bật Mouse Control";
+    }
+
+    btn.addEventListener("click", () => {
+        const current = getSetting("mouseControlEnabled");
+        const isOn = current === undefined || current === null || current === "" ? true : !!current;
+        saveSetting("mouseControlEnabled", !isOn);
+        render();
+        notifySetupChanged();
+    });
+
+    render();
+}
+
+// Mục V/X (B2): hiển thị trạng thái THẬT (không đoán) của 3 action DAW_PLAY/STOP/RECORD cho
+// DAW đang chọn — đọc trực tiếp coordinateProfiles + dawMidiOutMappings qua getSetting/
+// getCoordinate đã có sẵn, không cần nạp actionRegistry.js vào cửa sổ Setup (tránh 2
+// dispatcher MIDI song song — đúng cảnh báo Mục XI).
+//
+// S8/S9/S11 — MỞ RỘNG (không thay kiến trúc trên): thêm UI thật cho dawMidiOutMappings +
+// bảng Mapping Overview đầy đủ 4 cột (MIDI Input / MIDI Output / Mouse Coordinate / Action
+// Status). VẪN giữ quyết định KHÔNG load actionRegistry.js vào Setup — mọi logic Action
+// Status ở đây được lặp lại NGUYÊN VĂN theo đúng thứ tự ưu tiên của getActionStatus() (MIDI
+// output trước, rồi mouse coordinate, rồi NOT_CONFIGURED) và ĐÚNG 5 giá trị enum ACTION_STATUS
+// (SUCCESS/NOT_CONFIGURED/NO_DEVICE/MOUSE_DISABLED/ERROR) — không tự bịa giá trị mới.
+
+const DAW_MIDI_ACTIONS = [
+    { action: "DAW_PLAY", label: "PLAY", coordKey: "daw_play", midiInputAction: "daw:play" },
+    { action: "DAW_STOP", label: "STOP", coordKey: "daw_stop", midiInputAction: "daw:stop" },
+    { action: "DAW_RECORD", label: "RECORD", coordKey: "daw_record", midiInputAction: "daw:record" },
+    // MIDI-MASTER-01 / MENU-CONTROL-01 — mở rộng để nút Menu (renderer.js) có nơi thật để cấu
+    // hình MIDI Output, TÁI SỬ DỤNG nguyên vẹn cơ chế setDawMidiOutMapping()/executeAction() đã
+    // có, không tạo UI/schema thứ hai. Các action này chỉ dùng theo chiều OUTPUT (bấm nút Menu ->
+    // gửi MIDI) — không có coordKey (chưa có cơ chế capture toạ độ chuột riêng cho nhóm này) và
+    // không có midiInputAction (không phải nút nhận lệnh TỪ controller MIDI, đúng bản chất nút
+    // Menu bấm tay) — cả 2 field để undefined, initDawMidiOutputMappingSection()/
+    // renderMappingOverview() đã tự xử lý an toàn khi thiếu (đã kiểm tra: getCoordinate(undefined)
+    // trả "" , .find(m => m.action === undefined) không khớp gì — không throw).
+    { action: "PRESET_NORM", label: "PRESET NORM" },
+    { action: "PRESET_LOFI", label: "PRESET LOFI" },
+    { action: "PRESET_RAP", label: "PRESET RAP" },
+    { action: "CLAP", label: "CLAP" },
+    { action: "LAUGH", label: "LAUGH" },
+    { action: "MONITOR_MIC1", label: "MONITOR MIC1" },
+    { action: "MONITOR_MIC2", label: "MONITOR MIC2" },
+    { action: "MONITOR_FX", label: "MONITOR FX" },
+    // TASK B6 — Beat (input music level) và Master (final DAW output level) là 2 mapping
+    // ĐỘC LẬP hoàn toàn — 2 dòng riêng, không gộp, đúng yêu cầu "phải có khả năng cấu hình
+    // hai mapping độc lập". Không tự đặt CC — trống mặc định như mọi action khác ở đây.
+    { action: "BEAT_INPUT_VOLUME", label: "BEAT INPUT VOLUME" },
+    { action: "MASTER_OUTPUT_VOLUME", label: "MASTER OUTPUT VOLUME" },
+    // TASK B12 — mở rộng thêm 3 action mới nối ở B12 (musicBtn + Retune×2), tái dùng nguyên
+    // vẹn UI/schema đã có, không tạo cơ chế cấu hình thứ hai.
+    { action: "MONITOR_BEAT_TOGGLE", label: "MONITOR BEAT" },
+    { action: "RETUNE_SPEED_MIC1", label: "RETUNE SPEED MIC1" },
+    { action: "RETUNE_SPEED_MIC2", label: "RETUNE SPEED MIC2" },
+    // TASK AI-FX-01 — 2 Send do nút FX quản lý (Auto theo nhạc nền). Không có CC mặc định.
+    { action: "FX_SEND_REVERB", label: "FX SEND REVERB" },
+    { action: "FX_SEND_DELAY", label: "FX SEND DELAY" },
+    // MIDI-DAW-CONTROL-01 — TÁM lệnh ON/OFF đặt trạng thái đích (Studio One 8). Mỗi hàng một mapping RIÊNG, không mặc định.
+    // Khi đã lưu ÍT NHẤT một chiều (ON hoặc OFF) cho một nút, nút đó dùng chế độ "đặt đích danh" và KHÔNG còn gửi lệnh toggle cũ.
+    { action: "MUSIC_ON", label: "MUSIC ON (Monitor Beat bật)" },
+    { action: "MUSIC_OFF", label: "MUSIC OFF (Monitor Beat tắt)" },
+    { action: "MIC1_ON", label: "MIC 1 ON (Monitor Mic bật)" },
+    { action: "MIC1_OFF", label: "MIC 1 OFF (Monitor Mic tắt)" },
+    { action: "MIC2_ON", label: "MIC 2 ON (Monitor Không Dây bật)" },
+    { action: "MIC2_OFF", label: "MIC 2 OFF (Monitor Không Dây tắt)" },
+    { action: "FX_ON", label: "FX ON (bỏ Mute 4 bus)" },
+    { action: "FX_OFF", label: "FX OFF (Mute 4 bus)" },
+];
+
+// MIDI-DAW-CONTROL-01 — bộ CC GỢI Ý (kênh 16, giá trị 127) khớp 8 macro LIVE_* của LIVE-MIDI-FSP8-02.
+// Đây là bộ thử nghiệm, KHÔNG tự áp dụng: chỉ được lưu khi người dùng bấm nút và xác nhận.
+const DAW_STATE_SUGGESTED = Object.freeze({
+    MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109,
+});
+const DAW_STATE_ACTION_SET = new Set(Object.keys(DAW_STATE_SUGGESTED));
+const DAW_STATE_SUGGESTED_CHANNEL = 16;
+const DAW_STATE_SUGGESTED_VALUE = 127;
+
+// Hai action ON/OFF (hoặc bất kỳ cặp nào trong 8) KHÔNG được trùng cùng kind+channel+number — trùng sẽ làm Studio One chạy nhầm macro.
+function findDawStateMappingConflict(action, mapping) {
+    for (const other of DAW_STATE_ACTION_SET) {
+        if (other === action) continue;
+        const m = getDawMidiOutMapping(other);
+        if (m && m.kind === mapping.kind && Number(m.channel) === Number(mapping.channel) && Number(m.number) === Number(mapping.number)) return other;
+    }
+    return null;
+}
+
+// MENU-KNOB-MIDI-COMPLETION-01 — 4 Knob MIDI + 8 lệnh LIVE ON/OFF là nhóm "bảo vệ": một CC/Note (cùng kind+kênh+số) KHÔNG được dùng chung giữa
+// một trong 12 action này và BẤT KỲ action khác đã lưu (nếu không, một cú xoay Knob có thể kích hoạt macro hoặc ngược lại).
+// Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
+const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2"]);
+const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET]);
+function findMidiOutMappingConflict(action, mapping) {
+    for (const { action: other } of DAW_MIDI_ACTIONS) {
+        if (other === action) continue;
+        const m = getDawMidiOutMapping(other);
+        if (m && m.kind === mapping.kind && Number(m.channel) === Number(mapping.channel) && Number(m.number) === Number(mapping.number)) return other;
+    }
+    return null;
+}
+
+function isMouseControlEnabledLocal() {
+    const v = getSetting("mouseControlEnabled");
+    return v === undefined || v === null || v === "" ? true : !!v;
+}
+
+// Đúng schema actionRegistry.js: dawMidiOutMappings[daw][action] = {kind, channel, number, value|velocity, source}
+function getDawMidiOutMapping(action) {
+    const daw = getSetting("selectedDAW");
+    if (!daw) return null;
+    const all = getSetting("dawMidiOutMappings") || {};
+    return (all[daw] && all[daw][action]) || null;
+}
+function setDawMidiOutMapping(action, mapping) {
+    const daw = getSetting("selectedDAW");
+    if (!daw) return false;
+    const all = getSetting("dawMidiOutMappings") || {};
+    if (!all[daw]) all[daw] = {};
+    all[daw][action] = mapping ? { ...mapping, source: "USER_DEFINED" } : null;
+    setSetting("dawMidiOutMappings", all);
+    return true;
+}
+
+// DAW-SPECIFIC-MIDI-QUICK-FILL-01 — bộ CC "điền nhanh" THEO TỪNG DAW. Dữ liệu thuần (dễ thêm DAW/phiên bản mới), chỉ ghi vào
+// dawMidiOutMappings[DAW đang chọn] khi người dùng bấm nút + xác nhận. Không gửi MIDI, không tự áp dụng lúc mở app/đổi DAW.
+const DAW_QF_S1_LIVE = Object.freeze({
+    MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109,
+});
+function dawQfMake(channel, value, numbers) {
+    const o = {};
+    for (const [a, n] of Object.entries(numbers)) o[a] = Object.freeze({ kind: "cc", channel, number: n, value });
+    return Object.freeze(o);
+}
+const DAW_MIDI_PROFILES = Object.freeze({
+    "studio-one": Object.freeze({
+        id: "studio-one",
+        name: "Studio One / Fender Studio Pro",
+        match: /^(studio one|studio pro|fender)/i,
+        origin: "Bộ CC gợi ý của AUTO_MENU_AI (LIVE-MIDI-FSP8-02 / MENU-KNOB-MIDI-COMPLETION-01). Cần gán CC vào macro/fader trong Control Surface (MIDI Learn).",
+        versionStatus: Object.freeze({}),
+        defaultStatus: "THEO_REPO",
+        bundles: Object.freeze({
+            live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, DAW_QF_S1_LIVE) }),
+            knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_MIC1: 22, RETUNE_SPEED_MIC2: 23 }) }),
+        }),
+    }),
+    "cubase": Object.freeze({
+        id: "cubase",
+        name: "Cubase",
+        match: /^cubase/i,
+        origin: "Quy ước CC gợi ý của AUTO_MENU_AI — KHÔNG phải mặc định của Cubase (tránh CC 7/10/12/13/23/24/64 đã thấy trong Generic Remote/MIDI Remote). Cubase không tự nhận: phải gán trong MIDI Remote hoặc Generic Remote.",
+        versionStatus: Object.freeze({ "cubase 13": "CHỈ CÓ BẰNG CHỨNG FILE, CHƯA CHẠY THẬT" }),
+        defaultStatus: "UNVERIFIED",
+        bundles: Object.freeze({
+            live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, { MUSIC_ON: 110, MUSIC_OFF: 111, MIC1_ON: 112, MIC1_OFF: 113, MIC2_ON: 114, MIC2_OFF: 115, FX_ON: 116, FX_OFF: 117 }) }),
+            knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 85, MASTER_OUTPUT_VOLUME: 86, RETUNE_SPEED_MIC1: 87, RETUNE_SPEED_MIC2: 88 }) }),
+        }),
+    }),
+});
+// Nhận diện profile từ nhãn DAW đã lưu ("Studio One 7", "Studio Pro 8", "Cubase 13"...). DAW khác -> null (không dùng profile của DAW khác).
+function resolveDawProfile(dawLabel, profiles) {
+    const reg = profiles || DAW_MIDI_PROFILES;
+    const label = String(dawLabel || "").trim();
+    if (!label) return null;
+    for (const key of Object.keys(reg)) if (reg[key] && reg[key].match && reg[key].match.test(label)) return reg[key];
+    return null;
+}
+function dawProfileVersionStatus(profile, dawLabel) {
+    if (!profile) return "";
+    return (profile.versionStatus && profile.versionStatus[String(dawLabel || "").trim().toLowerCase()]) || profile.defaultStatus || "";
+}
+// Kiểm TOÀN BỘ bundle trước khi lưu. Trả về mảng lỗi (rỗng = hợp lệ).
+function validateDawProfileBundle(bundle, validActions) {
+    const errs = [];
+    if (!bundle || !bundle.mappings || typeof bundle.mappings !== "object") return ["Bộ CC thiếu hoặc hỏng."];
+    const keys = Object.keys(bundle.mappings);
+    if (!keys.length) errs.push("Bộ CC rỗng.");
+    if (bundle.count !== undefined && bundle.count !== keys.length) errs.push(`Số mapping (${keys.length}) khác khai báo (${bundle.count}).`);
+    const seen = new Map();
+    for (const a of keys) {
+        const m = bundle.mappings[a];
+        if (validActions && !validActions.includes(a)) errs.push(`Action không tồn tại: ${a}.`);
+        if (!m || (m.kind !== "cc" && m.kind !== "note")) { errs.push(`${a}: kind không hợp lệ.`); continue; }
+        const ch = Number(m.channel), nu = Number(m.number), v = Number(m.kind === "note" ? m.velocity : m.value);
+        if (!Number.isInteger(ch) || ch < 1 || ch > 16) errs.push(`${a}: kênh phải 1–16.`);
+        if (!Number.isInteger(nu) || nu < 0 || nu > 127) errs.push(`${a}: số phải 0–127.`);
+        if (!Number.isInteger(v) || v < 0 || v > 127) errs.push(`${a}: giá trị phải 0–127.`);
+        const k = `${m.kind}|${ch}|${nu}`;
+        if (seen.has(k)) errs.push(`${a} trùng ${seen.get(k)} (cùng ${m.kind} ${nu} kênh ${ch}).`); else seen.set(k, a);
+    }
+    return errs;
+}
+// Lập kế hoạch (KHÔNG ghi). getMapping(action) đọc mapping đã lưu của DAW đang chọn.
+function planDawProfileFill(profile, bundleId, getMapping, allActions) {
+    const res = { ok: false, errors: [], conflicts: [], overwrite: [], writes: [] };
+    const bundle = profile && profile.bundles && profile.bundles[bundleId];
+    if (!bundle) { res.errors.push("Không có bộ CC này cho DAW đã chọn."); return res; }
+    res.errors = validateDawProfileBundle(bundle, allActions);
+    if (res.errors.length) return res;
+    const inBundle = new Set(Object.keys(bundle.mappings));
+    for (const [a, m] of Object.entries(bundle.mappings)) {
+        for (const other of allActions) {
+            if (inBundle.has(other)) continue;
+            const o = getMapping(other);
+            if (o && o.kind === m.kind && Number(o.channel) === Number(m.channel) && Number(o.number) === Number(m.number)) res.conflicts.push([a, other]);
+        }
+        const cur = getMapping(a);
+        const same = cur && cur.kind === m.kind && Number(cur.channel) === Number(m.channel) && Number(cur.number) === Number(m.number) && Number(cur.value) === Number(m.value);
+        if (cur && !same) res.overwrite.push(a);
+        res.writes.push([a, { ...m }]);
+    }
+    res.ok = res.conflicts.length === 0;
+    return res;
+}
+// Ghi ALL-OR-NOTHING: một lần setAll duy nhất, chỉ vào khoá DAW đang chọn, giữ nguyên mọi mapping khác.
+function applyDawProfileFill(dawLabel, plan, getAll, setAll) {
+    if (!dawLabel || !plan || !plan.ok || !plan.writes.length) return false;
+    const all = { ...(getAll() || {}) };
+    const mine = { ...(all[dawLabel] || {}) };
+    for (const [a, m] of plan.writes) mine[a] = { ...m, source: "USER_DEFINED" };
+    all[dawLabel] = mine;
+    setAll(all);
+    return true;
+}
+
+// S8 — 3 hàng PLAY/STOP/RECORD, mỗi hàng: Type (CC/Note) + Channel + Number + Value/Velocity + Lưu + Xoá.
+function initDawMidiOutputMappingSection() {
+    const container = document.getElementById("dawMidiOutRows");
+    const dawBadge = document.getElementById("dawMidiOutDawBadge");
+    if (!container) return;
+
+    function render() {
+        const daw = getSetting("selectedDAW");
+        if (dawBadge) {
+            dawBadge.textContent = daw ? `DAW: ${daw}` : "Chưa chọn DAW";
+            dawBadge.className = daw ? "badge badge-live" : "badge badge-warn";
+        }
+        if (!daw) {
+            container.innerHTML = '<p class="hint-text">Chưa chọn DAW ở tab "Chọn DAW" — chưa thể cấu hình MIDI Output.</p>'
+                + '<p class="hint-text"><button class="setup-btn" id="btnFillLiveCcOff" disabled>Điền + lưu bộ LIVE gợi ý</button> <button class="setup-btn" id="btnFillKnobCcOff" disabled>Điền + lưu bộ KNOB gợi ý</button> Cần chọn DAW trước khi điền bộ CC gợi ý.</p>';
+            return;
+        }
+
+        container.innerHTML = "";
+
+        // MIDI-DAW-CONTROL-01 + DAW-SPECIFIC-MIDI-QUICK-FILL-01 — ghi chú + nút điền nhanh THEO DAW (tạo bằng JS, không đổi HTML).
+        const profile = resolveDawProfile(daw);
+        const liveBox = document.createElement("div");
+        liveBox.className = "hint-text";
+        const verStatus = dawProfileVersionStatus(profile, daw);
+        liveBox.innerHTML = `
+            <b>8 lệnh ON/OFF điều khiển DAW (MUSIC / MIC 1 / MIC 2 / FX):</b> ở cuối danh sách. Mỗi nút Menu gửi lệnh theo <b>trạng thái đích sau cú bấm</b>.
+            Menu chỉ <b>gửi</b> lệnh — <b>không đọc được trạng thái thật</b> của DAW, nên lúc mở app hoặc khi bạn đổi trực tiếp trong DAW, nút Menu có thể lệch DAW.
+            <br>${profile ? `<span id="quickFillProfile">Bộ gợi ý: <b>${profile.name}</b>${verStatus ? ` — ${verStatus}` : ""}. ${profile.origin} Điền ở đây chỉ LƯU mapping của Menu — DAW chưa được điều khiển cho đến khi bạn gán trong DAW.</span>
+            <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ LIVE gợi ý — ${profile.name}</button>
+            <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>`
+                : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
+            <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
+            <span id="liveCcStatus"></span>`;
+        container.appendChild(liveBox);
+        // Điền nhanh: kiểm cả bộ trước (xung đột/hợp lệ), xác nhận, rồi ghi MỘT LẦN vào đúng DAW đang chọn. Không gửi MIDI.
+        function runQuickFill(bundleId) {
+            const dawNow = getSetting("selectedDAW");
+            if (!dawNow) { alert("Cần chọn DAW trước khi điền bộ CC gợi ý."); return; }
+            const prof = resolveDawProfile(dawNow);
+            if (!prof) { alert("Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công."); return; }
+            const plan = planDawProfileFill(prof, bundleId, getDawMidiOutMapping, DAW_MIDI_ACTIONS.map((x) => x.action));
+            if (plan.errors.length) { alert("Không lưu bộ gợi ý (bộ CC lỗi): " + plan.errors.join("; ")); return; }
+            const liveClash = plan.conflicts;
+            if (liveClash.length) { alert("Không lưu bộ gợi ý: CC/Note đã dùng cho action khác — " + liveClash.map(([a, o]) => `${a} ↔ ${o}`).join(", ") + ". Đổi mapping của action kia trước."); return; }
+            const b = prof.bundles[bundleId];
+            const msg = `Lưu ${plan.writes.length} mapping ${b.title} gợi ý cho ${dawNow} (${prof.name})? Chỉ lưu mapping Menu MIDI Output — bạn vẫn phải gán từng CC trong DAW.`
+                + (plan.overwrite.length ? `\nSẽ GHI ĐÈ ${plan.overwrite.length} mapping đã lưu: ${plan.overwrite.join(", ")}.` : "");
+            if (!confirm(msg)) return;
+            applyDawProfileFill(dawNow, plan, () => getSetting("dawMidiOutMappings"), (all) => setSetting("dawMidiOutMappings", all));
+            notifySetupChanged();
+            render();
+            renderMappingOverview();
+        }
+        if (profile) {
+            liveBox.querySelector("#btnFillLiveCc").addEventListener("click", () => runQuickFill("live"));
+            liveBox.querySelector("#btnFillKnobCc").addEventListener("click", () => runQuickFill("knob"));
+        }
+
+        // Khôi phục: xoá CHỈ 8 mapping ON/OFF mới; mapping cũ (toggle MONITOR_*, Send, PLAY...) không bị đụng.
+        liveBox.querySelector("#btnClearLiveCc").addEventListener("click", () => {
+            const saved = [...DAW_STATE_ACTION_SET].filter((a) => getDawMidiOutMapping(a));
+            if (!saved.length) { alert("Chưa có mapping ON/OFF nào để xoá."); return; }
+            if (!confirm(`Xoá ${saved.length} mapping ON/OFF? Các nút MUSIC/MIC/FX sẽ quay về lệnh toggle cũ (nếu bạn đã cấu hình), mapping cũ không bị đụng.`)) return;
+            DAW_STATE_ACTION_SET.forEach((a) => setDawMidiOutMapping(a, null));
+            notifySetupChanged();
+            render();
+            renderMappingOverview();
+        });
+
+        DAW_MIDI_ACTIONS.forEach(({ action, label }) => {
+            const existing = getDawMidiOutMapping(action);
+            const row = document.createElement("div");
+            row.className = "midiout-row";
+            row.innerHTML = `
+                <b>${label}</b>
+                <select class="mo-kind">
+                    <option value="cc" ${existing?.kind === "cc" ? "selected" : ""}>CC</option>
+                    <option value="note" ${existing?.kind === "note" ? "selected" : ""}>Note</option>
+                </select>
+                <input class="mo-channel" type="number" min="1" max="16" placeholder="Ch" value="${existing?.channel ?? 1}">
+                <input class="mo-number" type="number" min="0" max="127" placeholder="Số" value="${existing?.number ?? ""}">
+                <input class="mo-value" type="number" min="0" max="127" placeholder="Value/Vel" value="${existing?.kind === "note" ? (existing?.velocity ?? "") : (existing?.value ?? "")}">
+                <button class="setup-btn mo-save">💾 Lưu</button>
+                <span class="badge ${existing ? "badge-live" : "badge-warn"} mo-status">${existing ? (DAW_STATE_ACTION_SET.has(action) ? "Đã lưu — chỉ gửi lệnh, DAW chưa xác nhận" : "Đã cấu hình") : "NOT_CONFIGURED"}</span>
+            `;
+
+            row.querySelector(".mo-save").addEventListener("click", () => {
+                const kind = row.querySelector(".mo-kind").value;
+                const channel = parseInt(row.querySelector(".mo-channel").value, 10) || 1;
+                const number = parseInt(row.querySelector(".mo-number").value, 10);
+                const val = parseInt(row.querySelector(".mo-value").value, 10);
+                if (!Number.isFinite(number)) {
+                    alert("Vui lòng nhập Số (CC number / Note number).");
+                    return;
+                }
+                const mapping = { kind, channel, number };
+                if (kind === "note") mapping.velocity = Number.isFinite(val) ? val : 100;
+                else mapping.value = Number.isFinite(val) ? val : 127;
+
+                if (MIDI_CONFLICT_GUARD_SET.has(action)) {
+                    const clash = findMidiOutMappingConflict(action, mapping);
+                    if (clash) {
+                        alert(`Không lưu: ${kind === "note" ? "Note" : "CC"} ${number} kênh ${channel} đã dùng cho ${clash}. Mỗi lệnh ON/OFF phải có CC/Note riêng.`);
+                        return;
+                    }
+                }
+                setDawMidiOutMapping(action, mapping);
+                notifySetupChanged();
+                render();
+                renderMappingOverview();
+            });
+
+            container.appendChild(row);
+        });
+    }
+
+    render();
+    document.getElementById("saveDawBtn")?.addEventListener("click", () => setTimeout(render, 300));
+}
+
+// S9/S11 — bảng Overview: PLAY/STOP/RECORD × {MIDI Input Mapping, MIDI Output Mapping,
+// Mouse Coordinate, Action Status}. Action Status lặp lại ĐÚNG thứ tự ưu tiên của
+// actionRegistry.js::getActionStatus() (không load file đó vào Setup — xem ghi chú đầu hàm).
+function renderMappingOverview() {
+    const el = document.getElementById("mappingOverviewTable");
+    if (!el) return;
+
+    const daw = getSetting("selectedDAW");
+    if (!daw) {
+        el.innerHTML = '<p class="hint-text">Chưa chọn DAW.</p>';
+        return;
+    }
+
+    const midiInputMappings = getSetting("midiMappingsV1") || [];
+    const mouseOn = isMouseControlEnabledLocal();
+
+    const rows = DAW_MIDI_ACTIONS.map(({ action, label, coordKey, midiInputAction }) => {
+        const inputMap = midiInputMappings.find((m) => m.action === midiInputAction);
+        const inputText = inputMap ? `${inputMap.kind?.toUpperCase() ?? "?"} ${inputMap.number} ch${inputMap.channel}` : "— chưa Learn";
+
+        const outputMap = getDawMidiOutMapping(action);
+        const outputText = outputMap
+            ? `${outputMap.kind === "note" ? "NOTE" : "CC"} ${outputMap.number} ch${outputMap.channel}`
+            : "— chưa cấu hình";
+
+        const coord = getCoordinate(coordKey);
+        const coordText = coord || "— chưa capture";
+
+        // Đúng thứ tự getActionStatus(): MIDI output trước, rồi mouse, rồi NOT_CONFIGURED.
+        let status;
+        if (outputMap) status = DAW_STATE_ACTION_SET.has(action) ? "ĐÃ LƯU (MIDI) — chỉ gửi lệnh, DAW chưa xác nhận" : "SUCCESS (MIDI)";
+        else if (coord) status = mouseOn ? "SUCCESS (Mouse)" : "MOUSE_DISABLED";
+        else status = "NOT_CONFIGURED";
+
+        return `<tr><td><b>${label}</b></td><td>${inputText}</td><td>${outputText}</td><td>${coordText}</td><td>${status}</td></tr>`;
+    }).join("");
+
+    el.innerHTML = `
+        <table class="overview-table">
+            <thead><tr><th>Action</th><th>MIDI Input</th><th>MIDI Output</th><th>Mouse Coordinate</th><th>Action Status</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+}
+
+function initDawActionMappingStatus() {
+    const el = document.getElementById("dawActionMappingStatus");
+    if (!el) return;
+
+    function render() {
+        const daw = getSetting("selectedDAW");
+        if (!daw) {
+            el.textContent = "Chưa chọn DAW ở mục \"Thiết lập AutoMenu\" — chưa thể capture toạ độ.";
+            return;
+        }
+        const keys = [
+            ["DAW_PLAY", "daw_play"],
+            ["DAW_STOP", "daw_stop"],
+            ["DAW_RECORD", "daw_record"]
+        ];
+        const parts = keys.map(([label, key]) => `${label}: ${getCoordinate(key) ? "✅ đã capture" : "— chưa capture"}`);
+        el.textContent = `DAW "${daw}" — ${parts.join(" · ")}`;
+        renderMappingOverview();
+    }
+
+    render();
+    // Cập nhật lại mỗi khi bấm xong 1 capture (setupCaptureButton tự alert rồi mới xong async,
+    // nên poll nhẹ khi panel này active là đủ, không cần event riêng)
+    document.getElementById("btnCaptureDawPlay")?.addEventListener("click", () => setTimeout(render, 500));
+    document.getElementById("btnCaptureDawStop")?.addEventListener("click", () => setTimeout(render, 500));
+    document.getElementById("btnCaptureDawRecord")?.addEventListener("click", () => setTimeout(render, 500));
+    document.getElementById("saveDawBtn")?.addEventListener("click", () => setTimeout(render, 300));
+}
+
+/* ================= PHÍM TẮT ================= */
+const SHORTCUT_FIELDS = [
+    { id: "shortcutNormal", key: "normal" },
+    { id: "shortcutLofi", key: "lofi" },
+    { id: "shortcutRemix", key: "remix" },
+    { id: "shortcutRap", key: "rap" },
+    { id: "shortcutKeyDetect", key: "doTone" }
+];
+
+function initShortcutsSection() {
+    const saved = getSetting("shortcuts") || {};
+
+    SHORTCUT_FIELDS.forEach(({ id, key }) => {
+        const input = document.getElementById(id);
+        if (!input) return;
+
+        input.value = saved[key] || "";
+
+        // Chỉ nhận phím tắt qua bàn phím, không cho gõ tay trực tiếp vào ô
+        input.addEventListener("keydown", (e) => {
+            e.preventDefault();
+
+            if (e.key === "Escape" || e.key === "Backspace" || e.key === "Delete") {
+                input.value = "";
+                return;
+            }
+
+            // Chờ phím chính đi kèm, chưa gán nếu chỉ mới nhấn Ctrl/Alt/Shift
+            if (["Control", "Alt", "Shift", "Meta"].includes(e.key)) {
+                return;
+            }
+
+            input.value = formatKeyCombo(e);
+        });
+    });
+
+    document.getElementById("saveShortcuts")?.addEventListener("click", () => {
+        const data = {};
+        SHORTCUT_FIELDS.forEach(({ id, key }) => {
+            data[key] = document.getElementById(id)?.value || "";
+        });
+
+        saveSetting("shortcuts", data);
+        notifySetupChanged();
+        alert("Đã lưu phím tắt");
+    });
+
+    document.getElementById("clearShortcuts")?.addEventListener("click", () => {
+        SHORTCUT_FIELDS.forEach(({ id }) => {
+            const input = document.getElementById(id);
+            if (input) input.value = "";
+        });
+
+        saveSetting("shortcuts", {});
+        notifySetupChanged();
+    });
+}
+
+/* ================= PROJECT MODAL ================= */
+function initProjectSection() {
+    const pjPathDisplay = document.getElementById("pjPathDisplay");
+    const checkOpenPj = document.getElementById("checkOpenPj");
+    const checkCopyPj = document.getElementById("checkCopyPj");
+    const checkOpenYt = document.getElementById("checkOpenYt");
+
+    // Khôi phục trạng thái đã lưu
+    if (pjPathDisplay) {
+        pjPathDisplay.value = getSetting("projectPath", "Chưa chọn project");
+    }
+    if (checkOpenPj) {
+        checkOpenPj.checked = getSetting("projectOpenEnabled") === true || getSetting("projectOpenEnabled") === "true";
+    }
+    if (checkCopyPj) {
+        checkCopyPj.checked = getSetting("projectCopyEnabled") === true || getSetting("projectCopyEnabled") === "true";
+    }
+    if (checkOpenYt) {
+        checkOpenYt.checked = getSetting("projectOpenYoutube") === true || getSetting("projectOpenYoutube") === "true";
+    }
+
+    checkOpenPj?.addEventListener("change", () => saveSetting("projectOpenEnabled", checkOpenPj.checked));
+    checkCopyPj?.addEventListener("change", () => saveSetting("projectCopyEnabled", checkCopyPj.checked));
+    checkOpenYt?.addEventListener("change", () => saveSetting("projectOpenYoutube", checkOpenYt.checked));
+
+    document.getElementById("btnSelectPj")?.addEventListener("click", async () => {
+        if (!window.electronAPI?.selectFile) {
+            console.warn("electronAPI.selectFile không khả dụng");
+            alert("Chức năng chọn file chưa khả dụng");
+            return;
+        }
+
+        try {
+            const path = await window.electronAPI.selectFile();
+            if (path) {
+                saveSetting("projectPath", path);
+                if (pjPathDisplay) pjPathDisplay.value = path;
+            }
+        } catch (err) {
+            console.error("Chọn project lỗi:", err);
+        }
+    });
+
+    // Lưu ý: nút này chỉ lưu lại đường dẫn ĐANG HIỂN THỊ trong ô phía trên.
+    // Vì Electron không có cách chuẩn để tự phát hiện project đang mở bên trong DAW,
+    // nên đây thực chất là "xác nhận lưu" chứ chưa tự động đọc từ DAW.
+    document.getElementById("btnSaveCurrentPj")?.addEventListener("click", () => {
+        const current = pjPathDisplay?.value?.trim();
+
+        if (!current || current === "Chưa chọn project") {
+            alert('Chưa có project nào. Hãy dùng "Chọn PJ" trước.');
+            return;
+        }
+
+        saveSetting("projectPath", current);
+        alert("Đã lưu project hiện tại");
+    });
+
+    document.getElementById("btnOpenProjectBundle")?.addEventListener("click", async () => {
+        const willOpenProject = checkOpenPj?.checked;
+        const willOpenYoutube = checkOpenYt?.checked;
+
+        if (!willOpenProject && !willOpenYoutube) {
+            alert('Hãy tick "Mở Project" hoặc "Mở Youtube" trước.');
+            return;
+        }
+
+        if (willOpenProject && (!pjPathDisplay?.value || pjPathDisplay.value === "Chưa chọn project")) {
+            alert('Chưa chọn Project. Hãy dùng "Chọn PJ" trước.');
+            return;
+        }
+
+        const result = await openProjectYoutubeBundle();
+
+        if (result?.errors?.length) {
+            alert("Có lỗi xảy ra:\n" + result.errors.join("\n"));
+        } else if (!result?.skipped) {
+            alert("Đã mở kèm Project/Youtube");
+        }
+    });
+}
+
+/* ================= SOUNDCARD (AUDIO INTERFACE) ================= */
+// TASK A71 — tham số thứ 3 `placeholderText` (tuỳ chọn, mặc định "Chọn Soundcard..." như cũ) để
+// hàm này dùng lại được cho SYSTEM_AUDIO select (mục 4 bên dưới) mà không đổi hành vi/lời gọi cũ.
+// TASK A76-FIX — tham số thứ 4 `kind` (mặc định "audioinput" = hành vi cũ, các nơi gọi cũ không đổi).
+// Truyền "audiooutput" cho Audio Output: liệt kê RIÊNG loa/tai nghe, KHÔNG lẫn với danh sách input.
+async function populateSoundcardOptions(selectEl, selectedValue, placeholderText = "Chọn Soundcard...", kind = "audioinput") {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+        return { foundInRealList: false };
+    }
+
+    try {
+        // Cần xin quyền mic trước thì enumerateDevices mới trả về label thật
+        // (nếu người dùng từ chối, vẫn liệt kê được device nhưng label rỗng)
+        try {
+            const tmpStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            tmpStream.getTracks().forEach(track => track.stop());
+        } catch (permErr) {
+            console.warn("Không có quyền mic, danh sách soundcard có thể thiếu tên:", permErr);
+        }
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const inputs = devices.filter(d => d.kind === kind);
+
+        selectEl.innerHTML = `<option value="">${placeholderText}</option>`;
+
+        inputs.forEach((device, idx) => {
+            const opt = document.createElement("option");
+            opt.value = device.deviceId;
+            opt.textContent = device.label || `${kind === "audiooutput" ? "Output" : "Soundcard"} ${idx + 1}`;
+            selectEl.appendChild(opt);
+        });
+
+        // S2 mục 9 — phải phân biệt được: selectedValue có thật sự nằm trong danh sách device
+        // THẬT vừa liệt kê hay không (khác với việc UI có 1 <option> hiển thị cho nó hay không —
+        // option fallback bên dưới KHÔNG tính là "tồn tại thật").
+        const foundInRealList = !selectedValue ? false : inputs.some((d) => d.deviceId === selectedValue);
+
+        if (selectedValue) {
+            const match = [...selectEl.options].find(o => o.value === selectedValue);
+            if (match) {
+                selectEl.value = selectedValue;
+            } else {
+                // Thiết bị đã lưu không còn trong danh sách hiện tại (đổi máy/rút dây...):
+                // vẫn giữ lại lựa chọn cũ để KHÔNG MẤT setting (mục 6: không tự xoá), thêm vào
+                // cuối danh sách chỉ để UI có gì đó hiển thị — KHÔNG coi đây là "device khả dụng".
+                const fallbackOpt = document.createElement("option");
+                fallbackOpt.value = selectedValue;
+                fallbackOpt.textContent = `(Đã lưu trước đó) ${selectedValue}`;
+                selectEl.appendChild(fallbackOpt);
+                selectEl.value = selectedValue;
+            }
+        }
+
+        return { foundInRealList };
+    } catch (err) {
+        console.error("Không thể liệt kê thiết bị audio:", err);
+        return { foundInRealList: false };
+    }
+}
+
+function updateSoundcardDisplays(foundInRealList = false) {
+    const saved = getSetting("selectedSoundcard");
+    const savedId = getSetting("selectedSoundcardId");
+    const modalDisplay = document.getElementById("statusSoundcardModal");
+    if (modalDisplay) {
+        modalDisplay.textContent = saved || "Chưa chọn soundcard nào";
+    }
+
+    // S2 mục 3/4 — 3 trạng thái RÕ RÀNG, dựa DUY NHẤT vào selectedSoundcardId (không đổi tên
+    // field, không tạo field song song). KHÔNG dùng chữ "Connected" — S2 chưa test stream thật,
+    // đó là việc của S3 (AUDIO SIGNAL: OK/NO AUDIO SIGNAL).
+    const badge = document.getElementById("soundcardStatusBadge");
+    if (!badge) return;
+
+    if (!savedId) {
+        // A. Chưa chọn
+        badge.textContent = "⚠ Chưa chọn Audio Interface";
+        badge.className = "badge badge-warn";
+    } else if (foundInRealList) {
+        // B. Đã chọn và device vẫn tồn tại trong enumerateDevices() hiện tại
+        badge.textContent = "● Đã chọn Audio Interface";
+        badge.className = "badge badge-live";
+    } else {
+        // C. Đã lưu ID nhưng device hiện KHÔNG còn trong danh sách thật -> không giả vờ connected,
+        // không tự xoá setting (mục 6), không tự fallback sang device khác.
+        badge.textContent = "⚠ Audio Interface không khả dụng";
+        badge.className = "badge badge-warn";
+    }
+}
+
+function initMidiSection() {
+    const select = document.getElementById("midiPortSelect");
+    const saveBtn = document.getElementById("saveMidiBtn");
+    const dashPill = document.getElementById("dashMidiPill");
+    if (!select) return;
+
+    // --- Cập nhật Dashboard MIDI pill theo cấu hình đã lưu ---
+    // TASK B30.1 — logic tính trạng thái pill nay nằm DUY NHẤT ở getMidiDashboardPillState()
+    // (appSettings.js), cả vị trí này và vị trí monkey-patch bên dưới (~dòng 1465) đều gọi hàm
+    // đó, tránh 2 nguồn sự thật khác nhau.
+    function updateDashboardMidiPill() {
+        if (!dashPill) return;
+        const state = getMidiDashboardPillState();
+        dashPill.textContent = state.text;
+        dashPill.className = state.className;
+        dashPill.title = state.title;
+    }
+
+    async function populatePorts() {
+        const saved = getSetting("midiOutputPort");
+        const ports = await listMidiOutputs();
+
+        select.innerHTML = '<option value="">Chọn cổng MIDI...</option>';
+        ports.forEach((port) => {
+            const opt = document.createElement("option");
+            opt.value = port.name;
+            opt.textContent = port.name;
+            select.appendChild(opt);
+        });
+
+        if (saved) {
+            const match = [...select.options].find((o) => o.value === saved);
+            // TASK B30.1: cập nhật hint NGAY khi vừa so khớp xong với danh sách MIDI thật —
+            // không thêm bất kỳ lệnh dò MIDI mới nào, chỉ dùng lại kết quả `match` đã có sẵn ở trên.
+            setMidiPortAvailabilityHint(!!match);
+            if (match) {
+                select.value = saved;
+            } else {
+                const fallbackOpt = document.createElement("option");
+                fallbackOpt.value = saved;
+                fallbackOpt.textContent = "(Đã lưu trước đó) " + saved;
+                fallbackOpt.dataset.stale = "true"; // TASK B30.1: đánh dấu để nơi khác (dòng ~1465) biết mà không cần dò lại MIDI
+                select.appendChild(fallbackOpt);
+                select.value = saved;
+            }
+        }
+
+        if (ports.length === 0) {
+            console.warn("Không tìm thấy cổng MIDI nào — kiểm tra đã tạo cổng ảo (vd loopMIDI) chưa.");
+        }
+
+        updateDashboardMidiPill();
+    }
+
+    populatePorts();
+
+    document.getElementById("btnRefreshMidiPorts")?.addEventListener("click", populatePorts);
+
+    document.getElementById("saveMidiBtn")?.addEventListener("click", () => {
+        if (!select.value) {
+            alert("Vui lòng chọn 1 cổng MIDI trước.");
+            return;
+        }
+
+        saveSetting("midiOutputPort", select.value);
+        // TASK B30.1: re-tính hint theo đúng option đang được chọn NGAY LÚC LƯU (dữ liệu dataset
+        // đã có sẵn từ populatePorts(), không dò MIDI mới) — phòng trường hợp người dùng đổi
+        // sang cổng khác trước khi bấm Lưu, khác với cổng lúc mở trang.
+        const selectedOpt = select.options[select.selectedIndex];
+        setMidiPortAvailabilityHint(!(selectedOpt && selectedOpt.dataset.stale === "true"));
+        updateSetupStatus();
+        updateSetupProgress();
+        notifySetupChanged();
+        updateDashboardMidiPill();
+
+        // Phản hồi trực quan cho người dùng
+        if (saveBtn) {
+            const original = saveBtn.textContent;
+            saveBtn.textContent = "✅ Đã lưu";
+            saveBtn.disabled = true;
+            setTimeout(() => {
+                saveBtn.textContent = original;
+                saveBtn.disabled = false;
+            }, 1500);
+        }
+
+        // KHÔNG đóng modal nữa - Setup MIDI hiện tại là panel trực tiếp, không phải modal
+        // document.getElementById("midiModal")?.classList.remove("show");
+    });
+
+    document.getElementById("btnTestMidiNote")?.addEventListener("click", async () => {
+        if (!select.value) {
+            alert("Chọn cổng MIDI trước khi test.");
+            return;
+        }
+        saveSetting("midiOutputPort", select.value); // lưu tạm để hàm gửi MIDI dùng đúng cổng đang chọn lúc test
+        notifySetupChanged(); // MIDI-RECOVERY-01 — báo main process mở lại driver theo cổng vừa chọn TRƯỚC khi gửi (IPC giữ đúng thứ tự)
+
+        const note = parseInt(document.getElementById("midiTestNote")?.value, 10) || 0;
+        const ok = await sendMidiNotePulse(note, 100, 0, 150);
+        // MIDI-MASTER-01 Phase 1 — log vào Monitor SAU khi biết kết quả thật (sửa "PASS giả", xem
+        // ghi chú trong setupMidiMonitor.js). Lưu ý: ok=true chỉ có nghĩa là lệnh gửi qua Web MIDI
+        // API không bị từ chối ở tầng trình duyệt — KHÔNG xác nhận phần cứng/DAW đã nhận được.
+        window.MidiMonitor?.logTestResult("NOTE", note, ok, ok ? null : "kiểm tra lại cổng MIDI đã chọn");
+        if (!ok) {
+            const r = window.getLastMidiSendResult?.();
+            alert("Không gửi được" + (r && r.reason ? ` (${r.reason}${r.detail ? ": " + r.detail : ""})` : "") + " — xem dòng log trong Monitor để biết tầng lỗi.");
+        }
+    });
+
+    document.getElementById("btnTestMidiCC")?.addEventListener("click", async () => {
+        if (!select.value) {
+            alert("Chọn cổng MIDI trước khi test.");
+            return;
+        }
+        saveSetting("midiOutputPort", select.value);
+        notifySetupChanged(); // MIDI-RECOVERY-01 — như nút Test Note
+
+        const cc = parseInt(document.getElementById("midiTestCC")?.value, 10) || 0;
+        const value = parseInt(document.getElementById("midiTestCCValue")?.value, 10) || 0;
+        const ok = await sendMidiCC(cc, value, 0);
+        window.MidiMonitor?.logTestResult(`CC${cc}`, value, ok, ok ? null : "kiểm tra lại cổng MIDI đã chọn");
+        if (!ok) {
+            const r = window.getLastMidiSendResult?.();
+            alert("Không gửi được" + (r && r.reason ? ` (${r.reason}${r.detail ? ": " + r.detail : ""})` : "") + " — xem dòng log trong Monitor để biết tầng lỗi.");
+        }
+    });
+
+    // --- Auto-refresh khi cắm/rút thiết bị MIDI (Web MIDI statechange) ---
+    if (typeof getMidiAccess === "function") {
+        getMidiAccess()
+            .then((access) => {
+                access.onstatechange = () => populatePorts();
+            })
+            .catch((err) => console.warn("Web MIDI statechange không khả dụng:", err));
+    }
+}
+
+function initSoundcardSection() {
+    const select = document.getElementById("soundcardSelect");
+    if (!select) return;
+
+    const savedId = getSetting("selectedSoundcardId");
+    populateSoundcardOptions(select, savedId).then(({ foundInRealList }) => {
+        // TASK B26.2 — chỉ cập nhật hint khi ĐÃ THỰC SỰ có deviceId đã lưu để so sánh; nếu chưa
+        // từng chọn gì (savedId rỗng) thì để nguyên null, không tự kết luận "unavailable" sai.
+        if (savedId) setSoundcardAvailabilityHint(foundInRealList);
+        updateSoundcardDisplays(foundInRealList);
+        updateSetupProgress();
+    });
+
+    // Làm mới danh sách mỗi lần mở modal (thiết bị có thể đã thay đổi)
+    document.getElementById("openSoundcardModal")?.addEventListener("click", () => {
+        const currentSavedId = getSetting("selectedSoundcardId");
+        populateSoundcardOptions(select, currentSavedId).then(({ foundInRealList }) => {
+            if (currentSavedId) setSoundcardAvailabilityHint(foundInRealList);
+            updateSoundcardDisplays(foundInRealList);
+            updateSetupProgress();
+        });
+    });
+
+    document.getElementById("btnSelectSoundcard")?.addEventListener("click", () => {
+        if (!select.value) {
+            alert("Vui lòng chọn một soundcard trước.");
+            return;
+        }
+
+        // Lưu TÊN để hiển thị (giống DAW/Auto-Tune), deviceId lưu riêng để dùng kỹ thuật sau này
+        const label = select.selectedOptions[0]?.textContent || select.value;
+        saveSetting("selectedSoundcard", label);
+        saveSetting("selectedSoundcardId", select.value);
+        // TASK A73-01 — PHÁT HIỆN REGRESSION: bản merge trước A73 đã làm mất dòng ghi
+        // "selectedMicDeviceId" (key mà createMicSource()/getMicDeviceId() trong audioSource.js
+        // THẬT SỰ đọc — đã audit + khoá bằng test ở A72AiLifecycle.verify.js mục A72.6, từng PASS
+        // trên baseline trước). Thiếu dòng này = giao diện "đã chọn Soundcard" nhưng MIC runtime
+        // vẫn dùng mic mặc định OS, y hệt GAP-3 mà A65/A70/A72 đã lần lượt ghi nhận. Khôi phục lại
+        // ĐÚNG hành vi đã xác minh — không đổi UI, không đổi tên field nào khác.
+        saveSetting("selectedMicDeviceId", select.value || "");
+
+        // S2 mục 5 — chỉ cấu hình + lưu + refresh UI status, KHÔNG restart KeyEngine/BPM/MOD/VU,
+        // KHÔNG tạo AudioContext/getUserMedia mới cho pipeline chính. Refresh lại đúng bằng cách
+        // liệt kê danh sách thật lần nữa để biết chắc device vừa lưu có thật trong danh sách hay
+        // không (an toàn hơn tự suy đoán từ select.value, tránh sai lệch nếu chọn nhầm option fallback).
+        populateSoundcardOptions(select, select.value).then(({ foundInRealList }) => {
+            setSoundcardAvailabilityHint(foundInRealList); // TASK B26.2
+            updateSoundcardDisplays(foundInRealList);
+            updateSetupProgress();
+        });
+        updateSetupStatus();
+        updateSetupProgress();
+        notifySetupChanged();
+        alert("Đã lưu soundcard");
+    });
+
+    document.getElementById("btnClearAlert")?.addEventListener("click", () => {
+        const modalDisplay = document.getElementById("statusSoundcardModal");
+        if (modalDisplay) modalDisplay.classList.remove("status-missing");
+    });
+}
+
+/* ================= SYSTEM_AUDIO (TASK A71 — độc lập hoàn toàn với MIC/Soundcard ở trên) ================= */
+// Quy tắc bắt buộc A71: KHÔNG ghi đè selectedSoundcardId, KHÔNG tự chọn MIC làm SYSTEM_AUDIO,
+// KHÔNG tự fallback khi thiết bị đã lưu không còn tồn tại (chỉ hiển thị "không khả dụng").
+function updateSystemAudioStatusBadge(foundInRealList) {
+    const savedId = getSetting("selectedSystemAudioDeviceId");
+    const badge = document.getElementById("systemAudioStatusBadge");
+    if (!badge) return;
+
+    if (!savedId) {
+        badge.textContent = "⚠ Chưa chọn SYSTEM_AUDIO";
+        badge.className = "badge badge-warn";
+    } else if (foundInRealList) {
+        badge.textContent = "● Đã chọn SYSTEM_AUDIO";
+        badge.className = "badge badge-live";
+    } else {
+        // Đã lưu deviceId nhưng KHÔNG còn trong danh sách audioinput hiện tại — vẫn giữ nguyên
+        // giá trị đã lưu (không tự xoá, không tự chuyển thiết bị khác — đúng mục B đề bài A71).
+        badge.textContent = "⚠ SYSTEM_AUDIO đã chọn không còn khả dụng";
+        badge.className = "badge badge-warn";
+    }
+}
+
+// TASK A71 — badge trạng thái RUNTIME (khác badge ở trên: badge trên = "đã LƯU gì", badge này =
+// "cửa sổ Menu đang THẤY gì ngay lúc này"). Ánh xạ tối thiểu, không suy diễn thêm ý nghĩa.
+function renderSystemAudioStateBadge(payload) {
+    const el = document.getElementById("systemAudioStateBadge");
+    if (!el) return;
+    const state = payload?.state || "NO_DEVICE";
+    const map = {
+        NO_DEVICE: ["NO_DEVICE", "badge badge-warn"],
+        STARTING: ["STARTING…", "badge badge-warn"],
+        RUNNING: ["● RUNNING", "badge badge-live"],
+        ERROR: ["✕ ERROR", "badge badge-unwired"],
+        STOPPING: ["STOPPED", "badge badge-warn"],
+    };
+    const [text, cls] = map[state] || [state, "badge badge-warn"];
+    el.textContent = text;
+    el.className = cls;
+}
+
+function initSystemAudioSection() {
+    const select = document.getElementById("systemAudioSelect");
+    if (!select) return;
+
+    const savedId = getSetting("selectedSystemAudioDeviceId");
+    populateSoundcardOptions(select, savedId, "— None / Chưa chọn thiết bị —").then(({ foundInRealList }) => {
+        updateSystemAudioStatusBadge(foundInRealList);
+        // TASK A76-FIX-R1 (R1-05) — báo cho readiness biết thiết bị đã lưu còn thật hay không.
+        if (savedId && typeof setSystemAudioAvailabilityHint === "function") setSystemAudioAvailabilityHint(foundInRealList);
+        if (typeof updateSetupProgress === "function") updateSetupProgress();
+    });
+
+    document.getElementById("btnSelectSystemAudio")?.addEventListener("click", () => {
+        // select.value === "" hợp lệ ở đây (chính là None) — KHÔNG chặn như soundcard cũ, vì
+        // "chọn None" là 1 hành động hợp lệ tường minh của SYSTEM_AUDIO (mục A đề bài A71).
+        saveSetting("selectedSystemAudioDeviceId", select.value || "");
+        populateSoundcardOptions(select, select.value, "— None / Chưa chọn thiết bị —").then(({ foundInRealList }) => {
+            updateSystemAudioStatusBadge(foundInRealList);
+            if (typeof setSystemAudioAvailabilityHint === "function") setSystemAudioAvailabilityHint(select.value ? foundInRealList : null); // A76-FIX-R1
+            if (typeof updateSetupProgress === "function") updateSetupProgress(); // A76-FIX-R1: Setup X/10 cập nhật ngay sau khi chọn
+        });
+        notifySetupChanged(); // cửa sổ Menu (nếu đang mở) tự stop()/start() lại với deviceId mới — cơ chế A65/C62 có sẵn
+        alert(select.value ? "Đã lưu SYSTEM_AUDIO." : "Đã đặt SYSTEM_AUDIO về None (NO_DEVICE).");
+    });
+
+    document.getElementById("btnClearSystemAudio")?.addEventListener("click", () => {
+        select.value = "";
+        saveSetting("selectedSystemAudioDeviceId", "");
+        updateSystemAudioStatusBadge(false);
+        if (typeof setSystemAudioAvailabilityHint === "function") setSystemAudioAvailabilityHint(null); // A76-FIX-R1
+        if (typeof updateSetupProgress === "function") updateSetupProgress();
+        notifySetupChanged();
+    });
+
+    // TASK A71 — trạng thái RUNTIME sống: hỏi giá trị hiện có ngay khi mở Setup (phòng trường hợp
+    // Menu đã RUNNING từ trước, không có transition mới nào để mà "push" sang), rồi lắng nghe mọi
+    // thay đổi tiếp theo qua IPC (main.js relay từ renderer.js của cửa sổ Menu).
+    window.electronAPI?.getSystemAudioState?.().then((payload) => renderSystemAudioStateBadge(payload));
+    window.electronAPI?.onSystemAudioStateChange?.((payload) => renderSystemAudioStateBadge(payload));
+}
+
+/* ================= MIC INPUT (TASK A76-FIX) — route riêng: audioinput -> selectedMicDeviceId -> createMicSource() ================= */
+// Không phụ thuộc selectedSoundcardId / selectedSystemAudioDeviceId, không fallback ngầm sang SYSTEM_AUDIO.
+function updateMicStatusBadge(foundInRealList) {
+    const savedId = getSetting("selectedMicDeviceId");
+    const badge = document.getElementById("micStatusBadge");
+    if (!badge) return;
+    if (!savedId) {
+        badge.textContent = "⚠ Dùng mic mặc định hệ thống";
+        badge.className = "badge badge-warn";
+    } else if (foundInRealList) {
+        badge.textContent = "● Đã chọn MIC Input";
+        badge.className = "badge badge-live";
+    } else {
+        // Giữ nguyên deviceId đã lưu, KHÔNG tự đổi sang thiết bị khác.
+        badge.textContent = "⚠ MIC đã chọn không còn khả dụng";
+        badge.className = "badge badge-warn";
+    }
+}
+
+function renderMicStateBadge(payload) {
+    const el = document.getElementById("micStateBadge");
+    if (!el) return;
+    const state = payload?.state || "NO_DEVICE";
+    const map = {
+        NO_DEVICE: ["NO_DEVICE", "badge badge-warn"],
+        STARTING: ["STARTING…", "badge badge-warn"],
+        RUNNING: ["● RUNNING", "badge badge-live"],
+        ERROR: ["✕ ERROR", "badge badge-unwired"],
+        STOPPING: ["STOPPED", "badge badge-warn"],
+    };
+    const [text, cls] = map[state] || [state, "badge badge-warn"];
+    el.textContent = text;
+    el.className = cls;
+}
+
+function initMicSection() {
+    const select = document.getElementById("micSelect");
+    if (!select) return;
+    const MIC_PLACEHOLDER = "— None / Dùng mic mặc định hệ thống —";
+
+    populateSoundcardOptions(select, getSetting("selectedMicDeviceId"), MIC_PLACEHOLDER, "audioinput").then(({ foundInRealList }) => {
+        updateMicStatusBadge(foundInRealList);
+    });
+
+    document.getElementById("btnSelectMic")?.addEventListener("click", () => {
+        // Chỉ ghi ĐÚNG 1 key (MIC); không đụng các route khác.
+        saveSetting("selectedMicDeviceId", select.value || "");
+        populateSoundcardOptions(select, select.value, MIC_PLACEHOLDER, "audioinput").then(({ foundInRealList }) => {
+            updateMicStatusBadge(foundInRealList);
+        });
+        notifySetupChanged(); // Menu tự đổi MIC khi selectedMicDeviceId thay đổi (cơ chế B72 có sẵn)
+        alert(select.value ? "Đã lưu MIC Input." : "Đã đặt MIC về None (dùng mic mặc định hệ thống).");
+    });
+
+    document.getElementById("btnClearMic")?.addEventListener("click", () => {
+        select.value = "";
+        saveSetting("selectedMicDeviceId", "");
+        updateMicStatusBadge(false);
+        notifySetupChanged();
+    });
+
+    window.electronAPI?.getMicState?.().then((payload) => renderMicStateBadge(payload));
+    window.electronAPI?.onMicStateChange?.((payload) => renderMicStateBadge(payload));
+}
+
+/* ================= AUDIO OUTPUT (TASK A76-FIX) — route riêng: audiooutput -> selectedAudioOutputDeviceId -> applyAudioOutputSetting() ================= */
+// Danh sách lấy từ kind === "audiooutput". KHÔNG bao giờ ghi vào selectedMicDeviceId /
+// selectedSystemAudioDeviceId, KHÔNG đổi output mặc định của Windows.
+function updateOutputStatusBadge(foundInRealList) {
+    const savedId = getSetting("selectedAudioOutputDeviceId");
+    const badge = document.getElementById("outputStatusBadge");
+    if (!badge) return;
+    if (!savedId) {
+        badge.textContent = "⚠ Dùng output mặc định hệ thống";
+        badge.className = "badge badge-warn";
+    } else if (foundInRealList) {
+        badge.textContent = "● Đã chọn Audio Output";
+        badge.className = "badge badge-live";
+    } else {
+        badge.textContent = "⚠ Output đã chọn không còn khả dụng";
+        badge.className = "badge badge-warn";
+    }
+}
+
+// Payload từ Menu (applyAudioOutputSetting): { state: "DEFAULT" | "APPLIED" | "ERROR", requested, actual, error }
+function renderOutputStateBadge(payload) {
+    const el = document.getElementById("outputStateBadge");
+    if (!el) return;
+    const state = payload?.state;
+    const map = {
+        DEFAULT: ["DEFAULT (output hệ thống)", "badge badge-warn"],
+        APPLIED: ["● APPLIED", "badge badge-live"],
+        ERROR: ["✕ ERROR", "badge badge-unwired"],
+    };
+    const [text, cls] = map[state] || ["CHƯA XÁC NHẬN", "badge badge-warn"];
+    el.textContent = text;
+    el.className = cls;
+}
+
+function initOutputSection() {
+    const select = document.getElementById("outputSelect");
+    if (!select) return;
+    const OUTPUT_PLACEHOLDER = "— None / Output mặc định hệ thống —";
+
+    populateSoundcardOptions(select, getSetting("selectedAudioOutputDeviceId"), OUTPUT_PLACEHOLDER, "audiooutput").then(({ foundInRealList }) => {
+        updateOutputStatusBadge(foundInRealList);
+    });
+
+    document.getElementById("btnSelectOutput")?.addEventListener("click", () => {
+        saveSetting("selectedAudioOutputDeviceId", select.value || "");
+        populateSoundcardOptions(select, select.value, OUTPUT_PLACEHOLDER, "audiooutput").then(({ foundInRealList }) => {
+            updateOutputStatusBadge(foundInRealList);
+        });
+        notifySetupChanged(); // Menu gọi applyAudioOutputSetting() khi selectedAudioOutputDeviceId đổi
+        alert(select.value ? "Đã lưu Audio Output." : "Đã đặt Audio Output về None (output mặc định hệ thống).");
+    });
+
+    document.getElementById("btnClearOutput")?.addEventListener("click", () => {
+        select.value = "";
+        saveSetting("selectedAudioOutputDeviceId", "");
+        updateOutputStatusBadge(false);
+        notifySetupChanged();
+    });
+
+    window.electronAPI?.getOutputState?.().then((payload) => renderOutputStateBadge(payload));
+    window.electronAPI?.onOutputStateChange?.((payload) => renderOutputStateBadge(payload));
+}
+
+/* ================= LINK PRO: BACKUP / RESTORE ================= */
+function initLinkProSection() {
+    const checkAutoRestore = document.getElementById("checkAutoRestore");
+    if (checkAutoRestore) {
+        checkAutoRestore.checked =
+            getSetting("autoRestoreOnDawStart") === true ||
+            getSetting("autoRestoreOnDawStart") === "true";
+
+        checkAutoRestore.addEventListener("change", () => {
+            saveSetting("autoRestoreOnDawStart", checkAutoRestore.checked);
+        });
+    }
+
+    document.getElementById("btnBackupLink")?.addEventListener("click", async () => {
+        if (!window.electronAPI?.exportBackup) {
+            console.warn("electronAPI.exportBackup không khả dụng");
+            alert("Chức năng Backup chưa khả dụng");
+            return;
+        }
+
+        try {
+            // TASK A78: backup phải chứa bản MỚI NHẤT, không phải state cũ trong bộ nhớ cửa sổ Setup.
+            if (refreshFromSharedFile?.() === false) {
+                alert("Không đọc được cài đặt mới nhất — chưa tạo Backup");
+                return;
+            }
+            const path = await window.electronAPI.exportBackup(appSettings);
+            if (path) alert("Đã backup vào:\n" + path);
+        } catch (err) {
+            console.error("Backup lỗi:", err);
+            alert("Backup thất bại");
+        }
+    });
+
+    document.getElementById("btnRestoreLink")?.addEventListener("click", async () => {
+        if (!window.electronAPI?.importBackup) {
+            console.warn("electronAPI.importBackup không khả dụng");
+            alert("Chức năng Restore chưa khả dụng");
+            return;
+        }
+
+        try {
+            const data = await window.electronAPI.importBackup();
+            if (!data) return;
+
+            if (!confirm("Restore sẽ ghi đè toàn bộ cài đặt hiện tại. Tiếp tục?")) {
+                return;
+            }
+
+            // TASK A-SETUP: file restore phải là object thường; lưu thất bại thì hoàn tác + báo lỗi,
+            // KHÔNG reload như thể đã thành công.
+            if (data === null || typeof data !== "object" || Array.isArray(data)) {
+                alert("File backup không hợp lệ");
+                return;
+            }
+            // TASK A78 — hợp đồng HIỆN TẠI của Restore (theo code): MERGE — chỉ ghi các trường có trong
+            // file backup, giữ các trường khác (dù hộp thoại ghi "ghi đè toàn bộ"). Không đổi hành vi
+            // sản phẩm; chỉ bảo đảm merge trên bản MỚI NHẤT trong file, không phải state cũ trong bộ nhớ.
+            if (refreshFromSharedFile?.() === false) {
+                alert("Không đọc được cài đặt mới nhất — chưa Restore để tránh ghi đè");
+                return;
+            }
+            const previous = appSettings;
+            appSettings = { ...appSettings, ...data };
+            if (saveSetup?.(Object.keys(data)) === false) {
+                appSettings = previous;
+                alert("Restore thất bại (không ghi được file cài đặt)");
+                return;
+            }
+            notifySetupChanged();
+
+            // Nạp lại trang để mọi ô hiển thị (radio, checkbox, input...) đồng bộ với dữ liệu vừa restore
+            location.reload();
+        } catch (err) {
+            console.error("Restore lỗi:", err);
+            alert("Restore thất bại");
+        }
+    });
+}
+
+function setStatus(id, ready, label) {
+    const el = document.getElementById(id);
+    if (!el) {
+        return;
+    }
+
+    el.textContent = ready ? `🟢 ${label}` : `🔴 ${label}`;
+    el.className = "status-item " + (ready ? "status-ready" : "status-missing");
+}
+
+function initAhkPathSection() {
+    const display = document.getElementById("ahkPathDisplay");
+    const downloadBtn = document.getElementById("btnDownloadAhk");
+
+    async function refreshDisplay() {
+        const saved = getSetting("ahkExePath");
+        if (saved) {
+            if (display) display.textContent = "✅ " + saved;
+            if (downloadBtn) downloadBtn.style.display = "none";
+            return;
+        }
+
+        if (display) display.textContent = "⏳ Đang dò AutoHotkey...";
+
+        if (!window.electronAPI?.findAhkPath) {
+            if (display) display.textContent = "❌ Chưa thiết lập";
+            if (downloadBtn) downloadBtn.style.display = "";
+            return;
+        }
+
+        try {
+            const found = await window.electronAPI.findAhkPath();
+            if (found) {
+                saveSetting("ahkExePath", found);
+                if (display) display.textContent = "✅ " + found;
+                if (downloadBtn) downloadBtn.style.display = "none";
+            } else {
+                if (display) display.textContent = '❌ Chưa cài AutoHotkey — bấm "Tải & Cài AutoHotkey" bên dưới';
+                if (downloadBtn) downloadBtn.style.display = "";
+            }
+        } catch (err) {
+            console.error("findAhkPath lỗi:", err);
+            if (display) display.textContent = "❌ Chưa thiết lập";
+            if (downloadBtn) downloadBtn.style.display = "";
+        }
+    }
+
+    refreshDisplay();
+
+    downloadBtn?.addEventListener("click", async () => {
+        if (!window.electronAPI?.downloadAhk) {
+            alert("Chức năng tải AutoHotkey chưa khả dụng");
+            return;
+        }
+
+        if (!confirm('Tải và cài AutoHotkey v2 (bắt buộc để dùng tính năng "Lấy tọa độ")?')) {
+            return;
+        }
+
+        const originalText = downloadBtn.textContent;
+        downloadBtn.textContent = "⏳ Đang tải...";
+        downloadBtn.disabled = true;
+
+        try {
+            const result = await window.electronAPI.downloadAhk();
+            if (result.success) {
+                alert('Đã tải xong, trình cài đặt AutoHotkey đang mở — cài xong thì bấm lại nút này (hoặc mở lại Setup) để app tự nhận diện.');
+                await refreshDisplay();
+            } else {
+                alert("Lỗi: " + result.error);
+            }
+        } catch (err) {
+            console.error("downloadAhk lỗi:", err);
+            alert("Có lỗi xảy ra khi tải AutoHotkey");
+        } finally {
+            downloadBtn.textContent = originalText;
+            downloadBtn.disabled = false;
+        }
+    });
+
+    document.getElementById("btnSelectAhkPath")?.addEventListener("click", async () => {
+        if (!window.electronAPI?.selectFile) {
+            alert("Chức năng chọn file chưa khả dụng");
+            return;
+        }
+
+        try {
+            const filePath = await window.electronAPI.selectFile({
+                filters: [{ name: "Ứng dụng", extensions: ["exe"] }]
+            });
+            if (filePath) {
+                saveSetting("ahkExePath", filePath);
+                if (display) display.textContent = "✅ " + filePath;
+                if (downloadBtn) downloadBtn.style.display = "none";
+            }
+        } catch (err) {
+            console.error("Chọn đường dẫn AutoHotkey lỗi:", err);
+        }
+    });
+}
+
+function updateCoordDawLabel() {
+    const label = document.getElementById("coordDawLabel");
+    if (!label) return;
+
+    const daw = getSetting("selectedDAW");
+    if (!daw) {
+        label.textContent = "⚠ Chưa chọn DAW — chọn DAW trước khi lấy tọa độ";
+        label.style.color = "#ff5252";
+    } else {
+        label.textContent = `📍 Đang thiết lập tọa độ cho: ${daw}`;
+        label.style.color = "";
+    }
+}
+
+// Đã bỏ khối "TRẠNG THÁI SETUP" (checklist chấm xanh) vì dư thừa — Setup vẫn hoạt động
+// bình thường, chỉ không hiển thị từng mục nữa. Giữ hàm rỗng thay vì xóa hết ~11 chỗ gọi
+// updateSetupStatus() rải rác trong file, để không phải sửa từng nơi một cách rủi ro.
+function updateSetupStatus() {
+    // no-op — xem ghi chú phía trên
+}
+
+function updateSetupProgress() {
+    const total = 10; // TASK A75-10 — 9 mục cũ + 1 mục SYSTEM_AUDIO mới (xem appSettings.js getSetupReadinessChecklist)
+    const ready = countSetupReady();
+
+    const percent = Math.round((ready / total) * 100);
+    const text = document.getElementById("setupProgressText");
+    const fill = document.getElementById("setupProgressFill");
+    if (text) {
+        text.textContent = `${ready}/${total} (${percent}%)`;
+    }
+    if (fill) {
+        fill.style.width = percent + "%";
+    }
+
+    updateCoordDawLabel();
+}
+
+function isSetupComplete() {
+    return isSetupFullyComplete();
+}
+
+// TASK A-SETUP — Preset: danh sách trường được lưu/nạp. Giữ NGUYÊN 10 trường cũ (preset cũ vẫn nạp
+// được) và thêm các trường cấu hình thiết bị/đường dẫn thật đang có trong appSettings.
+const PRESET_FIELDS = [
+    "selectedDAW", "selectedAutoKey", "selectedAutoTune", "selectedBrowser", "selectedSoundcard",
+    "autokey1", "autokey2", "autotunekey", "chromatic", "launchDAW",
+    // bổ sung (preset cũ thiếu các trường này vẫn nạp bình thường — chỉ áp những trường có mặt)
+    "selectedSoundcardId", "selectedSystemAudioDeviceId", "selectedMicDeviceId",
+    "selectedAudioOutputDeviceId", "midiOutputPort", "selectedBrowserPath", "selectedDAWPath"
+];
+
+function savePreset() {
+    if (typeof appSettings === "undefined") {
+        console.warn("appSettings chưa sẵn sàng");
+        return;
+    }
+
+    if (refreshFromSharedFile?.() === false) {
+        alert("Không đọc được cài đặt mới nhất — chưa lưu Preset để tránh ghi đè");
+        return;
+    }
+
+    const preset = {};
+    PRESET_FIELDS.forEach((key) => { preset[key] = getSetting(key); });
+    appSettings.autoMenuPreset = preset;
+
+    // TASK A-SETUP: chỉ báo "Đã lưu" khi ghi file THẬT sự thành công.
+    if (saveSetup?.(["autoMenuPreset"]) === false) {
+        alert("Lưu Preset thất bại (không ghi được file cài đặt)");
+        return;
+    }
+    alert("Đã lưu Preset");
+}
+
+function loadPreset() {
+    if (typeof appSettings === "undefined") {
+        console.warn("appSettings chưa sẵn sàng");
+        return;
+    }
+
+    if (refreshFromSharedFile?.() === false) {
+        alert("Không đọc được cài đặt mới nhất — chưa tải Preset để tránh ghi đè");
+        return;
+    }
+    const preset = appSettings.autoMenuPreset;
+
+    if (!preset) {
+        alert("Chưa có Preset");
+        return;
+    }
+    if (typeof preset !== "object" || Array.isArray(preset)) {
+        alert("Preset bị hỏng, không thể tải");
+        return;
+    }
+
+    // Chỉ áp các trường thuộc danh sách; bỏ qua undefined/null/"" (không xoá cấu hình hiện có khi
+    // preset thiếu giá trị) nhưng áp cả boolean false (trước đây launchDAW=false KHÔNG bao giờ được nạp).
+    const before = {};
+    const changes = {};
+    PRESET_FIELDS.forEach((key) => {
+        if (!Object.prototype.hasOwnProperty.call(preset, key)) return;
+        const v = preset[key];
+        if (v === undefined || v === null || v === "") return;
+        if (v !== appSettings[key]) { before[key] = appSettings[key]; changes[key] = v; }
+    });
+
+    const keys = Object.keys(changes);
+    if (keys.length === 0) {
+        alert("Preset trùng cấu hình hiện tại — không có gì thay đổi");
+        return;
+    }
+
+    keys.forEach((key) => { appSettings[key] = changes[key]; });
+
+    if (saveSetup?.(keys) === false) {
+        keys.forEach((key) => { appSettings[key] = before[key]; }); // hoàn tác, không để bộ nhớ lệch file
+        alert("Tải Preset thất bại (không ghi được file cài đặt)");
+        return;
+    }
+
+    updateSetupStatus();
+    updateSetupProgress();
+    notifySetupChanged();
+    alert("Đã tải Preset (" + keys.length + " mục thay đổi). Mở lại Setup để thấy các ô được cập nhật.");
+}
+
+/* ==========================================================
+   KHỞI TẠO KHI DOM SẴN SÀNG
+   (thay vì chạy toàn bộ ở top-level, phụ thuộc vào vị trí <script>)
+   ========================================================== */
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initSetupPage);
+} else {
+    initSetupPage();
+}
+
+/* ==========================================================
+   BỔ SUNG TÍNH NĂNG MỚI — KHÔNG SỬA GÌ PHẦN TRÊN
+   ==========================================================
+   1. Hoàn thiện MIDI Output (đã có cơ sở, bổ sung thêm)
+   2. Thêm Tự động khởi động: lưu đường dẫn loopMIDI + Studio One
+   ========================================================== */
+
+/* --- Bổ sung hàm trợ giúp nếu chưa có --- */
+if (typeof getSetting === "function" && !window._setupMidiPatched) {
+
+  /* --- Hoàn thiện/Mở rộng: initMidiSection --- */
+  const originalInitMidiSection = window.initMidiSection;
+  window.initMidiSection = function() {
+    if (originalInitMidiSection) originalInitMidiSection.apply(this, arguments);
+
+    const portSelect = document.getElementById("midiPortSelect");
+    const saveBtn = document.getElementById("saveMidiBtn");
+    const dashMidiPill = document.getElementById("dashMidiPill");
+
+    // Cập nhật Dashboard MIDI pill khi lưu
+    // TASK B30.1 — dùng CHUNG getMidiDashboardPillState() với updateDashboardMidiPill() ở trên
+    // (~dòng 1011), tránh 2 nguồn sự thật khác nhau. Hint đã được set bởi click handler chính
+    // (~dòng 1068) ngay trước khi patch này chạy (setTimeout 50ms sau).
+    if (saveBtn && !saveBtn._hasMidiPillPatch) {
+      saveBtn._hasMidiPillPatch = true;
+      const originalOnClick = saveBtn.onclick;
+      saveBtn.addEventListener("click", function() {
+        setTimeout(() => {
+          if (dashMidiPill) {
+            const state = getMidiDashboardPillState();
+            dashMidiPill.textContent = state.text;
+            dashMidiPill.className = state.className;
+            dashMidiPill.title = state.title;
+          }
+        }, 50);
+      });
+    }
+  };
+
+  /* --- THÊM MỚI: initAutoLaunchSection --- */
+  window.initAutoLaunchSection = function() {
+    const selectLoopMidiBtn = document.getElementById("selectLoopMidiPath");
+    const selectDawBtn = document.getElementById("selectDawPath");
+    const loopMidiPathEl = document.getElementById("loopMidiPath");
+    const dawPathEl = document.getElementById("dawExePath");
+    const autoLaunchToggle = document.getElementById("autoLaunchToggle");
+    const savePathsBtn = document.getElementById("saveAutoLaunchBtn");
+
+    // Khôi phục giá trị đã lưu
+    const savedLoopMidi = getSetting("loopMidiPath", "");
+    const savedDawPath = getSetting("dawExePath", "");
+    const autoLaunchEnabled = getSetting("autoLaunchEnabled", true);
+
+    if (loopMidiPathEl) loopMidiPathEl.value = savedLoopMidi;
+    if (dawPathEl) dawPathEl.value = savedDawPath;
+    if (autoLaunchToggle) autoLaunchToggle.checked = autoLaunchEnabled;
+
+    // Nút chọn loopMIDI
+    if (selectLoopMidiBtn && window.electronAPI?.selectFilePath) {
+      selectLoopMidiBtn.addEventListener("click", async () => {
+        const path = await window.electronAPI.selectFilePath({
+          title: "Chọn loopMIDI.exe",
+          filters: [{ name: "Chương trình", extensions: ["exe"] }],
+          defaultPath: "C:\\Program Files\\loopMIDI\\loopMIDI.exe"
+        });
+        if (path && loopMidiPathEl) loopMidiPathEl.value = path;
+      });
+    }
+
+    // Nút chọn Studio One
+    if (selectDawBtn && window.electronAPI?.selectFilePath) {
+      selectDawBtn.addEventListener("click", async () => {
+        const path = await window.electronAPI.selectFilePath({
+          title: "Chọn Studio One.exe",
+          filters: [{ name: "Chương trình", extensions: ["exe"] }],
+          defaultPath: "C:\\Program Files\\PreSonus\\Studio One 6\\Studio One.exe"
+        });
+        if (path && dawPathEl) dawPathEl.value = path;
+      });
+    }
+
+    // Nút Lưu đường dẫn
+    if (savePathsBtn && !savePathsBtn._hasAutoLaunchSave) {
+      savePathsBtn._hasAutoLaunchSave = true;
+      savePathsBtn.addEventListener("click", () => {
+        const loopPath = loopMidiPathEl ? loopMidiPathEl.value.trim() : "";
+        const dawPath = dawPathEl ? dawPathEl.value.trim() : "";
+        const autoLaunch = autoLaunchToggle ? autoLaunchToggle.checked : true;
+
+        // TASK A-SETUP: trước đây luôn hiện "✅ Đã lưu" kể cả khi ghi file thất bại (báo thành công giả).
+        const saveOk = [
+          saveSetting("loopMidiPath", loopPath),
+          saveSetting("dawExePath", dawPath),
+          saveSetting("autoLaunchEnabled", autoLaunch)
+        ].every((r) => r !== false);
+
+        // Cập nhật tiến độ
+        if (typeof updateSetupStatus === "function") updateSetupStatus();
+        if (typeof updateSetupProgress === "function") updateSetupProgress();
+        if (typeof notifySetupChanged === "function") notifySetupChanged();
+
+        // Phản hồi trực quan
+        const originalText = savePathsBtn.textContent;
+        savePathsBtn.textContent = saveOk ? "✅ Đã lưu" : "❌ Lưu thất bại";
+        savePathsBtn.disabled = true;
+        setTimeout(() => {
+          savePathsBtn.textContent = originalText;
+          savePathsBtn.disabled = false;
+        }, 1500);
+      });
+    }
+  };
+
+  /* --- Gọi tự động khi Setup tải xong --- */
+  const originalInitSetupPage = window.initSetupPage;
+  window.initSetupPage = function() {
+    if (originalInitSetupPage) originalInitSetupPage.apply(this, arguments);
+    setTimeout(() => {
+      if (typeof window.initAutoLaunchSection === "function") {
+        window.initAutoLaunchSection();
+      }
+    }, 150);
+  };
+
+  window._setupMidiPatched = true;
+}

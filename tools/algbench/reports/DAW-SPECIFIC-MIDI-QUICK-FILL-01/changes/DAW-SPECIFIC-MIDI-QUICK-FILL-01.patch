@@ -1,0 +1,367 @@
+diff --git a/tests/unit/DawQuickFill01.verify.js b/tests/unit/DawQuickFill01.verify.js
+new file mode 100644
+index 0000000..81e4be0
+--- /dev/null
++++ b/tests/unit/DawQuickFill01.verify.js
+@@ -0,0 +1,180 @@
++// DAW-SPECIFIC-MIDI-QUICK-FILL-01 — kiểm profile điền nhanh theo DAW (logic thật trích từ ui/js/setup.js).
++const fs = require('fs'), path = require('path');
++const setup = fs.readFileSync(path.join(__dirname, '../../ui/js/setup.js'), 'utf8');
++let pass = 0, fail = 0;
++const ok = (c, n, d) => { if (c) { pass++; console.log('PASS ' + n); } else { fail++; console.log('FAIL ' + n + (d ? ' :: ' + JSON.stringify(d) : '')); } };
++
++const a1 = setup.indexOf('const DAW_MIDI_ACTIONS = [');
++const a2 = setup.indexOf('function isMouseControlEnabledLocal');
++const b1 = setup.indexOf('function getDawMidiOutMapping');
++const b2 = setup.indexOf('// S8 — 3 hàng PLAY/STOP/RECORD');
++if (a1 < 0 || a2 < 0 || b1 < 0 || b2 < 0) { console.log('FAIL markers'); process.exit(1); }
++const code = setup.slice(a1, a2) + '\n' + setup.slice(b1, b2) +
++  '\nreturn {DAW_MIDI_ACTIONS, DAW_MIDI_PROFILES, resolveDawProfile, dawProfileVersionStatus, validateDawProfileBundle, planDawProfileFill, applyDawProfileFill, getDawMidiOutMapping, setDawMidiOutMapping};';
++function env(initial) {
++  const st = JSON.parse(JSON.stringify(initial || {}));
++  let sets = 0;
++  const api = new Function('getSetting', 'setSetting', code)((k) => st[k], (k, v) => { sets++; st[k] = JSON.parse(JSON.stringify(v)); });
++  const A = api.DAW_MIDI_ACTIONS.map((x) => x.action);
++  // mô phỏng handler nút: đọc DAW hiện tại, resolve profile, lập kế hoạch, (confirm), ghi
++  const click = (bundle, confirmFn = () => true) => {
++    const daw = st.selectedDAW; if (!daw) return { blocked: 'no-daw' };
++    const prof = api.resolveDawProfile(daw); if (!prof) return { blocked: 'no-profile' };
++    const plan = api.planDawProfileFill(prof, bundle, api.getDawMidiOutMapping, A);
++    if (plan.errors.length) return { blocked: 'errors', plan };
++    if (plan.conflicts.length) return { blocked: 'conflict', plan };
++    if (!confirmFn(plan)) return { blocked: 'cancel', plan };
++    api.applyDawProfileFill(daw, plan, () => st.dawMidiOutMappings, (all) => { st.dawMidiOutMappings = JSON.parse(JSON.stringify(all)); sets++; });
++    return { done: true, plan };
++  };
++  return { st, api, A, click, sets: () => sets };
++}
++const snap = (o) => JSON.stringify(o);
++const LIVE_S1 = { MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109 };
++const KNOB_S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_MIC1: 22, RETUNE_SPEED_MIC2: 23 };
++
++// 1 Studio One -> đúng LIVE & KNOB
++{
++  for (const d of ['Studio One 7', 'Studio One 6', 'Studio Pro 8']) {
++    const e = env({ selectedDAW: d });
++    e.click('live'); e.click('knob');
++    const m = e.st.dawMidiOutMappings[d];
++    const liveOk = Object.entries(LIVE_S1).every(([a, n]) => m[a] && m[a].kind === 'cc' && m[a].channel === 16 && m[a].number === n && m[a].value === 127 && m[a].source === 'USER_DEFINED');
++    const knobOk = Object.entries(KNOB_S1).every(([a, n]) => m[a] && m[a].kind === 'cc' && m[a].channel === 15 && m[a].number === n);
++    ok(liveOk && knobOk && Object.keys(m).length === 12, `[1] ${d}: LIVE 8 (CC102–109 ch16 v127) + KNOB 4 (CC20–23 ch15) đúng, tổng 12`, m);
++  }
++}
++// 2 Cubase -> profile riêng, không phải Studio One
++{
++  const e = env({ selectedDAW: 'Cubase 13' });
++  e.click('live'); e.click('knob');
++  const m = e.st.dawMidiOutMappings['Cubase 13'];
++  const prof = e.api.DAW_MIDI_PROFILES.cubase, s1 = e.api.DAW_MIDI_PROFILES['studio-one'];
++  const nums = Object.values(m).map((x) => x.number);
++  const reserved = [7, 10, 12, 13, 23, 24, 64];
++  ok(Object.keys(m).length === 12 && e.api.resolveDawProfile('Cubase 13') === prof && prof !== s1, '[2] Cubase 13 dùng profile Cubase riêng (12 mapping)');
++  ok(nums.every((n) => !reserved.includes(n)) && new Set(nums.map((n, i) => n + '|' + (i < 8 ? 16 : 15))).size === 12, '[2] CC Cubase không trùng CC đã biết (7/10/12/13/23/24/64) và không trùng nhau');
++  ok(Object.keys(LIVE_S1).every((a) => m[a].number !== LIVE_S1[a]) && /Quy ước CC gợi ý của AUTO_MENU_AI/.test(prof.origin) && /KHÔNG phải mặc định của Cubase/.test(prof.origin), '[2] Cubase khác số Studio One và được ghi rõ là quy ước AUTO_MENU_AI, không phải mặc định Cubase');
++  ok(e.api.dawProfileVersionStatus(prof, 'Cubase 13') !== 'UNVERIFIED' && e.api.dawProfileVersionStatus(prof, 'Cubase 12') === 'UNVERIFIED' && e.api.dawProfileVersionStatus(prof, 'Cubase 15') === 'UNVERIFIED', '[2] Cubase 13 có bằng chứng file; 12/14/15 gắn UNVERIFIED');
++}
++// 3 Studio One -> Cubase -> Studio One giữ nguyên
++{
++  const e = env({ selectedDAW: 'Studio One 7' });
++  e.click('live'); e.click('knob');
++  const s1 = snap(e.st.dawMidiOutMappings['Studio One 7']);
++  e.st.selectedDAW = 'Cubase 13'; const before = snap(e.st.dawMidiOutMappings);
++  ok(snap(e.st.dawMidiOutMappings) === before && e.st.dawMidiOutMappings['Cubase 13'] === undefined, '[3] đổi DAW không ghi gì (Cubase chưa có mapping)');
++  e.click('live'); e.click('knob');
++  const cub = snap(e.st.dawMidiOutMappings['Cubase 13']);
++  ok(snap(e.st.dawMidiOutMappings['Studio One 7']) === s1, '[3] điền Cubase không đổi Studio One');
++  e.st.selectedDAW = 'Studio One 7';
++  ok(snap(e.st.dawMidiOutMappings['Studio One 7']) === s1 && snap(e.st.dawMidiOutMappings['Cubase 13']) === cub, '[3] quay lại Studio One: mapping hai DAW còn nguyên');
++  // điền Studio One 6 không đụng Studio One 7 (khoá DAW riêng)
++  e.st.selectedDAW = 'Studio One 6'; e.click('live');
++  ok(snap(e.st.dawMidiOutMappings['Studio One 7']) === s1 && e.st.dawMidiOutMappings['Studio One 6'].MUSIC_ON.number === 102, '[3] mapping thủ công/điền của DAW này không ảnh hưởng DAW khác');
++}
++// 4 mapping thủ công không bị ghi đè âm thầm
++{
++  const e = env({ selectedDAW: 'Studio One 7', dawMidiOutMappings: { 'Studio One 7': { MUSIC_ON: { kind: 'cc', channel: 3, number: 55, value: 100, source: 'USER_DEFINED' }, FX_SEND_REVERB: { kind: 'cc', channel: 2, number: 90, value: 127, source: 'USER_DEFINED' } } } });
++  let asked = null;
++  const r = e.click('live', (plan) => { asked = plan; return false; });
++  ok(r.blocked === 'cancel' && asked.overwrite.length === 1 && asked.overwrite[0] === 'MUSIC_ON' && e.st.dawMidiOutMappings['Studio One 7'].MUSIC_ON.number === 55, '[4] có mapping thủ công -> hỏi xác nhận (liệt kê MUSIC_ON); Huỷ -> không đổi gì');
++  ok(e.sets() === 0, '[4] huỷ xác nhận -> không gọi lưu lần nào');
++  e.click('live');
++  const m = e.st.dawMidiOutMappings['Studio One 7'];
++  ok(m.MUSIC_ON.number === 102 && m.FX_SEND_REVERB.number === 90 && m.FX_SEND_REVERB.channel === 2, '[4]/[11] xác nhận -> chỉ bộ LIVE bị đổi; FX_SEND_REVERB ngoài bộ giữ nguyên');
++  ok(/Sẽ GHI ĐÈ \$\{plan\.overwrite\.length\} mapping đã lưu: \$\{plan\.overwrite\.join/.test(setup) && /if \(!confirm\(msg\)\) return;/.test(setup), '[4] static: confirm(msg) nêu số lượng + tên action ghi đè, chỉ ghi sau confirm');
++}
++// 5 xung đột Knob <-> LIVE
++{
++  // Knob đã lưu CC102 ch16 (trùng MUSIC_ON gợi ý)
++  const e = env({ selectedDAW: 'Studio One 7', dawMidiOutMappings: { 'Studio One 7': { BEAT_INPUT_VOLUME: { kind: 'cc', channel: 16, number: 102, value: 100, source: 'USER_DEFINED' } } } });
++  const r = e.click('live');
++  ok(r.blocked === 'conflict' && r.plan.conflicts.some(([a, o]) => a === 'MUSIC_ON' && o === 'BEAT_INPUT_VOLUME') && !e.st.dawMidiOutMappings['Studio One 7'].MUSIC_ON, '[5] LIVE trùng CC của Knob -> chặn, không ghi gì');
++  // LIVE đã lưu CC20 ch15 -> điền KNOB bị chặn
++  const f = env({ selectedDAW: 'Studio One 7', dawMidiOutMappings: { 'Studio One 7': { MIC1_ON: { kind: 'cc', channel: 15, number: 20, value: 127, source: 'USER_DEFINED' } } } });
++  const r2 = f.click('knob');
++  ok(r2.blocked === 'conflict' && !f.st.dawMidiOutMappings['Studio One 7'].BEAT_INPUT_VOLUME, '[5] KNOB trùng CC của LIVE macro -> chặn');
++  // CC giống nhưng khác kênh -> không xung đột
++  const g = env({ selectedDAW: 'Studio One 7', dawMidiOutMappings: { 'Studio One 7': { BEAT_INPUT_VOLUME: { kind: 'cc', channel: 14, number: 102, value: 100 } } } });
++  ok(g.click('live').done === true, '[5] cùng số CC nhưng khác kênh -> không xung đột');
++}
++// 6 profile thiếu/hỏng -> không ghi một phần
++{
++  const e = env({ selectedDAW: 'Studio One 7' });
++  const good = e.api.DAW_MIDI_PROFILES['studio-one'].bundles.live;
++  const bads = {
++    outOfRange: { count: 8, mappings: { ...good.mappings, FX_OFF: { kind: 'cc', channel: 16, number: 300, value: 127 } } },
++    badChannel: { count: 8, mappings: { ...good.mappings, FX_OFF: { kind: 'cc', channel: 17, number: 109, value: 127 } } },
++    dupInside: { count: 8, mappings: { ...good.mappings, FX_OFF: { kind: 'cc', channel: 16, number: 102, value: 127 } } },
++    unknownAction: { count: 8, mappings: { ...good.mappings, FAKE_ACTION: { kind: 'cc', channel: 16, number: 120, value: 127 } } },
++    missingEntry: { count: 8, mappings: { ...good.mappings, FX_OFF: null } },
++    countMismatch: { count: 7, mappings: good.mappings },
++    empty: { count: 0, mappings: {} },
++    nullBundle: null,
++  };
++  let allBlocked = true, detail = {};
++  for (const [k, b] of Object.entries(bads)) {
++    const plan = e.api.planDawProfileFill({ bundles: { live: b } }, 'live', e.api.getDawMidiOutMapping, e.A);
++    const wrote = e.api.applyDawProfileFill('Studio One 7', plan, () => e.st.dawMidiOutMappings, (all) => { e.st.dawMidiOutMappings = all; });
++    detail[k] = { errors: plan.errors.length, wrote };
++    if (!plan.errors.length || wrote || e.st.dawMidiOutMappings) allBlocked = false;
++  }
++  ok(allBlocked, '[6] bộ CC lỗi (ngoài dải/kênh sai/trùng/action lạ/thiếu mục/sai số lượng/rỗng/null) -> báo lỗi, KHÔNG ghi gì', detail);
++  const noBundle = e.api.planDawProfileFill(e.api.DAW_MIDI_PROFILES['studio-one'], 'nope', e.api.getDawMidiOutMapping, e.A);
++  ok(!noBundle.ok && noBundle.errors.length === 1 && e.api.applyDawProfileFill('Studio One 7', noBundle, () => ({}), () => { throw new Error('write'); }) === false, '[6] bundle không tồn tại -> không ghi');
++  // bộ CC hợp lệ ghi đúng 1 lần (all-or-nothing)
++  const e2 = env({ selectedDAW: 'Studio One 7' });
++  const plan = e2.api.planDawProfileFill(e2.api.DAW_MIDI_PROFILES['studio-one'], 'live', e2.api.getDawMidiOutMapping, e2.A);
++  let calls = 0;
++  e2.api.applyDawProfileFill('Studio One 7', plan, () => e2.st.dawMidiOutMappings, (all) => { calls++; e2.st.dawMidiOutMappings = all; });
++  ok(calls === 1 && Object.keys(e2.st.dawMidiOutMappings['Studio One 7']).length === 8, '[6] ghi 8 mapping bằng MỘT lần lưu duy nhất');
++}
++// 7 chưa chọn DAW
++{
++  const e = env({});
++  ok(e.click('live').blocked === 'no-daw' && e.click('knob').blocked === 'no-daw' && e.st.dawMidiOutMappings === undefined, '[7] chưa chọn DAW -> không điền được, không ghi gì');
++  ok(/btnFillLiveCcOff" disabled/.test(setup) && /btnFillKnobCcOff" disabled/.test(setup) && /Cần chọn DAW trước khi điền bộ CC gợi ý/.test(setup), '[7] static: nút bị vô hiệu hoá + thông báo cần chọn DAW');
++  ok(/const dawNow = getSetting\("selectedDAW"\);\s*if \(!dawNow\) \{ alert\("Cần chọn DAW/.test(setup), '[7] static: handler đọc DAW tại lúc bấm và chặn khi không có DAW');
++}
++// 8 DAW chưa có profile
++{
++  for (const d of ['Ableton Live 12', 'FL Studio 21', 'REAPER 7', 'Pro Tools']) {
++    const e = env({ selectedDAW: d });
++    ok(e.api.resolveDawProfile(d) === null && e.click('live').blocked === 'no-profile' && e.click('knob').blocked === 'no-profile' && e.st.dawMidiOutMappings === undefined, `[8] ${d}: không có profile, không dùng profile DAW khác, không ghi`);
++  }
++  ok(/Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công\./.test(setup) && /\$\{profile \? /.test(setup), '[8] static: thông báo đúng câu yêu cầu; nút điền chỉ render khi có profile');
++}
++// 9 Studio One giữ giá trị hiện tại; không sửa hằng cũ
++{
++  ok(/const DAW_STATE_SUGGESTED = Object\.freeze\(\{\s*MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109,/.test(setup) && /DAW_STATE_SUGGESTED_CHANNEL = 16/.test(setup) && /DAW_STATE_SUGGESTED_VALUE = 127/.test(setup), '[9] hằng gợi ý cũ (102–109, ch16, 127) giữ nguyên');
++  const e = env({ selectedDAW: 'Studio One 7' });
++  ok(Object.entries(e.api.DAW_MIDI_PROFILES['studio-one'].bundles.live.mappings).every(([a, m]) => LIVE_S1[a] === m.number && m.channel === 16 && m.value === 127), '[9] profile Studio One LIVE trùng đúng 102–109');
++}
++// 10 Knob độc lập + quy đổi 0–100→0–127 không đổi
++{
++  const e = env({ selectedDAW: 'Studio One 7' });
++  e.click('knob');
++  const m = e.st.dawMidiOutMappings['Studio One 7'];
++  ok(Object.keys(m).sort().join() === Object.keys(KNOB_S1).sort().join() && !m.MUSIC_ON, '[10] điền KNOB chỉ ghi 4 Knob, không đụng LIVE');
++  const reg = fs.readFileSync(path.join(__dirname, '../../ui/js/actionRegistry.js'), 'utf8');
++  ok(/Math\.round\(\s*\(?\s*\w+\s*\*\s*127\s*\)?\s*\/\s*100\s*\)|Math\.round\(\w+ \* 127 \/ 100\)/.test(reg) || /127\s*\/\s*100/.test(reg), '[10] actionRegistry vẫn quy đổi 0–100→0–127 (file không bị sửa trong task này)');
++  ok(!/btnFillKnobCc[^\n]*(sendMidi|midi-send|executeAction)/.test(setup) && !/function runQuickFill[\s\S]*?\n        }\n/.exec(setup)[0].match(/sendMidi|midi-send|executeAction|sendMidiCC/), '[10] static: nút điền không gửi MIDI');
++}
++// 11 action ngoài hai bộ không đổi
++{
++  const store = { MONITOR_FX: { kind: 'cc', channel: 1, number: 50, value: 127 }, FX_SEND_DELAY: { kind: 'note', channel: 1, number: 60, velocity: 100 }, PLAY: { kind: 'cc', channel: 1, number: 51, value: 127 } };
++  const e = env({ selectedDAW: 'Cubase 13', dawMidiOutMappings: { 'Cubase 13': JSON.parse(JSON.stringify(store)) } });
++  e.click('live'); e.click('knob');
++  const m = e.st.dawMidiOutMappings['Cubase 13'];
++  ok(Object.keys(store).every((k) => JSON.stringify(m[k]) === JSON.stringify(store[k])) && Object.keys(m).length === 15, '[11] MONITOR_FX/FX_SEND_*/PLAY (ngoài 2 bộ) giữ nguyên, thêm đúng 12 mapping');
++  ok(!/FX_SEND_REVERB|FX_SEND_DELAY|MONITOR_FX|TRANSPORT/.test(setup.slice(setup.indexOf('const DAW_QF_S1_LIVE'), setup.indexOf('// S8 — 3 hàng PLAY/STOP/RECORD'))), '[11] static: khối profile không nhắc tới action ngoài hai bộ');
++}
++// 12 an toàn khởi động/đổi DAW + phạm vi sửa
++{
++  const blk = setup.slice(setup.indexOf('const DAW_QF_S1_LIVE'), setup.indexOf('// S8 — 3 hàng PLAY/STOP/RECORD'));
++  ok(!/applyDawProfileFill\(/.test(setup.replace(/function applyDawProfileFill[\s\S]*?\n}\n/, '').replace(/applyDawProfileFill\(dawNow,[^\n]*\n/, '')), '[12] applyDawProfileFill chỉ được gọi từ handler nút (không tự áp dụng lúc mở/đổi DAW)');
++  ok(!/setSetting/.test(blk.replace(/function applyDawProfileFill[\s\S]*$/, '')), '[12] logic profile/plan không tự ghi setting');
++}
++console.log(`\n${pass} PASS / ${fail} FAIL`);
++process.exit(fail ? 1 : 0);
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index 63c44d9..10b58ce 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -707,6 +707,108 @@ function setDawMidiOutMapping(action, mapping) {
+     return true;
+ }
+ 
++// DAW-SPECIFIC-MIDI-QUICK-FILL-01 — bộ CC "điền nhanh" THEO TỪNG DAW. Dữ liệu thuần (dễ thêm DAW/phiên bản mới), chỉ ghi vào
++// dawMidiOutMappings[DAW đang chọn] khi người dùng bấm nút + xác nhận. Không gửi MIDI, không tự áp dụng lúc mở app/đổi DAW.
++const DAW_QF_S1_LIVE = Object.freeze({
++    MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109,
++});
++function dawQfMake(channel, value, numbers) {
++    const o = {};
++    for (const [a, n] of Object.entries(numbers)) o[a] = Object.freeze({ kind: "cc", channel, number: n, value });
++    return Object.freeze(o);
++}
++const DAW_MIDI_PROFILES = Object.freeze({
++    "studio-one": Object.freeze({
++        id: "studio-one",
++        name: "Studio One / Fender Studio Pro",
++        match: /^(studio one|studio pro|fender)/i,
++        origin: "Bộ CC gợi ý của AUTO_MENU_AI (LIVE-MIDI-FSP8-02 / MENU-KNOB-MIDI-COMPLETION-01). Cần gán CC vào macro/fader trong Control Surface (MIDI Learn).",
++        versionStatus: Object.freeze({}),
++        defaultStatus: "THEO_REPO",
++        bundles: Object.freeze({
++            live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, DAW_QF_S1_LIVE) }),
++            knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_MIC1: 22, RETUNE_SPEED_MIC2: 23 }) }),
++        }),
++    }),
++    "cubase": Object.freeze({
++        id: "cubase",
++        name: "Cubase",
++        match: /^cubase/i,
++        origin: "Quy ước CC gợi ý của AUTO_MENU_AI — KHÔNG phải mặc định của Cubase (tránh CC 7/10/12/13/23/24/64 đã thấy trong Generic Remote/MIDI Remote). Cubase không tự nhận: phải gán trong MIDI Remote hoặc Generic Remote.",
++        versionStatus: Object.freeze({ "cubase 13": "CHỈ CÓ BẰNG CHỨNG FILE, CHƯA CHẠY THẬT" }),
++        defaultStatus: "UNVERIFIED",
++        bundles: Object.freeze({
++            live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, { MUSIC_ON: 110, MUSIC_OFF: 111, MIC1_ON: 112, MIC1_OFF: 113, MIC2_ON: 114, MIC2_OFF: 115, FX_ON: 116, FX_OFF: 117 }) }),
++            knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 85, MASTER_OUTPUT_VOLUME: 86, RETUNE_SPEED_MIC1: 87, RETUNE_SPEED_MIC2: 88 }) }),
++        }),
++    }),
++});
++// Nhận diện profile từ nhãn DAW đã lưu ("Studio One 7", "Studio Pro 8", "Cubase 13"...). DAW khác -> null (không dùng profile của DAW khác).
++function resolveDawProfile(dawLabel, profiles) {
++    const reg = profiles || DAW_MIDI_PROFILES;
++    const label = String(dawLabel || "").trim();
++    if (!label) return null;
++    for (const key of Object.keys(reg)) if (reg[key] && reg[key].match && reg[key].match.test(label)) return reg[key];
++    return null;
++}
++function dawProfileVersionStatus(profile, dawLabel) {
++    if (!profile) return "";
++    return (profile.versionStatus && profile.versionStatus[String(dawLabel || "").trim().toLowerCase()]) || profile.defaultStatus || "";
++}
++// Kiểm TOÀN BỘ bundle trước khi lưu. Trả về mảng lỗi (rỗng = hợp lệ).
++function validateDawProfileBundle(bundle, validActions) {
++    const errs = [];
++    if (!bundle || !bundle.mappings || typeof bundle.mappings !== "object") return ["Bộ CC thiếu hoặc hỏng."];
++    const keys = Object.keys(bundle.mappings);
++    if (!keys.length) errs.push("Bộ CC rỗng.");
++    if (bundle.count !== undefined && bundle.count !== keys.length) errs.push(`Số mapping (${keys.length}) khác khai báo (${bundle.count}).`);
++    const seen = new Map();
++    for (const a of keys) {
++        const m = bundle.mappings[a];
++        if (validActions && !validActions.includes(a)) errs.push(`Action không tồn tại: ${a}.`);
++        if (!m || (m.kind !== "cc" && m.kind !== "note")) { errs.push(`${a}: kind không hợp lệ.`); continue; }
++        const ch = Number(m.channel), nu = Number(m.number), v = Number(m.kind === "note" ? m.velocity : m.value);
++        if (!Number.isInteger(ch) || ch < 1 || ch > 16) errs.push(`${a}: kênh phải 1–16.`);
++        if (!Number.isInteger(nu) || nu < 0 || nu > 127) errs.push(`${a}: số phải 0–127.`);
++        if (!Number.isInteger(v) || v < 0 || v > 127) errs.push(`${a}: giá trị phải 0–127.`);
++        const k = `${m.kind}|${ch}|${nu}`;
++        if (seen.has(k)) errs.push(`${a} trùng ${seen.get(k)} (cùng ${m.kind} ${nu} kênh ${ch}).`); else seen.set(k, a);
++    }
++    return errs;
++}
++// Lập kế hoạch (KHÔNG ghi). getMapping(action) đọc mapping đã lưu của DAW đang chọn.
++function planDawProfileFill(profile, bundleId, getMapping, allActions) {
++    const res = { ok: false, errors: [], conflicts: [], overwrite: [], writes: [] };
++    const bundle = profile && profile.bundles && profile.bundles[bundleId];
++    if (!bundle) { res.errors.push("Không có bộ CC này cho DAW đã chọn."); return res; }
++    res.errors = validateDawProfileBundle(bundle, allActions);
++    if (res.errors.length) return res;
++    const inBundle = new Set(Object.keys(bundle.mappings));
++    for (const [a, m] of Object.entries(bundle.mappings)) {
++        for (const other of allActions) {
++            if (inBundle.has(other)) continue;
++            const o = getMapping(other);
++            if (o && o.kind === m.kind && Number(o.channel) === Number(m.channel) && Number(o.number) === Number(m.number)) res.conflicts.push([a, other]);
++        }
++        const cur = getMapping(a);
++        const same = cur && cur.kind === m.kind && Number(cur.channel) === Number(m.channel) && Number(cur.number) === Number(m.number) && Number(cur.value) === Number(m.value);
++        if (cur && !same) res.overwrite.push(a);
++        res.writes.push([a, { ...m }]);
++    }
++    res.ok = res.conflicts.length === 0;
++    return res;
++}
++// Ghi ALL-OR-NOTHING: một lần setAll duy nhất, chỉ vào khoá DAW đang chọn, giữ nguyên mọi mapping khác.
++function applyDawProfileFill(dawLabel, plan, getAll, setAll) {
++    if (!dawLabel || !plan || !plan.ok || !plan.writes.length) return false;
++    const all = { ...(getAll() || {}) };
++    const mine = { ...(all[dawLabel] || {}) };
++    for (const [a, m] of plan.writes) mine[a] = { ...m, source: "USER_DEFINED" };
++    all[dawLabel] = mine;
++    setAll(all);
++    return true;
++}
++
+ // S8 — 3 hàng PLAY/STOP/RECORD, mỗi hàng: Type (CC/Note) + Channel + Number + Value/Velocity + Lưu + Xoá.
+ function initDawMidiOutputMappingSection() {
+     const container = document.getElementById("dawMidiOutRows");
+@@ -720,37 +822,51 @@ function initDawMidiOutputMappingSection() {
+             dawBadge.className = daw ? "badge badge-live" : "badge badge-warn";
+         }
+         if (!daw) {
+-            container.innerHTML = '<p class="hint-text">Chưa chọn DAW ở tab "Chọn DAW" — chưa thể cấu hình MIDI Output.</p>';
++            container.innerHTML = '<p class="hint-text">Chưa chọn DAW ở tab "Chọn DAW" — chưa thể cấu hình MIDI Output.</p>'
++                + '<p class="hint-text"><button class="setup-btn" id="btnFillLiveCcOff" disabled>Điền + lưu bộ LIVE gợi ý</button> <button class="setup-btn" id="btnFillKnobCcOff" disabled>Điền + lưu bộ KNOB gợi ý</button> Cần chọn DAW trước khi điền bộ CC gợi ý.</p>';
+             return;
+         }
+ 
+         container.innerHTML = "";
+ 
+-        // MIDI-DAW-CONTROL-01 — ghi chú + nút điền bộ CC gợi ý cho 8 lệnh ON/OFF (tạo bằng JS, không đổi HTML).
++        // MIDI-DAW-CONTROL-01 + DAW-SPECIFIC-MIDI-QUICK-FILL-01 — ghi chú + nút điền nhanh THEO DAW (tạo bằng JS, không đổi HTML).
++        const profile = resolveDawProfile(daw);
+         const liveBox = document.createElement("div");
+         liveBox.className = "hint-text";
++        const verStatus = dawProfileVersionStatus(profile, daw);
+         liveBox.innerHTML = `
+-            <b>8 lệnh ON/OFF điều khiển Studio One (MUSIC / MIC 1 / MIC 2 / FX):</b> ở cuối danh sách. Mỗi nút Menu gửi lệnh theo <b>trạng thái đích sau cú bấm</b>.
+-            Menu chỉ <b>gửi</b> lệnh — <b>không đọc được trạng thái thật</b> của Studio One, nên lúc mở app hoặc khi bạn đổi trực tiếp trong DAW, nút Menu có thể lệch DAW.
+-            <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ CC gợi ý LIVE (CC 102–109, kênh 16, giá trị 127)</button>
++            <b>8 lệnh ON/OFF điều khiển DAW (MUSIC / MIC 1 / MIC 2 / FX):</b> ở cuối danh sách. Mỗi nút Menu gửi lệnh theo <b>trạng thái đích sau cú bấm</b>.
++            Menu chỉ <b>gửi</b> lệnh — <b>không đọc được trạng thái thật</b> của DAW, nên lúc mở app hoặc khi bạn đổi trực tiếp trong DAW, nút Menu có thể lệch DAW.
++            <br>${profile ? `<span id="quickFillProfile">Bộ gợi ý: <b>${profile.name}</b>${verStatus ? ` — ${verStatus}` : ""}. ${profile.origin} Điền ở đây chỉ LƯU mapping của Menu — DAW chưa được điều khiển cho đến khi bạn gán trong DAW.</span>
++            <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ LIVE gợi ý — ${profile.name}</button>
++            <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>`
++                : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
+             <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
+             <span id="liveCcStatus"></span>`;
+         container.appendChild(liveBox);
+-        liveBox.querySelector("#btnFillLiveCc").addEventListener("click", () => {
+-            const overwrite = [...DAW_STATE_ACTION_SET].filter((a) => getDawMidiOutMapping(a));
+-            const msg = "Lưu 8 mapping gợi ý (CC 102–109, kênh 16, giá trị 127)? Đây là bộ CC THỬ NGHIỆM khớp macro LIVE_*; "
+-                + "bạn vẫn phải gán từng CC vào đúng macro trong Studio One." + (overwrite.length ? `\nSẽ GHI ĐÈ ${overwrite.length} mapping ON/OFF đã lưu.` : "");
+-            // MENU-KNOB-MIDI-COMPLETION-01 — bộ gợi ý (CC102–109 kênh 16) không được đè lên CC đang dùng cho Knob/Action khác.
+-            const liveClash = Object.entries(DAW_STATE_SUGGESTED).map(([a, cc]) => [a, findMidiOutMappingConflict(a, { kind: "cc", channel: DAW_STATE_SUGGESTED_CHANNEL, number: cc })]).filter(([, o]) => o && !DAW_STATE_ACTION_SET.has(o));
+-            if (liveClash.length) { alert("Không lưu bộ gợi ý: CC kênh 16 đã dùng cho action khác — " + liveClash.map(([a, o]) => `${a} ↔ ${o}`).join(", ") + ". Đổi mapping của action kia trước."); return; }
++        // Điền nhanh: kiểm cả bộ trước (xung đột/hợp lệ), xác nhận, rồi ghi MỘT LẦN vào đúng DAW đang chọn. Không gửi MIDI.
++        function runQuickFill(bundleId) {
++            const dawNow = getSetting("selectedDAW");
++            if (!dawNow) { alert("Cần chọn DAW trước khi điền bộ CC gợi ý."); return; }
++            const prof = resolveDawProfile(dawNow);
++            if (!prof) { alert("Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công."); return; }
++            const plan = planDawProfileFill(prof, bundleId, getDawMidiOutMapping, DAW_MIDI_ACTIONS.map((x) => x.action));
++            if (plan.errors.length) { alert("Không lưu bộ gợi ý (bộ CC lỗi): " + plan.errors.join("; ")); return; }
++            const liveClash = plan.conflicts;
++            if (liveClash.length) { alert("Không lưu bộ gợi ý: CC/Note đã dùng cho action khác — " + liveClash.map(([a, o]) => `${a} ↔ ${o}`).join(", ") + ". Đổi mapping của action kia trước."); return; }
++            const b = prof.bundles[bundleId];
++            const msg = `Lưu ${plan.writes.length} mapping ${b.title} gợi ý cho ${dawNow} (${prof.name})? Chỉ lưu mapping Menu MIDI Output — bạn vẫn phải gán từng CC trong DAW.`
++                + (plan.overwrite.length ? `\nSẽ GHI ĐÈ ${plan.overwrite.length} mapping đã lưu: ${plan.overwrite.join(", ")}.` : "");
+             if (!confirm(msg)) return;
+-            for (const [a, cc] of Object.entries(DAW_STATE_SUGGESTED)) {
+-                setDawMidiOutMapping(a, { kind: "cc", channel: DAW_STATE_SUGGESTED_CHANNEL, number: cc, value: DAW_STATE_SUGGESTED_VALUE });
+-            }
++            applyDawProfileFill(dawNow, plan, () => getSetting("dawMidiOutMappings"), (all) => setSetting("dawMidiOutMappings", all));
+             notifySetupChanged();
+             render();
+             renderMappingOverview();
+-        });
++        }
++        if (profile) {
++            liveBox.querySelector("#btnFillLiveCc").addEventListener("click", () => runQuickFill("live"));
++            liveBox.querySelector("#btnFillKnobCc").addEventListener("click", () => runQuickFill("knob"));
++        }
+ 
+         // Khôi phục: xoá CHỈ 8 mapping ON/OFF mới; mapping cũ (toggle MONITOR_*, Send, PLAY...) không bị đụng.
+         liveBox.querySelector("#btnClearLiveCc").addEventListener("click", () => {
