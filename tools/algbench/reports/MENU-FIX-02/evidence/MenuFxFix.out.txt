@@ -1,0 +1,54 @@
+=== MenuFxFix (wiring thật + đồng hồ ảo; TÍN HIỆU TỔNG HỢP, KHÔNG phải DAW thật) ===
+  ✅ 1a. Im lặng ban đầu: nút TẮT
+  ✅ 1b. Nhạc xuất hiện → nút/yêu cầu FX BẬT sau 496 ms (≤ 1000)
+  ✅ 1c. Lệnh FX_ON (mute 4 bus) gửi ngay khi bật, đúng 1 lệnh, KHÔNG Send (1 lệnh)
+  ✅ 1d. (tiền đề) đã tắt sau im lặng
+  ✅ 1e. Nhạc xuất hiện trở lại → BẬT sau 496 ms (≤ 1000)
+  ✅ 2a. (tiền đề) đang BẬT
+  ✅ 2b. Im lặng liên tục → TẮT sau 992 ms (đích ≈ 1000 ms + ≤1 chu kỳ tick)
+  ✅ 2c. Lặng chỉ 0,8 s (<1 s) → KHÔNG tắt
+  ✅ 3a. Mic to liên tục, nhạc im → FX không bật, không gửi lệnh
+  ✅ 3b. (tĩnh) khối khởi tạo MIC trong renderer.js KHÔNG tham chiếu bộ Auto FX
+  ✅ 3c. (tĩnh) feedLevel chỉ được gọi ĐÚNG 1 chỗ: BPMEngine.onLevel (analyser của SYSTEM_AUDIO)
+  ✅ 3d. (tĩnh) BPMEngine được nối với nguồn SYSTEM_AUDIO, không phải MIC
+  ✅ 4a. Nhạc dừng → TẮT
+  ✅ 4b. Mic vẫn nói 60 s sau khi nhạc dừng → vẫn TẮT, không gửi lại
+  ✅ 5a. Bấm tay BẬT khi nhạc im: nút BẬT, manualOverride
+  ✅ 5b. 59 s im lặng sau bấm tay: Auto KHÔNG tắt, không gửi lệnh
+  ✅ 5c. Bấm tay TẮT khi nhạc đang phát: nút TẮT
+  ✅ 5d. 59 s nhạc vẫn phát: Auto KHÔNG bật lại
+  ✅ 5e. Bấm tiếp → mốc 60 s tính lại từ lần bấm cuối
+  ✅ 6a. Trong 59 s: vẫn tắt tay
+  ✅ 6b. Hết 60 s, nhạc vẫn phát → Auto BẬT lại (+992 ms sau mốc 59 s; mốc 60 s ≤ 1000 ms nữa)
+  ✅ 6c. Lệnh tiếp quản KHÔNG được gửi trước mốc 60 s kể từ lúc bấm
+  ✅ 6d. (tiền đề) giữa chừng nhạc dừng 30 s
+  ✅ 6e. Nhạc phát lại trước mốc 60 s và còn phát khi hết 60 s → BẬT theo trạng thái HIỆN TẠI (không dùng trạng thái im lặng cũ)
+  ✅ 7a. (tiền đề) BẬT tay
+  ✅ 7b. Trước mốc 60 s (nhạc đã im 30 s): vẫn BẬT (Auto chưa được ghi đè)
+  ✅ 7c. Hết 60 s, nhạc đã im → TẮT (+10000 ms)
+  ✅ 7d. Nhạc dừng/phát/dừng trong lúc giữ quyền; im lặng khi hết 60 s → TẮT (theo trạng thái hiện tại)
+  ✅ 7e. Mic to suốt 70 s, nhạc im → hết 60 s vẫn TẮT (mic không đổi kết quả)
+  ✅ 8a. Auto: chưa cấu hình Send → nút BẬT theo YÊU CẦU, không lệnh nào gửi tới DAW
+  ✅ 8b. Hiển thị rõ: CHƯA cấu hình Send, không nói "đã gửi"
+  ✅ 8c. Bấm tay (Send chưa cấu hình): nút theo yêu cầu + hiển thị "thủ công" + "CHƯA cấu hình Send"
+  ✅ 8d. Dù gửi OK: chỉ ghi "đã GỬI — DAW chưa xác nhận"; không bao giờ ghi "đã đồng bộ/xác nhận"
+  ✅ 9a. Phản hồi chậm: nút theo yêu cầu nhưng trạng thái = "đang gửi, CHƯA có phản hồi" (không phải đã gửi)
+  ✅ 9b. Khi runtime trả lời OK mới đổi sang "đã gửi (chưa xác nhận)"
+  ✅ 9c. Runtime lỗi: nút theo yêu cầu, trạng thái = LỖI (không báo đã đồng bộ)
+  ✅ 9d. Runtime treo: vẫn "pending", không báo gửi xong
+  ✅ 9e. Quá 5 s không phản hồi → TIMEOUT hiển thị rõ (không kẹt "pending" mãi)
+  ✅ 9f. Sau timeout, nhạc dừng → nút được ĐỒNG BỘ về TẮT theo yêu cầu hiện tại (không kẹt ở BẬT; lệnh BẬT đã timeout không tính là "đã gửi")
+  ✅ 9f2. Hàng đợi Send KHÔNG kẹt sau timeout: nhạc phát lại → gửi BẬT bình thường
+  ✅ 9g. Bấm tay + phản hồi chậm: nút theo yêu cầu, trạng thái "pending"
+  ✅ 9h. Bấm tay + lỗi: nút giữ yêu cầu, trạng thái = LỖI
+  ✅ 9i. Nhạc đổi trạng thái khi lệnh trước còn chờ → lệnh TẮT vẫn được gửi (trước đây bị mất)
+  ✅ 9j. Lệnh BẬT còn treo, nhạc dừng → sau khi nó xong, yêu cầu TẮT (hiện tại) được áp dụng, nút không kẹt ở BẬT
+  ✅ 10a. (tiền đề) phiên cũ đang trong 60 s giữ quyền thủ công
+  ✅ 10b. Khởi động lại: KHÔNG kế thừa manual override / trạng thái nhạc / kết quả gửi của phiên cũ
+  ✅ 10c. Nút lưu BẬT + chưa đủ 1 s im lặng: chưa tự đổi (chưa có bằng chứng)
+  ✅ 10d. Nút lưu BẬT + nhạc im → TẮT sau ≈1 s và gửi lệnh TẮT (sửa state cũ sai)
+  ✅ 10e. Nút lưu TẮT + nhạc phát → BẬT sau 496 ms và gửi lệnh BẬT
+  ✅ 10f. Nút lưu BẬT + nhạc đang phát → giữ BẬT, không gửi lệnh thừa (GIẢ ĐỊNH: DAW còn đúng trạng thái đã lưu — KHÔNG kiểm chứng được, không có feedback DAW)
+  ✅ 10g. Nguồn SYSTEM_AUDIO chưa chạy: giữ nguyên nút đã lưu, không tự bật/tắt (đóng băng)
+  ✅ 10h. (tĩnh) click handler gọi __fxManualToggle; đúng 1 interval tick 100 ms
+✅ TẤT CẢ PASS

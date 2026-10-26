@@ -650,6 +650,10 @@ const DAW_MIDI_ACTIONS = [
     { action: "MIC2_OFF", label: "MIC 2 OFF (Monitor Không Dây tắt)" },
     { action: "FX_ON", label: "FX ON (bỏ Mute 4 bus)" },
     { action: "FX_OFF", label: "FX OFF (Mute 4 bus)" },
+    // MENU-FIX-02 — TUỲ CHỌN: lệnh CHỌN TRACK (macro chỉ "Find Track") gửi TRƯỚC lệnh ON/OFF tương ứng để Monitor không đảo nhầm track cũ.
+    { action: "MUSIC_SELECT", label: "MUSIC CHỌN TRACK (Find Track Beat — gửi trước ON/OFF)" },
+    { action: "MIC1_SELECT", label: "MIC 1 CHỌN TRACK (Find Track Mic — gửi trước ON/OFF)" },
+    { action: "MIC2_SELECT", label: "MIC 2 CHỌN TRACK (Find Track Không Dây — gửi trước ON/OFF)" },
 ];
 
 // MIDI-DAW-CONTROL-01 — bộ CC GỢI Ý (kênh 16, giá trị 127) khớp 8 macro LIVE_* của LIVE-MIDI-FSP8-02.
@@ -675,7 +679,8 @@ function findDawStateMappingConflict(action, mapping) {
 // một trong 12 action này và BẤT KỲ action khác đã lưu (nếu không, một cú xoay Knob có thể kích hoạt macro hoặc ngược lại).
 // Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
 const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2"]);
-const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET]);
+const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
+const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET]);
 function findMidiOutMappingConflict(action, mapping) {
     for (const { action: other } of DAW_MIDI_ACTIONS) {
         if (other === action) continue;
@@ -728,6 +733,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
         bundles: Object.freeze({
             live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, DAW_QF_S1_LIVE) }),
             knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_MIC1: 22, RETUNE_SPEED_MIC2: 23 }) }),
+            select: Object.freeze({ title: "CHỌN TRACK", count: 3, mappings: dawQfMake(16, 127, { MUSIC_SELECT: 110, MIC1_SELECT: 111, MIC2_SELECT: 112 }) }),
         }),
     }),
     "cubase": Object.freeze({
@@ -839,7 +845,8 @@ function initDawMidiOutputMappingSection() {
             Menu chỉ <b>gửi</b> lệnh — <b>không đọc được trạng thái thật</b> của DAW, nên lúc mở app hoặc khi bạn đổi trực tiếp trong DAW, nút Menu có thể lệch DAW.
             <br>${profile ? `<span id="quickFillProfile">Bộ gợi ý: <b>${profile.name}</b>${verStatus ? ` — ${verStatus}` : ""}. ${profile.origin} Điền ở đây chỉ LƯU mapping của Menu — DAW chưa được điều khiển cho đến khi bạn gán trong DAW.</span>
             <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ LIVE gợi ý — ${profile.name}</button>
-            <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>`
+            <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>
+            ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}`
                 : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
             <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
             <span id="liveCcStatus"></span>`;
@@ -866,6 +873,8 @@ function initDawMidiOutputMappingSection() {
         if (profile) {
             liveBox.querySelector("#btnFillLiveCc").addEventListener("click", () => runQuickFill("live"));
             liveBox.querySelector("#btnFillKnobCc").addEventListener("click", () => runQuickFill("knob"));
+            const selBtn = liveBox.querySelector("#btnFillSelectCc");
+            if (selBtn) selBtn.addEventListener("click", () => runQuickFill("select"));
         }
 
         // Khôi phục: xoá CHỈ 8 mapping ON/OFF mới; mapping cũ (toggle MONITOR_*, Send, PLAY...) không bị đụng.

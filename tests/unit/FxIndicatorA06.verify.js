@@ -20,7 +20,16 @@ function build(opts = {}) {
         document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) }, getSetting: (k, f) => (k === 'fxAutoMidiMode' ? 'toggle' : f), saveData: () => {}, console: { log() {}, warn() {}, error() {} },
         setInterval: (fn, ms) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,
         ActionRegistry: {
-            ACTIONS: { MONITOR_FX: 'MONITOR_FX', FX_SEND_REVERB: 'FX_SEND_REVERB', FX_SEND_DELAY: 'FX_SEND_DELAY' },
+            ACTIONS: { MONITOR_FX: 'MONITOR_FX', FX_SEND_REVERB: 'FX_SEND_REVERB', FX_SEND_DELAY: 'FX_SEND_DELAY', FX_ON: 'FX_ON', FX_OFF: 'FX_OFF' },
+            // FSP8-LIVE-MONITOR-FX-AUTO-FIX-01 — mô phỏng hợp đồng actionRegistry.js thật (explicit khi đã lưu ít nhất một trong FX_ON/FX_OFF; thiếu chiều đích => NOT_CONFIGURED).
+            getDawStateMode: () => (cfg.has('FX_ON') || cfg.has('FX_OFF') ? 'explicit' : 'legacy'),
+            setDawControlState: async (control, target, ctx) => {
+                const explicit = cfg.has('FX_ON') || cfg.has('FX_OFF'); const action = explicit ? (target ? 'FX_ON' : 'FX_OFF') : 'MONITOR_FX';
+                const res = explicit && !cfg.has(action) ? { ok: false, status: 'NOT_CONFIGURED', reason: 'NOT_CONFIGURED' } : await win.ActionRegistry.executeAction(action, ctx);
+                win.__dawStateLast = win.__dawStateLast || {}; const text = res && res.ok ? 'đã GỬI lệnh FX (Mute 4 bus) ' + (target ? 'ON' : 'OFF') + ' — DAW chưa xác nhận' : 'lỗi/chưa cấu hình — DAW KHÔNG nhận lệnh';
+                win.__dawStateLast[control] = { target: target ? 'ON' : 'OFF', ok: !!(res && res.ok), action, text };
+                return Object.assign({}, res, { control, target: target ? 'ON' : 'OFF', action, text, mode: explicit ? 'explicit' : 'legacy' });
+            },
             getMidiOutMapping: (n) => (cfg.has(n) ? { kind: 'cc', number: 20, value: 127, channel: 1 } : null), getMouseCoordinate: () => '',
             executeAction: async (n, ctx) => { executed.push({ n, t: clock.t }); return failExec ? { ok: false, status: 'NO_DEVICE', via: 'midi' } : { ok: true, status: 'SUCCESS', via: 'midi' }; },
         },
@@ -33,28 +42,28 @@ function build(opts = {}) {
 const SIL = () => -80, MUS = () => -25;
 (async () => {
     console.log('=== FxIndicatorA06 (wiring thật trong renderer.js; synthetic) ===');
-    let r = build({ configured: ['FX_SEND_REVERB', 'FX_SEND_DELAY'] }); await r.run(5, SIL); await r.run(5, MUS);
+    let r = build({ configured: ['FX_ON', 'FX_OFF'] }); await r.run(5, SIL); await r.run(5, MUS);
     ok(r.cls.has('active'), '1. Nhạc phát → nút FX tự SÁNG');
-    ok(r.executed.length === 2 && r.btn.dataset.fxSync === 'sent-unconfirmed' && /chưa xác nhận/.test(r.btn.title), '   đã gửi Reverb + Delay đúng 1 lệnh mỗi Send; trạng thái = đã gửi, CHƯA xác nhận');
-    await r.run(20, MUS); ok(r.executed.length === 2, '2. Nhạc tiếp tục → không gửi lặp');
-    await r.run(0.5, SIL); await r.run(3, MUS); ok(r.cls.has('active') && r.executed.length === 2, '3. Lặng ngắn (0,5 s) → nút vẫn sáng, không gửi');
-    await r.run(10, SIL); ok(!r.cls.has('active') && r.executed.length === 4, '4. Nhạc dừng đủ lâu → nút TẮT + 2 lệnh tắt');
-    await r.run(30, SIL); ok(r.executed.length === 4 && !r.cls.has('active'), '5. Micro/nhiễu sau khi dừng (không vào bộ phát hiện) → vẫn tắt, không gửi');
-    await r.run(5, MUS); ok(r.cls.has('active') && r.executed.length === 6, '6. Nhạc phát lại → sáng lại + bật Send');
+    ok(r.executed.length === 1 && r.executed[0].n === 'FX_ON' && r.btn.dataset.fxSync === 'sent-unconfirmed' && /chưa xác nhận/.test(r.btn.title), '   đã gửi đúng 1 lệnh FX_ON (mute 4 bus); trạng thái = đã gửi, CHƯA xác nhận');
+    await r.run(20, MUS); ok(r.executed.length === 1, '2. Nhạc tiếp tục → không gửi lặp');
+    await r.run(0.5, SIL); await r.run(3, MUS); ok(r.cls.has('active') && r.executed.length === 1, '3. Lặng ngắn (0,5 s) → nút vẫn sáng, không gửi');
+    await r.run(10, SIL); ok(!r.cls.has('active') && r.executed.length === 2 && r.executed[1].n === 'FX_OFF', '4. Nhạc dừng đủ lâu → nút TẮT + 1 lệnh FX_OFF');
+    await r.run(30, SIL); ok(r.executed.length === 2 && !r.cls.has('active'), '5. Micro/nhiễu sau khi dừng (không vào bộ phát hiện) → vẫn tắt, không gửi');
+    await r.run(5, MUS); ok(r.cls.has('active') && r.executed.length === 3 && r.executed[2].n === 'FX_ON', '6. Nhạc phát lại → sáng lại + FX_ON');
     // chưa cấu hình Send: nút VẪN sáng theo yêu cầu nhưng trạng thái nói rõ không có lệnh nào tới DAW
     r = build({ configured: [] }); await r.run(5, SIL); await r.run(5, MUS);
     ok(r.cls.has('active') && r.executed.length === 0, '7a. Chưa cấu hình Send: nút sáng theo YÊU CẦU, KHÔNG có lệnh nào gửi đi');
     ok(r.btn.dataset.fxSync === 'not-configured' && /CHƯA cấu hình/.test(r.btn.title), '7b. Trạng thái hiển thị đúng sự thật: chưa cấu hình, DAW không nhận lệnh (không báo thành công giả)');
     // MIDI lỗi
-    r = build({ configured: ['FX_SEND_REVERB', 'FX_SEND_DELAY'], failExec: true }); await r.run(5, SIL); await r.run(5, MUS);
+    r = build({ configured: ['FX_ON', 'FX_OFF'], failExec: true }); await r.run(5, SIL); await r.run(5, MUS);
     ok(r.cls.has('active') && r.btn.dataset.fxSync === 'failed' && /LỖI/.test(r.btn.title), '8. MIDI lỗi: nút theo yêu cầu nhưng trạng thái = LỖI/chưa đồng bộ (không báo đã áp dụng)');
-    const n = r.executed.length; await r.run(60, MUS); ok(r.executed.length <= n + 4, `   thử lại có giới hạn, không lặp vô hạn (${r.executed.length - n} lệnh thêm)`);
+    const n = r.executed.length; await r.run(60, MUS); ok(r.executed.length <= n + 2, `   thử lại có giới hạn, không lặp vô hạn (${r.executed.length - n} lệnh thêm)`);
     r.setFail(false);
     // nguồn mất: đóng băng
-    r = build({ configured: ['FX_SEND_REVERB'] }); await r.run(5, SIL); await r.run(5, MUS); r.ctl.setSourceState(false); await r.run(20, SIL);
+    r = build({ configured: ['FX_ON', 'FX_OFF'] }); await r.run(5, SIL); await r.run(5, MUS); r.ctl.setSourceState(false); await r.run(20, SIL);
     ok(r.cls.has('active') && /không khả dụng/.test(r.btn.title), '9. Nguồn nhạc mất → giữ nguyên trạng thái, báo không khả dụng');
     // telemetry
-    r = build({ configured: ['FX_SEND_REVERB'] }); await r.run(5, SIL); await r.run(5, MUS); await r.run(10, SIL);
+    r = build({ configured: ['FX_ON', 'FX_OFF'] }); await r.run(5, SIL); await r.run(5, MUS); await r.run(10, SIL);
     ok(r.telemetry.filter((x) => x.event === 'FX_AUTO').length >= 2 && r.telemetry.length < 30, `10. Chuyển trạng thái được ghi log FX_AUTO (${r.telemetry.length} bản ghi, không spam mỗi chu kỳ)`);
     ok(typeof r.win.__fxAutoDebug === 'function' && r.win.__fxAutoDebug().framesSeen > 0, '    __fxAutoDebug() trả về chẩn đoán (số khung nhận, mức dBFS, Send)');
     console.log(fail ? `❌ ${fail} FAIL` : '✅ TẤT CẢ PASS'); process.exit(fail ? 1 : 0);

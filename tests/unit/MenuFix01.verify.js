@@ -1,0 +1,64 @@
+// MENU-FIX-01 — MIC1/MIC2/MUSIC: lệnh ON/OFF cố định + gửi lại 1 lần sau độ trễ ngắn (đồng hồ ảo, không phụ thuộc DAW).
+const fs = require('fs'), path = require('path'), vm = require('vm');
+const ROOT = path.join(__dirname, '..', '..');
+let pass = 0, fail = 0;
+const check = (l, c, x) => { if (c) { pass++; console.log('  OK  ', l); } else { fail++; console.error('  FAIL ', l, x !== undefined ? JSON.stringify(x) : ''); } };
+const TABLE = { MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109 };
+const mk = (cc) => ({ kind: 'cc', channel: 16, number: cc, value: 127, source: 'USER_DEFINED' });
+function env({ mappings, extra = {}, sendOk = true } = {}) {
+  const store = { selectedDAW: 'studio-one', dawMidiOutMappings: { 'studio-one': mappings || Object.fromEntries(Object.entries(TABLE).map(([a, c]) => [a, mk(c)])) }, ...extra };
+  const sends = []; const timers = []; let now = 0;
+  const sb = {
+    console: { log() {}, error() {}, warn() {} }, Date: { now: () => now }, Math, Promise,
+    setTimeout: (fn, ms) => { const t = { fn, at: now + ms, dead: false }; timers.push(t); return t; },
+    clearTimeout: (t) => { if (t) t.dead = true; },
+    getSetting: (k, f) => (store[k] === undefined ? f : store[k]), setSetting: (k, v) => { store[k] = v; },
+    sendMidiCC: async (n, v, ch) => { sends.push({ n, v, ch, at: now }); return sendOk; }, sendMidiNotePulse: async () => true, saveData() {}, electronAPI: {},
+  };
+  sb.window = sb; vm.createContext(sb); vm.runInContext(fs.readFileSync(path.join(ROOT, 'ui/js/actionRegistry.js'), 'utf8'), sb);
+  const advance = async (ms) => { now += ms; for (const t of timers) if (!t.dead && t.at <= now) { t.dead = true; t.fn(); } for (let i = 0; i < 5; i++) await Promise.resolve(); };
+  return { AR: sb.window.ActionRegistry, sends, advance, store, sb, pending: () => timers.filter((t) => !t.dead).length };
+}
+(async () => {
+  console.log('== 1. Bấm 1 lần: gửi đúng lệnh ON cố định ngay, rồi gửi lại ĐÚNG lệnh đó 1 lần ==');
+  for (const [c, on, off] of [['MIC1', 'MIC1_ON', 'MIC1_OFF'], ['MIC2', 'MIC2_ON', 'MIC2_OFF'], ['MUSIC', 'MUSIC_ON', 'MUSIC_OFF']]) {
+    const e = env();
+    const r = await e.AR.setDawControlState(c, true, { reason: 'menu-button' });
+    check(`${c} ON: gửi ngay đúng 1 lệnh CC${TABLE[on]} (không đảo)`, r.ok && e.sends.length === 1 && e.sends[0].n === TABLE[on] && e.sends[0].v === 127 && e.sends[0].ch === 15 && r.action === on, e.sends);
+    await e.advance(349); check(`${c}: trước 350ms chưa gửi lại`, e.sends.length === 1);
+    await e.advance(2);
+    check(`${c}: sau ~350ms gửi lại ĐÚNG CC${TABLE[on]} đúng 1 lần (không gửi OFF/lệnh khác)`, e.sends.length === 2 && e.sends[1].n === TABLE[on] && e.sends[1].v === 127 && e.sends[1].ch === 15, e.sends);
+    await e.advance(5000); check(`${c}: không gửi lại lần nữa`, e.sends.length === 2);
+    const e2 = env(); await e2.AR.setDawControlState(c, false); await e2.advance(400);
+    check(`${c} OFF: gửi OFF rồi gửi lại OFF (CC${TABLE[off]}) — không lẫn ON`, e2.sends.length === 2 && e2.sends.every((s) => s.n === TABLE[off]), e2.sends);
+  }
+  console.log('\n== 2. Bấm liên tiếp ON rồi OFF: lệnh gửi lại cũ bị huỷ, không gửi trạng thái cũ ==');
+  { const e = env(); await e.AR.setDawControlState('MIC1', true); await e.advance(100); await e.AR.setDawControlState('MIC1', false);
+    await e.advance(1000);
+    const seq = e.sends.map((s) => s.n).join();
+    check('ON, (100ms) OFF -> chuỗi gửi: 104,105,105 (không còn 104 thừa sau OFF)', seq === '104,105,105', seq); }
+  console.log('\n== 3. Nút khác không bị ảnh hưởng ==');
+  { const e = env(); await e.AR.setDawControlState('FX', true); await e.advance(1000);
+    check('FX ON: đúng 1 lệnh, KHÔNG gửi lại (FX không có Find Track)', e.sends.length === 1 && e.sends[0].n === 108, e.sends);
+    const f = env(); await f.AR.setDawControlState('MIC1', true); await f.AR.setDawControlState('MIC2', true); await f.advance(400);
+    check('MIC1 và MIC2 bấm sát nhau: mỗi nút gửi lại lệnh của CHÍNH nó', f.sends.map((s) => s.n).sort().join() === '104,104,106,106', f.sends.map((s) => s.n)); }
+  console.log('\n== 4. Chế độ cũ (toggle) và lỗi gửi: KHÔNG gửi lại ==');
+  { const e = env({ mappings: { MONITOR_MIC1: mk(60) } }); const r = await e.AR.setDawControlState('MIC1', true); await e.advance(1000);
+    check('legacy toggle MONITOR_MIC1: đúng 1 lệnh (gửi lại sẽ ĐẢO trạng thái => cấm)', r.mode === 'legacy' && e.sends.length === 1, e.sends);
+    const g = env({ sendOk: false }); const r2 = await g.AR.setDawControlState('MIC1', true); await g.advance(1000);
+    check('gửi lỗi: không hẹn gửi lại, báo lỗi như cũ', !r2.ok && g.sends.length === 1 && g.pending() === 0, g.sends);
+    const h = env({ mappings: { MIC1_ON: mk(104) } }); const r3 = await h.AR.setDawControlState('MIC1', false); await h.advance(1000);
+    check('thiếu mapping OFF: NOT_CONFIGURED, không gửi gì, không gửi lại', !r3.ok && r3.reason === 'NOT_CONFIGURED' && h.sends.length === 0); }
+  console.log('\n== 5. Setting dawStateResendMs ==');
+  { const e = env({ extra: { dawStateResendMs: 0 } }); await e.AR.setDawControlState('MIC1', true); await e.advance(3000);
+    check('dawStateResendMs=0 -> tắt gửi lại (đúng 1 lệnh như trước)', e.sends.length === 1);
+    const f = env({ extra: { dawStateResendMs: 800 } }); await f.AR.setDawControlState('MIC2', true); await f.advance(799); const a = f.sends.length; await f.advance(2);
+    check('dawStateResendMs=800 -> gửi lại lúc ~800ms', a === 1 && f.sends.length === 2);
+    const g = env({ extra: { dawStateResendMs: 999999 } }); await g.AR.setDawControlState('MIC2', true); await g.advance(2001);
+    check('giá trị quá lớn bị chặn ở 2000ms', g.sends.length === 2); }
+  console.log('\n== 6. Tĩnh: không đổi HTML/renderer; mã gửi lại chỉ nằm trong setDawControlState ==');
+  { const src = fs.readFileSync(path.join(ROOT, 'ui/js/actionRegistry.js'), 'utf8');
+    check('scheduleDawStateResend chỉ được gọi trong nhánh explicit + ok', (src.match(/scheduleDawStateResend\(/g) || []).length === 2 && /mode === "explicit" && res && res\.ok && DAW_STATE_RESEND_CONTROLS\.has\(control\)/.test(src));
+    check('tập nút gửi lại chỉ MIC1/MIC2/MUSIC', /new Set\(\["MIC1", "MIC2", "MUSIC"\]\)/.test(src)); }
+  console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
+})();

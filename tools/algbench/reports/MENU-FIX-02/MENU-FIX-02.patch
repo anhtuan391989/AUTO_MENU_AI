@@ -1,0 +1,745 @@
+diff --git a/tests/unit/DawQuickFill01.verify.js b/tests/unit/DawQuickFill01.verify.js
+index 81e4be0..523f58b 100644
+--- a/tests/unit/DawQuickFill01.verify.js
++++ b/tests/unit/DawQuickFill01.verify.js
+@@ -176,5 +176,18 @@ const KNOB_S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_
+   ok(!/applyDawProfileFill\(/.test(setup.replace(/function applyDawProfileFill[\s\S]*?\n}\n/, '').replace(/applyDawProfileFill\(dawNow,[^\n]*\n/, '')), '[12] applyDawProfileFill chỉ được gọi từ handler nút (không tự áp dụng lúc mở/đổi DAW)');
+   ok(!/setSetting/.test(blk.replace(/function applyDawProfileFill[\s\S]*$/, '')), '[12] logic profile/plan không tự ghi setting');
+ }
++// 13 (MENU-FIX-02) bộ CHỌN TRACK: chỉ Studio One, ghi đúng 3 action SELECT, không đụng bộ khác
++{
++  const e = env({ selectedDAW: 'Studio One 7' });
++  e.click('live'); const before = snap(e.st.dawMidiOutMappings['Studio One 7']);
++  const r = e.click('select');
++  const m = e.st.dawMidiOutMappings['Studio One 7'];
++  ok(r.done && m.MUSIC_SELECT.number === 110 && m.MIC1_SELECT.number === 111 && m.MIC2_SELECT.number === 112 && m.MIC1_SELECT.channel === 16 && Object.keys(m).length === 11, '[13] Studio One: bộ CHỌN TRACK = CC110/111/112 ch16, thêm đúng 3 mapping');
++  ok(Object.entries(JSON.parse(before)).every(([k, v]) => snap(m[k]) === snap(v)), '[13] bộ LIVE đã lưu không bị đổi');
++  const c = env({ selectedDAW: 'Cubase 13' });
++  ok(c.click('select').blocked === 'errors' && c.st.dawMidiOutMappings === undefined, '[13] Cubase không có bộ CHỌN TRACK -> không ghi');
++  const k = env({ selectedDAW: 'Studio One 7', dawMidiOutMappings: { 'Studio One 7': { BEAT_INPUT_VOLUME: { kind: 'cc', channel: 16, number: 111, value: 100 } } } });
++  ok(k.click('select').blocked === 'conflict', '[13] CHỌN TRACK trùng CC của Knob -> chặn');
++}
+ console.log(`\n${pass} PASS / ${fail} FAIL`);
+ process.exit(fail ? 1 : 0);
+diff --git a/tests/unit/FxAutoBusFix01.verify.js b/tests/unit/FxAutoBusFix01.verify.js
+new file mode 100644
+index 0000000..71517fd
+--- /dev/null
++++ b/tests/unit/FxAutoBusFix01.verify.js
+@@ -0,0 +1,177 @@
++/**
++ * FxAutoBusFix01.verify.js — FSP8-LIVE-MONITOR-FX-AUTO-FIX-01
++ * ---------------------------------------------------------------------------
++ * LOẠI TEST: tích hợp TRONG-TIẾN-TRÌNH. Dùng mã THẬT: ui/js/actionRegistry.js, ui/js/audioSource.js, wiring createFxAutoWiring() và
++ * khối nút MUSIC/MIC1/MIC2/FX trích từ ui/js/renderer.js. Chỉ GIẢ: DOM, hàm gửi MIDI (sendMidiCC ghi lại tham số), đồng hồ ảo, tín hiệu nhạc tổng hợp.
++ * KHÔNG phải Fender Studio Pro 8 => KHÔNG chứng minh macro chạy trong DAW (xem REPORT.md: BLOCKED_USER_TEST).
++ * Chạy: node tests/unit/FxAutoBusFix01.verify.js
++ */
++'use strict';
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const ROOT = path.join(__dirname, '..', '..');
++const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
++const asSrc = read('ui/js/audioSource.js'), arSrc = read('ui/js/actionRegistry.js'), ren = read('ui/js/renderer.js');
++const a = ren.indexOf('function createFxAutoWiring() {'), b = ren.indexOf('createFxAutoWiring();\n', a);
++const fnSrc = ren.slice(a, b);
++let pass = 0, fail = 0;
++const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.error('  FAIL ', m, x !== undefined ? JSON.stringify(x) : ''); } };
++
++const CC = { MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109 };
++const mk = (n) => ({ kind: 'cc', channel: 16, number: n, value: 127, source: 'USER_DEFINED' });
++const full = () => Object.fromEntries(Object.entries(CC).map(([k, n]) => [k, mk(n)]));
++const FRAME = 16, TICK = 100;
++
++function build({ mappings = full(), sendMode = 'ok', saved = false } = {}) {
++    const clock = { t: 0 }; const sent = []; const timers = []; const deferred = []; const intervals = []; let mode = sendMode;
++    const store = { selectedDAW: 'studio-one', dawMidiOutMappings: { 'studio-one': mappings } };
++    const cls = new Set(saved ? ['active'] : []);
++    const btn = { dataset: {}, title: '', classList: { toggle(c, f) { (f === undefined ? !cls.has(c) : f) ? cls.add(c) : cls.delete(c); }, contains: (c) => cls.has(c), add: (c) => cls.add(c) } };
++    const win = { performance: { now: () => 0 }, electronAPI: { sendTelemetry() {} } }; win.window = win;
++    win.Date = { now: () => clock.t };
++    vm.createContext(win);
++    win.setTimeout = (fn, ms) => { timers.push({ at: clock.t + ms, fn }); return timers.length; };
++    win.clearTimeout = (h) => { if (timers[h - 1]) timers[h - 1].fn = null; };
++    vm.runInContext(asSrc, win);
++    Object.assign(win, {
++        document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) },
++        getSetting: (k, f) => (store[k] === undefined || store[k] === '' ? f : store[k]), setSetting: (k, v) => { store[k] = v; }, saveData() {},
++        console: { log() {}, warn() {}, error() {} }, setInterval: (fn) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,
++        sendMidiCC: (n, v, ch) => {
++            sent.push({ n, v, ch, t: clock.t, bytes: [0xb0 | (ch & 15), n & 127, v & 127] });
++            if (mode === 'fail') return Promise.resolve(false);
++            if (mode === 'hang') return new Promise(() => {});
++            if (mode === 'defer') return new Promise((res) => deferred.push(res));
++            return Promise.resolve(true);
++        },
++        sendMidiNotePulse: () => Promise.resolve(true),
++    });
++    vm.runInContext(arSrc, win);
++    vm.runInContext(fnSrc + '\ncreateFxAutoWiring();', win);
++    const ctl = win.__fxAuto; ctl.setSourceState(true);
++    const R = {
++        win, btn, cls, sent, ctl, store, clock, setMode: (m) => { mode = m; },
++        get on() { return cls.has('active'); }, get info() { return ctl.getInfo(); },
++        click() { btn.classList.toggle('active'); return win.__fxManualToggle(cls.has('active')); },
++        async flush() { for (let i = 0; i < 10; i++) await Promise.resolve(); },
++        async run(sec, music) {
++            const end = clock.t + sec * 1000; let nextTick = Math.ceil(clock.t / TICK) * TICK;
++            while (clock.t < end) {
++                clock.t += FRAME; ctl.feedLevel(music(clock.t / 1000), clock.t);
++                for (const tm of timers) if (tm.fn && tm.at <= clock.t) { const f = tm.fn; tm.fn = null; f(); }
++                while (nextTick <= clock.t) { intervals.forEach((fn) => fn()); nextTick += TICK; }
++                await Promise.resolve();
++            }
++            await R.flush();
++        },
++    };
++    return R;
++}
++const SIL = () => -80, MUS = () => -25;
++const nums = (r) => r.sent.map((s) => s.n);
++
++(async () => {
++    console.log('== 1. FX Auto: có nhạc -> đúng 1 lệnh FX_ON; hết nhạc -> đúng 1 lệnh FX_OFF (mã THẬT, byte đo được) ==');
++    {
++        const r = build(); await r.run(5, SIL);
++        ok(r.sent.length === 0 && !r.on, 'khởi động im lặng: nút TẮT, 0 lệnh (nút lưu = TẮT, không gửi OFF vô cớ)');
++        await r.run(3, MUS);
++        ok(r.on && r.sent.length === 1 && r.sent[0].n === 108 && r.sent[0].v === 127 && r.sent[0].ch === 15 && r.sent[0].bytes.join() === '191,108,127', 'nhạc phát -> nút SÁNG + đúng 1 CC108 ch16 v127 [0xBF,108,127]', r.sent);
++        ok(r.btn.dataset.fxSync === 'sent-unconfirmed' && /FX/.test(r.btn.title) && /chưa xác nhận/.test(r.btn.title) && !/Send Reverb/.test(r.btn.title), 'tooltip: đã GỬI lệnh FX, "chưa xác nhận", KHÔNG nói Send Reverb/Delay', r.btn.title);
++        await r.run(20, MUS); ok(r.sent.length === 1, 'nhạc tiếp tục: không gửi lặp');
++        await r.run(0.5, SIL); await r.run(3, MUS); ok(r.on && r.sent.length === 1, 'lặng ngắn 0,5 s: không tắt, không gửi');
++        await r.run(5, SIL);
++        ok(!r.on && r.sent.length === 2 && r.sent[1].n === 109 && r.sent[1].bytes.join() === '191,109,127', 'im lặng > 1 s -> nút TẮT + đúng 1 CC109 ch16 [0xBF,109,127]', r.sent);
++        await r.run(10, MUS); ok(r.on && r.sent.length === 3 && r.sent[2].n === 108, 'nhạc lại -> FX_ON lần nữa');
++        ok(r.sent.every((s) => ![20, 21, 22].includes(s.n)), 'không có CC nào của FX_SEND_REVERB/DELAY/MONITOR_FX');
++    }
++
++    console.log('\n== 2. Thời gian xác nhận giữ nguyên (nhạc ≈500 ms, im lặng ≈1000 ms) ==');
++    {
++        const r = build(); await r.run(5, SIL); const t0 = r.clock.t; await r.run(1.5, MUS);
++        const dOn = r.sent.length ? r.sent[0].t - t0 : null;
++        ok(dOn !== null && dOn >= 450 && dOn <= 800, `FX_ON gửi sau ${dOn} ms kể từ khi nhạc xuất hiện`);
++        await r.run(5, MUS); const t1 = r.clock.t; await r.run(2, SIL);
++        const dOff = r.sent.length > 1 ? r.sent[1].t - t1 : null;
++        ok(dOff !== null && dOff >= 950 && dOff <= 1300, `FX_OFF gửi sau ${dOff} ms kể từ khi im lặng`);
++    }
++
++    console.log('\n== 3. Bấm tay: Auto nhường quyền 60 s, hết 60 s tiếp quản theo trạng thái nhạc HIỆN TẠI; nút thủ công cũng đúng 1 lệnh ==');
++    {
++        const r = build(); await r.run(5, SIL); await r.click(); await r.flush();
++        ok(r.on && r.sent.length === 1 && r.sent[0].n === 108, 'bấm tay BẬT -> đúng 1 CC108');
++        const t = r.clock.t; await r.run(59, SIL);
++        ok(r.on && r.sent.length === 1, '59 s im lặng sau bấm tay: Auto KHÔNG tắt, không gửi');
++        await r.run(3, SIL);
++        ok(!r.on && r.sent.length === 2 && r.sent[1].n === 109 && r.sent[1].t - t >= 60000 - 1, 'hết 60 s + im lặng -> Auto tiếp quản: CC109, không sớm hơn mốc 60 s', r.sent);
++        const r2 = build(); await r2.run(5, SIL); await r2.click(); await r2.flush(); await r2.run(70, MUS);
++        ok(r2.on && r2.sent.length === 1, 'bấm tay BẬT rồi nhạc phát đúng suốt: sau 60 s KHÔNG gửi trùng FX_ON (trạng thái đã gửi khớp)', r2.sent);
++        const r3 = build(); await r3.run(5, SIL); await r3.run(3, MUS); await r3.click(); await r3.flush();
++        ok(!r3.on && r3.sent.length === 2 && r3.sent[1].n === 109, 'Auto BẬT rồi bấm tay TẮT -> CC109');
++        await r3.run(59, MUS); ok(!r3.on && r3.sent.length === 2, '59 s nhạc vẫn phát: Auto KHÔNG bật lại');
++        await r3.run(3, MUS); ok(r3.on && r3.sent.length === 3 && r3.sent[2].n === 108, 'hết 60 s -> Auto tiếp quản theo nhạc hiện tại: CC108');
++    }
++
++    console.log('\n== 4. Thiếu mapping / lỗi gửi / hết thời gian: KHÔNG báo thành công giả ==');
++    {
++        let r = build({ mappings: {} }); await r.run(5, SIL); await r.run(3, MUS);
++        ok(r.on && r.sent.length === 0 && r.btn.dataset.fxSync === 'not-configured' && /CHƯA cấu hình FX ON\/OFF/.test(r.btn.title) && !/đã GỬI/.test(r.btn.title), 'chưa cấu hình FX ON/OFF: nút theo YÊU CẦU, 0 lệnh, NOT_CONFIGURED rõ ràng', { t: r.btn.title, s: r.sent });
++        r = build({ mappings: { FX_SEND_REVERB: { kind: 'cc', channel: 2, number: 20, value: 127 }, FX_SEND_DELAY: { kind: 'cc', channel: 2, number: 21, value: 127 }, MONITOR_FX: { kind: 'cc', channel: 2, number: 22, value: 100 } } });
++        await r.run(5, SIL); await r.run(3, MUS); await r.run(10, SIL); await r.run(3, MUS);
++        ok(r.sent.length === 0 && r.btn.dataset.fxSync === 'not-configured', 'chỉ có Send/MONITOR_FX cũ (chưa có FX ON/OFF): Auto KHÔNG âm thầm gửi Send/toggle (0 lệnh, NOT_CONFIGURED)', r.sent);
++        r = build({ mappings: { FX_ON: mk(108) } }); await r.run(5, SIL); await r.run(3, MUS); await r.run(5, SIL);
++        ok(r.sent.length === 1 && r.sent[0].n === 108 && r.btn.dataset.fxSync === 'not-configured', 'chỉ lưu FX_ON: bật gửi CC108; tắt = NOT_CONFIGURED, KHÔNG rơi sang toggle/Send', r.sent);
++        r = build({ sendMode: 'fail' }); await r.run(5, SIL); await r.run(3, MUS);
++        ok(r.on && r.btn.dataset.fxSync === 'failed' && /KHÔNG nhận lệnh/.test(r.btn.title) && !/đã GỬI/.test(r.btn.title), 'gửi lỗi: nút theo yêu cầu, trạng thái = LỖI, không nói đã gửi', r.btn.title);
++        const nf = r.sent.length; await r.run(60, MUS); ok(r.sent.length <= nf + 2, `thử lại có giới hạn (${r.sent.length - nf} lệnh thêm)`);
++        r = build({ sendMode: 'hang' }); await r.run(5, SIL); await r.run(2, MUS);
++        ok(r.info.pending && r.btn.dataset.fxSync === 'pending', 'runtime treo: trạng thái "đang gửi, chưa phản hồi", không phải đã gửi');
++        await r.run(6, MUS);
++        ok(r.btn.dataset.fxSync === 'timeout' && /KHÔNG phản hồi/.test(r.btn.title), 'quá 5 s: TIMEOUT hiển thị rõ', { s: r.btn.dataset.fxSync, t: r.btn.title });
++        r = build(); await r.run(5, SIL); r.setMode('fail'); await r.click(); await r.flush();
++        ok(r.btn.dataset.dawSync === 'failed' && !/đã GỬI/.test(r.btn.title), 'bấm tay + gửi lỗi: dawSync=failed, không báo đã gửi');
++    }
++
++    console.log('\n== 5. Gửi lỗi/NOT_CONFIGURED lúc bấm tay không làm Auto tin trạng thái sai ==');
++    {
++        const r = build(); await r.run(5, SIL); r.setMode('fail'); await r.click(); await r.flush(); r.setMode('ok');
++        await r.run(62, MUS);
++        ok(r.sent.filter((s) => s.n === 108).length >= 2, 'bấm tay BẬT bị lỗi (không đánh dấu đã gửi) -> sau 60 s Auto gửi lại FX_ON khi có nhạc', r.sent);
++    }
++
++    console.log('\n== 6. MUSIC / MIC 1 / MIC 2 đặt trạng thái đích danh, độc lập (mã THẬT) ==');
++    {
++        const clicks = (r, id) => {
++            const handlers = {}; return handlers;
++        };
++        // dùng ActionRegistry thật trực tiếp (đường mà handler nút gọi): mỗi lần = đúng 1 CC của nút đó
++        const r = build();
++        const AR = r.win.ActionRegistry;
++        const seq = [['MUSIC', true], ['MIC1', true], ['MIC2', true], ['MIC1', false], ['MUSIC', false], ['MIC2', false], ['MIC1', true], ['MIC1', true]];
++        const expect = [102, 104, 106, 105, 103, 107, 104, 104];
++        for (let i = 0; i < seq.length; i++) {
++            const before = r.sent.length; const res = await AR.setDawControlState(seq[i][0], seq[i][1], { reason: 'menu-button' });
++            ok(res.ok && r.sent.length === before + 1 && r.sent[before].n === expect[i] && r.sent[before].bytes[0] === 0xbf, `${seq[i][0]} ${seq[i][1] ? 'ON' : 'OFF'} -> đúng 1 lệnh CC${expect[i]}`, r.sent.slice(before));
++        }
++        const mic1Presses = r.sent.filter((s) => [104, 105].includes(s.n));
++        ok(r.sent.filter((s) => s.n === 103).length === 1, 'CC103 (MUSIC_OFF) chỉ xuất hiện đúng 1 lần — khi chính nút MUSIC OFF được bấm; bấm MIC 1 KHÔNG sinh lệnh nào tắt MUSIC/Beat');
++        ok(mic1Presses.length === 4 && r.sent.filter((s) => [102, 103].includes(s.n)).length === 2, 'MIC 1 chỉ phát CC104/105; MUSIC chỉ CC102/103');
++        const r2 = build({ mappings: { MIC1_ON: mk(104) } });
++        const x = await r2.win.ActionRegistry.setDawControlState('MIC1', false);
++        ok(!x.ok && x.reason === 'NOT_CONFIGURED' && r2.sent.length === 0, 'chỉ lưu MIC1_ON: bấm OFF = NOT_CONFIGURED, không toggle cũ');
++    }
++
++    console.log('\n== 7. Macro LIVE_* (tệp trong repo): mỗi macro chỉ chạm ĐÚNG track của nó, dùng Monitor chứ không dùng Mute ==');
++    {
++        const dir = path.join(ROOT, 'tools/algbench/reports/LIVE-MIDI-FSP8-02/macros');
++        const parse = (f) => fs.readFileSync(path.join(dir, f), 'utf8').replace(/^﻿/, '');
++        const cmds = (f) => [...parse(f).matchAll(/<CommandElement category="([^"]*)" name="([^"]*)">\s*<CommandArgument name="([^"]*)" value="([^"]*)"\/>/g)].map((m) => `${m[1]}|${m[2]}:${m[3]}=${m[4]}`);
++        const want = { MUSIC: 'Beat', MIC1: 'Mic', MIC2: 'Không Dây' };
++        for (const [k, tr] of Object.entries(want)) for (const [sfx, st] of [['ON', '1'], ['OFF', '0']]) {
++            const c = cmds(`LIVE_${k}_${sfx}.studioonemacro`);
++            ok(c.length === 2 && c[0] === `Track|Find Track:Name=${tr}` && c[1] === `Track|Monitor:State=${st}`, `LIVE_${k}_${sfx}: Find Track "${tr}" -> Monitor State=${st} (không Mute, không track khác)`, c);
++        }
++    }
++
++    console.log(`\n${pass} PASS, ${fail} FAIL`);
++    process.exit(fail ? 1 : 0);
++})();
+diff --git a/tests/unit/FxIndicatorA06.verify.js b/tests/unit/FxIndicatorA06.verify.js
+index 30a359d..0503405 100644
+--- a/tests/unit/FxIndicatorA06.verify.js
++++ b/tests/unit/FxIndicatorA06.verify.js
+@@ -20,7 +20,16 @@ function build(opts = {}) {
+         document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) }, getSetting: (k, f) => (k === 'fxAutoMidiMode' ? 'toggle' : f), saveData: () => {}, console: { log() {}, warn() {}, error() {} },
+         setInterval: (fn, ms) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,
+         ActionRegistry: {
+-            ACTIONS: { MONITOR_FX: 'MONITOR_FX', FX_SEND_REVERB: 'FX_SEND_REVERB', FX_SEND_DELAY: 'FX_SEND_DELAY' },
++            ACTIONS: { MONITOR_FX: 'MONITOR_FX', FX_SEND_REVERB: 'FX_SEND_REVERB', FX_SEND_DELAY: 'FX_SEND_DELAY', FX_ON: 'FX_ON', FX_OFF: 'FX_OFF' },
++            // FSP8-LIVE-MONITOR-FX-AUTO-FIX-01 — mô phỏng hợp đồng actionRegistry.js thật (explicit khi đã lưu ít nhất một trong FX_ON/FX_OFF; thiếu chiều đích => NOT_CONFIGURED).
++            getDawStateMode: () => (cfg.has('FX_ON') || cfg.has('FX_OFF') ? 'explicit' : 'legacy'),
++            setDawControlState: async (control, target, ctx) => {
++                const explicit = cfg.has('FX_ON') || cfg.has('FX_OFF'); const action = explicit ? (target ? 'FX_ON' : 'FX_OFF') : 'MONITOR_FX';
++                const res = explicit && !cfg.has(action) ? { ok: false, status: 'NOT_CONFIGURED', reason: 'NOT_CONFIGURED' } : await win.ActionRegistry.executeAction(action, ctx);
++                win.__dawStateLast = win.__dawStateLast || {}; const text = res && res.ok ? 'đã GỬI lệnh FX (Mute 4 bus) ' + (target ? 'ON' : 'OFF') + ' — DAW chưa xác nhận' : 'lỗi/chưa cấu hình — DAW KHÔNG nhận lệnh';
++                win.__dawStateLast[control] = { target: target ? 'ON' : 'OFF', ok: !!(res && res.ok), action, text };
++                return Object.assign({}, res, { control, target: target ? 'ON' : 'OFF', action, text, mode: explicit ? 'explicit' : 'legacy' });
++            },
+             getMidiOutMapping: (n) => (cfg.has(n) ? { kind: 'cc', number: 20, value: 127, channel: 1 } : null), getMouseCoordinate: () => '',
+             executeAction: async (n, ctx) => { executed.push({ n, t: clock.t }); return failExec ? { ok: false, status: 'NO_DEVICE', via: 'midi' } : { ok: true, status: 'SUCCESS', via: 'midi' }; },
+         },
+@@ -33,28 +42,28 @@ function build(opts = {}) {
+ const SIL = () => -80, MUS = () => -25;
+ (async () => {
+     console.log('=== FxIndicatorA06 (wiring thật trong renderer.js; synthetic) ===');
+-    let r = build({ configured: ['FX_SEND_REVERB', 'FX_SEND_DELAY'] }); await r.run(5, SIL); await r.run(5, MUS);
++    let r = build({ configured: ['FX_ON', 'FX_OFF'] }); await r.run(5, SIL); await r.run(5, MUS);
+     ok(r.cls.has('active'), '1. Nhạc phát → nút FX tự SÁNG');
+-    ok(r.executed.length === 2 && r.btn.dataset.fxSync === 'sent-unconfirmed' && /chưa xác nhận/.test(r.btn.title), '   đã gửi Reverb + Delay đúng 1 lệnh mỗi Send; trạng thái = đã gửi, CHƯA xác nhận');
+-    await r.run(20, MUS); ok(r.executed.length === 2, '2. Nhạc tiếp tục → không gửi lặp');
+-    await r.run(0.5, SIL); await r.run(3, MUS); ok(r.cls.has('active') && r.executed.length === 2, '3. Lặng ngắn (0,5 s) → nút vẫn sáng, không gửi');
+-    await r.run(10, SIL); ok(!r.cls.has('active') && r.executed.length === 4, '4. Nhạc dừng đủ lâu → nút TẮT + 2 lệnh tắt');
+-    await r.run(30, SIL); ok(r.executed.length === 4 && !r.cls.has('active'), '5. Micro/nhiễu sau khi dừng (không vào bộ phát hiện) → vẫn tắt, không gửi');
+-    await r.run(5, MUS); ok(r.cls.has('active') && r.executed.length === 6, '6. Nhạc phát lại → sáng lại + bật Send');
++    ok(r.executed.length === 1 && r.executed[0].n === 'FX_ON' && r.btn.dataset.fxSync === 'sent-unconfirmed' && /chưa xác nhận/.test(r.btn.title), '   đã gửi đúng 1 lệnh FX_ON (mute 4 bus); trạng thái = đã gửi, CHƯA xác nhận');
++    await r.run(20, MUS); ok(r.executed.length === 1, '2. Nhạc tiếp tục → không gửi lặp');
++    await r.run(0.5, SIL); await r.run(3, MUS); ok(r.cls.has('active') && r.executed.length === 1, '3. Lặng ngắn (0,5 s) → nút vẫn sáng, không gửi');
++    await r.run(10, SIL); ok(!r.cls.has('active') && r.executed.length === 2 && r.executed[1].n === 'FX_OFF', '4. Nhạc dừng đủ lâu → nút TẮT + 1 lệnh FX_OFF');
++    await r.run(30, SIL); ok(r.executed.length === 2 && !r.cls.has('active'), '5. Micro/nhiễu sau khi dừng (không vào bộ phát hiện) → vẫn tắt, không gửi');
++    await r.run(5, MUS); ok(r.cls.has('active') && r.executed.length === 3 && r.executed[2].n === 'FX_ON', '6. Nhạc phát lại → sáng lại + FX_ON');
+     // chưa cấu hình Send: nút VẪN sáng theo yêu cầu nhưng trạng thái nói rõ không có lệnh nào tới DAW
+     r = build({ configured: [] }); await r.run(5, SIL); await r.run(5, MUS);
+     ok(r.cls.has('active') && r.executed.length === 0, '7a. Chưa cấu hình Send: nút sáng theo YÊU CẦU, KHÔNG có lệnh nào gửi đi');
+     ok(r.btn.dataset.fxSync === 'not-configured' && /CHƯA cấu hình/.test(r.btn.title), '7b. Trạng thái hiển thị đúng sự thật: chưa cấu hình, DAW không nhận lệnh (không báo thành công giả)');
+     // MIDI lỗi
+-    r = build({ configured: ['FX_SEND_REVERB', 'FX_SEND_DELAY'], failExec: true }); await r.run(5, SIL); await r.run(5, MUS);
++    r = build({ configured: ['FX_ON', 'FX_OFF'], failExec: true }); await r.run(5, SIL); await r.run(5, MUS);
+     ok(r.cls.has('active') && r.btn.dataset.fxSync === 'failed' && /LỖI/.test(r.btn.title), '8. MIDI lỗi: nút theo yêu cầu nhưng trạng thái = LỖI/chưa đồng bộ (không báo đã áp dụng)');
+-    const n = r.executed.length; await r.run(60, MUS); ok(r.executed.length <= n + 4, `   thử lại có giới hạn, không lặp vô hạn (${r.executed.length - n} lệnh thêm)`);
++    const n = r.executed.length; await r.run(60, MUS); ok(r.executed.length <= n + 2, `   thử lại có giới hạn, không lặp vô hạn (${r.executed.length - n} lệnh thêm)`);
+     r.setFail(false);
+     // nguồn mất: đóng băng
+-    r = build({ configured: ['FX_SEND_REVERB'] }); await r.run(5, SIL); await r.run(5, MUS); r.ctl.setSourceState(false); await r.run(20, SIL);
++    r = build({ configured: ['FX_ON', 'FX_OFF'] }); await r.run(5, SIL); await r.run(5, MUS); r.ctl.setSourceState(false); await r.run(20, SIL);
+     ok(r.cls.has('active') && /không khả dụng/.test(r.btn.title), '9. Nguồn nhạc mất → giữ nguyên trạng thái, báo không khả dụng');
+     // telemetry
+-    r = build({ configured: ['FX_SEND_REVERB'] }); await r.run(5, SIL); await r.run(5, MUS); await r.run(10, SIL);
++    r = build({ configured: ['FX_ON', 'FX_OFF'] }); await r.run(5, SIL); await r.run(5, MUS); await r.run(10, SIL);
+     ok(r.telemetry.filter((x) => x.event === 'FX_AUTO').length >= 2 && r.telemetry.length < 30, `10. Chuyển trạng thái được ghi log FX_AUTO (${r.telemetry.length} bản ghi, không spam mỗi chu kỳ)`);
+     ok(typeof r.win.__fxAutoDebug === 'function' && r.win.__fxAutoDebug().framesSeen > 0, '    __fxAutoDebug() trả về chẩn đoán (số khung nhận, mức dBFS, Send)');
+     console.log(fail ? `❌ ${fail} FAIL` : '✅ TẤT CẢ PASS'); process.exit(fail ? 1 : 0);
+diff --git a/tests/unit/KnobMidiCompletion01.verify.js b/tests/unit/KnobMidiCompletion01.verify.js
+index ec15bc3..d1c9577 100644
+--- a/tests/unit/KnobMidiCompletion01.verify.js
++++ b/tests/unit/KnobMidiCompletion01.verify.js
+@@ -158,7 +158,7 @@ const ccOf = (v) => Math.round(v * 127 / 100);
+         const saved = { MUSIC_ON: mk(102, 16), FX_OFF: mk(109, 16), BEAT_INPUT_VOLUME: mk(20, 1), MASTER_OUTPUT_VOLUME: mk(21, 1), MONITOR_FX: mk(22, 2) };
+         const fn = new Function('getDawMidiOutMapping', setup.slice(a, a2) + '\n' + setup.slice(b, b2) + '\n' + setup.slice(c, c2) + '\nreturn { findMidiOutMappingConflict, MIDI_CONFLICT_GUARD_SET };')((act) => saved[act] || null);
+         const { findMidiOutMappingConflict: f, MIDI_CONFLICT_GUARD_SET: G } = fn;
+-        ok(['BEAT_INPUT_VOLUME', 'MASTER_OUTPUT_VOLUME', 'RETUNE_SPEED_MIC1', 'RETUNE_SPEED_MIC2', 'MUSIC_ON', 'FX_OFF'].every((x) => G.has(x)) && G.size === 12, 'nhóm bảo vệ = 4 Knob + 8 LIVE');
++        ok(['BEAT_INPUT_VOLUME', 'MASTER_OUTPUT_VOLUME', 'RETUNE_SPEED_MIC1', 'RETUNE_SPEED_MIC2', 'MUSIC_ON', 'FX_OFF', 'MUSIC_SELECT', 'MIC1_SELECT', 'MIC2_SELECT'].every((x) => G.has(x)) && G.size === 15, 'nhóm bảo vệ = 4 Knob + 8 LIVE + 3 CHỌN TRACK (MENU-FIX-02: 12→15, chủ đích)');
+         ok(f('RETUNE_SPEED_MIC1', mk(102, 16)) === 'MUSIC_ON', 'Retune 1 đặt CC102 ch16 -> xung đột với MUSIC_ON (bị chặn)');
+         ok(f('MUSIC_OFF', mk(20, 1)) === 'BEAT_INPUT_VOLUME', 'LIVE đặt CC20 ch1 -> xung đột với Knob Beat');
+         ok(f('RETUNE_SPEED_MIC2', mk(21, 1)) === 'MASTER_OUTPUT_VOLUME', 'Knob trùng Knob khác -> bị chặn');
+diff --git a/tests/unit/LiveMidiCompletion01.verify.js b/tests/unit/LiveMidiCompletion01.verify.js
+new file mode 100644
+index 0000000..ed14822
+--- /dev/null
++++ b/tests/unit/LiveMidiCompletion01.verify.js
+@@ -0,0 +1,75 @@
++/**
++ * LiveMidiCompletion01.verify.js — FSP8-LIVE-MIDI-COMPLETION-01
++ * Kiểm chứng TĨNH + tích hợp trong tiến trình (mã THẬT, MIDI GIẢ) cho bảng 8 CC <-> 8 macro LIVE.
++ * KHÔNG phải Fender Studio Pro 8 thật => không chứng minh macro chạy trong DAW.
++ * Chạy: node tests/unit/LiveMidiCompletion01.verify.js
++ */
++'use strict';
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const ROOT = path.join(__dirname, '..', '..');
++const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
++let pass = 0, fail = 0;
++const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.error('  FAIL ', m, x !== undefined ? JSON.stringify(x) : ''); } };
++
++const TABLE = [
++    ['MUSIC_ON', 102, 'LIVE_MUSIC_ON'], ['MUSIC_OFF', 103, 'LIVE_MUSIC_OFF'], ['MIC1_ON', 104, 'LIVE_MIC1_ON'], ['MIC1_OFF', 105, 'LIVE_MIC1_OFF'],
++    ['MIC2_ON', 106, 'LIVE_MIC2_ON'], ['MIC2_OFF', 107, 'LIVE_MIC2_OFF'], ['FX_ON', 108, 'LIVE_FX_ON'], ['FX_OFF', 109, 'LIVE_FX_OFF'],
++];
++const MAC_DIR = 'tools/algbench/reports/LIVE-MIDI-FSP8-02/macros';
++const V2_DIR = 'tools/algbench/reports/FSP8-LIVE-MIDI-COMPLETION-01/macros';
++const parseMacro = (dir, name) => {
++    const f = path.join(ROOT, dir, name + '.studioonemacro'); if (!fs.existsSync(f)) return null;
++    const t = fs.readFileSync(f, 'utf8').replace(/^﻿/, '');
++    return { title: (t.match(/<Macro title="([^"]*)"/) || [])[1], cmds: [...t.matchAll(/<CommandElement category="([^"]*)" name="([^"]*)">\s*<CommandArgument name="([^"]*)" value="([^"]*)"\/>/g)].map((m) => `${m[1]}|${m[2]}:${m[3]}=${m[4]}`) };
++};
++
++(async () => {
++    console.log('== 1. Bảng gợi ý trong Setup khớp bảng mục tiêu (CC, kênh 16, value 127) ==');
++    const setup = read('ui/js/setup.js');
++    const sug = (setup.match(/const DAW_STATE_SUGGESTED = Object\.freeze\(\{([\s\S]*?)\}\);/) || [])[1] || '';
++    const got = Object.fromEntries([...sug.matchAll(/(\w+):\s*(\d+)/g)].map((m) => [m[1], +m[2]]));
++    ok(TABLE.every(([a, cc]) => got[a] === cc) && Object.keys(got).length === 8, 'DAW_STATE_SUGGESTED = 8 mapping đúng bảng', got);
++    ok(/DAW_STATE_SUGGESTED_CHANNEL = 16;/.test(setup) && /DAW_STATE_SUGGESTED_VALUE = 127;/.test(setup), 'kênh gợi ý 16, value 127');
++    ok(/if \(!confirm\(msg\)\)/.test(setup), 'điền bộ CC gợi ý CHỈ khi người dùng xác nhận (không ghi đè ngầm)');
++
++    console.log('\n== 2. Mã THẬT: 8 mapping -> 8 byte, kênh 16 -> index 15 (0xBF) ==');
++    const sent = [];
++    const store = { selectedDAW: 'studio-one', dawMidiOutMappings: { 'studio-one': Object.fromEntries(TABLE.map(([a, cc]) => [a, { kind: 'cc', channel: 16, number: cc, value: 127, source: 'USER_DEFINED' }])) } };
++    const sb = { console: { log() {}, error() {}, warn() {} }, setTimeout, clearTimeout, Date, Math, Promise, getSetting: (k, f) => (store[k] === undefined ? f : store[k]), setSetting: (k, v) => { store[k] = v; }, electronAPI: {},
++        sendMidiCC: async (n, v, ch) => { sent.push([0xb0 | ch, n, v]); return true; }, sendMidiNotePulse: async () => true };
++    sb.window = sb; vm.createContext(sb); vm.runInContext(read('ui/js/actionRegistry.js'), sb);
++    const AR = sb.window.ActionRegistry;
++    for (const ctl of ['MUSIC', 'MIC1', 'MIC2', 'FX']) for (const on of [true, false]) {
++        const before = sent.length; const cc = TABLE.find(([a]) => a === `${ctl}_${on ? 'ON' : 'OFF'}`)[1];
++        const r = await AR.setDawControlState(ctl, on);
++        ok(r.ok && r.dawConfirmed === false && r.delivery === 'UNCONFIRMED' && sent.length === before + 1 && sent[before].join() === `191,${cc},127`, `${ctl} ${on ? 'ON' : 'OFF'} -> [0xBF,${cc},127], delivery=UNCONFIRMED, dawConfirmed=false`, sent.slice(before));
++    }
++    const s2 = { ...store, dawMidiOutMappings: { 'studio-one': {} } }; Object.assign(store, s2);
++    const n0 = sent.length; const rr = await AR.setDawControlState('MIC1', true);
++    ok(!rr.ok && (rr.reason === 'NOT_CONFIGURED' || rr.status === 'NOT_CONFIGURED') && sent.length === n0, 'thiếu mapping -> NOT_CONFIGURED, không gửi gì');
++
++    console.log('\n== 3. Macro LIVE_* trong repo: đúng track/bus, đúng loại lệnh ==');
++    for (const [a, cc, name] of TABLE) {
++        const m = parseMacro(MAC_DIR, name); ok(!!m && m.title === name, `${name} tồn tại, title khớp (CC${cc})`);
++        if (!m) continue;
++        if (a.startsWith('FX')) {
++            const st = a === 'FX_ON' ? '0' : '1'; const buses = ['Delay', 'Verb ngắn', 'Verb dài', 'Com Verb'];
++            const want = buses.flatMap((b) => [`Console|Find Channel:Name=${b}`, `Track|Mute:State=${st}`]);
++            ok(JSON.stringify(m.cmds) === JSON.stringify(want), `${name}: đúng 4 bus (có dấu), Mute State=${st} (ON=bỏ Mute), không lệnh khác`, m.cmds);
++        } else {
++            const tr = a.startsWith('MUSIC') ? 'Beat' : a.startsWith('MIC1') ? 'Mic' : 'Không Dây'; const st = a.endsWith('_ON') ? '1' : '0';
++            ok(JSON.stringify(m.cmds) === JSON.stringify([`Track|Find Track:Name=${tr}`, `Track|Monitor:State=${st}`]), `${name}: Find Track "${tr}" -> Monitor State=${st}; KHÔNG Mute, KHÔNG track khác`, m.cmds);
++        }
++    }
++    const cc8 = new Set(TABLE.map(([, cc]) => cc)); ok(cc8.size === 8, '8 CC khác nhau từng đôi (không trùng macro)');
++
++    console.log('\n== 4. Macro V2 thử nghiệm (nếu có): không ghi đè LIVE_*, chỉ Find Track x2 + Monitor ==');
++    for (const [a, , name] of TABLE.filter(([a]) => !a.startsWith('FX'))) {
++        const v2 = 'LIVE_V2_' + name.slice(5); const m = parseMacro(V2_DIR, v2);
++        if (!m) { console.log('  (bỏ qua: không có', v2, 'trong thư mục báo cáo)'); continue; }
++        const tr = a.startsWith('MUSIC') ? 'Beat' : a.startsWith('MIC1') ? 'Mic' : 'Không Dây'; const st = a.endsWith('_ON') ? '1' : '0';
++        ok(m.title === v2 && v2 !== name && JSON.stringify(m.cmds) === JSON.stringify([`Track|Find Track:Name=${tr}`, `Track|Find Track:Name=${tr}`, `Track|Monitor:State=${st}`]), `${v2}: tên khác bản LIVE, đúng track "${tr}", Monitor State=${st}, không Mute`, m.cmds);
++    }
++
++    console.log(`\n${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})();
+diff --git a/tests/unit/MenuFix02.verify.js b/tests/unit/MenuFix02.verify.js
+new file mode 100644
+index 0000000..511b7a4
+--- /dev/null
++++ b/tests/unit/MenuFix02.verify.js
+@@ -0,0 +1,68 @@
++// MENU-FIX-02 — MIC1/MIC2/MUSIC: CHỌN TRACK -> chờ -> ON/OFF (đúng 1 lệnh Monitor/cú bấm, tuần tự, không gửi lại). Đồng hồ ảo.
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const ROOT = path.join(__dirname, '..', '..');
++let pass = 0, fail = 0;
++const check = (l, c, x) => { if (c) { pass++; console.log('  OK  ', l); } else { fail++; console.error('  FAIL ', l, x !== undefined ? JSON.stringify(x) : ''); } };
++const TABLE = { MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109 };
++const SEL = { MUSIC_SELECT: 110, MIC1_SELECT: 111, MIC2_SELECT: 112 };
++const mk = (cc) => ({ kind: 'cc', channel: 16, number: cc, value: 127, source: 'USER_DEFINED' });
++const all = (o) => Object.fromEntries(Object.entries(o).map(([a, c]) => [a, mk(c)]));
++function env({ mappings, extra = {}, failOn = [] } = {}) {
++  const store = { selectedDAW: 'studio-one', dawMidiOutMappings: { 'studio-one': mappings || { ...all(TABLE), ...all(SEL) } }, ...extra };
++  const sends = []; const timers = []; let now = 0;
++  const sb = {
++    console: { log() {}, error() {}, warn() {} }, Date: { now: () => now }, Math, Promise,
++    setTimeout: (fn, ms) => { const t = { fn, at: now + ms, dead: false }; timers.push(t); return t; }, clearTimeout: (t) => { if (t) t.dead = true; },
++    getSetting: (k, f) => (store[k] === undefined ? f : store[k]), setSetting: (k, v) => { store[k] = v; },
++    sendMidiCC: async (n, v, ch) => { sends.push({ n, v, ch, at: now }); return !failOn.includes(n); }, sendMidiNotePulse: async () => true, saveData() {}, electronAPI: {},
++  };
++  sb.window = sb; vm.createContext(sb); vm.runInContext(fs.readFileSync(path.join(ROOT, 'ui/js/actionRegistry.js'), 'utf8'), sb);
++  const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
++  const advance = async (ms) => { await flush(); now += ms; for (const t of timers.slice()) if (!t.dead && t.at <= now) { t.dead = true; t.fn(); } await flush(); };
++  return { AR: sb.window.ActionRegistry, sends, advance, flush, store, seq: () => sends.map((s) => s.n).join(',') };
++}
++(async () => {
++  console.log('== 1. Một cú bấm: CHỌN TRACK -> chờ -> đúng 1 lệnh ON/OFF ==');
++  for (const [c, on, off, sel] of [['MIC1', 'MIC1_ON', 'MIC1_OFF', 'MIC1_SELECT'], ['MIC2', 'MIC2_ON', 'MIC2_OFF', 'MIC2_SELECT'], ['MUSIC', 'MUSIC_ON', 'MUSIC_OFF', 'MUSIC_SELECT']]) {
++    const e = env(); const p = e.AR.setDawControlState(c, true, { reason: 'menu-button' });
++    await e.advance(0);
++    check(`${c}: lệnh ĐẦU là CHỌN TRACK CC${SEL[sel]}, Monitor CHƯA gửi`, e.seq() === String(SEL[sel]), e.sends);
++    await e.advance(299); check(`${c}: trước 300ms vẫn chưa gửi Monitor`, e.seq() === String(SEL[sel]));
++    await e.advance(2); const r = await p;
++    check(`${c} ON: sau chờ gửi đúng CC${TABLE[on]} ch16(index15) v127; tổng 2 lệnh; ok`, e.seq() === `${SEL[sel]},${TABLE[on]}` && e.sends[1].v === 127 && e.sends[1].ch === 15 && r.ok && r.selectUsed === sel && r.dawConfirmed === false, e.sends);
++    await e.advance(5000); check(`${c}: KHÔNG gửi lại Monitor sau đó (gửi lại sẽ đảo trạng thái)`, e.sends.length === 2);
++    const f = env(); const q = f.AR.setDawControlState(c, false); await f.advance(400); await q;
++    check(`${c} OFF: ${SEL[sel]} rồi CC${TABLE[off]}`, f.seq() === `${SEL[sel]},${TABLE[off]}`, f.sends);
++  }
++  console.log('\n== 2. Bấm MIC 1 rồi MIC 2 sát nhau: tuần tự, không xen lẫn, mỗi nút đúng track ==');
++  { const e = env(); const a = e.AR.setDawControlState('MIC1', true); const b = e.AR.setDawControlState('MIC2', true);
++    await e.advance(0); await e.advance(310); await e.advance(310); await e.advance(310); await Promise.all([a, b]);
++    check('thứ tự: 111,104,112,106 (chọn Mic1→Monitor Mic1→chọn Mic2→Monitor Mic2)', e.seq() === '111,104,112,106', e.seq());
++    const ts = e.sends.map((s) => s.at); check('mỗi Monitor cách lệnh chọn ≥300ms', ts[1] - ts[0] >= 300 && ts[3] - ts[2] >= 300, ts); }
++  console.log('\n== 3. Lỗi và tương thích ==');
++  { const e = env({ failOn: [111] }); const p = e.AR.setDawControlState('MIC1', true); await e.advance(0); await e.advance(400); const r = await p;
++    check('CHỌN TRACK lỗi -> KHÔNG gửi Monitor, báo lỗi rõ', !r.ok && r.selectFailed === true && !e.sends.some((s) => s.n === 104) && /KHÔNG gửi lệnh Monitor/.test(r.text) && r.delivery === 'NOT_SENT', e.sends);
++    const f = env({ failOn: [111] }); const x = f.AR.setDawControlState('MIC1', true); const y = f.AR.setDawControlState('MIC2', true);
++    await f.advance(0); await f.advance(400); await f.advance(400); await Promise.all([x, y]);
++    check('lỗi chọn của nút này không làm kẹt hàng đợi: MIC2 vẫn chạy (112,106)', f.seq() === '111,112,106', f.seq());
++    const g = env({ mappings: all(TABLE) }); const r2 = await g.AR.setDawControlState('MIC1', true);
++    check('chưa lưu CHỌN TRACK => hành vi cũ: đúng 1 lệnh CC104 NGAY, không chờ', r2.ok && g.seq() === '104' && r2.selectUsed === undefined, g.sends);
++    const h = env({ mappings: { MONITOR_MIC1: mk(60), MIC1_SELECT: mk(111) } }); const r3 = await h.AR.setDawControlState('MIC1', true);
++    check('chế độ toggle cũ: đúng 1 lệnh toggle, KHÔNG gửi chọn track', r3.mode === 'legacy' && h.seq() === '60', h.sends);
++    const i = env({ mappings: { ...all(TABLE), ...all(SEL), MIC1_OFF: undefined } }); delete i.store.dawMidiOutMappings['studio-one'].MIC1_OFF; const r4 = await i.AR.setDawControlState('MIC1', false);
++    check('thiếu mapping chiều OFF: NOT_CONFIGURED, KHÔNG gửi gì (kể cả chọn track)', !r4.ok && r4.reason === 'NOT_CONFIGURED' && i.sends.length === 0, i.sends);
++    const j = env(); const r5 = await j.AR.setDawControlState('FX', true);
++    check('FX: đúng 1 lệnh FX_ON (không có chọn track)', r5.ok && j.seq() === '108', j.sends); }
++  console.log('\n== 4. Setting dawSelectSettleMs ==');
++  { for (const [v, expect] of [[0, 0], [800, 800], [999999, 2000], [-5, 300]]) {
++      const e = env({ extra: { dawSelectSettleMs: v } }); const p = e.AR.setDawControlState('MIC2', true); await e.advance(0); await e.advance(expect > 0 ? expect - 1 : 0);
++      const before = e.sends.length; await e.advance(2); await p;
++      check(`dawSelectSettleMs=${v} -> chờ ${expect}ms (trước: ${before} lệnh, sau: ${e.sends.length})`, e.sends.length === 2 && (expect === 0 ? true : before === 1), e.sends); } }
++  console.log('\n== 5. Setup + gói gợi ý + tĩnh ==');
++  { const setup = fs.readFileSync(path.join(ROOT, 'ui/js/setup.js'), 'utf8'); const reg = fs.readFileSync(path.join(ROOT, 'ui/js/actionRegistry.js'), 'utf8');
++    check('Setup có 3 hàng CHỌN TRACK và nằm trong nhóm chống trùng CC', ['MUSIC_SELECT', 'MIC1_SELECT', 'MIC2_SELECT'].every((a) => new RegExp(`action: "${a}"`).test(setup)) && /DAW_SELECT_ACTION_SET[^\n]*\n[^\n]*\.\.\.DAW_SELECT_ACTION_SET/.test(setup));
++    check('Gói gợi ý Studio One có bộ CHỌN TRACK (CC110–112 ch16, v127); Cubase KHÔNG có', /select: Object\.freeze\(\{ title: "CHỌN TRACK", count: 3, mappings: dawQfMake\(16, 127, \{ MUSIC_SELECT: 110, MIC1_SELECT: 111, MIC2_SELECT: 112 \}\) \}\)/.test(setup) && (setup.match(/title: "CHỌN TRACK"/g) || []).length === 1);
++    check('Không còn mã gửi lại Monitor (resend) trong actionRegistry', !/Resend|resend/.test(reg));
++    check('ActionRegistry có 3 action SELECT và DAW_STATE_CONTROLS.select', /MIC1_SELECT: "MIC1_SELECT"/.test(reg) && /select: "MIC2_SELECT"/.test(reg)); }
++  console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})();
+diff --git a/tests/unit/MenuFxFix.verify.js b/tests/unit/MenuFxFix.verify.js
+index 2aa622e..b184373 100644
+--- a/tests/unit/MenuFxFix.verify.js
++++ b/tests/unit/MenuFxFix.verify.js
+@@ -17,7 +17,7 @@ function build(opts = {}) {
+     const clock = { t: 0 }; const executed = []; const telemetry = []; const timers = []; const deferred = [];
+     const cls = new Set(opts.saved ? ['active'] : []);
+     const btn = { dataset: {}, title: '', classList: { toggle(c, f) { (f === undefined ? !cls.has(c) : f) ? cls.add(c) : cls.delete(c); }, contains: (c) => cls.has(c), add: (c) => cls.add(c) } };
+-    const cfg = new Set(opts.configured === undefined ? ['FX_SEND_REVERB', 'FX_SEND_DELAY'] : opts.configured);
++    const cfg = new Set(opts.configured === undefined ? ['FX_ON', 'FX_OFF'] : opts.configured);
+     let mode = opts.mode || 'ok'; const intervals = [];
+     const win = { performance: { now: () => 0 }, electronAPI: { sendTelemetry: (r) => telemetry.push(r) } }; win.window = win;
+     win.Date = { now: () => clock.t };
+@@ -27,7 +27,18 @@ function build(opts = {}) {
+         document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) }, getSetting: (k, f) => (k === 'fxAutoMidiMode' ? 'toggle' : f), saveData: () => {}, console: { log() {}, warn() {}, error() {} },
+         setInterval: (fn) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,
+         ActionRegistry: {
+-            ACTIONS: { MONITOR_FX: 'MONITOR_FX', FX_SEND_REVERB: 'FX_SEND_REVERB', FX_SEND_DELAY: 'FX_SEND_DELAY' },
++            ACTIONS: { MONITOR_FX: 'MONITOR_FX', FX_SEND_REVERB: 'FX_SEND_REVERB', FX_SEND_DELAY: 'FX_SEND_DELAY', FX_ON: 'FX_ON', FX_OFF: 'FX_OFF' },
++            // FSP8-LIVE-MONITOR-FX-AUTO-FIX-01 — mô phỏng ĐÚNG hợp đồng actionRegistry.js thật: explicit khi đã lưu ít nhất một trong FX_ON/FX_OFF;
++            // explicit chỉ gửi mapping của chiều đích (thiếu => NOT_CONFIGURED, không toggle); legacy => lệnh MONITOR_FX cũ.
++            getDawStateMode: () => (cfg.has('FX_ON') || cfg.has('FX_OFF') ? 'explicit' : 'legacy'),
++            setDawControlState: async (control, target, ctx) => {
++                const explicit = cfg.has('FX_ON') || cfg.has('FX_OFF');
++                const action = explicit ? (target ? 'FX_ON' : 'FX_OFF') : 'MONITOR_FX';
++                const res = explicit && !cfg.has(action) ? { ok: false, status: 'NOT_CONFIGURED', reason: 'NOT_CONFIGURED' } : await win.ActionRegistry.executeAction(action, ctx);
++                const text = res && res.ok ? 'đã GỬI lệnh FX (Mute 4 bus) ' + (target ? 'ON' : 'OFF') + ' — DAW chưa xác nhận' : 'CHƯA cấu hình lệnh FX (Mute 4 bus) hoặc lỗi — DAW KHÔNG nhận lệnh';
++                win.__dawStateLast = win.__dawStateLast || {}; win.__dawStateLast[control] = { target: target ? 'ON' : 'OFF', ok: !!(res && res.ok), action, text };
++                return Object.assign({}, res, { control, target: target ? 'ON' : 'OFF', mode: explicit ? 'explicit' : 'legacy', action, text, delivery: res && res.ok ? 'UNCONFIRMED' : 'NOT_SENT', dawConfirmed: false });
++            },
+             getMidiOutMapping: (n) => (cfg.has(n) ? { kind: 'cc', number: 20, value: 127, channel: 1 } : null), getMouseCoordinate: () => '',
+             executeAction: (n) => {
+                 executed.push({ n, t: clock.t });
+@@ -74,7 +85,7 @@ async function until(r, music, cond, maxMs) { const t0 = r.clock.t; while (r.clo
+     let r = build(); await r.run(5, SIL); ok(!r.on, '1a. Im lặng ban đầu: nút TẮT');
+     let ms = await until(r, MUS, () => r.on, 3000);
+     ok(ms <= 1000, `1b. Nhạc xuất hiện → nút/yêu cầu FX BẬT sau ${ms} ms (≤ 1000)`);
+-    await r.run(0.3, MUS); ok(r.executed.length === 2 && r.executed.every((e) => e.t - 5000 <= 1000 + 400), `1c. Lệnh Send Reverb+Delay gửi ngay khi bật (${r.executed.length} lệnh)`);
++    await r.run(0.3, MUS); ok(r.executed.length === 1 && r.executed[0].n === 'FX_ON' && r.executed.every((e) => e.t - 5000 <= 1000 + 400), `1c. Lệnh FX_ON (mute 4 bus) gửi ngay khi bật, đúng 1 lệnh, KHÔNG Send (${r.executed.length} lệnh)`);
+     // nhạc xuất hiện TRỞ LẠI sau khi tắt
+     await r.run(3, SIL); ok(!r.on, '1d. (tiền đề) đã tắt sau im lặng');
+     ms = await until(r, MUS, () => r.on, 3000); ok(ms <= 1000, `1e. Nhạc xuất hiện trở lại → BẬT sau ${ms} ms (≤ 1000)`);
+@@ -135,7 +146,7 @@ async function until(r, music, cond, maxMs) { const t0 = r.clock.t; while (r.clo
+     ok(r.btn.dataset.fxSync === 'not-configured' && /CHƯA cấu hình/.test(r.btn.title) && !/đã GỬI/.test(r.btn.title), '8b. Hiển thị rõ: CHƯA cấu hình Send, không nói "đã gửi"');
+     r = build({ configured: [] }); await r.run(2, SIL); await r.click(); await r.flush();
+     ok(r.on && r.btn.dataset.fxSync === 'not-configured' && r.btn.dataset.fxControl === 'manual' && /THỦ CÔNG/.test(r.btn.title) && /CHƯA cấu hình/.test(r.btn.title), '8c. Bấm tay (Send chưa cấu hình): nút theo yêu cầu + hiển thị "thủ công" + "CHƯA cấu hình Send"');
+-    r = build({ configured: ['FX_SEND_REVERB', 'FX_SEND_DELAY'] }); await r.run(5, SIL); await r.run(3, MUS);
++    r = build({ configured: ['FX_ON', 'FX_OFF'] }); await r.run(5, SIL); await r.run(3, MUS);
+     ok(r.btn.dataset.fxSync === 'sent-unconfirmed' && /chưa xác nhận/.test(r.btn.title) && !/(^|[^a-zA-Z])đã xác nhận/.test(r.btn.title), '8d. Dù gửi OK: chỉ ghi "đã GỬI — DAW chưa xác nhận"; không bao giờ ghi "đã đồng bộ/xác nhận"');
+ 
+     // ---- 9. runtime chậm / lỗi → không hiện đồng bộ giả
+@@ -158,7 +169,7 @@ async function until(r, music, cond, maxMs) { const t0 = r.clock.t; while (r.clo
+     r = build({ mode: 'defer' }); await r.run(5, SIL); await r.run(1.2, MUS); // BẬT đang chờ phản hồi
+     await r.run(0.1, MUS); await settle(r, { ok: true });
+     await r.run(2, SIL); await settle(r, { ok: true }); await r.run(0.5, SIL); await settle(r, { ok: true });
+-    ok(!r.on && r.executed.filter((e) => e.n === 'FX_SEND_REVERB').length === 2, '9i. Nhạc đổi trạng thái khi lệnh trước còn chờ → lệnh TẮT vẫn được gửi (trước đây bị mất)');
++    ok(!r.on && r.executed.filter((e) => e.n === 'FX_ON').length === 1 && r.executed.filter((e) => e.n === 'FX_OFF').length === 1, '9i. Nhạc đổi trạng thái khi lệnh trước còn chờ → lệnh TẮT vẫn được gửi (trước đây bị mất)');
+     let rr = build({ mode: 'defer' }); await rr.run(5, SIL); await rr.run(1.0, MUS); // lệnh BẬT còn treo
+     await rr.run(1.3, SIL); // im lặng đủ lâu trong lúc BẬT chưa trả lời
+     await settle(rr, { ok: true }); await rr.run(0.3, SIL); await settle(rr, { ok: true }); await rr.run(0.3, SIL);
+@@ -169,8 +180,8 @@ async function until(r, music, cond, maxMs) { const t0 = r.clock.t; while (r.clo
+     r = build(); await r.run(5, SIL); await r.click(); await r.flush(); ok(r.info.manualOverride, '10a. (tiền đề) phiên cũ đang trong 60 s giữ quyền thủ công');
+     let r2 = build({ saved: true }); ok(!r2.info.manualOverride && r2.info.musicState === 'UNKNOWN' && r2.info.lastResult === null, '10b. Khởi động lại: KHÔNG kế thừa manual override / trạng thái nhạc / kết quả gửi của phiên cũ');
+     await r2.run(0.7, SIL); ok(r2.on, '10c. Nút lưu BẬT + chưa đủ 1 s im lặng: chưa tự đổi (chưa có bằng chứng)');
+-    await r2.run(1, SIL); ok(!r2.on && r2.executed.length === 2, '10d. Nút lưu BẬT + nhạc im → TẮT sau ≈1 s và gửi lệnh TẮT (sửa state cũ sai)');
+-    r2 = build({ saved: false }); await r2.run(1, SIL); ms = await until(r2, MUS, () => r2.on, 3000); ok(ms <= 1000 && r2.executed.length === 2, `10e. Nút lưu TẮT + nhạc phát → BẬT sau ${ms} ms và gửi lệnh BẬT`);
++    await r2.run(1, SIL); ok(!r2.on && r2.executed.length === 1 && r2.executed[0].n === 'FX_OFF', '10d. Nút lưu BẬT + nhạc im → TẮT sau ≈1 s và gửi lệnh TẮT (sửa state cũ sai)');
++    r2 = build({ saved: false }); await r2.run(1, SIL); ms = await until(r2, MUS, () => r2.on, 3000); ok(ms <= 1000 && r2.executed.length === 1 && r2.executed[0].n === 'FX_ON', `10e. Nút lưu TẮT + nhạc phát → BẬT sau ${ms} ms và gửi lệnh BẬT`);
+     r2 = build({ saved: true }); await r2.run(1, MUS); await r2.run(10, MUS);
+     ok(r2.on && r2.executed.length === 0, '10f. Nút lưu BẬT + nhạc đang phát → giữ BẬT, không gửi lệnh thừa (GIẢ ĐỊNH: DAW còn đúng trạng thái đã lưu — KHÔNG kiểm chứng được, không có feedback DAW)');
+     r2 = build({ saved: true, source: false }); await r2.run(10, SIL);
+diff --git a/tests/unit/MidiDawControl01.verify.js b/tests/unit/MidiDawControl01.verify.js
+index 10b8297..56b331a 100644
+--- a/tests/unit/MidiDawControl01.verify.js
++++ b/tests/unit/MidiDawControl01.verify.js
+@@ -206,7 +206,7 @@ function fakeBtn(initial = []) {
+         r.btns.mic1Btn.fire(); await r.flush();
+         check('Chưa cấu hình: tooltip "CHƯA cấu hình", dataset.dawSync=not-configured, 0 lệnh', /CHƯA cấu hình/.test(r.btns.mic1Btn.title) && r.btns.mic1Btn.dataset.dawSync === 'not-configured' && r.sends.length === 0);
+         check('STATIC: không có nơi nào gửi lệnh ON/OFF khi KHỞI ĐỘNG (setDawControlState chỉ gọi trong handler click/__fxManualToggle)',
+-            (ren.match(/setDawControlState\(/g) || []).length === 5 && !/DOMContentLoaded[\s\S]{0,200}setDawControlState/.test(ren));
++            (ren.match(/setDawControlState\(/g) || []).length === 6 && /return AR\.setDawControlState\("FX", !!target, \{ reason: "fx-auto" \}\)/.test(ren) && !/DOMContentLoaded[\s\S]{0,200}setDawControlState/.test(ren)); // 6 = 5 cũ + 1 trong busGroup.execute của FX Auto (FSP8-LIVE-MONITOR-FX-AUTO-FIX-01; chỉ chạy khi tick đổi trạng thái nhạc, không chạy lúc khởi động)
+     }
+ 
+     // ===================================================================== FX wiring thật (__fxManualToggle)
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index 8f7239e..2035049 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -94,14 +94,19 @@ const ACTIONS = Object.freeze({
+     MIC2_ON: "MIC2_ON",
+     MIC2_OFF: "MIC2_OFF",
+     FX_ON: "FX_ON",
+-    FX_OFF: "FX_OFF"
++    FX_OFF: "FX_OFF",
++    // MENU-FIX-02 — lệnh CHỌN TRACK riêng (macro chỉ có "Find Track"), tuỳ chọn. Có mapping thì Menu gửi nó TRƯỚC, chờ track chuyển xong,
++    // rồi mới gửi ON/OFF. Chưa lưu => hành vi cũ (một lệnh/cú bấm).
++    MUSIC_SELECT: "MUSIC_SELECT",
++    MIC1_SELECT: "MIC1_SELECT",
++    MIC2_SELECT: "MIC2_SELECT"
+ });
+ 
+ // MIDI-DAW-CONTROL-01 — nút Menu -> cặp action ON/OFF + action toggle CŨ (dùng khi người dùng CHƯA cấu hình ON/OFF).
+ const DAW_STATE_CONTROLS = Object.freeze({
+-    MUSIC: Object.freeze({ on: "MUSIC_ON", off: "MUSIC_OFF", legacy: "MONITOR_BEAT_TOGGLE", label: "MUSIC (Monitor Beat)" }),
+-    MIC1: Object.freeze({ on: "MIC1_ON", off: "MIC1_OFF", legacy: "MONITOR_MIC1", label: "MIC 1 (Monitor Mic)" }),
+-    MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", label: "MIC 2 (Monitor Không Dây)" }),
++    MUSIC: Object.freeze({ on: "MUSIC_ON", off: "MUSIC_OFF", legacy: "MONITOR_BEAT_TOGGLE", select: "MUSIC_SELECT", label: "MUSIC (Monitor Beat)" }),
++    MIC1: Object.freeze({ on: "MIC1_ON", off: "MIC1_OFF", legacy: "MONITOR_MIC1", select: "MIC1_SELECT", label: "MIC 1 (Monitor Mic)" }),
++    MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", select: "MIC2_SELECT", label: "MIC 2 (Monitor Không Dây)" }),
+     FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" })
+ });
+ 
+@@ -321,6 +326,25 @@ function describeDawStateResult(control, targetOn, res, mode) {
+     return `gửi lệnh ${def.label} ${dir} LỖI${res && res.status ? " (" + res.status + ")" : ""} — DAW KHÔNG nhận lệnh`;
+ }
+ 
++// MENU-FIX-02 — macro Monitor của Studio Pro là lệnh ĐẢO chạy lên track ĐANG CHỌN (INFERRED từ triệu chứng + mô tả macro "State rỗng"):
++// nếu Find Track chưa kịp chuyển track thì lệnh đảo rơi vào track CŨ (bấm MIC 2 làm MIC 1 đảo theo). Giải pháp: gửi CHỌN TRACK trước,
++// chờ ngắn, rồi mới gửi ON/OFF — mỗi cú bấm đúng MỘT lệnh Monitor, trên đúng track. Các chuỗi "chọn → chờ → ON/OFF" xếp hàng tuần tự
++// toàn cục để hai nút bấm sát nhau không xen lẫn. KHÔNG bao giờ gửi lại lệnh Monitor (sẽ đảo lần nữa).
++const DAW_SELECT_SETTLE_DEFAULT_MS = 300;
++function getDawSelectSettleMs() {
++    const v = typeof getSetting === "function" ? getSetting("dawSelectSettleMs") : undefined;
++    if (v === undefined || v === null || v === "") return DAW_SELECT_SETTLE_DEFAULT_MS;
++    const n = Number(v);
++    if (!Number.isFinite(n) || n < 0) return DAW_SELECT_SETTLE_DEFAULT_MS;
++    return Math.min(n, 2000);
++}
++let dawSequenceChain = Promise.resolve();
++function runDawSequence(fn) {
++    const p = dawSequenceChain.then(fn, fn);
++    dawSequenceChain = p.catch(() => {});
++    return p;
++}
++
+ async function setDawControlState(control, targetOn, context = {}) {
+     const def = DAW_STATE_CONTROLS[control];
+     if (!def) return { ok: false, reason: "UNKNOWN_CONTROL", control };
+@@ -332,6 +356,16 @@ async function setDawControlState(control, targetOn, context = {}) {
+         action = targetOn ? def.on : def.off;
+         if (!isMidiMappingConfigured(action)) {
+             res = { ok: false, status: ACTION_STATUS.NOT_CONFIGURED, reason: "NOT_CONFIGURED" };
++        } else if (def.select && isMidiMappingConfigured(def.select)) {
++            // MENU-FIX-02 — CHỌN TRACK -> chờ -> ON/OFF. Chọn lỗi => KHÔNG gửi Monitor (tránh đảo nhầm track cũ).
++            res = await runDawSequence(async () => {
++                const sel = await executeAction(def.select, { reason: `${reason}-select` });
++                if (!sel || !sel.ok) return { ...(sel || {}), ok: false, selectFailed: true };
++                const wait = getDawSelectSettleMs();
++                if (wait > 0) await new Promise((r) => setTimeout(r, wait));
++                const r2 = await executeAction(action, { reason });
++                return { ...r2, selectUsed: def.select, selectWaitMs: wait };
++            });
+         } else {
+             res = await executeAction(action, { reason });
+         }
+@@ -349,6 +383,8 @@ async function setDawControlState(control, targetOn, context = {}) {
+         dawConfirmed: false, // không có phản hồi từ Studio One => KHÔNG BAO GIỜ true
+         text: describeDawStateResult(control, targetOn, res, mode)
+     };
++    if (res && res.selectFailed) out.text = `gửi lệnh CHỌN TRACK (${def.select}) LỖI — KHÔNG gửi lệnh Monitor (tránh đảo nhầm track khác)`;
++    else if (res && res.selectUsed) out.text += ` [đã chọn track trước, chờ ${res.selectWaitMs} ms]`;
+     // Lỗi gửi: nêu tầng + lỗi gốc của đường gửi main-process (appSettings.js::getLastMidiSendResult), không che.
+     if (!out.ok && out.status === ACTION_STATUS.NO_DEVICE && typeof window !== "undefined" && typeof window.getLastMidiSendResult === "function") { // chỉ khi THỰC SỰ đã thử gửi (không dùng kết quả cũ cho NOT_CONFIGURED)
+         const lr = window.getLastMidiSendResult();
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 6142d79..35d006b 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -608,23 +608,46 @@ function createFxAutoWiring() {
+     // khởi động (ở chế độ toggle mặc định lệnh đó ĐẢO trạng thái DAW). Nếu DAW thực tế khác giả định, lần chuyển nhạc được xác nhận đầu tiên sẽ gửi lệnh.
+     group.seed(!!fxBtn?.classList.contains("active"));
+     window.__fxSendGroup = group;
++    // FSP8-LIVE-MONITOR-FX-AUTO-FIX-01 — ĐƯỜNG FX AUTO THẬT = FX_ON/FX_OFF (đặt Mute 4 bus đích danh), KHÔNG phải nhóm Send ở trên.
++    // Trước đây Auto chỉ gọi `group` (FX_SEND_REVERB/DELAY, fallback MONITOR_FX): nút FX sáng nhưng 4 bus vẫn Mute vì không có lệnh FX_ON nào được gửi.
++    // `busGroup` dùng lại đúng createFxSendGroup (hàng đợi tuần tự, timeout 5 s, không gửi trùng, chỉ coi ok khi lệnh gửi ok) với MỘT mục tiêu "FX_BUS".
++    // Đã cấu hình = chế độ "explicit" của ActionRegistry (đã lưu ÍT NHẤT một trong FX_ON/FX_OFF). Chưa cấu hình => managed() rỗng => NOT_CONFIGURED
++    // (Auto KHÔNG âm thầm rơi sang Send/MONITOR_FX). Thiếu riêng chiều đích (vd có FX_ON, thiếu FX_OFF) => setDawControlState trả NOT_CONFIGURED, không gửi toggle.
++    const busGroup = AudioSource.createFxSendGroup({
++        actions: ["FX_BUS"],
++        legacyAction: "FX_BUS_NO_LEGACY",
++        timeoutMs: 5000,
++        isConfigured: (n) => n === "FX_BUS" && AR0()?.getDawStateMode?.("FX") === "explicit",
++        execute: async (n, target) => {
++            const AR = AR0(); if (!AR?.setDawControlState) return { ok: false, reason: "NO_ACTION_REGISTRY" };
++            return AR.setDawControlState("FX", !!target, { reason: "fx-auto" });
++        },
++    });
++    busGroup.seed(!!fxBtn?.classList.contains("active"));
++    window.__fxBusGroup = busGroup;
+     // AI-FIX-06 — TÁCH 3 trạng thái: (1) YÊU CẦU (nút FX sáng/tắt theo nhạc nền ngay khi chuyển trạng thái được xác nhận),
+     // (2) ĐÃ GỬI (group.aggregate(), dùng để quyết định gửi/không gửi lại), (3) DAW ĐÃ XÁC NHẬN (KHÔNG tồn tại: không có feedback).
+     // Trước đây nút chỉ sáng khi gửi MIDI thành công => chưa cấu hình Send / MIDI lỗi => nút KHÔNG BAO GIỜ sáng và không có dấu vết nào.
+     // Trạng thái đồng bộ hiện ở tooltip (title) + data-fx-sync của nút (không đổi HTML/CSS); chuyển trạng thái được ghi vào log telemetry.
+     // MENU-FX-FIX: văn bản Send tách khỏi "ai đang điều khiển" để cả Auto lẫn thủ công đều hiện đúng trạng thái Send thật.
+     const sendText = (info) => {
+-        // MIDI-DAW-CONTROL-01 — lần bấm tay gần nhất đi đường FX ON/OFF (mute bus): hiển thị đúng kết quả của đường đó, không nói "Send".
+-        if (window.__fxLastManualVia === "daw-state" && info.manualOverride && window.__dawStateLast?.FX) {
+-            return info.pending ? "đang gửi lệnh FX ON/OFF (mute bus) — CHƯA có phản hồi" : window.__dawStateLast.FX.text;
+-        }
++        // Đường đang hiển thị: lần bấm tay gần nhất đi đường Send cũ (chưa cấu hình FX ON/OFF) => văn bản Send; còn lại (Auto, hoặc bấm tay đi FX ON/OFF) => văn bản FX bus.
++        const viaSend = info.manualOverride && window.__fxLastManualVia === "send";
+         const lr = info.lastResult;
+-        if (info.pending) return "đang gửi lệnh Send — CHƯA có phản hồi, chưa đồng bộ";
++        if (viaSend) {
++            if (info.pending) return "đang gửi lệnh Send — CHƯA có phản hồi, chưa đồng bộ";
++            if (!lr) return null;
++            if (lr.ok) return "đã GỬI lệnh Send Reverb/Delay — DAW chưa xác nhận (không có phản hồi)";
++            if (lr.reason === "NOT_CONFIGURED") return "CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh";
++            if (lr.reason === "TIMEOUT") return "lệnh Send KHÔNG phản hồi (hết thời gian) — DAW có thể chưa đồng bộ";
++            return "gửi lệnh Send LỖI" + (lr.partial ? " một phần" : "") + " — DAW có thể chưa đồng bộ";
++        }
++        if (info.pending) return "đang gửi lệnh FX ON/OFF (mute 4 bus) — CHƯA có phản hồi";
+         if (!lr) return null;
+-        if (lr.ok) return "đã GỬI lệnh Send Reverb/Delay — DAW chưa xác nhận (không có phản hồi)";
+-        if (lr.reason === "NOT_CONFIGURED") return "CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh";
+-        if (lr.reason === "TIMEOUT") return "lệnh Send KHÔNG phản hồi (hết thời gian) — DAW có thể chưa đồng bộ";
+-        return "gửi lệnh Send LỖI" + (lr.partial ? " một phần" : "") + " — DAW có thể chưa đồng bộ";
++        if (lr.ok) return window.__dawStateLast?.FX?.text || "đã GỬI lệnh FX ON/OFF (mute 4 bus) — DAW chưa xác nhận";
++        if (lr.reason === "NOT_CONFIGURED") return "CHƯA cấu hình FX ON/OFF (mute 4 bus) trong Setup — DAW KHÔNG nhận lệnh (FX Auto không dùng Send)";
++        if (lr.reason === "TIMEOUT") return "lệnh FX ON/OFF KHÔNG phản hồi (hết thời gian) — DAW có thể chưa đồng bộ";
++        return "gửi lệnh FX ON/OFF LỖI" + (lr.partial ? " một phần" : "") + " — DAW KHÔNG nhận lệnh";
+     };
+     const syncText = (info) => {
+         const st = sendText(info);
+@@ -635,12 +658,12 @@ function createFxAutoWiring() {
+     const syncKey = (info) => info.pending ? "pending" : (info.lastResult ? (info.lastResult.ok ? "sent-unconfirmed" : (info.lastResult.reason === "NOT_CONFIGURED" ? "not-configured" : (info.lastResult.reason === "TIMEOUT" ? "timeout" : "failed"))) : "idle");
+     let __lastFxLogKey = "";
+     const ctl = AudioSource.createFxAutoController({
+-        getFxState: () => group.aggregate(),
++        getFxState: () => busGroup.aggregate(),
+         onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); } }, // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX
+         applyFx: async (target) => {
+             if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
+-            const res = await group.apply(target);
+-            if (!(res && res.ok)) console.warn("[FX-AUTO] Gửi lệnh Send FX thất bại/một phần/chưa cấu hình — nút giữ trạng thái YÊU CẦU, DAW có thể chưa đồng bộ:", res);
++            const res = await busGroup.apply(target);
++            if (!(res && res.ok)) console.warn("[FX-AUTO] Gửi lệnh FX ON/OFF (mute 4 bus) thất bại/chưa cấu hình — nút giữ trạng thái YÊU CẦU, DAW có thể chưa đồng bộ:", res);
+             return res;
+         },
+         // MENU-FX-AUTO-OFF: ghi mức dBFS thực (min/avg/max ~1 s, số khung im lặng số 0) mỗi 30 s để lần test thật sau có số liệu hiệu chuẩn ngưỡng.
+@@ -663,6 +686,7 @@ function createFxAutoWiring() {
+             if (AR0()?.getDawStateMode?.("FX") === "explicit") {
+                 window.__fxLastManualVia = "daw-state";
+                 res = await AR0().setDawControlState("FX", !!target, { reason: "menu-button" });
++                if (res && res.ok) busGroup.markSent("FX_BUS", !!target); // trạng thái "đã GỬI" để Auto tiếp quản sau 60 s không gửi trùng/ngược (chưa phải xác nhận DAW)
+                 if (fxBtn) { fxBtn.title = res.text || ""; fxBtn.dataset.dawSync = res.ok ? "sent-unconfirmed" : (res.reason === "NOT_CONFIGURED" ? "not-configured" : "failed"); }
+                 ctl.reportManualResult(res, seq);
+                 return res;
+@@ -679,7 +703,7 @@ function createFxAutoWiring() {
+         ctl.reportManualResult(res, seq);
+         return res;
+     };
+-    window.__fxAutoDebug = () => Object.assign({}, ctl.getInfo(), { sends: group.getSent(), managed: group.managed(), params: ctl.params });
++    window.__fxAutoDebug = () => Object.assign({}, ctl.getInfo(), { sends: group.getSent(), managed: group.managed(), bus: busGroup.getSent(), busManaged: busGroup.managed(), params: ctl.params });
+     setInterval(() => { if (getSetting("fxAutoEnabled", true) !== false) ctl.tick(); }, 100); // ĐÚNG 1 interval cho cả vòng đời trang
+     return ctl;
+ }
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index 10b58ce..820194a 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -650,6 +650,10 @@ const DAW_MIDI_ACTIONS = [
+     { action: "MIC2_OFF", label: "MIC 2 OFF (Monitor Không Dây tắt)" },
+     { action: "FX_ON", label: "FX ON (bỏ Mute 4 bus)" },
+     { action: "FX_OFF", label: "FX OFF (Mute 4 bus)" },
++    // MENU-FIX-02 — TUỲ CHỌN: lệnh CHỌN TRACK (macro chỉ "Find Track") gửi TRƯỚC lệnh ON/OFF tương ứng để Monitor không đảo nhầm track cũ.
++    { action: "MUSIC_SELECT", label: "MUSIC CHỌN TRACK (Find Track Beat — gửi trước ON/OFF)" },
++    { action: "MIC1_SELECT", label: "MIC 1 CHỌN TRACK (Find Track Mic — gửi trước ON/OFF)" },
++    { action: "MIC2_SELECT", label: "MIC 2 CHỌN TRACK (Find Track Không Dây — gửi trước ON/OFF)" },
+ ];
+ 
+ // MIDI-DAW-CONTROL-01 — bộ CC GỢI Ý (kênh 16, giá trị 127) khớp 8 macro LIVE_* của LIVE-MIDI-FSP8-02.
+@@ -675,7 +679,8 @@ function findDawStateMappingConflict(action, mapping) {
+ // một trong 12 action này và BẤT KỲ action khác đã lưu (nếu không, một cú xoay Knob có thể kích hoạt macro hoặc ngược lại).
+ // Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
+ const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2"]);
+-const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET]);
++const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
++const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET]);
+ function findMidiOutMappingConflict(action, mapping) {
+     for (const { action: other } of DAW_MIDI_ACTIONS) {
+         if (other === action) continue;
+@@ -728,6 +733,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
+         bundles: Object.freeze({
+             live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, DAW_QF_S1_LIVE) }),
+             knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_MIC1: 22, RETUNE_SPEED_MIC2: 23 }) }),
++            select: Object.freeze({ title: "CHỌN TRACK", count: 3, mappings: dawQfMake(16, 127, { MUSIC_SELECT: 110, MIC1_SELECT: 111, MIC2_SELECT: 112 }) }),
+         }),
+     }),
+     "cubase": Object.freeze({
+@@ -839,7 +845,8 @@ function initDawMidiOutputMappingSection() {
+             Menu chỉ <b>gửi</b> lệnh — <b>không đọc được trạng thái thật</b> của DAW, nên lúc mở app hoặc khi bạn đổi trực tiếp trong DAW, nút Menu có thể lệch DAW.
+             <br>${profile ? `<span id="quickFillProfile">Bộ gợi ý: <b>${profile.name}</b>${verStatus ? ` — ${verStatus}` : ""}. ${profile.origin} Điền ở đây chỉ LƯU mapping của Menu — DAW chưa được điều khiển cho đến khi bạn gán trong DAW.</span>
+             <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ LIVE gợi ý — ${profile.name}</button>
+-            <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>`
++            <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>
++            ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}`
+                 : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
+             <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
+             <span id="liveCcStatus"></span>`;
+@@ -866,6 +873,8 @@ function initDawMidiOutputMappingSection() {
+         if (profile) {
+             liveBox.querySelector("#btnFillLiveCc").addEventListener("click", () => runQuickFill("live"));
+             liveBox.querySelector("#btnFillKnobCc").addEventListener("click", () => runQuickFill("knob"));
++            const selBtn = liveBox.querySelector("#btnFillSelectCc");
++            if (selBtn) selBtn.addEventListener("click", () => runQuickFill("select"));
+         }
+ 
+         // Khôi phục: xoá CHỈ 8 mapping ON/OFF mới; mapping cũ (toggle MONITOR_*, Send, PLAY...) không bị đụng.

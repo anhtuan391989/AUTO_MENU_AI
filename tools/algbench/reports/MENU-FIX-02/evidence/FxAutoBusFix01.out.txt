@@ -1,0 +1,58 @@
+== 1. FX Auto: có nhạc -> đúng 1 lệnh FX_ON; hết nhạc -> đúng 1 lệnh FX_OFF (mã THẬT, byte đo được) ==
+  OK   khởi động im lặng: nút TẮT, 0 lệnh (nút lưu = TẮT, không gửi OFF vô cớ)
+  OK   nhạc phát -> nút SÁNG + đúng 1 CC108 ch16 v127 [0xBF,108,127]
+  OK   tooltip: đã GỬI lệnh FX, "chưa xác nhận", KHÔNG nói Send Reverb/Delay
+  OK   nhạc tiếp tục: không gửi lặp
+  OK   lặng ngắn 0,5 s: không tắt, không gửi
+  OK   im lặng > 1 s -> nút TẮT + đúng 1 CC109 ch16 [0xBF,109,127]
+  OK   nhạc lại -> FX_ON lần nữa
+  OK   không có CC nào của FX_SEND_REVERB/DELAY/MONITOR_FX
+
+== 2. Thời gian xác nhận giữ nguyên (nhạc ≈500 ms, im lặng ≈1000 ms) ==
+  OK   FX_ON gửi sau 496 ms kể từ khi nhạc xuất hiện
+  OK   FX_OFF gửi sau 992 ms kể từ khi im lặng
+
+== 3. Bấm tay: Auto nhường quyền 60 s, hết 60 s tiếp quản theo trạng thái nhạc HIỆN TẠI; nút thủ công cũng đúng 1 lệnh ==
+  OK   bấm tay BẬT -> đúng 1 CC108
+  OK   59 s im lặng sau bấm tay: Auto KHÔNG tắt, không gửi
+  OK   hết 60 s + im lặng -> Auto tiếp quản: CC109, không sớm hơn mốc 60 s
+  OK   bấm tay BẬT rồi nhạc phát đúng suốt: sau 60 s KHÔNG gửi trùng FX_ON (trạng thái đã gửi khớp)
+  OK   Auto BẬT rồi bấm tay TẮT -> CC109
+  OK   59 s nhạc vẫn phát: Auto KHÔNG bật lại
+  OK   hết 60 s -> Auto tiếp quản theo nhạc hiện tại: CC108
+
+== 4. Thiếu mapping / lỗi gửi / hết thời gian: KHÔNG báo thành công giả ==
+  OK   chưa cấu hình FX ON/OFF: nút theo YÊU CẦU, 0 lệnh, NOT_CONFIGURED rõ ràng
+  OK   chỉ có Send/MONITOR_FX cũ (chưa có FX ON/OFF): Auto KHÔNG âm thầm gửi Send/toggle (0 lệnh, NOT_CONFIGURED)
+  OK   chỉ lưu FX_ON: bật gửi CC108; tắt = NOT_CONFIGURED, KHÔNG rơi sang toggle/Send
+  OK   gửi lỗi: nút theo yêu cầu, trạng thái = LỖI, không nói đã gửi
+  OK   thử lại có giới hạn (2 lệnh thêm)
+  OK   runtime treo: trạng thái "đang gửi, chưa phản hồi", không phải đã gửi
+  OK   quá 5 s: TIMEOUT hiển thị rõ
+  OK   bấm tay + gửi lỗi: dawSync=failed, không báo đã gửi
+
+== 5. Gửi lỗi/NOT_CONFIGURED lúc bấm tay không làm Auto tin trạng thái sai ==
+  OK   bấm tay BẬT bị lỗi (không đánh dấu đã gửi) -> sau 60 s Auto gửi lại FX_ON khi có nhạc
+
+== 6. MUSIC / MIC 1 / MIC 2 đặt trạng thái đích danh, độc lập (mã THẬT) ==
+  OK   MUSIC ON -> đúng 1 lệnh CC102
+  OK   MIC1 ON -> đúng 1 lệnh CC104
+  OK   MIC2 ON -> đúng 1 lệnh CC106
+  OK   MIC1 OFF -> đúng 1 lệnh CC105
+  OK   MUSIC OFF -> đúng 1 lệnh CC103
+  OK   MIC2 OFF -> đúng 1 lệnh CC107
+  OK   MIC1 ON -> đúng 1 lệnh CC104
+  OK   MIC1 ON -> đúng 1 lệnh CC104
+  OK   CC103 (MUSIC_OFF) chỉ xuất hiện đúng 1 lần — khi chính nút MUSIC OFF được bấm; bấm MIC 1 KHÔNG sinh lệnh nào tắt MUSIC/Beat
+  OK   MIC 1 chỉ phát CC104/105; MUSIC chỉ CC102/103
+  OK   chỉ lưu MIC1_ON: bấm OFF = NOT_CONFIGURED, không toggle cũ
+
+== 7. Macro LIVE_* (tệp trong repo): mỗi macro chỉ chạm ĐÚNG track của nó, dùng Monitor chứ không dùng Mute ==
+  OK   LIVE_MUSIC_ON: Find Track "Beat" -> Monitor State=1 (không Mute, không track khác)
+  OK   LIVE_MUSIC_OFF: Find Track "Beat" -> Monitor State=0 (không Mute, không track khác)
+  OK   LIVE_MIC1_ON: Find Track "Mic" -> Monitor State=1 (không Mute, không track khác)
+  OK   LIVE_MIC1_OFF: Find Track "Mic" -> Monitor State=0 (không Mute, không track khác)
+  OK   LIVE_MIC2_ON: Find Track "Không Dây" -> Monitor State=1 (không Mute, không track khác)
+  OK   LIVE_MIC2_OFF: Find Track "Không Dây" -> Monitor State=0 (không Mute, không track khác)
+
+43 PASS, 0 FAIL

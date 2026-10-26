@@ -1,0 +1,39 @@
+== 1. Bấm 1 lần: gửi đúng lệnh ON cố định ngay, rồi gửi lại ĐÚNG lệnh đó 1 lần ==
+  OK   MIC1 ON: gửi ngay đúng 1 lệnh CC104 (không đảo)
+  OK   MIC1: trước 350ms chưa gửi lại
+  OK   MIC1: sau ~350ms gửi lại ĐÚNG CC104 đúng 1 lần (không gửi OFF/lệnh khác)
+  OK   MIC1: không gửi lại lần nữa
+  OK   MIC1 OFF: gửi OFF rồi gửi lại OFF (CC105) — không lẫn ON
+  OK   MIC2 ON: gửi ngay đúng 1 lệnh CC106 (không đảo)
+  OK   MIC2: trước 350ms chưa gửi lại
+  OK   MIC2: sau ~350ms gửi lại ĐÚNG CC106 đúng 1 lần (không gửi OFF/lệnh khác)
+  OK   MIC2: không gửi lại lần nữa
+  OK   MIC2 OFF: gửi OFF rồi gửi lại OFF (CC107) — không lẫn ON
+  OK   MUSIC ON: gửi ngay đúng 1 lệnh CC102 (không đảo)
+  OK   MUSIC: trước 350ms chưa gửi lại
+  OK   MUSIC: sau ~350ms gửi lại ĐÚNG CC102 đúng 1 lần (không gửi OFF/lệnh khác)
+  OK   MUSIC: không gửi lại lần nữa
+  OK   MUSIC OFF: gửi OFF rồi gửi lại OFF (CC103) — không lẫn ON
+
+== 2. Bấm liên tiếp ON rồi OFF: lệnh gửi lại cũ bị huỷ, không gửi trạng thái cũ ==
+  OK   ON, (100ms) OFF -> chuỗi gửi: 104,105,105 (không còn 104 thừa sau OFF)
+
+== 3. Nút khác không bị ảnh hưởng ==
+  OK   FX ON: đúng 1 lệnh, KHÔNG gửi lại (FX không có Find Track)
+  OK   MIC1 và MIC2 bấm sát nhau: mỗi nút gửi lại lệnh của CHÍNH nó
+
+== 4. Chế độ cũ (toggle) và lỗi gửi: KHÔNG gửi lại ==
+  OK   legacy toggle MONITOR_MIC1: đúng 1 lệnh (gửi lại sẽ ĐẢO trạng thái => cấm)
+  OK   gửi lỗi: không hẹn gửi lại, báo lỗi như cũ
+  OK   thiếu mapping OFF: NOT_CONFIGURED, không gửi gì, không gửi lại
+
+== 5. Setting dawStateResendMs ==
+  OK   dawStateResendMs=0 -> tắt gửi lại (đúng 1 lệnh như trước)
+  OK   dawStateResendMs=800 -> gửi lại lúc ~800ms
+  OK   giá trị quá lớn bị chặn ở 2000ms
+
+== 6. Tĩnh: không đổi HTML/renderer; mã gửi lại chỉ nằm trong setDawControlState ==
+  OK   scheduleDawStateResend chỉ được gọi trong nhánh explicit + ok
+  OK   tập nút gửi lại chỉ MIC1/MIC2/MUSIC
+
+26 PASS / 0 FAIL

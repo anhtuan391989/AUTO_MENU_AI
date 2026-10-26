@@ -176,5 +176,18 @@ const KNOB_S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_
   ok(!/applyDawProfileFill\(/.test(setup.replace(/function applyDawProfileFill[\s\S]*?\n}\n/, '').replace(/applyDawProfileFill\(dawNow,[^\n]*\n/, '')), '[12] applyDawProfileFill chỉ được gọi từ handler nút (không tự áp dụng lúc mở/đổi DAW)');
   ok(!/setSetting/.test(blk.replace(/function applyDawProfileFill[\s\S]*$/, '')), '[12] logic profile/plan không tự ghi setting');
 }
+// 13 (MENU-FIX-02) bộ CHỌN TRACK: chỉ Studio One, ghi đúng 3 action SELECT, không đụng bộ khác
+{
+  const e = env({ selectedDAW: 'Studio One 7' });
+  e.click('live'); const before = snap(e.st.dawMidiOutMappings['Studio One 7']);
+  const r = e.click('select');
+  const m = e.st.dawMidiOutMappings['Studio One 7'];
+  ok(r.done && m.MUSIC_SELECT.number === 110 && m.MIC1_SELECT.number === 111 && m.MIC2_SELECT.number === 112 && m.MIC1_SELECT.channel === 16 && Object.keys(m).length === 11, '[13] Studio One: bộ CHỌN TRACK = CC110/111/112 ch16, thêm đúng 3 mapping');
+  ok(Object.entries(JSON.parse(before)).every(([k, v]) => snap(m[k]) === snap(v)), '[13] bộ LIVE đã lưu không bị đổi');
+  const c = env({ selectedDAW: 'Cubase 13' });
+  ok(c.click('select').blocked === 'errors' && c.st.dawMidiOutMappings === undefined, '[13] Cubase không có bộ CHỌN TRACK -> không ghi');
+  const k = env({ selectedDAW: 'Studio One 7', dawMidiOutMappings: { 'Studio One 7': { BEAT_INPUT_VOLUME: { kind: 'cc', channel: 16, number: 111, value: 100 } } } });
+  ok(k.click('select').blocked === 'conflict', '[13] CHỌN TRACK trùng CC của Knob -> chặn');
+}
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

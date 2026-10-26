@@ -158,7 +158,7 @@ const ccOf = (v) => Math.round(v * 127 / 100);
         const saved = { MUSIC_ON: mk(102, 16), FX_OFF: mk(109, 16), BEAT_INPUT_VOLUME: mk(20, 1), MASTER_OUTPUT_VOLUME: mk(21, 1), MONITOR_FX: mk(22, 2) };
         const fn = new Function('getDawMidiOutMapping', setup.slice(a, a2) + '\n' + setup.slice(b, b2) + '\n' + setup.slice(c, c2) + '\nreturn { findMidiOutMappingConflict, MIDI_CONFLICT_GUARD_SET };')((act) => saved[act] || null);
         const { findMidiOutMappingConflict: f, MIDI_CONFLICT_GUARD_SET: G } = fn;
-        ok(['BEAT_INPUT_VOLUME', 'MASTER_OUTPUT_VOLUME', 'RETUNE_SPEED_MIC1', 'RETUNE_SPEED_MIC2', 'MUSIC_ON', 'FX_OFF'].every((x) => G.has(x)) && G.size === 12, 'nhóm bảo vệ = 4 Knob + 8 LIVE');
+        ok(['BEAT_INPUT_VOLUME', 'MASTER_OUTPUT_VOLUME', 'RETUNE_SPEED_MIC1', 'RETUNE_SPEED_MIC2', 'MUSIC_ON', 'FX_OFF', 'MUSIC_SELECT', 'MIC1_SELECT', 'MIC2_SELECT'].every((x) => G.has(x)) && G.size === 15, 'nhóm bảo vệ = 4 Knob + 8 LIVE + 3 CHỌN TRACK (MENU-FIX-02: 12→15, chủ đích)');
         ok(f('RETUNE_SPEED_MIC1', mk(102, 16)) === 'MUSIC_ON', 'Retune 1 đặt CC102 ch16 -> xung đột với MUSIC_ON (bị chặn)');
         ok(f('MUSIC_OFF', mk(20, 1)) === 'BEAT_INPUT_VOLUME', 'LIVE đặt CC20 ch1 -> xung đột với Knob Beat');
         ok(f('RETUNE_SPEED_MIC2', mk(21, 1)) === 'MASTER_OUTPUT_VOLUME', 'Knob trùng Knob khác -> bị chặn');

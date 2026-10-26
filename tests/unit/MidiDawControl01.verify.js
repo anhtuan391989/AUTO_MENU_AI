@@ -206,7 +206,7 @@ function fakeBtn(initial = []) {
         r.btns.mic1Btn.fire(); await r.flush();
         check('Chưa cấu hình: tooltip "CHƯA cấu hình", dataset.dawSync=not-configured, 0 lệnh', /CHƯA cấu hình/.test(r.btns.mic1Btn.title) && r.btns.mic1Btn.dataset.dawSync === 'not-configured' && r.sends.length === 0);
         check('STATIC: không có nơi nào gửi lệnh ON/OFF khi KHỞI ĐỘNG (setDawControlState chỉ gọi trong handler click/__fxManualToggle)',
-            (ren.match(/setDawControlState\(/g) || []).length === 5 && !/DOMContentLoaded[\s\S]{0,200}setDawControlState/.test(ren));
+            (ren.match(/setDawControlState\(/g) || []).length === 6 && /return AR\.setDawControlState\("FX", !!target, \{ reason: "fx-auto" \}\)/.test(ren) && !/DOMContentLoaded[\s\S]{0,200}setDawControlState/.test(ren)); // 6 = 5 cũ + 1 trong busGroup.execute của FX Auto (FSP8-LIVE-MONITOR-FX-AUTO-FIX-01; chỉ chạy khi tick đổi trạng thái nhạc, không chạy lúc khởi động)
     }
 
     // ===================================================================== FX wiring thật (__fxManualToggle)

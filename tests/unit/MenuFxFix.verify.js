@@ -17,7 +17,7 @@ function build(opts = {}) {
     const clock = { t: 0 }; const executed = []; const telemetry = []; const timers = []; const deferred = [];
     const cls = new Set(opts.saved ? ['active'] : []);
     const btn = { dataset: {}, title: '', classList: { toggle(c, f) { (f === undefined ? !cls.has(c) : f) ? cls.add(c) : cls.delete(c); }, contains: (c) => cls.has(c), add: (c) => cls.add(c) } };
-    const cfg = new Set(opts.configured === undefined ? ['FX_SEND_REVERB', 'FX_SEND_DELAY'] : opts.configured);
+    const cfg = new Set(opts.configured === undefined ? ['FX_ON', 'FX_OFF'] : opts.configured);
     let mode = opts.mode || 'ok'; const intervals = [];
     const win = { performance: { now: () => 0 }, electronAPI: { sendTelemetry: (r) => telemetry.push(r) } }; win.window = win;
     win.Date = { now: () => clock.t };
@@ -27,7 +27,18 @@ function build(opts = {}) {
         document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) }, getSetting: (k, f) => (k === 'fxAutoMidiMode' ? 'toggle' : f), saveData: () => {}, console: { log() {}, warn() {}, error() {} },
         setInterval: (fn) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,
         ActionRegistry: {
-            ACTIONS: { MONITOR_FX: 'MONITOR_FX', FX_SEND_REVERB: 'FX_SEND_REVERB', FX_SEND_DELAY: 'FX_SEND_DELAY' },
+            ACTIONS: { MONITOR_FX: 'MONITOR_FX', FX_SEND_REVERB: 'FX_SEND_REVERB', FX_SEND_DELAY: 'FX_SEND_DELAY', FX_ON: 'FX_ON', FX_OFF: 'FX_OFF' },
+            // FSP8-LIVE-MONITOR-FX-AUTO-FIX-01 — mô phỏng ĐÚNG hợp đồng actionRegistry.js thật: explicit khi đã lưu ít nhất một trong FX_ON/FX_OFF;
+            // explicit chỉ gửi mapping của chiều đích (thiếu => NOT_CONFIGURED, không toggle); legacy => lệnh MONITOR_FX cũ.
+            getDawStateMode: () => (cfg.has('FX_ON') || cfg.has('FX_OFF') ? 'explicit' : 'legacy'),
+            setDawControlState: async (control, target, ctx) => {
+                const explicit = cfg.has('FX_ON') || cfg.has('FX_OFF');
+                const action = explicit ? (target ? 'FX_ON' : 'FX_OFF') : 'MONITOR_FX';
+                const res = explicit && !cfg.has(action) ? { ok: false, status: 'NOT_CONFIGURED', reason: 'NOT_CONFIGURED' } : await win.ActionRegistry.executeAction(action, ctx);
+                const text = res && res.ok ? 'đã GỬI lệnh FX (Mute 4 bus) ' + (target ? 'ON' : 'OFF') + ' — DAW chưa xác nhận' : 'CHƯA cấu hình lệnh FX (Mute 4 bus) hoặc lỗi — DAW KHÔNG nhận lệnh';
+                win.__dawStateLast = win.__dawStateLast || {}; win.__dawStateLast[control] = { target: target ? 'ON' : 'OFF', ok: !!(res && res.ok), action, text };
+                return Object.assign({}, res, { control, target: target ? 'ON' : 'OFF', mode: explicit ? 'explicit' : 'legacy', action, text, delivery: res && res.ok ? 'UNCONFIRMED' : 'NOT_SENT', dawConfirmed: false });
+            },
             getMidiOutMapping: (n) => (cfg.has(n) ? { kind: 'cc', number: 20, value: 127, channel: 1 } : null), getMouseCoordinate: () => '',
             executeAction: (n) => {
                 executed.push({ n, t: clock.t });
@@ -74,7 +85,7 @@ async function until(r, music, cond, maxMs) { const t0 = r.clock.t; while (r.clo
     let r = build(); await r.run(5, SIL); ok(!r.on, '1a. Im lặng ban đầu: nút TẮT');
     let ms = await until(r, MUS, () => r.on, 3000);
     ok(ms <= 1000, `1b. Nhạc xuất hiện → nút/yêu cầu FX BẬT sau ${ms} ms (≤ 1000)`);
-    await r.run(0.3, MUS); ok(r.executed.length === 2 && r.executed.every((e) => e.t - 5000 <= 1000 + 400), `1c. Lệnh Send Reverb+Delay gửi ngay khi bật (${r.executed.length} lệnh)`);
+    await r.run(0.3, MUS); ok(r.executed.length === 1 && r.executed[0].n === 'FX_ON' && r.executed.every((e) => e.t - 5000 <= 1000 + 400), `1c. Lệnh FX_ON (mute 4 bus) gửi ngay khi bật, đúng 1 lệnh, KHÔNG Send (${r.executed.length} lệnh)`);
     // nhạc xuất hiện TRỞ LẠI sau khi tắt
     await r.run(3, SIL); ok(!r.on, '1d. (tiền đề) đã tắt sau im lặng');
     ms = await until(r, MUS, () => r.on, 3000); ok(ms <= 1000, `1e. Nhạc xuất hiện trở lại → BẬT sau ${ms} ms (≤ 1000)`);
@@ -135,7 +146,7 @@ async function until(r, music, cond, maxMs) { const t0 = r.clock.t; while (r.clo
     ok(r.btn.dataset.fxSync === 'not-configured' && /CHƯA cấu hình/.test(r.btn.title) && !/đã GỬI/.test(r.btn.title), '8b. Hiển thị rõ: CHƯA cấu hình Send, không nói "đã gửi"');
     r = build({ configured: [] }); await r.run(2, SIL); await r.click(); await r.flush();
     ok(r.on && r.btn.dataset.fxSync === 'not-configured' && r.btn.dataset.fxControl === 'manual' && /THỦ CÔNG/.test(r.btn.title) && /CHƯA cấu hình/.test(r.btn.title), '8c. Bấm tay (Send chưa cấu hình): nút theo yêu cầu + hiển thị "thủ công" + "CHƯA cấu hình Send"');
-    r = build({ configured: ['FX_SEND_REVERB', 'FX_SEND_DELAY'] }); await r.run(5, SIL); await r.run(3, MUS);
+    r = build({ configured: ['FX_ON', 'FX_OFF'] }); await r.run(5, SIL); await r.run(3, MUS);
     ok(r.btn.dataset.fxSync === 'sent-unconfirmed' && /chưa xác nhận/.test(r.btn.title) && !/(^|[^a-zA-Z])đã xác nhận/.test(r.btn.title), '8d. Dù gửi OK: chỉ ghi "đã GỬI — DAW chưa xác nhận"; không bao giờ ghi "đã đồng bộ/xác nhận"');
 
     // ---- 9. runtime chậm / lỗi → không hiện đồng bộ giả
@@ -158,7 +169,7 @@ async function until(r, music, cond, maxMs) { const t0 = r.clock.t; while (r.clo
     r = build({ mode: 'defer' }); await r.run(5, SIL); await r.run(1.2, MUS); // BẬT đang chờ phản hồi
     await r.run(0.1, MUS); await settle(r, { ok: true });
     await r.run(2, SIL); await settle(r, { ok: true }); await r.run(0.5, SIL); await settle(r, { ok: true });
-    ok(!r.on && r.executed.filter((e) => e.n === 'FX_SEND_REVERB').length === 2, '9i. Nhạc đổi trạng thái khi lệnh trước còn chờ → lệnh TẮT vẫn được gửi (trước đây bị mất)');
+    ok(!r.on && r.executed.filter((e) => e.n === 'FX_ON').length === 1 && r.executed.filter((e) => e.n === 'FX_OFF').length === 1, '9i. Nhạc đổi trạng thái khi lệnh trước còn chờ → lệnh TẮT vẫn được gửi (trước đây bị mất)');
     let rr = build({ mode: 'defer' }); await rr.run(5, SIL); await rr.run(1.0, MUS); // lệnh BẬT còn treo
     await rr.run(1.3, SIL); // im lặng đủ lâu trong lúc BẬT chưa trả lời
     await settle(rr, { ok: true }); await rr.run(0.3, SIL); await settle(rr, { ok: true }); await rr.run(0.3, SIL);
@@ -169,8 +180,8 @@ async function until(r, music, cond, maxMs) { const t0 = r.clock.t; while (r.clo
     r = build(); await r.run(5, SIL); await r.click(); await r.flush(); ok(r.info.manualOverride, '10a. (tiền đề) phiên cũ đang trong 60 s giữ quyền thủ công');
     let r2 = build({ saved: true }); ok(!r2.info.manualOverride && r2.info.musicState === 'UNKNOWN' && r2.info.lastResult === null, '10b. Khởi động lại: KHÔNG kế thừa manual override / trạng thái nhạc / kết quả gửi của phiên cũ');
     await r2.run(0.7, SIL); ok(r2.on, '10c. Nút lưu BẬT + chưa đủ 1 s im lặng: chưa tự đổi (chưa có bằng chứng)');
-    await r2.run(1, SIL); ok(!r2.on && r2.executed.length === 2, '10d. Nút lưu BẬT + nhạc im → TẮT sau ≈1 s và gửi lệnh TẮT (sửa state cũ sai)');
-    r2 = build({ saved: false }); await r2.run(1, SIL); ms = await until(r2, MUS, () => r2.on, 3000); ok(ms <= 1000 && r2.executed.length === 2, `10e. Nút lưu TẮT + nhạc phát → BẬT sau ${ms} ms và gửi lệnh BẬT`);
+    await r2.run(1, SIL); ok(!r2.on && r2.executed.length === 1 && r2.executed[0].n === 'FX_OFF', '10d. Nút lưu BẬT + nhạc im → TẮT sau ≈1 s và gửi lệnh TẮT (sửa state cũ sai)');
+    r2 = build({ saved: false }); await r2.run(1, SIL); ms = await until(r2, MUS, () => r2.on, 3000); ok(ms <= 1000 && r2.executed.length === 1 && r2.executed[0].n === 'FX_ON', `10e. Nút lưu TẮT + nhạc phát → BẬT sau ${ms} ms và gửi lệnh BẬT`);
     r2 = build({ saved: true }); await r2.run(1, MUS); await r2.run(10, MUS);
     ok(r2.on && r2.executed.length === 0, '10f. Nút lưu BẬT + nhạc đang phát → giữ BẬT, không gửi lệnh thừa (GIẢ ĐỊNH: DAW còn đúng trạng thái đã lưu — KHÔNG kiểm chứng được, không có feedback DAW)');
     r2 = build({ saved: true, source: false }); await r2.run(10, SIL);

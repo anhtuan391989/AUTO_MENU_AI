@@ -94,14 +94,19 @@ const ACTIONS = Object.freeze({
     MIC2_ON: "MIC2_ON",
     MIC2_OFF: "MIC2_OFF",
     FX_ON: "FX_ON",
-    FX_OFF: "FX_OFF"
+    FX_OFF: "FX_OFF",
+    // MENU-FIX-02 — lệnh CHỌN TRACK riêng (macro chỉ có "Find Track"), tuỳ chọn. Có mapping thì Menu gửi nó TRƯỚC, chờ track chuyển xong,
+    // rồi mới gửi ON/OFF. Chưa lưu => hành vi cũ (một lệnh/cú bấm).
+    MUSIC_SELECT: "MUSIC_SELECT",
+    MIC1_SELECT: "MIC1_SELECT",
+    MIC2_SELECT: "MIC2_SELECT"
 });
 
 // MIDI-DAW-CONTROL-01 — nút Menu -> cặp action ON/OFF + action toggle CŨ (dùng khi người dùng CHƯA cấu hình ON/OFF).
 const DAW_STATE_CONTROLS = Object.freeze({
-    MUSIC: Object.freeze({ on: "MUSIC_ON", off: "MUSIC_OFF", legacy: "MONITOR_BEAT_TOGGLE", label: "MUSIC (Monitor Beat)" }),
-    MIC1: Object.freeze({ on: "MIC1_ON", off: "MIC1_OFF", legacy: "MONITOR_MIC1", label: "MIC 1 (Monitor Mic)" }),
-    MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", label: "MIC 2 (Monitor Không Dây)" }),
+    MUSIC: Object.freeze({ on: "MUSIC_ON", off: "MUSIC_OFF", legacy: "MONITOR_BEAT_TOGGLE", select: "MUSIC_SELECT", label: "MUSIC (Monitor Beat)" }),
+    MIC1: Object.freeze({ on: "MIC1_ON", off: "MIC1_OFF", legacy: "MONITOR_MIC1", select: "MIC1_SELECT", label: "MIC 1 (Monitor Mic)" }),
+    MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", select: "MIC2_SELECT", label: "MIC 2 (Monitor Không Dây)" }),
     FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" })
 });
 
@@ -321,6 +326,25 @@ function describeDawStateResult(control, targetOn, res, mode) {
     return `gửi lệnh ${def.label} ${dir} LỖI${res && res.status ? " (" + res.status + ")" : ""} — DAW KHÔNG nhận lệnh`;
 }
 
+// MENU-FIX-02 — macro Monitor của Studio Pro là lệnh ĐẢO chạy lên track ĐANG CHỌN (INFERRED từ triệu chứng + mô tả macro "State rỗng"):
+// nếu Find Track chưa kịp chuyển track thì lệnh đảo rơi vào track CŨ (bấm MIC 2 làm MIC 1 đảo theo). Giải pháp: gửi CHỌN TRACK trước,
+// chờ ngắn, rồi mới gửi ON/OFF — mỗi cú bấm đúng MỘT lệnh Monitor, trên đúng track. Các chuỗi "chọn → chờ → ON/OFF" xếp hàng tuần tự
+// toàn cục để hai nút bấm sát nhau không xen lẫn. KHÔNG bao giờ gửi lại lệnh Monitor (sẽ đảo lần nữa).
+const DAW_SELECT_SETTLE_DEFAULT_MS = 300;
+function getDawSelectSettleMs() {
+    const v = typeof getSetting === "function" ? getSetting("dawSelectSettleMs") : undefined;
+    if (v === undefined || v === null || v === "") return DAW_SELECT_SETTLE_DEFAULT_MS;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return DAW_SELECT_SETTLE_DEFAULT_MS;
+    return Math.min(n, 2000);
+}
+let dawSequenceChain = Promise.resolve();
+function runDawSequence(fn) {
+    const p = dawSequenceChain.then(fn, fn);
+    dawSequenceChain = p.catch(() => {});
+    return p;
+}
+
 async function setDawControlState(control, targetOn, context = {}) {
     const def = DAW_STATE_CONTROLS[control];
     if (!def) return { ok: false, reason: "UNKNOWN_CONTROL", control };
@@ -332,6 +356,16 @@ async function setDawControlState(control, targetOn, context = {}) {
         action = targetOn ? def.on : def.off;
         if (!isMidiMappingConfigured(action)) {
             res = { ok: false, status: ACTION_STATUS.NOT_CONFIGURED, reason: "NOT_CONFIGURED" };
+        } else if (def.select && isMidiMappingConfigured(def.select)) {
+            // MENU-FIX-02 — CHỌN TRACK -> chờ -> ON/OFF. Chọn lỗi => KHÔNG gửi Monitor (tránh đảo nhầm track cũ).
+            res = await runDawSequence(async () => {
+                const sel = await executeAction(def.select, { reason: `${reason}-select` });
+                if (!sel || !sel.ok) return { ...(sel || {}), ok: false, selectFailed: true };
+                const wait = getDawSelectSettleMs();
+                if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+                const r2 = await executeAction(action, { reason });
+                return { ...r2, selectUsed: def.select, selectWaitMs: wait };
+            });
         } else {
             res = await executeAction(action, { reason });
         }
@@ -349,6 +383,8 @@ async function setDawControlState(control, targetOn, context = {}) {
         dawConfirmed: false, // không có phản hồi từ Studio One => KHÔNG BAO GIỜ true
         text: describeDawStateResult(control, targetOn, res, mode)
     };
+    if (res && res.selectFailed) out.text = `gửi lệnh CHỌN TRACK (${def.select}) LỖI — KHÔNG gửi lệnh Monitor (tránh đảo nhầm track khác)`;
+    else if (res && res.selectUsed) out.text += ` [đã chọn track trước, chờ ${res.selectWaitMs} ms]`;
     // Lỗi gửi: nêu tầng + lỗi gốc của đường gửi main-process (appSettings.js::getLastMidiSendResult), không che.
     if (!out.ok && out.status === ACTION_STATUS.NO_DEVICE && typeof window !== "undefined" && typeof window.getLastMidiSendResult === "function") { // chỉ khi THỰC SỰ đã thử gửi (không dùng kết quả cũ cho NOT_CONFIGURED)
         const lr = window.getLastMidiSendResult();

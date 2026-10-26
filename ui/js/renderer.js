@@ -608,23 +608,46 @@ function createFxAutoWiring() {
     // khởi động (ở chế độ toggle mặc định lệnh đó ĐẢO trạng thái DAW). Nếu DAW thực tế khác giả định, lần chuyển nhạc được xác nhận đầu tiên sẽ gửi lệnh.
     group.seed(!!fxBtn?.classList.contains("active"));
     window.__fxSendGroup = group;
+    // FSP8-LIVE-MONITOR-FX-AUTO-FIX-01 — ĐƯỜNG FX AUTO THẬT = FX_ON/FX_OFF (đặt Mute 4 bus đích danh), KHÔNG phải nhóm Send ở trên.
+    // Trước đây Auto chỉ gọi `group` (FX_SEND_REVERB/DELAY, fallback MONITOR_FX): nút FX sáng nhưng 4 bus vẫn Mute vì không có lệnh FX_ON nào được gửi.
+    // `busGroup` dùng lại đúng createFxSendGroup (hàng đợi tuần tự, timeout 5 s, không gửi trùng, chỉ coi ok khi lệnh gửi ok) với MỘT mục tiêu "FX_BUS".
+    // Đã cấu hình = chế độ "explicit" của ActionRegistry (đã lưu ÍT NHẤT một trong FX_ON/FX_OFF). Chưa cấu hình => managed() rỗng => NOT_CONFIGURED
+    // (Auto KHÔNG âm thầm rơi sang Send/MONITOR_FX). Thiếu riêng chiều đích (vd có FX_ON, thiếu FX_OFF) => setDawControlState trả NOT_CONFIGURED, không gửi toggle.
+    const busGroup = AudioSource.createFxSendGroup({
+        actions: ["FX_BUS"],
+        legacyAction: "FX_BUS_NO_LEGACY",
+        timeoutMs: 5000,
+        isConfigured: (n) => n === "FX_BUS" && AR0()?.getDawStateMode?.("FX") === "explicit",
+        execute: async (n, target) => {
+            const AR = AR0(); if (!AR?.setDawControlState) return { ok: false, reason: "NO_ACTION_REGISTRY" };
+            return AR.setDawControlState("FX", !!target, { reason: "fx-auto" });
+        },
+    });
+    busGroup.seed(!!fxBtn?.classList.contains("active"));
+    window.__fxBusGroup = busGroup;
     // AI-FIX-06 — TÁCH 3 trạng thái: (1) YÊU CẦU (nút FX sáng/tắt theo nhạc nền ngay khi chuyển trạng thái được xác nhận),
     // (2) ĐÃ GỬI (group.aggregate(), dùng để quyết định gửi/không gửi lại), (3) DAW ĐÃ XÁC NHẬN (KHÔNG tồn tại: không có feedback).
     // Trước đây nút chỉ sáng khi gửi MIDI thành công => chưa cấu hình Send / MIDI lỗi => nút KHÔNG BAO GIỜ sáng và không có dấu vết nào.
     // Trạng thái đồng bộ hiện ở tooltip (title) + data-fx-sync của nút (không đổi HTML/CSS); chuyển trạng thái được ghi vào log telemetry.
     // MENU-FX-FIX: văn bản Send tách khỏi "ai đang điều khiển" để cả Auto lẫn thủ công đều hiện đúng trạng thái Send thật.
     const sendText = (info) => {
-        // MIDI-DAW-CONTROL-01 — lần bấm tay gần nhất đi đường FX ON/OFF (mute bus): hiển thị đúng kết quả của đường đó, không nói "Send".
-        if (window.__fxLastManualVia === "daw-state" && info.manualOverride && window.__dawStateLast?.FX) {
-            return info.pending ? "đang gửi lệnh FX ON/OFF (mute bus) — CHƯA có phản hồi" : window.__dawStateLast.FX.text;
-        }
+        // Đường đang hiển thị: lần bấm tay gần nhất đi đường Send cũ (chưa cấu hình FX ON/OFF) => văn bản Send; còn lại (Auto, hoặc bấm tay đi FX ON/OFF) => văn bản FX bus.
+        const viaSend = info.manualOverride && window.__fxLastManualVia === "send";
         const lr = info.lastResult;
-        if (info.pending) return "đang gửi lệnh Send — CHƯA có phản hồi, chưa đồng bộ";
+        if (viaSend) {
+            if (info.pending) return "đang gửi lệnh Send — CHƯA có phản hồi, chưa đồng bộ";
+            if (!lr) return null;
+            if (lr.ok) return "đã GỬI lệnh Send Reverb/Delay — DAW chưa xác nhận (không có phản hồi)";
+            if (lr.reason === "NOT_CONFIGURED") return "CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh";
+            if (lr.reason === "TIMEOUT") return "lệnh Send KHÔNG phản hồi (hết thời gian) — DAW có thể chưa đồng bộ";
+            return "gửi lệnh Send LỖI" + (lr.partial ? " một phần" : "") + " — DAW có thể chưa đồng bộ";
+        }
+        if (info.pending) return "đang gửi lệnh FX ON/OFF (mute 4 bus) — CHƯA có phản hồi";
         if (!lr) return null;
-        if (lr.ok) return "đã GỬI lệnh Send Reverb/Delay — DAW chưa xác nhận (không có phản hồi)";
-        if (lr.reason === "NOT_CONFIGURED") return "CHƯA cấu hình Send Reverb/Delay trong Setup — DAW KHÔNG nhận lệnh";
-        if (lr.reason === "TIMEOUT") return "lệnh Send KHÔNG phản hồi (hết thời gian) — DAW có thể chưa đồng bộ";
-        return "gửi lệnh Send LỖI" + (lr.partial ? " một phần" : "") + " — DAW có thể chưa đồng bộ";
+        if (lr.ok) return window.__dawStateLast?.FX?.text || "đã GỬI lệnh FX ON/OFF (mute 4 bus) — DAW chưa xác nhận";
+        if (lr.reason === "NOT_CONFIGURED") return "CHƯA cấu hình FX ON/OFF (mute 4 bus) trong Setup — DAW KHÔNG nhận lệnh (FX Auto không dùng Send)";
+        if (lr.reason === "TIMEOUT") return "lệnh FX ON/OFF KHÔNG phản hồi (hết thời gian) — DAW có thể chưa đồng bộ";
+        return "gửi lệnh FX ON/OFF LỖI" + (lr.partial ? " một phần" : "") + " — DAW KHÔNG nhận lệnh";
     };
     const syncText = (info) => {
         const st = sendText(info);
@@ -635,12 +658,12 @@ function createFxAutoWiring() {
     const syncKey = (info) => info.pending ? "pending" : (info.lastResult ? (info.lastResult.ok ? "sent-unconfirmed" : (info.lastResult.reason === "NOT_CONFIGURED" ? "not-configured" : (info.lastResult.reason === "TIMEOUT" ? "timeout" : "failed"))) : "idle");
     let __lastFxLogKey = "";
     const ctl = AudioSource.createFxAutoController({
-        getFxState: () => group.aggregate(),
+        getFxState: () => busGroup.aggregate(),
         onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); } }, // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX
         applyFx: async (target) => {
             if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
-            const res = await group.apply(target);
-            if (!(res && res.ok)) console.warn("[FX-AUTO] Gửi lệnh Send FX thất bại/một phần/chưa cấu hình — nút giữ trạng thái YÊU CẦU, DAW có thể chưa đồng bộ:", res);
+            const res = await busGroup.apply(target);
+            if (!(res && res.ok)) console.warn("[FX-AUTO] Gửi lệnh FX ON/OFF (mute 4 bus) thất bại/chưa cấu hình — nút giữ trạng thái YÊU CẦU, DAW có thể chưa đồng bộ:", res);
             return res;
         },
         // MENU-FX-AUTO-OFF: ghi mức dBFS thực (min/avg/max ~1 s, số khung im lặng số 0) mỗi 30 s để lần test thật sau có số liệu hiệu chuẩn ngưỡng.
@@ -663,6 +686,7 @@ function createFxAutoWiring() {
             if (AR0()?.getDawStateMode?.("FX") === "explicit") {
                 window.__fxLastManualVia = "daw-state";
                 res = await AR0().setDawControlState("FX", !!target, { reason: "menu-button" });
+                if (res && res.ok) busGroup.markSent("FX_BUS", !!target); // trạng thái "đã GỬI" để Auto tiếp quản sau 60 s không gửi trùng/ngược (chưa phải xác nhận DAW)
                 if (fxBtn) { fxBtn.title = res.text || ""; fxBtn.dataset.dawSync = res.ok ? "sent-unconfirmed" : (res.reason === "NOT_CONFIGURED" ? "not-configured" : "failed"); }
                 ctl.reportManualResult(res, seq);
                 return res;
@@ -679,7 +703,7 @@ function createFxAutoWiring() {
         ctl.reportManualResult(res, seq);
         return res;
     };
-    window.__fxAutoDebug = () => Object.assign({}, ctl.getInfo(), { sends: group.getSent(), managed: group.managed(), params: ctl.params });
+    window.__fxAutoDebug = () => Object.assign({}, ctl.getInfo(), { sends: group.getSent(), managed: group.managed(), bus: busGroup.getSent(), busManaged: busGroup.managed(), params: ctl.params });
     setInterval(() => { if (getSetting("fxAutoEnabled", true) !== false) ctl.tick(); }, 100); // ĐÚNG 1 interval cho cả vòng đời trang
     return ctl;
 }
