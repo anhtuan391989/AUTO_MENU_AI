@@ -1,0 +1,44 @@
+﻿
+
+LineNumber : 404
+Line       :         confirmSilenceMs: 1000, // im lặng liên tục thế này thì tắt (HỆ QUẢ: khoảng lặng/chuyển bài > 1 s 
+             sẽ tắt rồi bật lại FX)
+
+LineNumber : 439
+Line       :             const keepFrom = t - Math.max(P.confirmSilenceMs, P.confirmMusicMs) - 500;
+
+LineNumber : 456
+Line       :         function windowStats(t, windowMs, thresholdDb) {
+
+LineNumber : 459
+Line       :             for (let i = frames.length - 1; i >= 0 && frames[i].t >= t - windowMs; i--) { n++; if 
+             (frames[i].db > thresholdDb) above++; }
+
+LineNumber : 479
+Line       :                 const st = windowStats(t, P.confirmSilenceMs, P.offDbfs);
+
+LineNumber : 485
+Line       :                     const ss = windowStats(t, P.confirmSilenceMs, P.offDbfs);
+
+LineNumber : 586
+Line       : // Cờ tắt khẩn cấp (không có UI): setting "fxAutoEnabled" = false. Chế độ MIDI: "fxAutoMidiMode" =
+
+LineNumber : 662
+Line       :         onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { 
+             fxBtn?.classList.toggle("active", !!target); } }, // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX
+
+LineNumber : 664
+Line       :             if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
+
+LineNumber : 707
+Line       :     setInterval(() => { if (getSetting("fxAutoEnabled", true) !== false) ctl.tick(); }, 100); // ĐÚNG 1 
+             interval cho cả vòng đời trang
+
+LineNumber : 1052
+Line       : const AI_SIGNAL_VU_FLOOR_TENTATIVE = 2;
+
+LineNumber : 2300
+Line       :                 if (vuPercent > AI_SIGNAL_VU_FLOOR_TENTATIVE) { __aiState.lastSignalTime = Date.now(); }
+
+
+
