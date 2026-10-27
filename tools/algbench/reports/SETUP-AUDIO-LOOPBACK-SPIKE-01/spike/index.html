@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><title>LOOPBACK SPIKE 01 (độc lập)</title>
+<style>
+body{font:14px system-ui;margin:16px;background:#111;color:#eee}
+button,select{font-size:14px;padding:6px 10px;margin:3px}
+.row{margin:8px 0}.bar{height:18px;background:#333;border-radius:4px;overflow:hidden}
+.fill{height:100%;width:0;background:#4c8}.mic .fill{background:#e84}
+pre{background:#000;padding:8px;max-height:260px;overflow:auto;font-size:12px}
+</style></head><body>
+<h3>LOOPBACK SPIKE 01 — chỉ để kiểm chứng, không nối vào AUTO_MENU_AI</h3>
+<div id="info"></div>
+<div class="row">Chế độ:
+ <select id="mode"><option>loopback</option><option>loopbackWithMute</option></select>
+ <button id="btnLoop">1. Bật loopback</button><button id="btnStopLoop">Tắt loopback</button></div>
+<div class="row">Mic (để so lọt tiếng): <select id="micSel"></select>
+ <button id="btnMic">2. Bật mic</button><button id="btnStopMic">Tắt mic</button></div>
+<div class="row">LOOPBACK <div class="bar"><div class="fill" id="vuLoop"></div></div></div>
+<div class="row mic">MIC <div class="bar"><div class="fill" id="vuMic"></div></div></div>
+<div class="row">Tiếng thử từ chính spike (giả lập CLAP/LAUGH):
+ <button id="btnBeep">3. Phát bíp 440Hz 2s</button></div>
+<div class="row"><button id="btnSnap">Ghi mốc (nhãn):</button> <input id="label" value="chi-phat-nhac">
+ <button id="btnDump">Xuất log JSON ra màn hình</button></div>
+<pre id="log"></pre>
+<script src="spike.js"></script></body></html>
