@@ -1,0 +1,45 @@
+== Case 1: Beat (musicKnob) tăng qua wheel -> Beat state tăng, Master KHÔNG đổi ==
+  OK   Beat tăng đúng 1 nấc (thực tế: 91)
+  OK   Master KHÔNG đổi (thực tế: 90, trước: 90)
+
+== Case 2: Beat giảm qua wheel -> Beat giảm, Master KHÔNG đổi ==
+  OK   Beat giảm đúng 1 nấc
+  OK   Master KHÔNG đổi
+
+== Case 3: Master tăng qua wheel -> Master tăng, Beat KHÔNG đổi ==
+  OK   Master tăng đúng 1 nấc
+  OK   Beat KHÔNG đổi
+
+== Case 4: Master giảm qua wheel -> Master giảm, Beat KHÔNG đổi ==
+  OK   Master giảm đúng 1 nấc
+  OK   Beat KHÔNG đổi
+
+== Case 5: Beat -> command/mapping target = BEAT_INPUT_VOLUME, không phải Master ==
+  OK   executeAction gọi đúng 1 lần (thực tế: 1)
+  OK   action = BEAT_INPUT_VOLUME (thực tế: BEAT_INPUT_VOLUME)
+
+== Case 6: Master -> command/mapping target = MASTER_OUTPUT_VOLUME, không phải Beat ==
+  OK   executeAction gọi đúng 1 lần (thực tế: 1)
+  OK   action = MASTER_OUTPUT_VOLUME (thực tế: MASTER_OUTPUT_VOLUME)
+
+== Case 7: Beat rồi Master thay đổi liên tiếp -> mỗi lần đúng 1 execution, không duplicate ==
+  OK   đúng 2 lần gọi tổng cộng, không duplicate (thực tế: 2)
+  OK   đúng thứ tự, không lẫn lộn 2 action
+
+== Case 7b: mousemove không đổi giá trị (đứng yên) -> KHÔNG dispatch trùng (chống duplicate) ==
+  OK   mousemove tại cùng vị trí không tạo dispatch thừa (thực tế: 1 lần gọi)
+
+== Case 8: Beat=70 và Master=70 (cùng giá trị số) vẫn là 2 control độc lập, KHÔNG collapse thành 1 state "volume=70" ==
+  OK   2 giá trị độc lập, không bị gộp/ảnh hưởng chéo (Beat=71, Master=90)
+  OK   Beat dispatch đúng giá trị riêng của nó
+  OK   Master dispatch đúng giá trị riêng của nó, không bị lẫn với Beat
+
+== TASK B12: Retune1/Retune2 GIỜ ĐÃ dispatch đúng action riêng (RETUNE_SPEED_MIC1/2), không lẫn với Beat/Master ==
+  OK   retune1 + retune2 dispatch đúng 2 lần (thực tế: 2)
+  OK   retune1 -> RETUNE_SPEED_MIC1 (thực tế: RETUNE_SPEED_MIC1)
+  OK   retune2 -> RETUNE_SPEED_MIC2 (thực tế: RETUNE_SPEED_MIC2)
+
+== Kiểm tra bổ sung: Clap/Laugh Volume knob VẪN KHÔNG dispatch (target = internal audio engine, không phải MIDI — đúng bằng chứng, không mở rộng sai) ==
+  OK   0 dispatch nào cho Clap/Laugh Volume (thực tế: 0) — đúng BLOCKED, không tự nối MIDI sai hướng
+
+22 PASS, 0 FAIL

@@ -728,8 +728,11 @@ const DAW_MIDI_PROFILES = Object.freeze({
         name: "Studio One / Fender Studio Pro",
         match: /^(studio one|studio pro|fender)/i,
         origin: "Bộ CC gợi ý của AUTO_MENU_AI (LIVE-MIDI-FSP8-02 / MENU-KNOB-MIDI-COMPLETION-01). Cần gán CC vào macro/fader trong Control Surface (MIDI Learn).",
-        versionStatus: Object.freeze({}),
-        defaultStatus: "THEO_REPO",
+        versionStatus: Object.freeze({
+            "studio pro 8": "DAW nền của project; CC Knob CHƯA kiểm chứng gán trong DAW",
+            "studio one 5": "UNVERIFIED (cùng bộ CC với Studio One 6/7; chưa có bằng chứng riêng cho bản 5)",
+        }),
+        defaultStatus: "UNVERIFIED (cùng bộ CC với Studio Pro 8; chưa kiểm chứng gán Knob trong DAW)",
         bundles: Object.freeze({
             live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, DAW_QF_S1_LIVE) }),
             knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_MIC1: 22, RETUNE_SPEED_MIC2: 23 }) }),

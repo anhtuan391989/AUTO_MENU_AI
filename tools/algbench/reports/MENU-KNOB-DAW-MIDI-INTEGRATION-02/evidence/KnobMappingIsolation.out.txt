@@ -1,0 +1,16 @@
+== Case 7: 2 mapping BEAT_INPUT_VOLUME / MASTER_OUTPUT_VOLUME tồn tại độc lập ==
+  OK   Beat mapping đúng riêng của nó (thực tế: {"kind":"cc","channel":1,"number":20,"value":0,"source":"USER_DEFINED"})
+  OK   Master mapping đúng riêng của nó (thực tế: {"kind":"cc","channel":2,"number":21,"value":0,"source":"USER_DEFINED"})
+  OK   Beat và Master có CC number khác nhau khi user tự cấu hình khác nhau (không ép chung)
+
+== Case 8: Lưu (Learn) mapping cho Beat KHÔNG ghi đè/ảnh hưởng Master đã lưu trước đó ==
+  OK   Lưu Beat KHÔNG làm đổi Master đã lưu trước (trước: {"kind":"cc","channel":1,"number":7,"value":90,"source":"USER_DEFINED"}, sau: {"kind":"cc","channel":1,"number":7,"value":90,"source":"USER_DEFINED"})
+
+== Case 9: Lưu (Learn) mapping cho Master KHÔNG ghi đè/ảnh hưởng Beat đã lưu trước đó ==
+  OK   Lưu Master KHÔNG làm đổi Beat đã lưu trước (trước: {"kind":"cc","channel":3,"number":30,"value":50,"source":"USER_DEFINED"}, sau: {"kind":"cc","channel":3,"number":30,"value":50,"source":"USER_DEFINED"})
+
+== Bổ sung: cả 2 mapping mặc định NOT_CONFIGURED (null) khi chưa ai lưu — không tự bịa CC ==
+  OK   Beat mặc định null (NOT_CONFIGURED), không có CC tự đặt sẵn
+  OK   Master mặc định null (NOT_CONFIGURED), không có CC tự đặt sẵn
+
+7 PASS, 0 FAIL

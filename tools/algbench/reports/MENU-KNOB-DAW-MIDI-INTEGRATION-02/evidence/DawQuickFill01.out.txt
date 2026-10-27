@@ -1,0 +1,44 @@
+PASS [1] Studio One 7: LIVE 8 (CC102–109 ch16 v127) + KNOB 4 (CC20–23 ch15) đúng, tổng 12
+PASS [1] Studio One 6: LIVE 8 (CC102–109 ch16 v127) + KNOB 4 (CC20–23 ch15) đúng, tổng 12
+PASS [1] Studio Pro 8: LIVE 8 (CC102–109 ch16 v127) + KNOB 4 (CC20–23 ch15) đúng, tổng 12
+PASS [2] Cubase 13 dùng profile Cubase riêng (12 mapping)
+PASS [2] CC Cubase không trùng CC đã biết (7/10/12/13/23/24/64) và không trùng nhau
+PASS [2] Cubase khác số Studio One và được ghi rõ là quy ước AUTO_MENU_AI, không phải mặc định Cubase
+PASS [2] Cubase 13 có bằng chứng file; 12/14/15 gắn UNVERIFIED
+PASS [3] đổi DAW không ghi gì (Cubase chưa có mapping)
+PASS [3] điền Cubase không đổi Studio One
+PASS [3] quay lại Studio One: mapping hai DAW còn nguyên
+PASS [3] mapping thủ công/điền của DAW này không ảnh hưởng DAW khác
+PASS [4] có mapping thủ công -> hỏi xác nhận (liệt kê MUSIC_ON); Huỷ -> không đổi gì
+PASS [4] huỷ xác nhận -> không gọi lưu lần nào
+PASS [4]/[11] xác nhận -> chỉ bộ LIVE bị đổi; FX_SEND_REVERB ngoài bộ giữ nguyên
+PASS [4] static: confirm(msg) nêu số lượng + tên action ghi đè, chỉ ghi sau confirm
+PASS [5] LIVE trùng CC của Knob -> chặn, không ghi gì
+PASS [5] KNOB trùng CC của LIVE macro -> chặn
+PASS [5] cùng số CC nhưng khác kênh -> không xung đột
+PASS [6] bộ CC lỗi (ngoài dải/kênh sai/trùng/action lạ/thiếu mục/sai số lượng/rỗng/null) -> báo lỗi, KHÔNG ghi gì
+PASS [6] bundle không tồn tại -> không ghi
+PASS [6] ghi 8 mapping bằng MỘT lần lưu duy nhất
+PASS [7] chưa chọn DAW -> không điền được, không ghi gì
+PASS [7] static: nút bị vô hiệu hoá + thông báo cần chọn DAW
+PASS [7] static: handler đọc DAW tại lúc bấm và chặn khi không có DAW
+PASS [8] Ableton Live 12: không có profile, không dùng profile DAW khác, không ghi
+PASS [8] FL Studio 21: không có profile, không dùng profile DAW khác, không ghi
+PASS [8] REAPER 7: không có profile, không dùng profile DAW khác, không ghi
+PASS [8] Pro Tools: không có profile, không dùng profile DAW khác, không ghi
+PASS [8] static: thông báo đúng câu yêu cầu; nút điền chỉ render khi có profile
+PASS [9] hằng gợi ý cũ (102–109, ch16, 127) giữ nguyên
+PASS [9] profile Studio One LIVE trùng đúng 102–109
+PASS [10] điền KNOB chỉ ghi 4 Knob, không đụng LIVE
+PASS [10] actionRegistry vẫn quy đổi 0–100→0–127 (file không bị sửa trong task này)
+PASS [10] static: nút điền không gửi MIDI
+PASS [11] MONITOR_FX/FX_SEND_*/PLAY (ngoài 2 bộ) giữ nguyên, thêm đúng 12 mapping
+PASS [11] static: khối profile không nhắc tới action ngoài hai bộ
+PASS [12] applyDawProfileFill chỉ được gọi từ handler nút (không tự áp dụng lúc mở/đổi DAW)
+PASS [12] logic profile/plan không tự ghi setting
+PASS [13] Studio One: bộ CHỌN TRACK = CC110/111/112 ch16, thêm đúng 3 mapping
+PASS [13] bộ LIVE đã lưu không bị đổi
+PASS [13] Cubase không có bộ CHỌN TRACK -> không ghi
+PASS [13] CHỌN TRACK trùng CC của Knob -> chặn
+
+42 PASS / 0 FAIL

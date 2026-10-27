@@ -1,0 +1,42 @@
+== 1. Một cú bấm: CHỌN TRACK -> chờ -> đúng 1 lệnh ON/OFF ==
+  OK   MIC1: lệnh ĐẦU là CHỌN TRACK CC111, Monitor CHƯA gửi
+  OK   MIC1: trước 300ms vẫn chưa gửi Monitor
+  OK   MIC1 ON: sau chờ gửi đúng CC104 ch16(index15) v127; tổng 2 lệnh; ok
+  OK   MIC1: KHÔNG gửi lại Monitor sau đó (gửi lại sẽ đảo trạng thái)
+  OK   MIC1 OFF: 111 rồi CC105
+  OK   MIC2: lệnh ĐẦU là CHỌN TRACK CC112, Monitor CHƯA gửi
+  OK   MIC2: trước 300ms vẫn chưa gửi Monitor
+  OK   MIC2 ON: sau chờ gửi đúng CC106 ch16(index15) v127; tổng 2 lệnh; ok
+  OK   MIC2: KHÔNG gửi lại Monitor sau đó (gửi lại sẽ đảo trạng thái)
+  OK   MIC2 OFF: 112 rồi CC107
+  OK   MUSIC: lệnh ĐẦU là CHỌN TRACK CC110, Monitor CHƯA gửi
+  OK   MUSIC: trước 300ms vẫn chưa gửi Monitor
+  OK   MUSIC ON: sau chờ gửi đúng CC102 ch16(index15) v127; tổng 2 lệnh; ok
+  OK   MUSIC: KHÔNG gửi lại Monitor sau đó (gửi lại sẽ đảo trạng thái)
+  OK   MUSIC OFF: 110 rồi CC103
+
+== 2. Bấm MIC 1 rồi MIC 2 sát nhau: tuần tự, không xen lẫn, mỗi nút đúng track ==
+  OK   thứ tự: 111,104,112,106 (chọn Mic1→Monitor Mic1→chọn Mic2→Monitor Mic2)
+  OK   mỗi Monitor cách lệnh chọn ≥300ms
+
+== 3. Lỗi và tương thích ==
+  OK   CHỌN TRACK lỗi -> KHÔNG gửi Monitor, báo lỗi rõ
+  OK   lỗi chọn của nút này không làm kẹt hàng đợi: MIC2 vẫn chạy (112,106)
+  OK   chưa lưu CHỌN TRACK => hành vi cũ: đúng 1 lệnh CC104 NGAY, không chờ
+  OK   chế độ toggle cũ: đúng 1 lệnh toggle, KHÔNG gửi chọn track
+  OK   thiếu mapping chiều OFF: NOT_CONFIGURED, KHÔNG gửi gì (kể cả chọn track)
+  OK   FX: đúng 1 lệnh FX_ON (không có chọn track)
+
+== 4. Setting dawSelectSettleMs ==
+  OK   dawSelectSettleMs=0 -> chờ 0ms (trước: 2 lệnh, sau: 2)
+  OK   dawSelectSettleMs=800 -> chờ 800ms (trước: 1 lệnh, sau: 2)
+  OK   dawSelectSettleMs=999999 -> chờ 2000ms (trước: 1 lệnh, sau: 2)
+  OK   dawSelectSettleMs=-5 -> chờ 300ms (trước: 1 lệnh, sau: 2)
+
+== 5. Setup + gói gợi ý + tĩnh ==
+  OK   Setup có 3 hàng CHỌN TRACK và nằm trong nhóm chống trùng CC
+  OK   Gói gợi ý Studio One có bộ CHỌN TRACK (CC110–112 ch16, v127); Cubase KHÔNG có
+  OK   Không còn mã gửi lại Monitor (resend) trong actionRegistry
+  OK   ActionRegistry có 3 action SELECT và DAW_STATE_CONTROLS.select
+
+31 PASS / 0 FAIL

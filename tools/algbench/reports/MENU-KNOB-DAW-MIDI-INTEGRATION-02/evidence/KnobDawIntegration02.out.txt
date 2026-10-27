@@ -1,0 +1,65 @@
+PASS [1] renderer: đúng 4 Knob MIDI -> 4 Action (musicKnob, masterKnob, retune1, retune2)
+PASS [8] clapKnob/laughKnob KHÔNG nằm trong map MIDI; vẫn ở KNOB_ID_TO_SOUND_EFFECT (SoundEffectEngine nội bộ)
+PASS [8] bộ điền nhanh không chứa CLAP/LAUGH
+PASS [4] setup.html có lựa chọn "Studio One 5"
+PASS [4][5] "Studio One 5" nhận đúng profile studio-one
+PASS [2][3] "Studio One 5": KNOB điền đúng 4 mapping CC 20/21/22/23 kênh 15
+PASS [3] "Studio One 5": điền nhanh KHÔNG gửi MIDI
+PASS [4] setup.html có lựa chọn "Studio One 6"
+PASS [4][5] "Studio One 6" nhận đúng profile studio-one
+PASS [2][3] "Studio One 6": KNOB điền đúng 4 mapping CC 20/21/22/23 kênh 15
+PASS [3] "Studio One 6": điền nhanh KHÔNG gửi MIDI
+PASS [4] setup.html có lựa chọn "Studio One 7"
+PASS [4][5] "Studio One 7" nhận đúng profile studio-one
+PASS [2][3] "Studio One 7": KNOB điền đúng 4 mapping CC 20/21/22/23 kênh 15
+PASS [3] "Studio One 7": điền nhanh KHÔNG gửi MIDI
+PASS [4] setup.html có lựa chọn "Studio Pro 8"
+PASS [4][5] "Studio Pro 8" nhận đúng profile studio-one
+PASS [2][3] "Studio Pro 8": KNOB điền đúng 4 mapping CC 20/21/22/23 kênh 15
+PASS [3] "Studio Pro 8": điền nhanh KHÔNG gửi MIDI
+PASS [4] setup.html có lựa chọn "Cubase 10"
+PASS [4][5] "Cubase 10" nhận đúng profile cubase
+PASS [2][3] "Cubase 10": KNOB điền đúng 4 mapping CC 85/86/87/88 kênh 15
+PASS [3] "Cubase 10": điền nhanh KHÔNG gửi MIDI
+PASS [4] setup.html có lựa chọn "Cubase 11"
+PASS [4][5] "Cubase 11" nhận đúng profile cubase
+PASS [2][3] "Cubase 11": KNOB điền đúng 4 mapping CC 85/86/87/88 kênh 15
+PASS [3] "Cubase 11": điền nhanh KHÔNG gửi MIDI
+PASS [4] setup.html có lựa chọn "Cubase 12"
+PASS [4][5] "Cubase 12" nhận đúng profile cubase
+PASS [2][3] "Cubase 12": KNOB điền đúng 4 mapping CC 85/86/87/88 kênh 15
+PASS [3] "Cubase 12": điền nhanh KHÔNG gửi MIDI
+PASS [4] setup.html có lựa chọn "Cubase 13"
+PASS [4][5] "Cubase 13" nhận đúng profile cubase
+PASS [2][3] "Cubase 13": KNOB điền đúng 4 mapping CC 85/86/87/88 kênh 15
+PASS [3] "Cubase 13": điền nhanh KHÔNG gửi MIDI
+PASS [4] setup.html có lựa chọn "Cubase 14"
+PASS [4][5] "Cubase 14" nhận đúng profile cubase
+PASS [2][3] "Cubase 14": KNOB điền đúng 4 mapping CC 85/86/87/88 kênh 15
+PASS [3] "Cubase 14": điền nhanh KHÔNG gửi MIDI
+PASS [4] setup.html có lựa chọn "Cubase 15"
+PASS [4][5] "Cubase 15" nhận đúng profile cubase
+PASS [2][3] "Cubase 15": KNOB điền đúng 4 mapping CC 85/86/87/88 kênh 15
+PASS [3] "Cubase 15": điền nhanh KHÔNG gửi MIDI
+PASS [2] "Studio Pro 8": 0/25/50/75/100 -> CC 0/32/64/95/127 (kênh 15 = index 14), đúng CC riêng từng Knob; tăng/giảm đúng chiều
+PASS [2] "Studio Pro 8": cùng giá trị CC gửi lại -> không gửi lặp (3 lần xoay, chỉ 1 CC)
+PASS [2] "Cubase 13": 0/25/50/75/100 -> CC 0/32/64/95/127 (kênh 15 = index 14), đúng CC riêng từng Knob; tăng/giảm đúng chiều
+PASS [2] "Cubase 13": cùng giá trị CC gửi lại -> không gửi lặp (3 lần xoay, chỉ 1 CC)
+PASS [3] vào "Studio Pro 8": đổi DAW không ghi gì
+PASS [3] vào "Cubase 13": đổi DAW không ghi gì
+PASS [3] vào "Studio One 5": đổi DAW không ghi gì
+PASS [3] vào "Cubase 10": đổi DAW không ghi gì
+PASS [3] quay về Studio Pro 8: mapping 4 DAW còn nguyên, không ghi chéo
+PASS [3] Studio Pro 8 gửi CC21 (không dùng CC86 của Cubase)
+PASS [3] Cubase 10 gửi CC86 (không dùng CC21)
+PASS [6] điền KNOB sau LIVE: 8 mapping LIVE (CC102–109 kênh 16) không đổi
+PASS [6] CC Knob (20–23, 85–88) không rơi vào 102–109
+PASS [6] trùng mapping hiện có -> chặn, không ghi một phần
+PASS [6] mapping tay của Knob sẽ bị ghi đè -> liệt kê để xác nhận (không ghi đè âm thầm)
+PASS [7] chưa có mapping -> NOT_CONFIGURED, không gửi, không báo thành công
+PASS [7] có mapping nhưng cổng MIDI không mở -> NO_DEVICE (ok=false)
+PASS [7] static: loadData() (khôi phục UI) không gọi dispatchKnobVolume -> không gửi MIDI ngầm lúc khởi động
+PASS [4] setup.html: đúng 10 lựa chọn DAW (7 cũ + Studio One 5, Cubase 10, Cubase 11)
+PASS [4] thứ tự radio hợp lý, các lựa chọn cũ giữ nguyên
+
+63 PASS / 0 FAIL
