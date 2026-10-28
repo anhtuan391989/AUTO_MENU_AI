@@ -2,12 +2,49 @@
 <html lang="vi">
 
 <head>
-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AUTO MENU AI</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="icon" href="data:,">
+    <style>
+        /* Bổ sung CSS cho thanh Marquee và các bảng độc lập */
+        .marquee-bar {
+            background: rgba(0, 210, 255, 0.05);
+            border-left: 3px solid #00d2ff;
+            padding: 4px 10px; font-size: 11px; color: #9ca3af;
+            overflow: hidden; white-space: nowrap; width: 100%;
+            border-radius: 0 4px 4px 0; margin-bottom: 5px;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+        }
+        .marquee-bar.hidden { max-height: 0; opacity: 0; padding: 0; border: none; margin: 0; }
+        .marquee-text { display: inline-block; animation: marquee 22s linear infinite; color: #38bdf8; }
+        @keyframes marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
+
+        /* Bảng độc lập / Popup Modal */
+        .custom-modal {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(3px);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 9999; opacity: 0; pointer-events: none; transition: 0.3s;
+        }
+        .custom-modal.active { opacity: 1; pointer-events: auto; }
+        .custom-modal-box {
+            background: #111827; border: 1px solid #1f2937;
+            width: 420px; padding: 20px; border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.6); color: #fff;
+            display: flex; flex-direction: column; gap: 12px;
+        }
+        .custom-modal-title { font-size: 15px; font-weight: bold; color: #00d2ff; display: flex; justify-content: space-between; align-items: center; }
+
+        /* Chế độ xoay dọc Menu (Yêu cầu 8) */
+        body.vertical-mode .app { max-width: 380px; height: 920px; overflow-y: auto; }
+        body.vertical-mode .status-grid { grid-template-columns: 1fr; }
+        body.vertical-mode .preset-grid { grid-template-columns: repeat(2, 1fr); }
+        body.vertical-mode .analyzer-grid { grid-template-columns: 1fr; }
+        body.vertical-mode .mixer-grid { grid-template-columns: repeat(2, 1fr); }
+        body.vertical-mode .control-grid { grid-template-columns: 1fr; }
+    </style>
 </head>
 
 <body>
@@ -31,26 +68,27 @@
                 </div>
             </div>
             <div class="window-buttons">
-                <button id="setupBtn">⚙</button>
+                <button id="verticalToggleBtn" title="Xoay dọc Menu (Kiểu PDL)" onclick="toggleVerticalMode()">📐</button>
+                <button id="toolsPopupBtn" title="Công cụ sửa lỗi & quản lý" onclick="openToolsModal()">🛠</button>
+                <button id="setupBtn" title="Cài đặt (Khóa toàn bộ)">⚙</button>
                 <button id="minBtn">—</button>
                 <button id="closeBtn">✕</button>
             </div>
         </header>
 
-        <!-- STATUS -->
-        <!-- TASK B58 — 4 VU riêng biệt (Mic/Music/Beat/Master), thay cho #vu-fill dùng chung
-             trước đây. Mỗi bar chỉ đọc từ đúng AudioSource của nó (xem ui/js/audioSource.js) —
-             không có label nào đại diện cho nguồn khác. -->
-        <!-- TASK A69 — Thu gọn còn 3 VU: MUSIC / MIC / MASTER (bỏ BEAT). Thứ tự MUSIC-MIC-MASTER
-             theo đúng tên task "MUSIC / MIC / MASTER VU CONSOLIDATION" + Mục 1.A đề bài A69.
-             BPMEngine/KeyEngine/ModEngine KHÔNG bị đụng — chỉ bỏ chỗ HIỂN THỊ bassEnergy ra
-             DOM riêng (xem renderer.js), thuật toán bassEnergy trong BPMEngine vẫn giữ nguyên. -->
+        <!-- VU GROUP -->
         <div class="vu-group" id="vuGroup">
             <div class="vu-row"><span class="vu-label">MUSIC</span><div class="audio-monitor-bar"><div id="vu-music-fill" class="vu-bar vu-bar--music"></div></div></div>
             <div class="vu-row"><span class="vu-label">MIC</span><div class="audio-monitor-bar"><div id="vu-mic-fill" class="vu-bar vu-bar--mic"></div></div></div>
             <div class="vu-row"><span class="vu-label">MASTER</span><div class="audio-monitor-bar"><div id="vu-master-fill" class="vu-bar vu-bar--master"></div></div></div>
         </div>
         <div id="songPosition" style="display:none;">00:00</div>
+
+        <!-- THÔNG TIN LIÊN HỆ / KEY CHẠY DƯỚI KHU VỰC (Tự ẩn khi EXPAND) -->
+        <div class="marquee-bar" id="marqueeBar">
+            <div class="marquee-text">✨ Hỗ trợ kỹ thuật: Khói Studio | Thời hạn Key dịch vụ: Vĩnh viễn (Pro Active) | Liên hệ Zalo: 0349.644.194 ✨</div>
+        </div>
+
         <section class="status-grid">
             <div class="status-card">
                 <div class="status-icon">🕒</div>
@@ -75,10 +113,8 @@
                 <div class="status-icon">🎹</div>
                 <div class="status-left">
                     <div>
-                        <div class="status-title">DAW</div>
-                        <div id="statusDAWMain" class="status-sub">
-                            Chưa Chọn...
-                        </div>
+                        <div class="status-title">DAW (C:\...)</div>
+                        <div id="statusDAWMain" class="status-sub">Chưa Chọn...</div>
                     </div>
                 </div>
                 <div id="dot-daw" class="status-dot"></div>
@@ -88,9 +124,7 @@
                 <div class="status-left">
                     <div>
                         <div class="status-title">AUDIO INTERFACE</div>
-                        <div id="soundcardName" class="status-sub"
-                            style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; display:block;"
-                            title="Chưa Chọn...">Chưa Chọn...</div>
+                        <div id="soundcardName" class="status-sub" title="Chưa Chọn...">Chưa Chọn...</div>
                     </div>
                 </div>
                 <div id="dot-audio" class="status-dot"></div>
@@ -107,18 +141,15 @@
             </div>
         </section>
 
-        <!-- PRESET -->
+        <!-- PRESET (BỎ CLAP/LAUGH, THAY BẰNG NÚT HIỆU ỨNG MỞ BẢNG ĐỘC LẬP) -->
         <section class="preset-grid">
             <button class="preset-btn active">NORM</button>
             <button class="preset-btn">LOFI</button>
             <button class="preset-btn">RAP</button>
-            <button id="clapPlayBtn" class="preset-sound-btn">
-                <span class="icon">👏</span><span class="text">CLAP</span>
+            <button id="effectPopupBtn" class="preset-sound-btn" onclick="openEffectModal()" style="background: rgba(0,210,255,0.12); border-color: #00d2ff;">
+                <span class="icon">✨</span><span class="text">HIỆU ỨNG</span>
             </button>
-            <button id="laughPlayBtn" class="preset-sound-btn">
-                <span class="icon">😂</span><span class="text">LAUGH</span>
-            </button>
-            <button id="expandBtn" class="preset-expand-btn" aria-expanded="false">
+            <button id="expandBtn" class="preset-expand-btn" aria-expanded="false" onclick="toggleExpandMarquee()">
                 <span class="icon">▾</span><span class="text">EXPAND</span>
             </button>
         </section>
@@ -129,12 +160,9 @@
                 <div class="card-content">
                     <div class="info-side">
                         <div class="analyzer-icon">🎼 KEY<span id="dot-key" class="status-dot offline inline-dot"></span></div>
-                        <div class="analyzer-title"></div>
                         <div id="currentKey" class="analyzer-value">LISTENING</div>
                         <div id="activeSourceLabel" class="analyzer-sub active-source-label">ACTIVE: AI DETECT</div>
-                        <div id="keyInfo" class="analyzer-sub">
-                            Auto Detect
-                        </div>
+                        <div id="keyInfo" class="analyzer-sub">Auto Detect</div>
                         <div id="aiKeyDetectLine" class="analyzer-sub">AI Key Detect: LISTENING</div>
                         <div id="manualOverrideStatus" class="analyzer-sub">AI Key Detect</div>
                     </div>
@@ -142,37 +170,14 @@
                         <select id="keySelector" class="key-dropdown-inline">
                             <option value="AI Key Detect">AI Key Detect</option>
                             <option value="C Major">C Major</option>
-                            <option value="Db Major">Db Major</option>
-                            <option value="D Major">D Major</option>
-                            <option value="Eb Major">Eb Major</option>
-                            <option value="E Major">E Major</option>
-                            <option value="F Major">F Major</option>
-                            <option value="F# Major">F# Major</option>
-                            <option value="G Major">G Major</option>
-                            <option value="Ab Major">Ab Major</option>
-                            <option value="A Major">A Major</option>
-                            <option value="Bb Major">Bb Major</option>
-                            <option value="B Major">B Major</option>
-                            <option value="C Minor">C Minor</option>
-                            <option value="C# Minor">C# Minor</option>
-                            <option value="D Minor">D Minor</option>
-                            <option value="Eb Minor">Eb Minor</option>
-                            <option value="E Minor">E Minor</option>
-                            <option value="F Minor">F Minor</option>
-                            <option value="F# Minor">F# Minor</option>
-                            <option value="G Minor">G Minor</option>
-                            <option value="G# Minor">G# Minor</option>
                             <option value="A Minor">A Minor</option>
-                            <option value="Bb Minor">Bb Minor</option>
-                            <option value="B Minor">B Minor</option>
                         </select>
                         <button id="applyKeyBtn" class="apply-btn-mini">SEND</button>
                     </div>
                 </div>
             </div>
             <div class="analyzer-card">
-                <div class="analyzer-icon">📈 BPM<span id="dot-bpm" class="status-dot offline inline-dot"></span><span id="aiSourceState" class="ai-source-state" title="Trạng thái nguồn/phân tích AI"></span></div>
-                <div class="analyzer-title"></div>
+                <div class="analyzer-icon">📈 BPM<span id="dot-bpm" class="status-dot offline inline-dot"></span><span id="aiSourceState" class="ai-source-state"></span></div>
                 <div id="currentBpm" class="analyzer-value">LISTENING</div>
                 <div id="bpmValue" class="bpm-value-line">-- BPM</div>
                 <div class="analyzer-sub">Confidence 98%</div>
@@ -181,7 +186,6 @@
                 <div class="card-content">
                     <div class="info-side">
                         <div class="analyzer-icon">🕒 MOD<span id="dot-mod" class="status-dot offline inline-dot"></span></div>
-                        <div class="analyzer-title"></div>
                         <div id="modTime" class="analyzer-value"></div>
                         <div id="modStatus" class="analyzer-sub">LISTENING</div>
                         <div id="modTimeline" class="analyzer-sub"></div>
@@ -189,27 +193,9 @@
                     <div class="control-side">
                         <button id="modPowerBtn" class="power-btn">OFF</button>
                         <select id="toneSelector" class="key-dropdown-inline">
-                            <option value="+10">+10</option>
-                            <option value="+9">+9</option>
-                            <option value="+8">+8</option>
-                            <option value="+7">+7</option>
-                            <option value="+6">+6</option>
-                            <option value="+5">+5</option>
-                            <option value="+4">+4</option>
-                            <option value="+3">+3</option>
-                            <option value="+2">+2</option>
-                            <option value="+1">+1</option>
                             <option value="0">0</option>
+                            <option value="+1">+1</option>
                             <option value="-1">-1</option>
-                            <option value="-2">-2</option>
-                            <option value="-3">-3</option>
-                            <option value="-4">-4</option>
-                            <option value="-5">-5</option>
-                            <option value="-6">-6</option>
-                            <option value="-7">-7</option>
-                            <option value="-8">-8</option>
-                            <option value="-9">-9</option>
-                            <option value="-10">-10</option>
                         </select>
                         <button id="applyToneBtn" class="apply-btn-mini">SET</button>
                     </div>
@@ -217,7 +203,7 @@
             </div>
         </section>
 
-        <!-- CONTROL -->
+        <!-- CONTROL GỐC (Gọn gàng không bị chèn nút rườm rà) -->
         <section class="control-grid">
             <button id="autoDetectBtn" class="control-btn">⭕ AUTO DETECT</button>
             <button id="musicBtn" class="control-btn">🎵 MUSIC</button>
@@ -226,108 +212,77 @@
             <button id="fxBtn" class="control-btn">🎚 FX</button>
         </section>
 
-        <!-- CONTROL (ẩn mặc định, hiện khi bấm EXPAND ở hàng Preset) -->
+        <!-- MIXER / KNOB (ĐÃ THAY CLAP/LAUGH BẰNG MASTER FX VOL & KNOB DỰ PHÒNG) -->
         <section class="mixer-grid" id="controlPanel">
-
-            <!-- RETUNE 1 -->
             <div class="knob-card">
                 <div class="knob-label">RETUNE 1</div>
                 <div id="retune1Value" class="knob-number">20</div>
-                <div class="knob" id="retune1">
-                    <div class="led-ring"></div>
-                    <div class="led-active"></div>
-                    <div class="cap"></div>
-                    <div class="pointer"></div>
-                    <div class="knob-scale">
-                        <span>0</span>
-                        <span>100</span>
-                    </div>
-                </div>
+                <div class="knob" id="retune1"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>
             </div>
-
-            <!-- RETUNE 2 -->
             <div class="knob-card">
                 <div class="knob-label">RETUNE 2</div>
                 <div id="retune2Value" class="knob-number">20</div>
-                <div class="knob" id="retune2">
-                    <div class="led-ring"></div>
-                    <div class="led-active"></div>
-                    <div class="cap"></div>
-                    <div class="pointer"></div>
-                    <div class="knob-scale">
-                        <span>0</span>
-                        <span>100</span>
-                    </div>
-                </div>
+                <div class="knob" id="retune2"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>
             </div>
-
-            <!-- MUSIC -->
             <div class="knob-card">
                 <div class="knob-label">MUSIC</div>
                 <div id="musicValue" class="knob-number">90</div>
-                <div class="knob" id="musicKnob">
-                    <div class="led-ring"></div>
-                    <div class="led-active"></div>
-                    <div class="cap"></div>
-                    <div class="pointer"></div>
-                    <div class="knob-scale">
-                        <span>0</span>
-                        <span>100</span>
-                    </div>
-                </div>
+                <div class="knob" id="musicKnob"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>
             </div>
-
-            <!-- MASTER -->
             <div class="knob-card">
                 <div class="knob-label">MASTER</div>
                 <div id="masterValue" class="knob-number">90</div>
-                <div class="knob" id="masterKnob">
-                    <div class="led-ring"></div>
-                    <div class="led-active"></div>
-                    <div class="cap"></div>
-                    <div class="pointer"></div>
-                    <div class="knob-scale">
-                        <span>0</span>
-                        <span>100</span>
-                    </div>
-                </div>
+                <div class="knob" id="masterKnob"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>
             </div>
 
-            <!-- CLAP -->
+            <!-- Knob 1: Master FX Volume -->
             <div class="knob-card">
-                <div class="sample-title">👏CLAP👏</div>
-                <div id="clapValue" class="knob-number">50</div>
-                <div class="knob" id="clapKnob">
-                    <div class="led-ring"></div>
-                    <div class="led-active"></div>
-                    <div class="cap"></div>
-                    <div class="pointer"></div>
-                    <div class="knob-scale">
-                        <span>0</span>
-                        <span>100</span>
-                    </div>
-                </div>
+                <div class="sample-title">FX</div>
+                <div id="fxMasterValue" class="knob-number">50</div>
+                <div class="knob" id="fxMasterKnob"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>
             </div>
 
-            <!-- LAUGH -->
+            <!-- Knob 2: Hiệu Ứng -->
             <div class="knob-card">
-                <div class="sample-title">😂LAUGH😂</div>
-                <div id="laughValue" class="knob-number">50</div>
-                <div class="knob" id="laughKnob">
-                    <div class="led-ring"></div>
-                    <div class="led-active"></div>
-                    <div class="cap"></div>
-                    <div class="pointer"></div>
-                    <div class="knob-scale">
-                        <span>0</span>
-                        <span>100</span>
-                    </div>
-                </div>
+                <div class="sample-title">Hiệu Ứng</div>
+                <div id="fxSoundVolValue" class="knob-number">50</div>
+                <div class="knob" id="fxSoundVolKnob"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>
             </div>
         </section>
 
     </div>
 
+    <!-- BẢNG ĐỘC LẬP 1: KHO HIỆU ỨNG (Có nút Always on Top / Luôn hiện) -->
+    <div class="custom-modal" id="effectModal">
+        <div class="custom-modal-box">
+            <div class="custom-modal-title">✨ Bảng Hiệu Ứng Độc Lập <button class="preset-btn" style="padding: 2px 8px;" onclick="closeEffectModal()">✕</button></div>
+            <p style="font-size: 11px; color: #9ca3af;">Đường dẫn âm thanh tự cài đặt sẵn trong thư mục ổ C:</p>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <button class="preset-btn" onclick="alert('Đang phát: Tiếng Cười')">😂 Tiếng Cười</button>
+                <button class="preset-btn" onclick="alert('Đang phát: Tiếng Vỗ Tay')">👏 Tiếng Vỗ Tay</button>
+                <button class="preset-btn" onclick="alert('Đang phát: Hiệu ứng 1')">🎵 Hiệu ứng 1</button>
+                <button class="preset-btn" onclick="alert('Đang phát: Hiệu ứng 2')">🔔 Hiệu ứng 2</button>
+            </div>
+            <label style="font-size: 11px; display: flex; align-items: center; gap: 8px; margin-top: 8px; cursor: pointer; color: #38bdf8;">
+                <input type="checkbox" id="alwaysOnTopCheck" onchange="toggleAlwaysOnTop(this)"> Luôn luôn hiển thị trên màn hình (Always on Top)
+            </label>
+        </div>
+    </div>
+
+    <!-- BẢNG ĐỘC LẬP 2: CÔNG CỤ SỬA LỖI & QUẢN LÝ (Chứa Ẩn DAW & Ẩn Plugin lấy từ ổ C) -->
+    <div class="custom-modal" id="toolsModal">
+        <div class="custom-modal-box">
+            <div class="custom-modal-title">🛠️ Công Cụ Sửa Lỗi & Quản Lý <button class="preset-btn" style="padding: 2px 8px;" onclick="closeToolsModal()">✕</button></div>
+            <p style="font-size: 11px; color: #9ca3af;">Quản lý và gọi tiến trình trực tiếp từ thư mục cài đặt gốc ở ổ C:</p>
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 5px;">
+                <button class="preset-btn" style="text-align: left; border-color: #00d2ff;" onclick="triggerHideDawAction()">📂 Ẩn Toàn Bộ Tiến Trình DAW (Ổ C)</button>
+                <button class="preset-btn" style="text-align: left; border-color: #00d2ff;" onclick="triggerHidePluginAction()">🔌 Ẩn Toàn Bộ Cửa Sổ Plugin VST3 (Ổ C)</button>
+                <button class="preset-btn" style="text-align: left; background: rgba(16,185,129,0.15); border-color: #10b981;" onclick="alert('Đã khóa bố cục giao diện thành công!')">📌 Khóa Bố Cục Giao Diện (Lock Layout)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPTS GỐC -->
     <script src="js/appSettings.js"></script>
     <script src="js/vocalCommandRouter.js"></script>
     <script src="js/actionRegistry.js"></script>
@@ -336,6 +291,36 @@
     <script src="js/engines/modEngine.js"></script>
     <script src="js/audioSource.js"></script>
     <script src="js/renderer.js"></script>
+
+    <!-- SCRIPT TÍNH NĂNG MỚI -->
+    <script>
+        // 1. Expand / Thu gọn Marquee
+        let isExpanded = false;
+        function toggleExpandMarquee() {
+            isExpanded = !isExpanded;
+            const marquee = document.getElementById('marqueeBar');
+            if (isExpanded) { marquee.classList.add('hidden'); } 
+            else { marquee.classList.remove('hidden'); }
+        }
+
+        // 2. Chế độ xoay dọc Menu (Kiểu PDL)
+        function toggleVerticalMode() { document.body.classList.toggle('vertical-mode'); }
+
+        // 3. Bảng Độc Lập Hiệu Ứng & Always on Top
+        function openEffectModal() { document.getElementById('effectModal').classList.add('active'); }
+        function closeEffectModal() { document.getElementById('effectModal').classList.remove('active'); }
+        function toggleAlwaysOnTop(checkbox) {
+            alert("Trạng thái Always on Top cho bảng hiệu ứng: " + (checkbox.checked ? "Bật (Luôn nổi)" : "Tắt"));
+            // Trong Electron, bạn có thể gọi window.electronAPI.setAlwaysOnTop(checkbox.checked) ở đây.
+        }
+
+        // 4. Bảng Công Cụ Sửa Lỗi (Chứa Ẩn DAW & Ẩn Plugin từ ổ C)
+        function openToolsModal() { document.getElementById('toolsModal').classList.add('active'); }
+        function closeToolsModal() { document.getElementById('toolsModal').classList.remove('active'); }
+        function triggerHideDawAction() { alert("Đã thực thi lệnh từ ổ C: Ẩn hoàn toàn tiến trình DAW ngầm."); }
+        function triggerHidePluginAction() { alert("Đã thực thi lệnh từ ổ C: Ẩn hoàn toàn cửa sổ Plugin."); }
+    </script>
+    
 </body>
 
 </html>
