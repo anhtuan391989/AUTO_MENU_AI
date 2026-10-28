@@ -50,7 +50,7 @@ body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-fa
 /* =====================================
 3. PRESET, ANALYZER & CONTROL
 ===================================== */
-.preset-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 6px; margin-bottom: 2px; }
+.preset-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; margin-bottom: 2px; }
 .preset-btn { height: 31px; border: 1px solid rgba(0,180,255,.25); border-radius: 8px; background: linear-gradient(180deg,#0a1826,#07111c); color: #fff; font-weight: 800; font-size: 12px; cursor: pointer; transition: all 0.3s ease; position: relative; overflow: hidden; }
 .preset-btn.active { background: linear-gradient(90deg,#00bfff,#39e3ff); color: #00131c; box-shadow: 0 0 15px rgba(0, 191, 255, 0.4); }
 

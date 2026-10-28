@@ -47,6 +47,8 @@ const ACTIONS = Object.freeze({
     PRESET_NORM: "PRESET_NORM",
     PRESET_LOFI: "PRESET_LOFI",
     PRESET_RAP: "PRESET_RAP",
+    PRESET_REMIX: "PRESET_REMIX",
+    PRESET_TUNE_OFF: "PRESET_TUNE_OFF",
     CLAP: "CLAP",
     LAUGH: "LAUGH",
     // MIDI-MASTER-01 / MENU-CONTROL-01 — cùng nhóm "khai báo trước, KHÔNG mapping mặc định"

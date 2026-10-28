@@ -598,6 +598,8 @@ const PRESET_NAME_TO_ACTION = {
     NORM: "PRESET_NORM",
     LOFI: "PRESET_LOFI",
     RAP: "PRESET_RAP",
+    REMIX: "PRESET_REMIX",
+    "TUNE OFF": "PRESET_TUNE_OFF",
 };
 document.querySelectorAll(".preset-btn").forEach(btn => {
     btn.addEventListener("click", (e) => {
@@ -2704,8 +2706,7 @@ const SHORTCUT_ACTIONS = {
     lofi: () => clickPresetByName("LOFI"),
     rap: () => clickPresetByName("RAP"),
     doTone: () => document.getElementById("autoDetectBtn")?.click(),
-    // Chưa có nút "REMIX" trong giao diện chính hiện tại, nên phím tắt này tạm thời không có hành động.
-    remix: () => console.warn("Phím tắt REMIX đã lưu nhưng chưa có chế độ REMIX trong menu chính.")
+    remix: () => clickPresetByName("REMIX")
 };
 
 document.addEventListener("keydown", (e) => {

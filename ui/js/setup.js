@@ -622,6 +622,8 @@ const DAW_MIDI_ACTIONS = [
     { action: "PRESET_NORM", label: "PRESET NORM" },
     { action: "PRESET_LOFI", label: "PRESET LOFI" },
     { action: "PRESET_RAP", label: "PRESET RAP" },
+    { action: "PRESET_REMIX", label: "PRESET REMIX" },
+    { action: "PRESET_TUNE_OFF", label: "PRESET TUNE OFF" },
     { action: "CLAP", label: "CLAP" },
     { action: "LAUGH", label: "LAUGH" },
     { action: "MONITOR_MIC1", label: "MONITOR MIC1" },

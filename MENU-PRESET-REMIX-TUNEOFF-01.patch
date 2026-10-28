@@ -1,0 +1,75 @@
+diff --git a/ui/css/style.css b/ui/css/style.css
+index 86992fa..4806c68 100644
+--- a/ui/css/style.css
++++ b/ui/css/style.css
+@@ -50,7 +50,7 @@ body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-fa
+ /* =====================================
+ 3. PRESET, ANALYZER & CONTROL
+ ===================================== */
+-.preset-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 6px; margin-bottom: 2px; }
++.preset-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; margin-bottom: 2px; }
+ .preset-btn { height: 31px; border: 1px solid rgba(0,180,255,.25); border-radius: 8px; background: linear-gradient(180deg,#0a1826,#07111c); color: #fff; font-weight: 800; font-size: 12px; cursor: pointer; transition: all 0.3s ease; position: relative; overflow: hidden; }
+ .preset-btn.active { background: linear-gradient(90deg,#00bfff,#39e3ff); color: #00131c; box-shadow: 0 0 15px rgba(0, 191, 255, 0.4); }
+ 
+diff --git a/ui/index.html b/ui/index.html
+index 7d3ab8e..957e1fd 100644
+--- a/ui/index.html
++++ b/ui/index.html
+@@ -146,6 +146,8 @@
+             <button class="preset-btn active">NORM</button>
+             <button class="preset-btn">LOFI</button>
+             <button class="preset-btn">RAP</button>
++            <button class="preset-btn">REMIX</button>
++            <button class="preset-btn">TUNE OFF</button>
+             <button id="effectPopupBtn" class="preset-sound-btn" onclick="openEffectModal()" style="background: rgba(0,210,255,0.12); border-color: #00d2ff;">
+                 <span class="icon"></span><span class="text">EFFECT</span>
+             </button>
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index 8b4934a..aea7e3d 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -47,6 +47,8 @@ const ACTIONS = Object.freeze({
+     PRESET_NORM: "PRESET_NORM",
+     PRESET_LOFI: "PRESET_LOFI",
+     PRESET_RAP: "PRESET_RAP",
++    PRESET_REMIX: "PRESET_REMIX",
++    PRESET_TUNE_OFF: "PRESET_TUNE_OFF",
+     CLAP: "CLAP",
+     LAUGH: "LAUGH",
+     // MIDI-MASTER-01 / MENU-CONTROL-01 — cùng nhóm "khai báo trước, KHÔNG mapping mặc định"
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 3dada02..1819b7f 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -598,6 +598,8 @@ const PRESET_NAME_TO_ACTION = {
+     NORM: "PRESET_NORM",
+     LOFI: "PRESET_LOFI",
+     RAP: "PRESET_RAP",
++    REMIX: "PRESET_REMIX",
++    "TUNE OFF": "PRESET_TUNE_OFF",
+ };
+ document.querySelectorAll(".preset-btn").forEach(btn => {
+     btn.addEventListener("click", (e) => {
+@@ -2704,8 +2706,7 @@ const SHORTCUT_ACTIONS = {
+     lofi: () => clickPresetByName("LOFI"),
+     rap: () => clickPresetByName("RAP"),
+     doTone: () => document.getElementById("autoDetectBtn")?.click(),
+-    // Chưa có nút "REMIX" trong giao diện chính hiện tại, nên phím tắt này tạm thời không có hành động.
+-    remix: () => console.warn("Phím tắt REMIX đã lưu nhưng chưa có chế độ REMIX trong menu chính.")
++    remix: () => clickPresetByName("REMIX")
+ };
+ 
+ document.addEventListener("keydown", (e) => {
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index 04b4885..018de2d 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -622,6 +622,8 @@ const DAW_MIDI_ACTIONS = [
+     { action: "PRESET_NORM", label: "PRESET NORM" },
+     { action: "PRESET_LOFI", label: "PRESET LOFI" },
+     { action: "PRESET_RAP", label: "PRESET RAP" },
++    { action: "PRESET_REMIX", label: "PRESET REMIX" },
++    { action: "PRESET_TUNE_OFF", label: "PRESET TUNE OFF" },
+     { action: "CLAP", label: "CLAP" },
+     { action: "LAUGH", label: "LAUGH" },
+     { action: "MONITOR_MIC1", label: "MONITOR MIC1" },
