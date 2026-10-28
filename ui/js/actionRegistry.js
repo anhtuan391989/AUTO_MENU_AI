@@ -143,11 +143,15 @@ const SUPPORTED_DAWS = Object.freeze([
 // Căn cứ: số đo thật của người dùng (CC20 → fader Beat): CC64 = −11,3 dB · CC95 = −0,5 · CC97 = +0,2 · CC98 = +0,5 · CC99 = +0,8 ·
 // CC114 = +5,7 · CC127 = +10 dB. Mục tiêu: MUSIC 90 → fader gần 0 dB nhất theo số đo = CC97 (+0,2 dB).
 // Điểm neo [MenuMusic, CC]: 50→64 và 100→127 là điểm hiện hành đã đo; 90→97 là LỰA CHỌN hiệu chuẩn (không phải CC "tự nhiên" của 90).
+// FSP8-MIDI-SYNC-FAST-03 — số đo sau FAST-02 cho thấy trong CC 81–127 fader FSP8 gần tuyến tính theo dB: dB ≈ 0,3284×CC − 31,71 (13 điểm đo, sai số ≤ 0,05 dB);
+// dưới CC81 chỉ có điểm CC64 nên KHÔNG ngoại suy. Đoạn Menu 50→90 giữ nguyên (đo: −5,1 / −3,8 / −2,5 / −1,2 / +0,2 dB ở 70/75/80/85/90, tăng đều ~0,27 dB/bước).
+// Đoạn 90→100 (trước FAST-03: 3 CC/bước ≈ 1 dB/bước, 90→95 = +4,9 dB) nay là đường parabol liên tục độ dốc tại 90: CC = 97 + 0,825·t + 0,2175·t² (t = MUSIC − 90), làm tròn;
+// vẫn kết thúc đúng MUSIC 100 → CC127. dB tương ứng ở các neo là DỰ ĐOÁN theo công thức tuyến tính-dB nói trên, CHƯA đo.
 // Dưới 50: giữ nguyên công thức cũ round(v×127/100) (liên tục tại 50). Giữa các neo: nội suy tuyến tính theo CC — đây chỉ là XẤP XỈ
 // theo Menu, KHÔNG phải đường cong thật của FSP8. Các action/DAW khác: công thức cũ, không đổi.
 const KNOB_CC_ANCHORS = Object.freeze({
     "Studio Pro 8": Object.freeze({
-        BEAT_INPUT_VOLUME: Object.freeze([[50, 64], [90, 97], [100, 127]]),
+        BEAT_INPUT_VOLUME: Object.freeze([[50, 64], [90, 97], [91, 98], [92, 100], [93, 101], [94, 104], [95, 107], [96, 110], [97, 113], [98, 118], [99, 122], [100, 127]]),
     }),
 });
 

@@ -69,7 +69,7 @@ function env(init = {}, { portOk = true } = {}) {
   for (let i = 0; i <= 100; i++) await e.turn(A.BEAT_INPUT_VOLUME, i);
   for (let i = 100; i >= 0; i--) await e.turn(A.BEAT_INPUT_VOLUME, i);
   const vals = e.sent.map(s => s.v);
-  const exp = []; const f = v => (v < 50 ? Math.round(v * 127 / 100) : v <= 90 ? Math.round(64 + 33 * (v - 50) / 40) : Math.round(97 + 30 * (v - 90) / 10));
+  const exp = []; const f = v => (v < 50 ? Math.round(v * 127 / 100) : v <= 90 ? Math.round(64 + 33 * (v - 50) / 40) : [97, 98, 100, 101, 104, 107, 110, 113, 118, 122, 127][v - 90]); // FAST-03: bảng 90–100 độc lập (parabol 97+0,825t+0,2175t²)
   let prev = null; const seq = [...Array(101).keys(), ...[...Array(101).keys()].reverse()];
   for (const v of seq) { const c = f(v); if (c !== prev) { exp.push(c); prev = c; } }
   ok(JSON.stringify(vals) === JSON.stringify(exp), '[T08] quét 0→100→0: CC gửi đúng thứ tự, chỉ bỏ các giá trị trùng liên tiếp', {n: vals.length, e: exp.length});
