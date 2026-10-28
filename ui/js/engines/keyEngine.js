@@ -762,10 +762,25 @@ const KeyEngine = (() => {
                 const cv2Rejected = buildConfidenceV2(result, 0);
                 logMarginSnapshot(result, startedAt, 0, false, 0, cv2Rejected, top1StableMs, "dưới MIN_CONFIDENCE");
                 sendTelemetry({
+                    event: "KEY_LOW_CONFIDENCE_DIAG",
                     time: elapsedSec, top1: candidateLabel(result.top1), top2: candidateLabel(result.top2),
                     confidence: result.confidence, margin: result.margin, stability: 0,
                     top1Stable: top1StableMs / 1000, decisionScore: cv2Rejected.combined,
-                    votes: 0, window: voteWindow.length, locked: false
+                    votes: 0, window: voteWindow.length, locked: false,
+                    // Diagnostic only: distinguishes a silent Key analyser from a scoring/gate problem.
+                    hasMusicalContent, frameCounter,
+                    inputProbe: {
+                        frames: inputProbe.frames,
+                        framesWithContent: inputProbe.framesWithContent,
+                        lastContentRms: inputProbe.lastContentRms,
+                        maxContentRms: inputProbe.maxContentRms,
+                        lastMaxDb: inputProbe.lastMaxDb,
+                        maxDbEver: inputProbe.maxDbEver,
+                        finiteBins: inputProbe.finiteBins,
+                        sampleRate: inputProbe.sampleRate,
+                        fftSize: inputProbe.fftSize,
+                        lastFrameAt: inputProbe.lastFrameAt
+                    }
                 });
                 highConfidenceStreak = 0;
                 return;
