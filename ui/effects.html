@@ -17,7 +17,7 @@
         .fx-toprow { display: flex; justify-content: space-between; align-items: center; flex: none; }
         .fx-aot { font-size: 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--cyan); }
         .fx-tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; flex: none; }
-        .fx-tabs button.active { box-shadow: 0 0 0 1px var(--cyan) inset; color: var(--cyan); }
+        .fx-tabs button.active { box-shadow: 0 0 0 1px var(--cyan) inset; color: #00131f; text-shadow: none; }
         .fx-gridwrap { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; border: 1px solid rgba(0,180,255,.45); border-radius: 6px; background: rgba(0,180,255,.06); }
         .fx-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
         .fx-grid button { padding: 12px 4px; font-size: 12px; font-weight: bold; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -63,6 +63,9 @@
 
             let items = [];
             let group = "HIEUUNG";
+            // Nếu preload/main còn là bản cũ (chưa tắt hẳn ứng dụng sau khi chép file) thì báo rõ thay vì để bảng trống.
+            const libReady = typeof api.getEffectsLibrary === "function" && typeof api.playLibEffect === "function";
+            const emptyMsg = libReady ? "Chưa có hiệu ứng. Bấm EDIT để thêm." : "Ứng dụng chưa nạp bản mới. Hãy tắt hẳn AUTO MENU AI (kể cả dưới khay hệ thống) rồi mở lại.";
 
             // Vẽ lưới nút theo tab đang chọn. Tên nút dùng textContent (không chèn HTML).
             function render() {
@@ -72,7 +75,7 @@
                 if (shown.length === 0) {
                     const empty = document.createElement("div");
                     empty.className = "fx-empty";
-                    empty.textContent = "Chưa có hiệu ứng. Bấm EDIT để thêm.";
+                    empty.textContent = emptyMsg;
                     grid.appendChild(empty);
                     return;
                 }
@@ -90,11 +93,14 @@
             function setItems(list) { items = Array.isArray(list) ? list : []; render(); }
 
             tabs.forEach((t) => t.addEventListener("click", () => { group = t.getAttribute("data-group"); render(); }));
-            document.getElementById("fxStopBtn").addEventListener("click", () => api.stopLibEffects());
-            document.getElementById("fxEditBtn").addEventListener("click", () => api.openEffectsEditor());
-
-            api.getEffectsLibrary().then((r) => setItems(r && r.ok ? r.items : [])).catch(() => setItems([]));
-            api.onEffectsLibChanged((list) => setItems(list));
+            if (libReady) {
+                document.getElementById("fxStopBtn").addEventListener("click", () => api.stopLibEffects());
+                document.getElementById("fxEditBtn").addEventListener("click", () => api.openEffectsEditor());
+                api.getEffectsLibrary().then((r) => setItems(r && r.ok ? r.items : [])).catch(() => setItems([]));
+                api.onEffectsLibChanged((list) => setItems(list));
+            } else {
+                render();
+            }
 
             closeBtn.addEventListener("click", () => api.closeEffectsWindow());
             document.addEventListener("keydown", (e) => { if (e.key === "Escape") api.closeEffectsWindow(); });

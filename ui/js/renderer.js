@@ -220,10 +220,10 @@ const SoundEffectEngine = (() => {
         });
     }
 
-    /** Dừng mọi hiệu ứng thư viện đang phát (nút "Dừng" của Bảng Hiệu Ứng). */
-    function stopAll() {
+    /** Dừng mọi hiệu ứng thư viện đang phát (nút "Dừng" của Bảng Hiệu Ứng). exceptId: id được giữ lại (nếu có). */
+    function stopAll(exceptId) {
         Object.keys(effects).forEach((key) => {
-            if (!key.startsWith(LIB_PREFIX)) return;
+            if (!key.startsWith(LIB_PREFIX) || key === exceptId) return;
             const e = effects[key];
             if (!e.playing) return;
             e.audio.pause();
@@ -854,7 +854,12 @@ window.electronAPI?.getEffectsLibrary?.()
     .then((r) => { if (r && r.ok) SoundEffectEngine.loadLibrary(r.items); })
     .catch((err) => console.error("getEffectsLibrary lỗi:", err));
 window.electronAPI?.onEffectsLibChanged?.((items) => SoundEffectEngine.loadLibrary(items));
-window.electronAPI?.onEffectsLibPlay?.((id) => { if (typeof id === "string") SoundEffectEngine.toggle("LIB:" + id); });
+// Bấm hiệu ứng KHÁC khi đang có hiệu ứng chạy -> tắt ngay hiệu ứng cũ rồi chạy hiệu ứng mới. Bấm lại đúng nút đang chạy -> dừng.
+window.electronAPI?.onEffectsLibPlay?.((id) => {
+    if (typeof id !== "string") return;
+    SoundEffectEngine.stopAll("LIB:" + id);
+    SoundEffectEngine.toggle("LIB:" + id);
+});
 window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
 
 /* ==========================================================

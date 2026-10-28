@@ -805,6 +805,113 @@ ipcMain.handle("effects-set-aot", (event, enabled) => {
 });
 
 // ================================
+// THƯ VIỆN HIỆU ỨNG — danh sách nút của Bảng Hiệu Ứng (HIỆU ỨNG / NHẠC), chỉnh trong Cài đặt.
+// Logic ở app/EffectsLibrary.js. Quyền: đọc danh sách <- menu / bảng hiệu ứng / cài đặt;
+// sửa danh sách <- chỉ cửa sổ Cài đặt; phát/dừng <- chỉ bảng hiệu ứng (chuyển sang menu để phát).
+// ================================
+const { createEffectsLibrary } = require("./EffectsLibrary");
+const { pathToFileURL } = require("url");
+const effectsLibrary = createEffectsLibrary({
+    fs: require("fs"),
+    path,
+    pathToFileURL,
+    bundledDir: path.join(__dirname, "..", "ui", "assets", "effects"),
+    userDir: app.getPath("userData")
+});
+
+function isEffectsLibReader(sender) {
+    return !!sender && (
+        (mainWin && !mainWin.isDestroyed() && sender === mainWin.webContents) ||
+        (setupWin && !setupWin.isDestroyed() && sender === setupWin.webContents) ||
+        effectsWindow.isFromEffects(sender)
+    );
+}
+
+function broadcastEffectsLibrary() {
+    const items = effectsLibrary.list();
+    const targets = [mainWin && !mainWin.isDestroyed() ? mainWin.webContents : null, setupWin && !setupWin.isDestroyed() ? setupWin.webContents : null, effectsWindow.getWebContents()];
+    for (const wc of targets) {
+        try { if (wc && !wc.isDestroyed()) wc.send("effects-lib-changed", items); } catch (err) { console.error("effects-lib-changed lỗi:", err); }
+    }
+}
+
+ipcMain.handle("effects-lib-get", (event) => {
+    if (!isEffectsLibReader(event.sender)) return { ok: false, items: [], error: "Không được phép" };
+    return { ok: true, items: effectsLibrary.list() };
+});
+
+ipcMain.handle("effects-lib-op", async (event, op) => {
+    try {
+        if (!setupWin || setupWin.isDestroyed() || event.sender !== setupWin.webContents) return { ok: false, error: "Không được phép" };
+        if (!op || typeof op.type !== "string") return { ok: false, error: "Lệnh không hợp lệ" };
+        let result;
+        if (op.type === "rename") result = effectsLibrary.rename(op.id, op.name);
+        else if (op.type === "move") result = effectsLibrary.move(op.id, op.group);
+        else if (op.type === "remove") result = effectsLibrary.remove(op.id);
+        else if (op.type === "reset") result = effectsLibrary.reset();
+        else if (op.type === "replace" || op.type === "add") {
+            const picked = await dialog.showOpenDialog(setupWin, {
+                title: op.type === "add" ? "Chọn file âm thanh để thêm" : "Chọn file âm thanh thay thế",
+                properties: op.type === "add" ? ["openFile", "multiSelections"] : ["openFile"],
+                filters: [{ name: "Âm thanh", extensions: ["mp3", "wav", "ogg", "m4a"] }]
+            });
+            if (picked.canceled || !picked.filePaths.length) return { ok: true, canceled: true };
+            if (op.type === "replace") {
+                result = effectsLibrary.replaceFile(op.id, picked.filePaths[0]);
+            } else {
+                result = { ok: true };
+                for (const fp of picked.filePaths) {
+                    const base = path.basename(fp, path.extname(fp));
+                    const r = effectsLibrary.add(op.group, base, fp);
+                    if (!r.ok) { result = r; break; }
+                }
+            }
+        } else return { ok: false, error: "Lệnh không hợp lệ" };
+        if (result && result.ok) broadcastEffectsLibrary();
+        return result;
+    } catch (err) {
+        console.error("effects-lib-op lỗi:", err);
+        return { ok: false, error: String((err && err.message) || err) };
+    }
+});
+
+ipcMain.on("effects-lib-play", (event, id) => {
+    try {
+        if (!effectsWindow.isFromEffects(event.sender)) return;
+        if (typeof id !== "string" || !effectsLibrary.find(id)) return;
+        if (!mainWin || mainWin.isDestroyed()) return;
+        mainWin.webContents.send("effects-lib-play", id);
+    } catch (err) {
+        console.error("effects-lib-play lỗi:", err);
+    }
+});
+
+ipcMain.on("effects-lib-stop", (event) => {
+    try {
+        if (!effectsWindow.isFromEffects(event.sender)) return;
+        if (!mainWin || mainWin.isDestroyed()) return;
+        mainWin.webContents.send("effects-lib-stop");
+    } catch (err) {
+        console.error("effects-lib-stop lỗi:", err);
+    }
+});
+
+// Nút EDIT trong Bảng Hiệu Ứng -> mở Cài đặt, nhảy thẳng tới mục "Hiệu Ứng".
+ipcMain.on("effects-open-editor", (event) => {
+    try {
+        if (!effectsWindow.isFromEffects(event.sender)) return;
+        if (!setupWin || setupWin.isDestroyed()) createSetupWindow();
+        const sendGoto = () => { try { setupWin.webContents.send("setup-goto-panel", "panel-effects"); } catch (err) { console.error("setup-goto-panel lỗi:", err); } };
+        setupWin.show();
+        setupWin.focus();
+        if (setupWin.webContents.isLoading()) setupWin.webContents.once("did-finish-load", () => setTimeout(sendGoto, 300));
+        else sendGoto();
+    } catch (err) {
+        console.error("effects-open-editor lỗi:", err);
+    }
+});
+
+// ================================
 // LẤY TỌA ĐỘ: dùng AutoHotkey v2 (di chuột thật tới vị trí + nhấn F8)
 // Không che màn hình, hoạt động đúng trên cả nhiều màn hình vì MouseGetPos
 // của AHK tự tính theo toàn bộ desktop ảo (ghép tất cả các màn hình).

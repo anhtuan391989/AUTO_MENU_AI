@@ -12,8 +12,8 @@
    - Module thuần Node (BrowserWindow/screen được truyền vào) để test được bằng đối tượng giả.
    ========================================================== */
 
-const WIDTH = 440;
-const HEIGHT = 250;
+const WIDTH = 380;
+const HEIGHT = 560;
 const GAP = 10;
 
 // Vị trí mở lần đầu: ngay DƯỚI menu nếu còn chỗ trong vùng làm việc, nếu không thì góc phải-trên
@@ -197,7 +197,7 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
         return alive(main) && !!sender && sender === main.webContents;
     }
 
-    return { open, close, toggle, getAlwaysOnTop, setAlwaysOnTop, isFromEffects, isFromMain, isOpen: () => alive(win) };
+    return { open, close, toggle, getAlwaysOnTop, setAlwaysOnTop, isFromEffects, isFromMain, isOpen: () => alive(win), getWebContents: () => (alive(win) ? win.webContents : null) };
 }
 
 module.exports = { createEffectsWindowManager, computeInitialPosition, WIDTH, HEIGHT };

@@ -95,6 +95,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     playEffect: (effectId) => ipcRenderer.send("effects-play", effectId),
     onEffectsPlay: (callback) => ipcRenderer.on("effects-play", (event, effectId) => callback(effectId)),
 
+    // ---- THƯ VIỆN HIỆU ỨNG (bảng nhiều nút + mục "Hiệu Ứng" trong Cài đặt, xem app/EffectsLibrary.js) ----
+    getEffectsLibrary: () => ipcRenderer.invoke("effects-lib-get"),
+    effectsLibraryOp: (op) => ipcRenderer.invoke("effects-lib-op", op),
+    playLibEffect: (id) => ipcRenderer.send("effects-lib-play", id),
+    stopLibEffects: () => ipcRenderer.send("effects-lib-stop"),
+    openEffectsEditor: () => ipcRenderer.send("effects-open-editor"),
+    onEffectsLibChanged: (callback) => ipcRenderer.on("effects-lib-changed", (event, items) => callback(items)),
+    onEffectsLibPlay: (callback) => ipcRenderer.on("effects-lib-play", (event, id) => callback(id)),
+    onEffectsLibStop: (callback) => ipcRenderer.on("effects-lib-stop", () => callback()),
+    onSetupGotoPanel: (callback) => ipcRenderer.on("setup-goto-panel", (event, panelId) => callback(panelId)),
+
     // ---- MIDI-MASTER-01 Phase 1: trạng thái MIDI THẬT phía main process (easymidi) ----
     // Dùng bởi ui/js/midiHealth.js để hợp nhất với trạng thái Web MIDI phía renderer.
     getMainMidiHealth: () => ipcRenderer.invoke("midi-health"),

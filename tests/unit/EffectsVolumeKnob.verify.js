@@ -81,9 +81,10 @@ const main = read("app/main.js");
 check(/ipcMain\.on\("effects-play"[\s\S]*isFromEffects\(event\.sender\)[\s\S]*effectId !== "CLAP" && effectId !== "LAUGH"[\s\S]*mainWin\.webContents\.send\("effects-play", effectId\)/.test(main), "main: effects-play kiểm tra nguồn + id rồi chuyển cho menu");
 
 const html = read("ui/effects.html");
-check(/data-effect="LAUGH"/.test(html) && /data-effect="CLAP"/.test(html), "effects.html: 2 nút có âm thanh gắn data-effect");
-check(/api\.playEffect\(btn\.getAttribute\("data-effect"\)\)/.test(html), "effects.html: bấm nút gọi playEffect");
-check(/Hiệu ứng 1/.test(html) && /Hiệu ứng 2/.test(html), "effects.html: Hiệu ứng 1/2 vẫn còn");
+// Bảng Hiệu Ứng mới: lưới nút lấy từ thư viện (HIỆU ỨNG / NHẠC), mỗi nút gọi playLibEffect; có Dừng + EDIT.
+check(/api\.playLibEffect\(it\.id\)/.test(html), "effects.html: bấm nút gọi playLibEffect(id)");
+check(/data-group="HIEUUNG"/.test(html) && /data-group="NHAC"/.test(html), "effects.html: có 2 tab HIỆU ỨNG và NHẠC");
+check(/id="fxStopBtn"/.test(html) && /id="fxEditBtn"/.test(html) && /id="fxAotCheck"/.test(html), "effects.html: có Dừng, EDIT, Luôn Hiện");
 
 const index = read("ui/index.html");
 check(index.includes('id="fxSoundVolKnob"') && index.includes('id="fxSoundVolValue"'), "index.html có sẵn knob Hiệu Ứng (không sửa HTML)");
