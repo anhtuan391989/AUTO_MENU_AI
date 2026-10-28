@@ -304,6 +304,18 @@ updateClock();
 
     });
 
+    // Đo lại khi chính vùng hiển thị đổi độ rộng (vd. bấm nút xoay dọc Menu — lúc này
+    // không có sự kiện "resize" của cửa sổ). Chỉ đo, không đổi kích thước layout.
+    if (typeof ResizeObserver === "function") {
+
+        new ResizeObserver(() => {
+
+            requestAnimationFrame(startMarqueeIfNeeded);
+
+        }).observe(viewport);
+
+    }
+
     // API công khai cho 1 task nối dây sau này (IPC từ WindowsMediaSession).
     window.AutoMenuAI = window.AutoMenuAI || {};
     window.AutoMenuAI.updateNowPlaying = render;

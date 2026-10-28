@@ -258,3 +258,21 @@ không đọc kích thước phần tử, nên đổi số đo ở đây không 
 #aotSwitch[data-state="error"]::after { background: #ff4d4d; }
 #aotSwitch:disabled { cursor: default; }
 #aotSwitch:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+/* =====================================
+VERTICAL MODE — NOW PLAYING ngay dưới "AUTO MENU AI" + ẨN TẠM khu thông tin
+(Chỉ áp dụng khi body có class "vertical-mode"; không đổi HTML, không đổi chế độ ngang.
+ Phần tử chỉ bị display:none nên mọi logic JS cập nhật chúng vẫn chạy bình thường.)
+===================================== */
+body.vertical-mode .header { height: auto; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 8px; row-gap: 4px; padding: 6px 11px; }
+body.vertical-mode .logo { grid-column: 1; grid-row: 1; min-width: 0; font-size: 16px; letter-spacing: .5px; } /* nhỏ lại chút để hiện đủ "AUTO MENU AI" trong khung 380px */
+body.vertical-mode .window-buttons { grid-column: 2; grid-row: 1; gap: 3px; }
+body.vertical-mode .window-buttons button:not(#aotSwitch) { width: 24px; height: 24px; }
+body.vertical-mode .header-center { grid-column: 1 / -1; grid-row: 2; }
+
+/* TẠM ẨN (xóa các dòng dưới đây để hiện lại): AUTO TUNE, DAW, AUDIO INTERFACE, CACHE, BPM. TIME vẫn giữ. */
+body.vertical-mode .status-card:has(#dot-autotune),
+body.vertical-mode .status-card:has(#dot-daw),
+body.vertical-mode .status-card:has(#dot-audio),
+body.vertical-mode .status-card:has(#dot-cache),
+body.vertical-mode .analyzer-card:has(#dot-bpm) { display: none; }
