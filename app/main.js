@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, session, shell, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { execFile } = require("child_process");
@@ -747,6 +747,48 @@ ipcMain.handle("set-always-on-top", (event, enabled) => {
         try { actual = !!(mainWin && !mainWin.isDestroyed() && mainWin.isAlwaysOnTop()); } catch { /* giữ false */ }
         return { ok: false, value: actual, error: String((err && err.message) || err) };
     }
+});
+
+// ================================
+// BẢNG HIỆU ỨNG ĐỘC LẬP — cửa sổ riêng, kéo tự do, "Luôn hiển thị" vẫn hiện khi menu xuống taskbar.
+// Toàn bộ logic nằm trong app/EffectsWindow.js; ở đây chỉ nối 4 kênh IPC MỚI (tách biệt mọi kênh khác).
+// Mỗi kênh chỉ nhận lệnh từ đúng cửa sổ: toggle <- menu chính; close/get/set <- chính cửa sổ hiệu ứng.
+// ================================
+const { createEffectsWindowManager } = require("./EffectsWindow");
+const effectsWindow = createEffectsWindowManager({
+    BrowserWindow,
+    screen,
+    getMainWin: () => mainWin,
+    preloadPath: path.join(__dirname, "preload.js"),
+    htmlPath: path.join(__dirname, "..", "ui", "effects.html")
+});
+
+ipcMain.on("effects-toggle", (event) => {
+    try {
+        if (!effectsWindow.isFromMain(event.sender)) return;
+        effectsWindow.toggle();
+    } catch (err) {
+        console.error("effects-toggle lỗi:", err);
+    }
+});
+
+ipcMain.on("effects-close", (event) => {
+    try {
+        if (!effectsWindow.isFromEffects(event.sender)) return;
+        effectsWindow.close();
+    } catch (err) {
+        console.error("effects-close lỗi:", err);
+    }
+});
+
+ipcMain.handle("effects-get-aot", (event) => {
+    if (!effectsWindow.isFromEffects(event.sender)) return { ok: false, value: false, error: "Không được phép" };
+    return effectsWindow.getAlwaysOnTop();
+});
+
+ipcMain.handle("effects-set-aot", (event, enabled) => {
+    if (!effectsWindow.isFromEffects(event.sender)) return { ok: false, value: false, error: "Không được phép" };
+    return effectsWindow.setAlwaysOnTop(enabled);
 });
 
 // ================================

@@ -324,6 +324,30 @@ updateClock();
 })();
 
 /* ==========================================================
+   NÚT "HIỆU ỨNG" -> mở/đóng CỬA SỔ RIÊNG của Bảng Hiệu Ứng (app/EffectsWindow.js).
+   index.html đang gắn onclick="openEffectModal()" (lớp phủ cũ trong menu); vì không được sửa
+   HTML nên chặn click ở pha capture của document, TRƯỚC onclick inline. Nếu không có
+   electronAPI (vd. mở index.html bằng trình duyệt thường) thì không chặn -> lớp phủ cũ vẫn chạy.
+   ========================================================== */
+(function setupEffectsWindowButton() {
+
+    document.addEventListener("click", (event) => {
+
+        const btn = event.target && event.target.closest ? event.target.closest("#effectPopupBtn") : null;
+        if (!btn) return;
+
+        const api = window.electronAPI;
+        if (!api || typeof api.toggleEffectsWindow !== "function") return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        api.toggleEffectsWindow();
+
+    }, true);
+
+})();
+
+/* ==========================================================
    1C. NOW PLAYING — nhận IPC từ main process (WindowsMediaSession)
    ----------------------------------------------------------
    Gọi window.AutoMenuAI.updateNowPlaying()/setNowPlayingUnavailable()

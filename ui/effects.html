@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bảng Hiệu Ứng</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:,">
+    <style>
+        /* Cửa sổ riêng của Bảng Hiệu Ứng — cùng tông navy + viền cyan với menu chính */
+        html, body { width: 100%; height: 100%; margin: 0; background: #010813; }
+        body { display: flex; user-select: none; }
+        .fx-box { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 0 16px 14px; border: 1px solid rgba(0,180,255,.45); background: linear-gradient(180deg,#03111f,#010813); }
+        .fx-titlebar { display: flex; justify-content: space-between; align-items: center; height: 44px; font-size: 15px; font-weight: bold; color: var(--cyan); -webkit-app-region: drag; cursor: move; }
+        .fx-titlebar button { -webkit-app-region: no-drag; padding: 2px 8px; cursor: pointer; }
+        .fx-hint { font-size: 11px; color: #8fa5b8; }
+        .fx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .fx-aot { font-size: 11px; display: flex; align-items: center; gap: 8px; margin-top: 4px; cursor: pointer; color: var(--cyan); }
+        .fx-aot-status { font-size: 10px; color: #ff6b6b; min-height: 12px; }
+    </style>
+</head>
+
+<body>
+    <div class="fx-box">
+        <div class="fx-titlebar">
+            <span>✨ Bảng Hiệu Ứng Độc Lập</span>
+            <button class="preset-btn" id="fxCloseBtn" title="Đóng (Esc)">✕</button>
+        </div>
+        <p class="fx-hint">Đường dẫn âm thanh tự cài đặt sẵn trong thư mục ổ C:</p>
+        <div class="fx-grid">
+            <button class="preset-btn" onclick="alert('Đang phát: Tiếng Cười')">😂 Tiếng Cười</button>
+            <button class="preset-btn" onclick="alert('Đang phát: Tiếng Vỗ Tay')">👏 Tiếng Vỗ Tay</button>
+            <button class="preset-btn" onclick="alert('Đang phát: Hiệu ứng 1')">🎵 Hiệu ứng 1</button>
+            <button class="preset-btn" onclick="alert('Đang phát: Hiệu ứng 2')">🔔 Hiệu ứng 2</button>
+        </div>
+        <label class="fx-aot">
+            <input type="checkbox" id="fxAotCheck"> Luôn luôn hiển thị trên màn hình (Always on Top)
+        </label>
+        <div class="fx-aot-status" id="fxAotStatus"></div>
+    </div>
+
+    <script>
+        (function () {
+            const api = window.electronAPI;
+            const closeBtn = document.getElementById("fxCloseBtn");
+            const check = document.getElementById("fxAotCheck");
+            const status = document.getElementById("fxAotStatus");
+
+            if (!api) { status.textContent = "Không kết nối được với ứng dụng."; return; }
+
+            closeBtn.addEventListener("click", () => api.closeEffectsWindow());
+            document.addEventListener("keydown", (e) => { if (e.key === "Escape") api.closeEffectsWindow(); });
+
+            // Luôn hiển thị trạng thái THẬT do main trả về, không tự đoán.
+            api.getEffectsAlwaysOnTop().then((r) => { check.checked = !!(r && r.value); }).catch(() => {});
+
+            check.addEventListener("change", () => {
+                status.textContent = "";
+                api.setEffectsAlwaysOnTop(check.checked).then((r) => {
+                    check.checked = !!(r && r.value);
+                    if (!r || !r.ok) status.textContent = (r && r.error) || "Không áp dụng được.";
+                }).catch(() => { check.checked = !check.checked; status.textContent = "Không áp dụng được."; });
+            });
+        })();
+    </script>
+</body>
+
+</html>

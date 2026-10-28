@@ -86,6 +86,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getAlwaysOnTop: () => ipcRenderer.invoke("get-always-on-top"),
     setAlwaysOnTop: (enabled) => ipcRenderer.invoke("set-always-on-top", enabled),
 
+    // ---- BẢNG HIỆU ỨNG ĐỘC LẬP (cửa sổ riêng, xem app/EffectsWindow.js) ----
+    toggleEffectsWindow: () => ipcRenderer.send("effects-toggle"),
+    closeEffectsWindow: () => ipcRenderer.send("effects-close"),
+    getEffectsAlwaysOnTop: () => ipcRenderer.invoke("effects-get-aot"),
+    setEffectsAlwaysOnTop: (enabled) => ipcRenderer.invoke("effects-set-aot", enabled),
+
     // ---- MIDI-MASTER-01 Phase 1: trạng thái MIDI THẬT phía main process (easymidi) ----
     // Dùng bởi ui/js/midiHealth.js để hợp nhất với trạng thái Web MIDI phía renderer.
     getMainMidiHealth: () => ipcRenderer.invoke("midi-health"),
