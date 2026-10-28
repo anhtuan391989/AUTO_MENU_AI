@@ -24,6 +24,7 @@
             <nav class="sidebar-nav" id="sidebarNav">
                 <button class="nav-item active" data-panel="panel-dashboard">🏠 <span>Dashboard</span></button>
                 <button class="nav-item" data-panel="panel-audio">🔊 <span>Audio</span></button>
+                <button class="nav-item" data-panel="panel-effects">🎧 <span>Hiệu Ứng</span></button>
                 <button class="nav-item" data-panel="panel-ai">🤖 <span>AI 🔒</span></button>
                 <button class="nav-item" data-panel="panel-midi">🎹 <span>MIDI</span></button>
                 <button class="nav-item" data-panel="panel-daw">🎛 <span>DAW</span></button>
@@ -715,6 +716,21 @@
             </section>
 
             <!-- ===================== PLUGIN ===================== -->
+            <!-- ===================== HIỆU ỨNG (quản lý nút của Bảng Hiệu Ứng) ===================== -->
+            <section class="setup-panel" id="panel-effects" data-title="Hiệu Ứng">
+                <div class="panel-card">
+                    <div class="panel-card-title">🎧 Quản lý Bảng Hiệu Ứng</div>
+                    <p class="hint-text">Thêm, đổi tên, thay file âm thanh hoặc xoá nút. Bảng Hiệu Ứng trên menu tự cập nhật ngay. Nhận file mp3, wav, ogg, m4a — file được sao chép vào ứng dụng nên không mất khi bạn xoá file gốc.</p>
+                    <div class="row-buttons">
+                        <button id="fxAddHieuUng" class="setup-btn">➕ Thêm vào HIỆU ỨNG</button>
+                        <button id="fxAddNhac" class="setup-btn">➕ Thêm vào NHẠC</button>
+                        <button id="fxResetLib" class="setup-btn">⟲ Khôi phục mặc định</button>
+                    </div>
+                    <div id="fxLibStatus" class="hint-text" style="min-height:16px"></div>
+                    <div id="fxLibRoot"></div>
+                </div>
+            </section>
+
             <section class="setup-panel" id="panel-plugins" data-title="Plugin">
                 <div class="panel-card">
                     <div class="panel-card-title">🎤 Auto-Tune <span class="badge badge-soon" id="autoTuneStatusBadge">Not selected</span></div>
@@ -921,6 +937,7 @@
     <script src="js/appSettings.js"></script>
     <script src="js/setup.js"></script>
     <script src="js/setupNav.js"></script>
+    <script src="js/setupEffects.js"></script>
     <script src="js/setupVuMeter.js"></script>
     <script src="js/midiHealth.js"></script>
     <script src="js/setupMidiMonitor.js"></script>

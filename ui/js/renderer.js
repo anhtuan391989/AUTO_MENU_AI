@@ -58,6 +58,10 @@ const SoundEffectEngine = (() => {
     // biến nào giữa CLAP và LAUGH (đúng mục 6: volume/playback hoàn toàn độc lập).
     const effects = {};
     const listeners = [];
+    // Âm lượng chung (knob "Hiệu Ứng") và thiết bị ra hiện tại — để hiệu ứng thêm SAU (thư viện) dùng đúng giá trị.
+    let allVolume = DEFAULT_VOLUME_0_100 / 100;
+    let lastSinkId = "";
+    const LIB_PREFIX = "LIB:";
 
     function notify(effectId, isPlaying) {
         listeners.forEach((cb) => {
@@ -127,6 +131,7 @@ const SoundEffectEngine = (() => {
         const clamped = Math.max(0, Math.min(100, Number(value0to100) || 0));
         // "ALL" = âm lượng CHUNG cho cả Bảng Hiệu Ứng (knob "Hiệu Ứng"): áp cho mọi effect.
         if (effectId === "ALL") {
+            allVolume = clamped / 100;
             Object.values(effects).forEach((e) => { e.audio.volume = clamped / 100; });
             return;
         }
@@ -173,6 +178,7 @@ const SoundEffectEngine = (() => {
                 : Promise.reject(new Error("setSinkId không được hỗ trợ trong môi trường này"))
         )));
         const failed = results.find((r) => r.status === "rejected");
+        if (!failed) lastSinkId = requested;
         return {
             ok: !failed,
             requested,
@@ -181,13 +187,59 @@ const SoundEffectEngine = (() => {
         };
     }
 
+    /**
+     * Thư viện hiệu ứng (Bảng Hiệu Ứng nhiều nút): đồng bộ danh sách audio theo `items` do main gửi
+     * ({ id, src }). Mỗi mục có id nội bộ "LIB:<id>" — KHÔNG chạm tới CLAP/LAUGH. Mục bị xoá/đổi file
+     * sẽ được dừng và tạo lại. preload="none" để 40+ file không bị nạp sẵn vào bộ nhớ.
+     */
+    function loadLibrary(items) {
+        const wanted = new Map();
+        (Array.isArray(items) ? items : []).forEach((it) => {
+            if (it && typeof it.id === "string" && typeof it.src === "string") wanted.set(LIB_PREFIX + it.id, it.src);
+        });
+        Object.keys(effects).forEach((key) => {
+            if (!key.startsWith(LIB_PREFIX)) return;
+            const e = effects[key];
+            if (!wanted.has(key) || e.src !== wanted.get(key)) {
+                e.audio.pause();
+                e.audio.removeAttribute("src");
+                e.audio.load();
+                if (e.playing) { e.playing = false; notify(key, false); }
+                delete effects[key];
+            }
+        });
+        wanted.forEach((src, key) => {
+            if (effects[key]) return;
+            createEffect(key, src);
+            effects[key].src = src;
+            effects[key].audio.preload = "none";
+            effects[key].audio.volume = allVolume;
+            if (lastSinkId && typeof effects[key].audio.setSinkId === "function") {
+                effects[key].audio.setSinkId(lastSinkId).catch(() => {});
+            }
+        });
+    }
+
+    /** Dừng mọi hiệu ứng thư viện đang phát (nút "Dừng" của Bảng Hiệu Ứng). */
+    function stopAll() {
+        Object.keys(effects).forEach((key) => {
+            if (!key.startsWith(LIB_PREFIX)) return;
+            const e = effects[key];
+            if (!e.playing) return;
+            e.audio.pause();
+            e.audio.currentTime = 0;
+            e.playing = false;
+            notify(key, false);
+        });
+    }
+
     /** sinkId THẬT mà audio element đang dùng ("" = mặc định OS). null nếu chưa đọc được. */
     function getOutputDeviceId() {
         const first = Object.values(effects)[0];
         return first && typeof first.audio.sinkId === "string" ? first.audio.sinkId : null;
     }
 
-    return { toggle, setVolume, isPlaying, onChange, setOutputDevice, getOutputDeviceId, SOUND_SOURCES };
+    return { toggle, setVolume, isPlaying, onChange, setOutputDevice, getOutputDeviceId, loadLibrary, stopAll, SOUND_SOURCES };
 
 })();
 
@@ -760,6 +812,7 @@ const PRESET_SOUND_BTN_TO_ACTION = { clapPlayBtn: "CLAP", laughPlayBtn: "LAUGH" 
 // cả khi audio tự kết thúc (event 'ended') mà không có click nào xảy ra (đúng mục 2/3:
 // "ended -> UI trở về IDLE" phải tự xảy ra, không chờ user bấm lại).
 SoundEffectEngine.onChange((effectId, isPlaying) => {
+    if (effectId !== "CLAP" && effectId !== "LAUGH") return; // hiệu ứng thư viện (LIB:...) không có nút trong menu
     const btnId = effectId === "CLAP" ? "clapPlayBtn" : "laughPlayBtn";
     document.getElementById(btnId)?.classList.toggle("active", isPlaying);
 });
@@ -794,6 +847,15 @@ window.electronAPI?.onEffectsPlay?.((effectId) => {
             .catch(err => console.error(`[MenuControl] ${effectId} lỗi:`, err));
     }
 });
+
+// Thư viện hiệu ứng: danh sách nút lấy từ main (đổi trong Cài đặt -> "effects-lib-changed" tự cập nhật).
+// Nút trong Bảng Hiệu Ứng gửi id qua main, về đây phát/dừng bằng cùng SoundEffectEngine (âm lượng = knob "Hiệu Ứng").
+window.electronAPI?.getEffectsLibrary?.()
+    .then((r) => { if (r && r.ok) SoundEffectEngine.loadLibrary(r.items); })
+    .catch((err) => console.error("getEffectsLibrary lỗi:", err));
+window.electronAPI?.onEffectsLibChanged?.((items) => SoundEffectEngine.loadLibrary(items));
+window.electronAPI?.onEffectsLibPlay?.((id) => { if (typeof id === "string") SoundEffectEngine.toggle("LIB:" + id); });
+window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
 
 /* ==========================================================
    5b. EXPAND / COLLAPSE CONTROL PANEL (UI Final v1.0)

@@ -11,33 +11,43 @@
         /* Cửa sổ riêng của Bảng Hiệu Ứng — cùng tông navy + viền cyan với menu chính */
         html, body { width: 100%; height: 100%; margin: 0; background: #010813; }
         body { display: flex; user-select: none; }
-        .fx-box { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 0 16px 14px; border: 1px solid rgba(0,180,255,.45); background: linear-gradient(180deg,#03111f,#010813); }
-        .fx-titlebar { display: flex; justify-content: space-between; align-items: center; height: 44px; font-size: 15px; font-weight: bold; color: var(--cyan); -webkit-app-region: drag; cursor: move; }
+        .fx-box { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 0 14px 12px; border: 1px solid rgba(0,180,255,.45); background: linear-gradient(180deg,#03111f,#010813); }
+        .fx-titlebar { display: flex; justify-content: space-between; align-items: center; height: 44px; flex: none; font-size: 15px; font-weight: bold; color: var(--cyan); -webkit-app-region: drag; cursor: move; }
         .fx-titlebar button { -webkit-app-region: no-drag; padding: 2px 8px; cursor: pointer; }
-        .fx-hint { font-size: 11px; color: #8fa5b8; }
-        .fx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        .fx-aot { font-size: 11px; display: flex; align-items: center; gap: 8px; margin-top: 4px; cursor: pointer; color: var(--cyan); }
-        .fx-aot-status { font-size: 10px; color: #ff6b6b; min-height: 12px; }
+        .fx-toprow { display: flex; justify-content: space-between; align-items: center; flex: none; }
+        .fx-aot { font-size: 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--cyan); }
+        .fx-tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; flex: none; }
+        .fx-tabs button.active { box-shadow: 0 0 0 1px var(--cyan) inset; color: var(--cyan); }
+        .fx-gridwrap { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; border: 1px solid rgba(0,180,255,.45); border-radius: 6px; background: rgba(0,180,255,.06); }
+        .fx-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+        .fx-grid button { padding: 12px 4px; font-size: 12px; font-weight: bold; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .fx-grid button:disabled { opacity: .35; cursor: not-allowed; }
+        .fx-empty { grid-column: 1 / -1; font-size: 12px; color: #8fa5b8; text-align: center; padding: 16px 4px; }
+        .fx-status { font-size: 10px; color: #ff6b6b; min-height: 12px; flex: none; }
     </style>
 </head>
 
 <body>
     <div class="fx-box">
         <div class="fx-titlebar">
-            <span>✨ Bảng Hiệu Ứng Độc Lập</span>
+            <span>✨ Bảng Hiệu Ứng</span>
             <button class="preset-btn" id="fxCloseBtn" title="Đóng (Esc)">✕</button>
         </div>
-        <p class="fx-hint">Đường dẫn âm thanh tự cài đặt sẵn trong thư mục ổ C:</p>
-        <div class="fx-grid">
-            <button class="preset-btn" data-effect="LAUGH" onclick="alert('Đang phát: Tiếng Cười')">😂 Tiếng Cười</button>
-            <button class="preset-btn" data-effect="CLAP" onclick="alert('Đang phát: Tiếng Vỗ Tay')">👏 Tiếng Vỗ Tay</button>
-            <button class="preset-btn" onclick="alert('Đang phát: Hiệu ứng 1')">🎵 Hiệu ứng 1</button>
-            <button class="preset-btn" onclick="alert('Đang phát: Hiệu ứng 2')">🔔 Hiệu ứng 2</button>
+        <div class="fx-toprow">
+            <label class="fx-aot">
+                <input type="checkbox" id="fxAotCheck"> Luôn Hiện
+            </label>
+            <button class="preset-btn" id="fxEditBtn" title="Mở Cài đặt để thêm, đổi tên, thay file">EDIT</button>
         </div>
-        <label class="fx-aot">
-            <input type="checkbox" id="fxAotCheck"> Luôn luôn hiển thị trên màn hình (Always on Top)
-        </label>
-        <div class="fx-aot-status" id="fxAotStatus"></div>
+        <div class="fx-tabs">
+            <button class="preset-btn active" id="fxTabHieuUng" data-group="HIEUUNG">HIỆU ỨNG</button>
+            <button class="preset-btn" id="fxTabNhac" data-group="NHAC">NHẠC</button>
+            <button class="preset-btn" id="fxStopBtn" title="Dừng mọi âm thanh đang phát">Dừng</button>
+        </div>
+        <div class="fx-gridwrap">
+            <div class="fx-grid" id="fxGrid"></div>
+        </div>
+        <div class="fx-status" id="fxAotStatus"></div>
     </div>
 
     <script>
@@ -46,17 +56,45 @@
             const closeBtn = document.getElementById("fxCloseBtn");
             const check = document.getElementById("fxAotCheck");
             const status = document.getElementById("fxAotStatus");
+            const grid = document.getElementById("fxGrid");
+            const tabs = Array.from(document.querySelectorAll(".fx-tabs [data-group]"));
 
             if (!api) { status.textContent = "Không kết nối được với ứng dụng."; return; }
 
-            // 2 nút có âm thanh thật (Tiếng Cười/Vỗ Tay): phát qua menu, âm lượng theo knob "Hiệu Ứng".
-            // Bắt ở pha capture để chặn alert() thử cũ; Hiệu ứng 1/2 chưa có file âm thanh nên giữ alert thử.
-            document.addEventListener("click", (e) => {
-                const btn = e.target && e.target.closest ? e.target.closest("[data-effect]") : null;
-                if (!btn) return;
-                e.stopImmediatePropagation();
-                api.playEffect(btn.getAttribute("data-effect"));
-            }, true);
+            let items = [];
+            let group = "HIEUUNG";
+
+            // Vẽ lưới nút theo tab đang chọn. Tên nút dùng textContent (không chèn HTML).
+            function render() {
+                tabs.forEach((t) => t.classList.toggle("active", t.getAttribute("data-group") === group));
+                grid.textContent = "";
+                const shown = items.filter((it) => it.group === group);
+                if (shown.length === 0) {
+                    const empty = document.createElement("div");
+                    empty.className = "fx-empty";
+                    empty.textContent = "Chưa có hiệu ứng. Bấm EDIT để thêm.";
+                    grid.appendChild(empty);
+                    return;
+                }
+                shown.forEach((it) => {
+                    const b = document.createElement("button");
+                    b.className = "preset-btn";
+                    b.textContent = it.name;
+                    b.title = it.name;
+                    if (!it.exists) { b.disabled = true; b.title = it.name + " — không tìm thấy file âm thanh"; }
+                    b.addEventListener("click", () => api.playLibEffect(it.id));
+                    grid.appendChild(b);
+                });
+            }
+
+            function setItems(list) { items = Array.isArray(list) ? list : []; render(); }
+
+            tabs.forEach((t) => t.addEventListener("click", () => { group = t.getAttribute("data-group"); render(); }));
+            document.getElementById("fxStopBtn").addEventListener("click", () => api.stopLibEffects());
+            document.getElementById("fxEditBtn").addEventListener("click", () => api.openEffectsEditor());
+
+            api.getEffectsLibrary().then((r) => setItems(r && r.ok ? r.items : [])).catch(() => setItems([]));
+            api.onEffectsLibChanged((list) => setItems(list));
 
             closeBtn.addEventListener("click", () => api.closeEffectsWindow());
             document.addEventListener("keydown", (e) => { if (e.key === "Escape") api.closeEffectsWindow(); });
