@@ -276,3 +276,15 @@ body.vertical-mode .status-card:has(#dot-daw),
 body.vertical-mode .status-card:has(#dot-audio),
 body.vertical-mode .status-card:has(#dot-cache),
 body.vertical-mode .analyzer-card:has(#dot-bpm) { display: none; }
+
+/* =====================================
+NÚT HIỆU ỨNG + BẢNG HIỆU ỨNG — đồng bộ màu với phần còn lại của menu
+(trước đây nút dùng cyan phẳng và bảng dùng nền xám #111827 lệch tông; chỉ đổi màu, không đổi bố cục/HTML.
+ Dùng !important vì HTML đang gắn màu trực tiếp bằng thuộc tính style="...")
+===================================== */
+#effectPopupBtn.preset-sound-btn { background: linear-gradient(180deg,#0a1826,#07111c) !important; border-color: rgba(0,180,255,.45) !important; }
+#effectPopupBtn.preset-sound-btn:hover { background: linear-gradient(180deg,#0d2238,#0a1826) !important; border-color: var(--cyan) !important; }
+#effectModal .custom-modal-box { background: linear-gradient(180deg,#03111f,#010813); border: 1px solid rgba(0,180,255,.35); border-radius: 11px; box-shadow: 0 10px 30px rgba(0,0,0,.6), 0 0 14px rgba(0,180,255,.15); }
+#effectModal .custom-modal-title { color: var(--cyan); }
+#effectModal p { color: #8fa5b8 !important; }
+#effectModal label { color: var(--cyan) !important; }
