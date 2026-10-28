@@ -1,0 +1,149 @@
+diff --git a/tests/unit/FSP8MidiSync01.verify.js b/tests/unit/FSP8MidiSync01.verify.js
+index 4367dad..f02c7d9 100644
+--- a/tests/unit/FSP8MidiSync01.verify.js
++++ b/tests/unit/FSP8MidiSync01.verify.js
+@@ -57,7 +57,7 @@ function env(init = {}, { portOk = true } = {}) {
+   // T02/T03: 90 -> 60 -> 90
+   e.sent.length = 0;
+   await e.turn(A.BEAT_INPUT_VOLUME, 90); await e.turn(A.BEAT_INPUT_VOLUME, 60); await e.turn(A.BEAT_INPUT_VOLUME, 90);
+-  ok(JSON.stringify(e.sent.map(s => [s.n, s.v, s.ch])) === JSON.stringify([[20,114,14],[20,76,14],[20,114,14]]), '[T02][T03] 90->60->90: CC20 = 114, 76, 114 (kênh index 14)', e.sent);
++  ok(JSON.stringify(e.sent.map(s => [s.n, s.v, s.ch])) === JSON.stringify([[20,97,14],[20,72,14],[20,97,14]]), '[T02][T03] 90->60->90: CC20 = 97, 72, 97 (sau hiệu chuẩn FAST-02; trước đó 114/76/114) (kênh index 14)', e.sent);
+   // T04/T05: MASTER độc lập
+   e.sent.length = 0;
+   await e.turn(A.MASTER_OUTPUT_VOLUME, 50); await e.turn(A.BEAT_INPUT_VOLUME, 40); await e.turn(A.MASTER_OUTPUT_VOLUME, 55);
+@@ -69,7 +69,7 @@ function env(init = {}, { portOk = true } = {}) {
+   for (let i = 0; i <= 100; i++) await e.turn(A.BEAT_INPUT_VOLUME, i);
+   for (let i = 100; i >= 0; i--) await e.turn(A.BEAT_INPUT_VOLUME, i);
+   const vals = e.sent.map(s => s.v);
+-  const exp = []; const f = v => Math.round(v * 127 / 100);
++  const exp = []; const f = v => (v < 50 ? Math.round(v * 127 / 100) : v <= 90 ? Math.round(64 + 33 * (v - 50) / 40) : Math.round(97 + 30 * (v - 90) / 10));
+   let prev = null; const seq = [...Array(101).keys(), ...[...Array(101).keys()].reverse()];
+   for (const v of seq) { const c = f(v); if (c !== prev) { exp.push(c); prev = c; } }
+   ok(JSON.stringify(vals) === JSON.stringify(exp), '[T08] quét 0→100→0: CC gửi đúng thứ tự, chỉ bỏ các giá trị trùng liên tiếp', {n: vals.length, e: exp.length});
+diff --git a/tests/unit/KnobDawIntegration02.verify.js b/tests/unit/KnobDawIntegration02.verify.js
+index 5cb7442..493b91f 100644
+--- a/tests/unit/KnobDawIntegration02.verify.js
++++ b/tests/unit/KnobDawIntegration02.verify.js
+@@ -62,12 +62,14 @@ function env(init = {}, { portOk = true } = {}) {
+     let allOk = true; const rows = [];
+     for (const [a, num] of Object.entries(FAMILY(d))) {
+       e.sent.length = 0;
+-      for (const [v, cc] of [[0, 0], [25, 32], [50, 64], [75, 95], [100, 127], [50, 64], [0, 0]]) {
++      // FSP8-MIDI-SYNC-FAST-02 (THAY ĐỔI SPEC CÓ CHỦ ĐÍCH): riêng MUSIC trên Studio Pro 8 dùng neo 50→64, 90→97, 100→127 => 75→85 (không còn 95). Mọi Knob/DAW khác giữ nguyên.
++      const calib = d === 'Studio Pro 8' && a === 'BEAT_INPUT_VOLUME';
++      for (const [v, cc] of [[0, 0], [25, 32], [50, 64], [75, calib ? 85 : 95], [100, 127], [50, 64], [0, 0]]) {
+         const r = await e.turn(e.AR.ACTIONS[a], v); const last = e.sent[e.sent.length - 1];
+         if (!r.ok || !last || last.n !== num || last.v !== cc || last.ch !== 14) { allOk = false; rows.push([a, v, cc, last, r]); }
+       }
+     }
+-    ok(allOk, `[2] "${d}": 0/25/50/75/100 -> CC 0/32/64/95/127 (kênh 15 = index 14), đúng CC riêng từng Knob; tăng/giảm đúng chiều`, rows[0]);
++    ok(allOk, `[2] "${d}": 0/25/50/75/100 -> CC 0/32/64/95/127 (riêng MUSIC trên Studio Pro 8: 75->85, xem FSP8-MIDI-SYNC-FAST-02) (kênh 15 = index 14), đúng CC riêng từng Knob; tăng/giảm đúng chiều`, rows[0]);
+     e.sent.length = 0; await e.turn('BEAT_INPUT_VOLUME', 10); await e.turn('BEAT_INPUT_VOLUME', 10); await e.turn('BEAT_INPUT_VOLUME', 10.2);
+     ok(e.sent.length === 1 && e.sent[0].v === 13, `[2] "${d}": cùng giá trị CC gửi lại -> không gửi lặp (3 lần xoay, chỉ 1 CC)`, e.sent);
+   }
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index 2035049..f3e9f85 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -139,6 +139,32 @@ const SUPPORTED_DAWS = Object.freeze([
+     "studio-one", "ableton", "cubase", "fl-studio", "reaper"
+ ]);
+ 
++// FSP8-MIDI-SYNC-FAST-02 — hiệu chuẩn CHỈ cho núm MUSIC (BEAT_INPUT_VOLUME) khi DAW chọn là "Studio Pro 8".
++// Căn cứ: số đo thật của người dùng (CC20 → fader Beat): CC64 = −11,3 dB · CC95 = −0,5 · CC97 = +0,2 · CC98 = +0,5 · CC99 = +0,8 ·
++// CC114 = +5,7 · CC127 = +10 dB. Mục tiêu: MUSIC 90 → fader gần 0 dB nhất theo số đo = CC97 (+0,2 dB).
++// Điểm neo [MenuMusic, CC]: 50→64 và 100→127 là điểm hiện hành đã đo; 90→97 là LỰA CHỌN hiệu chuẩn (không phải CC "tự nhiên" của 90).
++// Dưới 50: giữ nguyên công thức cũ round(v×127/100) (liên tục tại 50). Giữa các neo: nội suy tuyến tính theo CC — đây chỉ là XẤP XỈ
++// theo Menu, KHÔNG phải đường cong thật của FSP8. Các action/DAW khác: công thức cũ, không đổi.
++const KNOB_CC_ANCHORS = Object.freeze({
++    "Studio Pro 8": Object.freeze({
++        BEAT_INPUT_VOLUME: Object.freeze([[50, 64], [90, 97], [100, 127]]),
++    }),
++});
++
++function knobToCc(action, value, daw) {
++    const v = Math.max(0, Math.min(100, Number(value)));
++    const linear = Math.round(v * 127 / 100);
++    const dawName = daw === undefined ? getSelectedDaw() : daw;
++    const anchors = (KNOB_CC_ANCHORS[dawName] || {})[action];
++    if (!anchors || v < anchors[0][0]) return linear;
++    let cc = anchors[anchors.length - 1][1];
++    for (let i = 0; i < anchors.length - 1; i++) {
++        const [x0, y0] = anchors[i], [x1, y1] = anchors[i + 1];
++        if (v >= x0 && v <= x1) { cc = y0 + (y1 - y0) * (v - x0) / (x1 - x0); break; }
++    }
++    return Math.max(0, Math.min(127, Math.round(cc)));
++}
++
+ function getSelectedDaw() {
+     return (typeof getSetting === "function" ? getSetting("selectedDAW") : "") || "";
+ }
+@@ -233,7 +259,7 @@ async function executeAction(action, context = {}) {
+                 && (action === ACTIONS.BEAT_INPUT_VOLUME || action === ACTIONS.MASTER_OUTPUT_VOLUME
+                     || action === ACTIONS.RETUNE_SPEED_MIC1 || action === ACTIONS.RETUNE_SPEED_MIC2);
+             if (isKnobCc && typeof sendMidiCC === "function") {
+-                const ccValue = Math.round(Math.max(0, Math.min(100, dynamicValue)) * 127 / 100);
++                const ccValue = knobToCc(action, dynamicValue);
+                 const sig = `${midiMap.kind}|${midiMap.channel || 1}|${midiMap.number}`;
+                 const cache = (window.__knobLastCc = window.__knobLastCc || {});
+                 if (cache[action] && cache[action].sig === sig && cache[action].cc === ccValue) {
+diff --git a/tests/unit/FSP8MusicCalib02.verify.js b/tests/unit/FSP8MusicCalib02.verify.js
+new file mode 100644
+index 0000000..07ba4d1
+--- /dev/null
++++ b/tests/unit/FSP8MusicCalib02.verify.js
+@@ -0,0 +1,54 @@
++// FSP8-MIDI-SYNC-FAST-02 — hiệu chuẩn MUSIC (BEAT_INPUT_VOLUME) trên Studio Pro 8. PASS_CODE/PASS_SIM; KHÔNG phải test Windows+FSP8.
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const ROOT = path.join(__dirname, '..', '..');
++const reg = fs.readFileSync(path.join(ROOT, 'ui/js/actionRegistry.js'), 'utf8');
++const ren = fs.readFileSync(path.join(ROOT, 'ui/js/renderer.js'), 'utf8');
++let pass = 0, fail = 0;
++const ok = (c, n, d) => { if (c) { pass++; console.log('PASS ' + n); } else { fail++; console.log('FAIL ' + n + (d !== undefined ? ' :: ' + JSON.stringify(d) : '')); } };
++
++function env(daw, map) {
++  const st = { selectedDAW: daw, dawMidiOutMappings: { [daw]: map } }; const sent = [];
++  const sb = { console: { log() {}, error() {}, warn() {} }, setTimeout, clearTimeout, Date, Math, Promise,
++    getSetting: (k, f) => (st[k] === undefined ? f : st[k]), setSetting: (k, v) => { st[k] = v; },
++    sendMidiCC: async (n, v, ch) => { sent.push({ n, v, ch }); return true; }, sendMidiNotePulse: async () => true, saveData() {}, electronAPI: {} };
++  sb.window = sb; vm.createContext(sb); vm.runInContext(reg, sb);
++  const AR = sb.window.ActionRegistry;
++  return { sent, turn: (a, v) => AR.executeAction(AR.ACTIONS[a], { reason: 'knob', value: v }), sb };
++}
++const M = (n) => ({ kind: 'cc', channel: 15, number: n, value: 127, source: 'USER_DEFINED' });
++const MAPS = { BEAT_INPUT_VOLUME: M(20), MASTER_OUTPUT_VOLUME: M(21), RETUNE_SPEED_MIC1: M(22), RETUNE_SPEED_MIC2: M(23) };
++const OLD = (v) => Math.round(Math.max(0, Math.min(100, v)) * 127 / 100);
++
++(async () => {
++  const e = env('Studio Pro 8', MAPS);
++  const cc = async (a, v) => { e.sent.length = 0; vm.runInContext('window.__knobLastCc = {}', e.sb); await e.turn(a, v); return e.sent[0]; };
++  // điểm neo
++  for (const [v, c] of [[0, 0], [50, 64], [90, 97], [100, 127]]) { const r = await cc('BEAT_INPUT_VOLUME', v); ok(r && r.n === 20 && r.ch === 14 && r.v === c, `[neo] MUSIC ${v} -> CC20 = ${c} (kênh index 14)`, r); }
++  // số đo thật của người dùng vẫn nhất quán: CC97 = +0,2 dB là CC gần 0 dB nhất trong các CC đã đo (95:-0,5 · 97:+0,2 · 98:+0,5 · 99:+0,8)
++  const measured = { 64: -11.3, 95: -0.5, 97: 0.2, 98: 0.5, 99: 0.8, 114: 5.7, 127: 10 };
++  const best = Object.entries(measured).sort((a, b) => Math.abs(a[1]) - Math.abs(b[1]))[0];
++  ok(+best[0] === 97 && (await cc('BEAT_INPUT_VOLUME', 90)).v === 97, '[căn cứ] CC gần 0 dB nhất theo số đo = 97 và MUSIC 90 gửi đúng 97', best);
++  // toàn dải: trong 0–127, không giảm, dưới 50 bằng công thức cũ
++  let last = -1, inR = true, mono = true, low = true; const all = [];
++  for (let v = 0; v <= 100; v++) { const r = await cc('BEAT_INPUT_VOLUME', v); all.push(r.v); if (r.v < 0 || r.v > 127 || !Number.isInteger(r.v)) inR = false; if (r.v < last) mono = false; last = r.v; if (v < 50 && r.v !== OLD(v)) low = false; }
++  ok(inR && mono && low, '[dải] MUSIC 0–100: CC nguyên trong 0–127, không giảm khi tăng, dưới 50 giữ công thức cũ', all.join(','));
++  // giá trị ngoài dải được kẹp
++  ok((await cc('BEAT_INPUT_VOLUME', 150)).v === 127 && (await cc('BEAT_INPUT_VOLUME', -20)).v === 0, '[dải] MUSIC ngoài 0–100 được kẹp (127 / 0)');
++  // MASTER và Retune: công thức cũ trên FSP8
++  let same = true; for (const a of ['MASTER_OUTPUT_VOLUME', 'RETUNE_SPEED_MIC1', 'RETUNE_SPEED_MIC2']) for (let v = 0; v <= 100; v++) { const r = await cc(a, v); if (r.v !== OLD(v) || r.n !== MAPS[a].number) same = false; }
++  ok(same, '[MASTER] MASTER CC21 + RETUNE CC22/23 vẫn dùng round(v×127/100) trên Studio Pro 8');
++  // DAW khác: MUSIC giữ công thức cũ
++  for (const d of ['Studio One 7', 'Cubase 13', 'Studio One 5', '']) {
++    const f = env(d || 'x', MAPS); if (!d) f.sb.getSetting = () => undefined;
++    let o = true; for (let v = 0; v <= 100; v++) { f.sent.length = 0; vm.runInContext('window.__knobLastCc = {}', f.sb); await f.turn('BEAT_INPUT_VOLUME', v); if (f.sent[0] && f.sent[0].v !== OLD(v)) o = false; }
++    ok(o, `[DAW khác] "${d || '(chưa chọn)'}": MUSIC giữ công thức cũ`);
++  }
++  // CC20 / kênh 15 không đổi; không gửi lúc nạp
++  ok(e.sent.length <= 1, '[khởi tạo] chỉ gửi khi gọi executeAction(reason:"knob")');
++  ok(!/knobToCc|KNOB_CC_ANCHORS/.test(ren), '[UI] renderer.js không đổi (hiệu chuẩn nằm ở actionRegistry)');
++  const li = ren.indexOf('function loadData()'); ok(!/executeAction|dispatchKnobVolume|sendMidi/.test(ren.slice(li, ren.indexOf('\n}\n', li))), '[khởi tạo] loadData() vẫn không gửi MIDI');
++  // chỉ MUSIC trên Studio Pro 8 có neo
++  const anchors = vm.runInContext('KNOB_CC_ANCHORS', e.sb);
++  ok(Object.keys(anchors).join() === 'Studio Pro 8' && Object.keys(anchors['Studio Pro 8']).join() === 'BEAT_INPUT_VOLUME', '[phạm vi] chỉ có neo cho Studio Pro 8 / BEAT_INPUT_VOLUME');
++  console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})();

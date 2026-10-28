@@ -57,7 +57,7 @@ function env(init = {}, { portOk = true } = {}) {
   // T02/T03: 90 -> 60 -> 90
   e.sent.length = 0;
   await e.turn(A.BEAT_INPUT_VOLUME, 90); await e.turn(A.BEAT_INPUT_VOLUME, 60); await e.turn(A.BEAT_INPUT_VOLUME, 90);
-  ok(JSON.stringify(e.sent.map(s => [s.n, s.v, s.ch])) === JSON.stringify([[20,114,14],[20,76,14],[20,114,14]]), '[T02][T03] 90->60->90: CC20 = 114, 76, 114 (kênh index 14)', e.sent);
+  ok(JSON.stringify(e.sent.map(s => [s.n, s.v, s.ch])) === JSON.stringify([[20,97,14],[20,72,14],[20,97,14]]), '[T02][T03] 90->60->90: CC20 = 97, 72, 97 (sau hiệu chuẩn FAST-02; trước đó 114/76/114) (kênh index 14)', e.sent);
   // T04/T05: MASTER độc lập
   e.sent.length = 0;
   await e.turn(A.MASTER_OUTPUT_VOLUME, 50); await e.turn(A.BEAT_INPUT_VOLUME, 40); await e.turn(A.MASTER_OUTPUT_VOLUME, 55);
@@ -69,7 +69,7 @@ function env(init = {}, { portOk = true } = {}) {
   for (let i = 0; i <= 100; i++) await e.turn(A.BEAT_INPUT_VOLUME, i);
   for (let i = 100; i >= 0; i--) await e.turn(A.BEAT_INPUT_VOLUME, i);
   const vals = e.sent.map(s => s.v);
-  const exp = []; const f = v => Math.round(v * 127 / 100);
+  const exp = []; const f = v => (v < 50 ? Math.round(v * 127 / 100) : v <= 90 ? Math.round(64 + 33 * (v - 50) / 40) : Math.round(97 + 30 * (v - 90) / 10));
   let prev = null; const seq = [...Array(101).keys(), ...[...Array(101).keys()].reverse()];
   for (const v of seq) { const c = f(v); if (c !== prev) { exp.push(c); prev = c; } }
   ok(JSON.stringify(vals) === JSON.stringify(exp), '[T08] quét 0→100→0: CC gửi đúng thứ tự, chỉ bỏ các giá trị trùng liên tiếp', {n: vals.length, e: exp.length});

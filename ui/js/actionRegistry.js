@@ -139,6 +139,32 @@ const SUPPORTED_DAWS = Object.freeze([
     "studio-one", "ableton", "cubase", "fl-studio", "reaper"
 ]);
 
+// FSP8-MIDI-SYNC-FAST-02 — hiệu chuẩn CHỈ cho núm MUSIC (BEAT_INPUT_VOLUME) khi DAW chọn là "Studio Pro 8".
+// Căn cứ: số đo thật của người dùng (CC20 → fader Beat): CC64 = −11,3 dB · CC95 = −0,5 · CC97 = +0,2 · CC98 = +0,5 · CC99 = +0,8 ·
+// CC114 = +5,7 · CC127 = +10 dB. Mục tiêu: MUSIC 90 → fader gần 0 dB nhất theo số đo = CC97 (+0,2 dB).
+// Điểm neo [MenuMusic, CC]: 50→64 và 100→127 là điểm hiện hành đã đo; 90→97 là LỰA CHỌN hiệu chuẩn (không phải CC "tự nhiên" của 90).
+// Dưới 50: giữ nguyên công thức cũ round(v×127/100) (liên tục tại 50). Giữa các neo: nội suy tuyến tính theo CC — đây chỉ là XẤP XỈ
+// theo Menu, KHÔNG phải đường cong thật của FSP8. Các action/DAW khác: công thức cũ, không đổi.
+const KNOB_CC_ANCHORS = Object.freeze({
+    "Studio Pro 8": Object.freeze({
+        BEAT_INPUT_VOLUME: Object.freeze([[50, 64], [90, 97], [100, 127]]),
+    }),
+});
+
+function knobToCc(action, value, daw) {
+    const v = Math.max(0, Math.min(100, Number(value)));
+    const linear = Math.round(v * 127 / 100);
+    const dawName = daw === undefined ? getSelectedDaw() : daw;
+    const anchors = (KNOB_CC_ANCHORS[dawName] || {})[action];
+    if (!anchors || v < anchors[0][0]) return linear;
+    let cc = anchors[anchors.length - 1][1];
+    for (let i = 0; i < anchors.length - 1; i++) {
+        const [x0, y0] = anchors[i], [x1, y1] = anchors[i + 1];
+        if (v >= x0 && v <= x1) { cc = y0 + (y1 - y0) * (v - x0) / (x1 - x0); break; }
+    }
+    return Math.max(0, Math.min(127, Math.round(cc)));
+}
+
 function getSelectedDaw() {
     return (typeof getSetting === "function" ? getSetting("selectedDAW") : "") || "";
 }
@@ -233,7 +259,7 @@ async function executeAction(action, context = {}) {
                 && (action === ACTIONS.BEAT_INPUT_VOLUME || action === ACTIONS.MASTER_OUTPUT_VOLUME
                     || action === ACTIONS.RETUNE_SPEED_MIC1 || action === ACTIONS.RETUNE_SPEED_MIC2);
             if (isKnobCc && typeof sendMidiCC === "function") {
-                const ccValue = Math.round(Math.max(0, Math.min(100, dynamicValue)) * 127 / 100);
+                const ccValue = knobToCc(action, dynamicValue);
                 const sig = `${midiMap.kind}|${midiMap.channel || 1}|${midiMap.number}`;
                 const cache = (window.__knobLastCc = window.__knobLastCc || {});
                 if (cache[action] && cache[action].sig === sig && cache[action].cc === ccValue) {

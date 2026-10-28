@@ -62,12 +62,14 @@ function env(init = {}, { portOk = true } = {}) {
     let allOk = true; const rows = [];
     for (const [a, num] of Object.entries(FAMILY(d))) {
       e.sent.length = 0;
-      for (const [v, cc] of [[0, 0], [25, 32], [50, 64], [75, 95], [100, 127], [50, 64], [0, 0]]) {
+      // FSP8-MIDI-SYNC-FAST-02 (THAY ĐỔI SPEC CÓ CHỦ ĐÍCH): riêng MUSIC trên Studio Pro 8 dùng neo 50→64, 90→97, 100→127 => 75→85 (không còn 95). Mọi Knob/DAW khác giữ nguyên.
+      const calib = d === 'Studio Pro 8' && a === 'BEAT_INPUT_VOLUME';
+      for (const [v, cc] of [[0, 0], [25, 32], [50, 64], [75, calib ? 85 : 95], [100, 127], [50, 64], [0, 0]]) {
         const r = await e.turn(e.AR.ACTIONS[a], v); const last = e.sent[e.sent.length - 1];
         if (!r.ok || !last || last.n !== num || last.v !== cc || last.ch !== 14) { allOk = false; rows.push([a, v, cc, last, r]); }
       }
     }
-    ok(allOk, `[2] "${d}": 0/25/50/75/100 -> CC 0/32/64/95/127 (kênh 15 = index 14), đúng CC riêng từng Knob; tăng/giảm đúng chiều`, rows[0]);
+    ok(allOk, `[2] "${d}": 0/25/50/75/100 -> CC 0/32/64/95/127 (riêng MUSIC trên Studio Pro 8: 75->85, xem FSP8-MIDI-SYNC-FAST-02) (kênh 15 = index 14), đúng CC riêng từng Knob; tăng/giảm đúng chiều`, rows[0]);
     e.sent.length = 0; await e.turn('BEAT_INPUT_VOLUME', 10); await e.turn('BEAT_INPUT_VOLUME', 10); await e.turn('BEAT_INPUT_VOLUME', 10.2);
     ok(e.sent.length === 1 && e.sent[0].v === 13, `[2] "${d}": cùng giá trị CC gửi lại -> không gửi lặp (3 lần xoay, chỉ 1 CC)`, e.sent);
   }
