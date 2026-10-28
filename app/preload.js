@@ -91,6 +91,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     closeEffectsWindow: () => ipcRenderer.send("effects-close"),
     getEffectsAlwaysOnTop: () => ipcRenderer.invoke("effects-get-aot"),
     setEffectsAlwaysOnTop: (enabled) => ipcRenderer.invoke("effects-set-aot", enabled),
+    // Nút trong Bảng Hiệu Ứng -> main -> cửa sổ menu (nơi có SoundEffectEngine). effectId: "CLAP" | "LAUGH"
+    playEffect: (effectId) => ipcRenderer.send("effects-play", effectId),
+    onEffectsPlay: (callback) => ipcRenderer.on("effects-play", (event, effectId) => callback(effectId)),
 
     // ---- MIDI-MASTER-01 Phase 1: trạng thái MIDI THẬT phía main process (easymidi) ----
     // Dùng bởi ui/js/midiHealth.js để hợp nhất với trạng thái Web MIDI phía renderer.

@@ -781,6 +781,19 @@ ipcMain.on("effects-close", (event) => {
     }
 });
 
+// Nút phát hiệu ứng: chỉ nhận từ cửa sổ hiệu ứng, chỉ 2 id hợp lệ, rồi chuyển sang cửa sổ menu
+// (nơi SoundEffectEngine phát âm thanh với âm lượng của knob "Hiệu Ứng").
+ipcMain.on("effects-play", (event, effectId) => {
+    try {
+        if (!effectsWindow.isFromEffects(event.sender)) return;
+        if (effectId !== "CLAP" && effectId !== "LAUGH") return;
+        if (!mainWin || mainWin.isDestroyed()) return;
+        mainWin.webContents.send("effects-play", effectId);
+    } catch (err) {
+        console.error("effects-play lỗi:", err);
+    }
+});
+
 ipcMain.handle("effects-get-aot", (event) => {
     if (!effectsWindow.isFromEffects(event.sender)) return { ok: false, value: false, error: "Không được phép" };
     return effectsWindow.getAlwaysOnTop();

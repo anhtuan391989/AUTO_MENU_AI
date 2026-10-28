@@ -124,9 +124,14 @@ const SoundEffectEngine = (() => {
      * @param {number} value0to100
      */
     function setVolume(effectId, value0to100) {
+        const clamped = Math.max(0, Math.min(100, Number(value0to100) || 0));
+        // "ALL" = âm lượng CHUNG cho cả Bảng Hiệu Ứng (knob "Hiệu Ứng"): áp cho mọi effect.
+        if (effectId === "ALL") {
+            Object.values(effects).forEach((e) => { e.audio.volume = clamped / 100; });
+            return;
+        }
         const effect = effects[effectId];
         if (!effect) return;
-        const clamped = Math.max(0, Math.min(100, Number(value0to100) || 0));
         effect.audio.volume = clamped / 100;
     }
 
@@ -777,6 +782,19 @@ SoundEffectEngine.onChange((effectId, isPlaying) => {
     });
 });
 
+// Bảng Hiệu Ứng ĐỘC LẬP là cửa sổ riêng (app/EffectsWindow.js, ui/effects.html) nên không gọi trực
+// tiếp được SoundEffectEngine ở đây: nút bấm gửi IPC "effects-play" qua main, về lại đây. Xử lý GIỐNG
+// HỆT nút CLAP/LAUGH cũ ở trên (toggle phát/dừng + executeAction MIDI tuỳ chọn). Âm lượng do knob
+// "Hiệu Ứng" quyết định (SoundEffectEngine.setVolume("ALL", ...)).
+window.electronAPI?.onEffectsPlay?.((effectId) => {
+    if (effectId !== "CLAP" && effectId !== "LAUGH") return;
+    SoundEffectEngine.toggle(effectId);
+    if (window.ActionRegistry?.executeAction) {
+        window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[effectId], { reason: "menu-button" })
+            .catch(err => console.error(`[MenuControl] ${effectId} lỗi:`, err));
+    }
+});
+
 /* ==========================================================
    5b. EXPAND / COLLAPSE CONTROL PANEL (UI Final v1.0)
    Thao tác DOM/CSS + gọi IPC resize-window có sẵn (preload.js:
@@ -874,7 +892,9 @@ const knobData = [
     { id: "musicKnob", valueId: "musicValue", value: 90, defaultValue: 90 },
     { id: "masterKnob", valueId: "masterValue", value: 90, defaultValue: 90 },
     { id: "clapKnob", valueId: "clapValue", value: 40, defaultValue: 40 },
-    { id: "laughKnob", valueId: "laughValue", value: 40, defaultValue: 40 }
+    { id: "laughKnob", valueId: "laughValue", value: 40, defaultValue: 40 },
+    // Knob "Hiệu Ứng" (index.html: #fxSoundVolKnob) = âm lượng CHUNG của cả Bảng Hiệu Ứng độc lập.
+    { id: "fxSoundVolKnob", valueId: "fxSoundVolValue", value: 50, defaultValue: 50 }
 ];
 
 // TASK A20 — clapKnob/laughKnob đi tới Internal Audio Backend (SoundEffectEngine), KHÔNG
@@ -883,7 +903,8 @@ const knobData = [
 // để cả dispatchKnobVolume() lẫn loadData() đều dùng chung được 1 map duy nhất.
 const KNOB_ID_TO_SOUND_EFFECT = Object.freeze({
     clapKnob: "CLAP",
-    laughKnob: "LAUGH"
+    laughKnob: "LAUGH",
+    fxSoundVolKnob: "ALL" // "ALL" = mọi hiệu ứng trong Bảng Hiệu Ứng (xem SoundEffectEngine.setVolume)
 });
 
 function updateKnob(k) {
@@ -2835,6 +2856,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     knobData.forEach(k => {
         updateKnob(k);
+        // Đồng bộ âm lượng hiệu ứng theo giá trị đang hiển thị ngay từ đầu (chỉ audio nội bộ,
+        // KHÔNG gửi MIDI) để lần phát đầu tiên đúng âm lượng trên knob, không lệch mặc định engine.
+        // Chỉ knob "ALL" (Hiệu Ứng): clapKnob/laughKnob cũ đã khớp sẵn mặc định engine (40) nên giữ nguyên.
+        if (typeof KNOB_ID_TO_SOUND_EFFECT !== "undefined" && typeof SoundEffectEngine !== "undefined" && KNOB_ID_TO_SOUND_EFFECT[k.id] === "ALL") {
+            SoundEffectEngine.setVolume("ALL", k.value);
+        }
         const knob = document.getElementById(k.id);
         if (!knob) return;
 

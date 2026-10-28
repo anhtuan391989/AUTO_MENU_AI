@@ -27,10 +27,10 @@
             <span>✨ Bảng Hiệu Ứng Độc Lập</span>
             <button class="preset-btn" id="fxCloseBtn" title="Đóng (Esc)">✕</button>
         </div>
-        <p class="fx-hint">Đường dẫn âm thanh tự cài đặt sẵn trong Cài Đặt MENU</p>
+        <p class="fx-hint">Đường dẫn âm thanh tự cài đặt sẵn trong thư mục ổ C:</p>
         <div class="fx-grid">
-            <button class="preset-btn" onclick="alert('Đang phát: Tiếng Cười')">😂 Tiếng Cười</button>
-            <button class="preset-btn" onclick="alert('Đang phát: Tiếng Vỗ Tay')">👏 Tiếng Vỗ Tay</button>
+            <button class="preset-btn" data-effect="LAUGH" onclick="alert('Đang phát: Tiếng Cười')">😂 Tiếng Cười</button>
+            <button class="preset-btn" data-effect="CLAP" onclick="alert('Đang phát: Tiếng Vỗ Tay')">👏 Tiếng Vỗ Tay</button>
             <button class="preset-btn" onclick="alert('Đang phát: Hiệu ứng 1')">🎵 Hiệu ứng 1</button>
             <button class="preset-btn" onclick="alert('Đang phát: Hiệu ứng 2')">🔔 Hiệu ứng 2</button>
         </div>
@@ -48,6 +48,15 @@
             const status = document.getElementById("fxAotStatus");
 
             if (!api) { status.textContent = "Không kết nối được với ứng dụng."; return; }
+
+            // 2 nút có âm thanh thật (Tiếng Cười/Vỗ Tay): phát qua menu, âm lượng theo knob "Hiệu Ứng".
+            // Bắt ở pha capture để chặn alert() thử cũ; Hiệu ứng 1/2 chưa có file âm thanh nên giữ alert thử.
+            document.addEventListener("click", (e) => {
+                const btn = e.target && e.target.closest ? e.target.closest("[data-effect]") : null;
+                if (!btn) return;
+                e.stopImmediatePropagation();
+                api.playEffect(btn.getAttribute("data-effect"));
+            }, true);
 
             closeBtn.addEventListener("click", () => api.closeEffectsWindow());
             document.addEventListener("keydown", (e) => { if (e.key === "Escape") api.closeEffectsWindow(); });
