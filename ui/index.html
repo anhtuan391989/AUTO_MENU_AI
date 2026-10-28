@@ -147,7 +147,7 @@
             <button class="preset-btn">LOFI</button>
             <button class="preset-btn">RAP</button>
             <button id="effectPopupBtn" class="preset-sound-btn" onclick="openEffectModal()" style="background: rgba(0,210,255,0.12); border-color: #00d2ff;">
-                <span class="icon">✨</span><span class="text">HIỆU ỨNG</span>
+                <span class="icon"></span><span class="text">EFFECT</span>
             </button>
             <button id="expandBtn" class="preset-expand-btn" aria-expanded="false" onclick="toggleExpandMarquee()">
                 <span class="icon">▾</span><span class="text">EXPAND</span>
@@ -244,7 +244,7 @@
 
             <!-- Knob 2: Hiệu Ứng -->
             <div class="knob-card">
-                <div class="sample-title">Hiệu Ứng</div>
+                <div class="sample-title">EFFECT</div>
                 <div id="fxSoundVolValue" class="knob-number">50</div>
                 <div class="knob" id="fxSoundVolKnob"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>
             </div>
@@ -255,13 +255,13 @@
     <!-- BẢNG ĐỘC LẬP 1: KHO HIỆU ỨNG (Có nút Always on Top / Luôn hiện) -->
     <div class="custom-modal" id="effectModal">
         <div class="custom-modal-box">
-            <div class="custom-modal-title">✨ Bảng Hiệu Ứng Độc Lập <button class="preset-btn" style="padding: 2px 8px;" onclick="closeEffectModal()">✕</button></div>
+            <div class="custom-modal-title"> Bảng Hiệu Ứng Độc Lập <button class="preset-btn" style="padding: 2px 8px;" onclick="closeEffectModal()">✕</button></div>
             <p style="font-size: 11px; color: #9ca3af;">Đường dẫn âm thanh tự cài đặt sẵn trong thư mục ổ C:</p>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <button class="preset-btn" onclick="alert('Đang phát: Tiếng Cười')">😂 Tiếng Cười</button>
                 <button class="preset-btn" onclick="alert('Đang phát: Tiếng Vỗ Tay')">👏 Tiếng Vỗ Tay</button>
-                <button class="preset-btn" onclick="alert('Đang phát: Hiệu ứng 1')">🎵 Hiệu ứng 1</button>
-                <button class="preset-btn" onclick="alert('Đang phát: Hiệu ứng 2')">🔔 Hiệu ứng 2</button>
+                <button class="preset-btn" onclick="alert('Đang phát: EFFECT 1')">🎵 EFFECT 1</button>
+                <button class="preset-btn" onclick="alert('Đang phát: EFFECT 2')">🔔 EFFECT 2</button>
             </div>
             <label style="font-size: 11px; display: flex; align-items: center; gap: 8px; margin-top: 8px; cursor: pointer; color: #38bdf8;">
                 <input type="checkbox" id="alwaysOnTopCheck" onchange="toggleAlwaysOnTop(this)"> Luôn luôn hiển thị trên màn hình (Always on Top)
