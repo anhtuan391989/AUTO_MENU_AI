@@ -47,9 +47,43 @@ Hiệu năng: Menu gửi mỗi bước (không throttle), đã chống trùng; k
 ## 6. File
 Mới: `tools/algbench/reports/FSP8-MIDI-SYNC-FAST-01/REPORT.md`, `tests/unit/FSP8MidiSync01.verify.js`. Sửa: không. Không commit/push.
 
+## 7. Cập nhật 28/10 — dữ liệu đo thật của người dùng (CC20 → Volume Beat đã xác nhận)
+HEAD kiểm tra lại: `6cd4ac0f47fc696cc948b9b28347502f1e18a128` (08:47 giờ VN, không đổi).
+
+| Menu MUSIC | CC20 hiện tại | Fader Beat | Nguồn |
+|---:|---:|---:|---|
+| 50 | 64 | −11,7 dB | USER_MEASURED |
+| 90 | 114 | +5,7 dB | USER_MEASURED |
+| 100 | 127 | +10 dB | USER_MEASURED |
+
+Phân tích (không nội suy thành đường cong):
+- Fader FSP8 **không tuyến tính theo CC** (không có đường cong nào đã xác minh): 64→114 (50 bước CC) tăng 17,4 dB, tức ~0,35 dB/bước ở đoạn này; 114→127 (13 bước) tăng 4,3 dB, ~0,33 dB/bước. Phần dưới CC64 chắc chắn dốc khác (không có số đo).
+- 0 dB nằm **giữa CC64 và CC114**. Một ước lượng thô nếu đoạn này gần tuyến tính là CC ≈ 97–98 — **chỉ là gợi ý để chọn điểm đo, KHÔNG dùng làm giá trị hiệu chuẩn.**
+- Cách an toàn xác định CC đúng: đo trực tiếp quanh vùng đó. Knob Menu nguyên chỉ tạo ra các CC: knob 75→95, 76→97, 77→98, 78→99 (CC96 không ra được bằng knob nguyên). Fader có độ phân giải ~0,35 dB/bước nên có thể không đúng 0,0 dB mà chỉ gần nhất (vd −0,2 / +0,1).
+
+### Phép đo bổ sung duy nhất cần người dùng (≈1 phút)
+Đặt MUSIC lần lượt ở 75, 76, 77, 78 và ghi dB trên fader `Beat`:
+
+| Menu MUSIC | 75 | 76 | 77 | 78 |
+|---|---|---|---|---|
+| CC gửi | 95 | 97 | 98 | 99 |
+| dB fader Beat | | | | |
+
+Nếu không giá trị nào gần 0 dB (khoảng ±0,3), gửi tôi các số đo đó để chọn dải đo tiếp.
+
+### Thiết kế thay đổi (sẽ áp dụng ngay khi có số đo; CHƯA áp dụng, không có giá trị CC giả định trong code)
+- Chỉ đổi **hàm quy đổi knob→CC của riêng action `BEAT_INPUT_VOLUME`** trong `ui/js/actionRegistry.js` (khối `isKnobCc`, dòng ~233): thay công thức tuyến tính bằng bảng điểm neo `[Menu→CC]` = `0→0`, `50→64` (đo), `90→CC_0dB` (đo), `100→127` (đo), nội suy tuyến tính giữa các neo, kẹp 0–127, làm tròn. Các giá trị Menu ngoài 3 điểm đo là **xấp xỉ**, không phải đường cong thật của FSP8 (sẽ ghi rõ trong báo cáo).
+- Chỉ áp dụng khi DAW đang chọn là "Studio Pro 8" (cấu hình CC này đo trên FSP8); `MASTER_OUTPUT_VOLUME` (CC21), RETUNE, Cubase, Studio One khác: **giữ nguyên công thức cũ**.
+- Không gửi MIDI lúc khởi động/khôi phục (không đổi). Test sẽ thêm: MUSIC 90 → đúng CC đo; 0/50/100 giữ 0/64/127; mọi 0–100 nằm trong 0–127 và không giảm khi Menu tăng; MASTER 0–100 vẫn là `round(v×127/100)`; không có MIDI khi nạp cấu hình.
+- Lưu ý: nếu muốn kết quả tốt cho vùng 60–100 xung quanh 0 dB, nên đo thêm 1–2 điểm (ví dụ MUSIC 70 và 80); không bắt buộc cho mục tiêu "90 = 0 dB".
+
+### Trạng thái
+- Mục tiêu MUSIC=90 → 0 dB: **BLOCKED_USER_TEST** (thiếu CC thực sự cho 0 dB; không đoán).
+- Code: chưa sửa. Test: giữ 11/11 PASS của bản trước.
+
 ---
 Claude A : Task A: FSP8-MIDI-SYNC-FAST-01
 1. File đã sửa: không sửa code; thêm REPORT.md và test FSP8MidiSync01.verify.js.
 2. Vì sao: Menu đã đúng và không gửi lúc khởi động; việc làm "MUSIC=90 = mức tham chiếu" cần bảng quy đổi của FSP8 mà hiện chưa có bằng chứng.
 3. Ảnh hưởng module: không.
-4. Còn lại: bảng đo 7 điểm dB + mức dB mong muốn ở MUSIC=90 + xác nhận Control Link CC20; sau đó áp dụng bảng hiệu chuẩn (cần đồng ý); T07 hai chiều chưa xác minh.
+4. Còn lại: đo dB fader Beat ở MUSIC 75/76/77/78 (CC 95/97/98/99) để chốt CC của 0 dB; sau đó áp dụng bảng neo cho BEAT (mục 7); T07 hai chiều chưa xác minh.
