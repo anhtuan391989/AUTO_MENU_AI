@@ -7,6 +7,9 @@ const { create } = require('../helpers/keyEngineSim.js');
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.error('  FAIL ', m); } };
 const src = fs.readFileSync(path.join(__dirname, '../../ui/js/renderer.js'), 'utf8');
+// AI-KEY-ENGINE-COMPLETE-01: lối tắt 'đứng yên' nay cần ≥ LONG_STATIONARY_MIN_S giây nhạc (trước: khoá ở 2000 ms theo hợp âm đầu — sai ở ~37% ca có hợp âm đầu ≠ tonic). Thời điểm khoá đầu tính từ hằng số trong keyEngine.js (đặt =0 trả lại 2000 ms).
+const __minS = +((fs.readFileSync(path.join(__dirname, '../../ui/js/engines/keyEngine.js'), 'utf8').match(/const LONG_STATIONARY_MIN_S = (\d+)/) || [0, 0])[1]);
+const FIRST = __minS > 0 ? __minS * 1000 + 400 : 2000;
 function fnText(name) { const st = src.indexOf(`function ${name}(`); let i = src.indexOf('{', st), d = 0; for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) break; } return src.slice(st, i + 1); }
 
 function rig() {
@@ -30,17 +33,17 @@ function rig() {
 function watchFirst(r) { r.first = null; const orig = r.sb.refreshKeySourceDisplay; r.sb.refreshKeySourceDisplay = () => { if (r.first === null) r.first = Math.round(r.e.now()); }; }
 
 console.log('\n== A. Trigger @0, lặp @1990 (timer 2s xuất hiện trước kết quả) ==');
-{ const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(1990); r.api.trigger(); r.e.step(5000);
-  ok(r.first === 2000, `Key đầu @2000ms (trước fix mô phỏng: 3990ms) — thực tế ${r.first}`);
+{ const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(1990); r.api.trigger(); r.e.step(FIRST + 3000);
+  ok(r.first === FIRST, `Key đầu @${FIRST}ms (không bị trễ thêm bởi trigger lặp @1990) — thực tế ${r.first}`);
   ok(r.cnt('WATCHER_CANCEL') === 0 && r.cnt('KEY_TRIGGER_KEPT_VALID_WATCHER') === 1, 'lần lặp bị bỏ qua, KHÔNG huỷ watcher hợp lệ');
   ok(r.keyVal() === 'C Major', 'kết quả đúng (C Major)'); }
 console.log('\n== B. Trigger @0, lặp @2010 (sau kết quả) ==');
-{ const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(2010); r.api.trigger(); r.e.step(5000);
-  ok(r.first === 2000, 'Key đầu vẫn @2000ms'); ok(r.cnt('WATCHER_CANCEL') === 0, 'không huỷ vòng dò liên tục đang chạy (không tạo lượt dò trùng)'); }
+{ const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(FIRST + 10); r.api.trigger(); r.e.step(5000);
+  ok(r.first === FIRST, `Key đầu vẫn @${FIRST}ms`); ok(r.cnt('WATCHER_CANCEL') === 0, 'không huỷ vòng dò liên tục đang chạy (không tạo lượt dò trùng)'); }
 console.log('\n== C. Đổi bài A→B trước khi Key của A xuất hiện (AUTO DETECT: gen++, bind, huỷ, trigger) ==');
 { const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(800);
-  r.api.newSong(); r.bind(r.src1); r.cancelExternal(); r.api.trigger(); r.e.step(5000);
-  ok(r.first === 800 + 2000, `Key của B @800+2000 — thực tế ${r.first}`); ok(r.keyVal() === 'C Major', 'chỉ có 1 kết quả hợp lệ'); }
+  r.api.newSong(); r.bind(r.src1); r.cancelExternal(); r.api.trigger(); r.e.step(FIRST + 3000);
+  ok(r.first === 800 + FIRST, `Key của B @800+${FIRST} — thực tế ${r.first}`); ok(r.keyVal() === 'C Major', 'chỉ có 1 kết quả hợp lệ'); }
 console.log('\n== C2. Đổi bài nhưng watcher cũ KHÔNG bị huỷ ngoài => trigger tự huỷ do khác token ==');
 { const r = rig(); r.bind(r.src1); r.api.trigger(); r.e.step(500); r.api.newSong(); r.api.trigger();
   ok(r.cnt('WATCHER_CANCEL') === 1 && r.cnt('KEY_TRIGGER_KEPT_VALID_WATCHER') === 0, 'khác generation token => huỷ + khởi động mới đúng 1 lần'); }
@@ -52,7 +55,7 @@ console.log('\n== E. Nguồn mất / không RUNNING: không tạo Key giả ==')
 { const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(300); r.e.KeyEngine.stop(); r.cancelExternal(); r.e.step(10000);
   ok(r.first === null && r.keyVal() === null, 'engine dừng + watcher huỷ => không có kết quả'); }
 console.log('\n== F. Watcher đã kết thúc/null => được khởi động lại (phục hồi) ==');
-{ const r = rig(); watchFirst(r); r.bind(r.src1); r.cancelExternal(); r.api.trigger(); r.e.step(2500); ok(r.first === 2000, 'không có watcher => trigger tạo mới và ra Key @2000'); }
+{ const r = rig(); watchFirst(r); r.bind(r.src1); r.cancelExternal(); r.api.trigger(); r.e.step(FIRST + 500); ok(r.first === FIRST, `không có watcher => trigger tạo mới và ra Key @${FIRST}`); }
 console.log('\n== G. Bất biến / ngưỡng không đổi ==');
 { const k = fs.readFileSync(path.join(__dirname, '../../ui/js/engines/keyEngine.js'), 'utf8');
   ok(/FAST_PATH_MIN_ELAPSED_MS\s*=\s*1200/.test(k) && /FAST_PATH_STREAK_REQUIRED\s*=\s*3/.test(k), 'hằng fast-path keyEngine không đổi');

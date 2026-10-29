@@ -7,6 +7,10 @@ const { create } = require('../helpers/keyEngineSim.js');
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.error('  FAIL ', m); } };
 const src = fs.readFileSync(path.join(__dirname, '../../ui/js/renderer.js'), 'utf8');
+// AI-KEY-ENGINE-COMPLETE-01: lối tắt 'đứng yên' nay cần ≥ LONG_STATIONARY_MIN_S giây nhạc (trước: khoá @2000 ms theo hợp âm đầu). Đặt hằng số =0 trả lại hành vi cũ.
+const __minS = +((require('fs').readFileSync(require('path').join(__dirname, '../../ui/js/engines/keyEngine.js'), 'utf8').match(/const LONG_STATIONARY_MIN_S = (\d+)/) || [0, 0])[1]);
+const FIRST = __minS > 0 ? __minS * 1000 + 400 : 2000;
+
 function fnText(name) { const st = src.indexOf(`function ${name}(`); let i = src.indexOf('{', st), d = 0; for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) break; } return src.slice(st, i + 1); }
 
 function rig() {
@@ -33,7 +37,7 @@ console.log('\n== A. Lần click đầu: trigger khi CHƯA có engine; bind 73ms
   ok(r.maxActive() === 1, `số vòng runVoteLoop đồng thời tối đa = ${r.maxActive()} (huỷ trước khi tạo mới)`);
   ok(r.cnt('KEY_RESULT') >= 1, `sau đó có KEY_RESULT (${r.cnt('KEY_RESULT')})`); }
 console.log('\n== A2. Cùng kịch bản nhưng timer bắn SAU khi watcher #1 đã có kết quả và re-arm (watcher mới đã mang epoch hiện tại) ==');
-{ const r = rig(); r.api.trigger(); r.step(73); r.bind(); r.step(2100); r.api.trigger(); r.step(3000);
+{ const r = rig(); r.api.trigger(); r.step(73); r.bind(); r.step(FIRST + 100); r.api.trigger(); r.step(3000);
   ok(r.cnt('WATCHER_CANCEL') === 0 && r.cnt('KEY_TRIGGER_KEPT_VALID_WATCHER') === 1, 'trigger của timer giữ watcher re-arm hợp lệ (không reset vote)'); ok(r.maxActive() === 1, 'tối đa 1 vòng'); }
 console.log('\n== B. AUTO DETECT bấm 3 lần (0/500/1000ms) + 3 timer 2s của 3 lần bind ==');
 { const r = rig(); r.autoDetect(); r.step(500); r.autoDetect(); r.step(500); r.autoDetect();

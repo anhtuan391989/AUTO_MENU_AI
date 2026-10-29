@@ -28,7 +28,10 @@ console.log('\n== 2. Thứ tự trong 1 chu trình đổi bài (tĩnh) ==');
 }
 
 console.log('\n== 3. MÔ PHỎNG engine thật: lần dò thứ hai có làm mất tiến độ không? ==');
-function scenario(spec, triggers, runMs = 12000) {
+// AI-KEY-ENGINE-COMPLETE-01: lối tắt 'đứng yên' cần ≥ LONG_STATIONARY_MIN_S giây nhạc (trước: Key đầu @~2000 ms theo hợp âm đầu). Đặt hằng số =0 trả lại 2000.
+const __minS = +((fs.readFileSync(path.join(__dirname, '../../ui/js/engines/keyEngine.js'), 'utf8').match(/const LONG_STATIONARY_MIN_S = (\d+)/) || [0, 0])[1]);
+const FIRST = __minS > 0 ? __minS * 1000 + 400 : 2000;
+function scenario(spec, triggers, runMs = 16000) {
     const e = create(spec); e.KeyEngine.init(e.ctx, { connect() {} });
     let watcher = null, firedAt = null, key = null, starts = 0, cancels = 0;
     const trigger = () => { starts++; if (watcher) { watcher(); cancels++; watcher = null; } watcher = e.KeyEngine.detectOnce((r) => { if (firedAt === null) { firedAt = e.now(); key = r.key; } }); };
@@ -39,17 +42,18 @@ function scenario(spec, triggers, runMs = 12000) {
 {
     const spec = { root: 0, mode: 'major' };
     const S1 = scenario(spec, [0]), S3 = scenario(spec, [2000]);
-    const early = scenario(spec, [0, 1990]), late = scenario(spec, [0, 2010]);
+    const early = scenario(spec, [0, FIRST - 10]), late = scenario(spec, [0, FIRST + 10]);
     console.log('    S1 một lần @0           :', JSON.stringify(S1));
     console.log('    S3 chỉ lần trễ @2000    :', JSON.stringify(S3));
     console.log('    S2 dò lại SỚM 10ms (<2s):', JSON.stringify(early));
     console.log('    S2 dò lại TRỄ 10ms (>2s):', JSON.stringify(late));
     ok([S1, S3, early, late].every((r) => r.key === 'C Major'), 'mọi kịch bản ra ĐÚNG khoá C Major (thuật toán không bị đổi)');
-    ok(S1.firstKeyMs >= 1900 && S1.firstKeyMs <= 2100, `engine ra Key đầu tiên sau ~2000ms (ảo) khi dò 1 lần: ${S1.firstKeyMs}ms`);
+    ok(S1.firstKeyMs >= FIRST - 100 && S1.firstKeyMs <= FIRST + 100, `engine ra Key đầu tiên sau ~${FIRST}ms (ảo) khi dò 1 lần: ${S1.firstKeyMs}ms`);
     ok(late.firstKeyMs === S1.firstKeyMs, 'dò lại SAU khi đã có kết quả: không mất gì');
     ok(early.firstKeyMs >= S1.firstKeyMs + 1500, `dò lại TRƯỚC khi vòng đầu ra kết quả bị mất tiến độ: ${early.firstKeyMs}ms so với ${S1.firstKeyMs}ms (chậm thêm ~${early.firstKeyMs - S1.firstKeyMs}ms)`);
     ok(early.cancels === 1 && early.starts === 2, 'đúng 2 lần khởi chạy, 1 lần huỷ watcher (không chạy song song)');
-    ok(S3.firstKeyMs >= S1.firstKeyMs + 1900, 'chỉ có lần trễ 2s: Key ra sau ~4s (tức lần dò TRỰC TIẾP trong handler có tác dụng làm nhanh)');
+    // AI-KEY-ENGINE-COMPLETE-01: bộ đếm bằng chứng dài hạn tính từ lúc engine init (không phải từ lúc watcher tạo), nên lần dò muộn không còn phải chờ lại từ đầu; chỉ yêu cầu không ra SỚM hơn lần dò trực tiếp.
+    ok(S3.firstKeyMs !== null && S3.firstKeyMs >= S1.firstKeyMs, `chỉ có lần trễ @2000: Key ra ${S3.firstKeyMs}ms, không sớm hơn lần dò trực tiếp (${S1.firstKeyMs}ms)`);
 }
 
 console.log('\n== 4. Log chẩn đoán: hành vi (chạy hàm thật aiDiag) và ranh giới ==');

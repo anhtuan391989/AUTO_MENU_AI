@@ -34,6 +34,23 @@ const KeyEngine = (() => {
     const MUSICAL_CONTENT_MIN_ENERGY = 0.08;
     let hasMusicalContent = false;
 
+    // === TASK AI-KEY-ENGINE-COMPLETE-01 — CỔNG NỘI DUNG THÍCH ỨNG (sửa nguyên nhân "VU có tín hiệu nhưng Key luôn LISTENING") ===
+    // Nguyên nhân gốc (đo bằng mô phỏng FFT thật, xem REPORT): cổng cũ so contentRms (căn trung bình bình phương biên độ của ~1000 bin 50–6000 Hz,
+    // đơn vị |X|/N của getFloatFrequencyData) với hằng số tuyệt đối 0.0005. Với cửa sổ Blackman/FFT 8192, ngưỡng đó tương đương nhạc ≈ -31 dBFS RMS:
+    // nhạc loopback ≤ -35 dBFS (rất phổ biến) có contentRms ≈ 0.00035 → 0 khung đạt → hasMusicalContent=false mãi mãi → chroma không tích luỹ.
+    // (log thật: maxContentRms≈0.000496 — ngay sát ngưỡng.) Hạ ngưỡng tuyệt đối đơn thuần sẽ cho nhiễu nền/âm trầm lọt vào => KHÔNG làm vậy.
+    // Thay bằng bằng chứng "âm nhạc" không phụ thuộc âm lượng: số ĐỈNH HÒA ÂM NỔI BẬT (đỉnh cục bộ cao hơn trung bình dB của các bin lân cận ≥ TONAL_PROMINENCE_DB).
+    // Nhiễu trắng/hồng/nâu và im lặng không có đỉnh như vậy; nhạc có hợp âm có nhiều đỉnh ở MỌI mức âm lượng. Sàn tuyệt đối chỉ để loại tín hiệu "gần số 0".
+    // Tắt/hoàn nguyên: ADAPTIVE_CONTENT_GATE_ENABLED = false (cổng 0.0005 + ngưỡng bass 0.01 trở về y hệt trước task này).
+    const ADAPTIVE_CONTENT_GATE_ENABLED = true;
+    const CONTENT_ABS_FLOOR_RMS = 1e-6;     // sàn tuyệt đối (≈ -85 dBFS nhạc) — chỉ loại số 0 / dither cực nhỏ
+    const TONAL_PROMINENCE_DB = 15;         // đỉnh phải cao hơn trung bình dB của bin lân cận ≥ 15 dB (nhiễu Rayleigh: xác suất ~0)
+    const TONAL_MIN_PEAKS = 4;              // cần ≥ 4 đỉnh nổi bật trong khung (hợp âm 3 nốt + hài đã cho ≥ 10)
+    const TONAL_NEIGHBOR_NEAR = 7;          // lân cận tính từ ±7 .. ±11 bin (ngoài thuỳ chính Blackman ±3)
+    const TONAL_NEIGHBOR_FAR = 11;
+    const BASS_MIN_ENERGY_LEGACY = 0.01;    // ngưỡng bass tuyệt đối cũ (chỉ dùng khi tắt cổng thích ứng)
+    const BASS_MIN_ENERGY_ADAPTIVE = 1e-5;  // bản thích ứng: nhạc nhỏ vẫn bỏ phiếu bass (hasMusicalContent đã chặn nhiễu)
+
     let frameCounter = 0;
     let firstEvidenceAt = null;
     let firstEvidenceFrame = null;
@@ -93,6 +110,10 @@ const KeyEngine = (() => {
     const LONG_LOCK_MIN_MODAL = 0.2;  // khoá thẳng theo dài hạn chỉ khi có bằng chứng quãng 3 rõ (hợp âm thiếu quãng 3 = mập mờ Major/Minor, không khoá)
     const LONG_FIRST_LOCK_S = 8;      // khoá LẦN ĐẦU: chờ ≥ 8 s nhạc, trừ khi tín hiệu "đứng yên" (1 hợp âm giữ lâu: ngắn ≈ dài)
     const LONG_STATIONARY_COS = 0.97; // cosine(ngắn, dài) ≥ 0.97 => không có gì để lấy trung bình, khoá sớm vẫn đúng
+    // TASK AI-KEY-ENGINE-COMPLETE-01 — lối tắt "đứng yên" (1 hợp âm giữ lâu) CHỈ hợp lệ sau LONG_STATIONARY_MIN_S giây nhạc tích luỹ.
+    // Đo (benchmark keybench01): với 0 s, hợp âm mở đầu được giữ 2 s => khoá Tone của HỢP ÂM đó ngay tại 2,0 s (sai ở ~55% ca có hợp âm đầu ≠ tonic), sau đó mới tự sửa.
+    // Đặt 0 = hành vi cũ (như trước task này). A/B đo được (27 ca nhạy cảm): 0 s → khoá đầu sai 10/27, trung vị khoá đầu 2,0 s; ≥4 s → khoá đầu sai 2/27, trung vị 8,8 s (đoạn <8 s giữ LISTENING).
+    const LONG_STATIONARY_MIN_S = 4;
     const LONG_BASS_WEIGHT = 0.05;    // trọng số bass khi xếp hạng Key dài hạn (mặc định cũ 0.5 làm lệch về gốc hợp âm thường gặp nhất — xem báo cáo AI-ALG-05)
     let chromaVectorLong = new Array(12).fill(0); // = longSum/longMass (hướng chroma dài hạn)
     let longSum = new Array(12).fill(0), longMass = 0;
@@ -151,7 +172,7 @@ const KeyEngine = (() => {
     // quyết định Key). Đọc qua getDebugSnapshot().inputProbe.
     // TASK AI-KEY-FAST-06 — đếm vòng runVoteLoop (chỉ để chẩn đoán lifecycle; không tham gia quyết định): active>1 = có vòng chạy song song.
     const loopStats = { started: 0, stopped: 0, active: 0, maxActive: 0 };
-    const inputProbe = { frames: 0, framesWithContent: 0, lastContentRms: 0, maxContentRms: 0, lastMaxDb: null, maxDbEver: null, finiteBins: 0, sampleRate: null, fftSize: null, binCount: null, lastFrameAt: null };
+    const inputProbe = { frames: 0, framesAccepted: 0, tonalPeaks: 0, maxTonalPeaks: 0, lastLevelDb: null, framesWithContent: 0, lastContentRms: 0, maxContentRms: 0, lastMaxDb: null, maxDbEver: null, finiteBins: 0, sampleRate: null, fftSize: null, binCount: null, lastFrameAt: null };
 
     function init(audioContext, sourceNode) {
         audioCtxRef = audioContext;
@@ -174,7 +195,7 @@ const KeyEngine = (() => {
         candidateHistory = {};
 
         frameCounter = 0;
-        inputProbe.frames = 0; inputProbe.framesWithContent = 0; inputProbe.lastContentRms = 0; inputProbe.maxContentRms = 0; inputProbe.lastMaxDb = null; inputProbe.maxDbEver = null; inputProbe.finiteBins = 0; // TASK AI-KEY-FAST-05
+        inputProbe.frames = 0; inputProbe.framesAccepted = 0; inputProbe.tonalPeaks = 0; inputProbe.maxTonalPeaks = 0; inputProbe.lastLevelDb = null; inputProbe.framesWithContent = 0; inputProbe.lastContentRms = 0; inputProbe.maxContentRms = 0; inputProbe.lastMaxDb = null; inputProbe.maxDbEver = null; inputProbe.finiteBins = 0; // TASK AI-KEY-FAST-05
         firstEvidenceAt = null;
         firstEvidenceFrame = null;
         firstProvisionalAt = null;
@@ -280,7 +301,32 @@ const KeyEngine = (() => {
             inputProbe.finiteBins = finite; inputProbe.sampleRate = sampleRate; inputProbe.fftSize = chromaAnalyser.fftSize; inputProbe.binCount = binCount; inputProbe.lastFrameAt = Date.now();
         } catch (e) { /* probe không bao giờ được làm hỏng vòng phân tích */ }
 
-        contentEnergyEMA = contentEnergyEMA * 0.9 + (frameHasContent ? 1 : 0) * 0.1;
+        // TASK AI-KEY-ENGINE-COMPLETE-01 — cổng thích ứng (xem khối chú thích ở đầu file). frameHasContent (cổng cũ 0.0005) GIỮ NGUYÊN làm số đo chẩn đoán.
+        let frameAccepted = frameHasContent;
+        if (ADAPTIVE_CONTENT_GATE_ENABLED) {
+            const rmsNow = contentCount > 0 ? Math.sqrt(contentRms / contentCount) : 0;
+            let peaks = 0;
+            if (rmsNow > CONTENT_ABS_FLOOR_RMS) {
+                const lo = BIN_LO + TONAL_NEIGHBOR_FAR, hi = BIN_HI - TONAL_NEIGHBOR_FAR;
+                for (let b = lo; b <= hi; b++) {
+                    const d = chromaDataArray[b];
+                    if (!(d > -140) || d < chromaDataArray[b - 1] || d < chromaDataArray[b + 1]) continue; // chỉ xét đỉnh cục bộ (bỏ -Infinity/NaN)
+                    let sum = 0;
+                    for (let k = TONAL_NEIGHBOR_NEAR; k <= TONAL_NEIGHBOR_FAR; k++) {
+                        const l = chromaDataArray[b - k], r = chromaDataArray[b + k];
+                        sum += (l > -140 ? l : -140) + (r > -140 ? r : -140);
+                    }
+                    if (d - sum / (2 * (TONAL_NEIGHBOR_FAR - TONAL_NEIGHBOR_NEAR + 1)) >= TONAL_PROMINENCE_DB) peaks++;
+                }
+            }
+            frameAccepted = rmsNow > CONTENT_ABS_FLOOR_RMS && peaks >= TONAL_MIN_PEAKS;
+            try {
+                inputProbe.tonalPeaks = peaks; if (peaks > inputProbe.maxTonalPeaks) inputProbe.maxTonalPeaks = peaks;
+                inputProbe.lastLevelDb = rmsNow > 0 ? 20 * Math.log10(rmsNow) : null; if (frameAccepted) inputProbe.framesAccepted++;
+            } catch (e) { /* probe không được làm hỏng vòng phân tích */ }
+        }
+
+        contentEnergyEMA = contentEnergyEMA * 0.9 + (frameAccepted ? 1 : 0) * 0.1;
         hasMusicalContent = contentEnergyEMA >= 0.5;
         frameCounter++;
 
@@ -321,7 +367,7 @@ const KeyEngine = (() => {
             if (bassFrame[i] > winnerVal) { winnerVal = bassFrame[i]; winnerPc = i; }
         }
         for (let i = 0; i < 12; i++) bassRootVotes[i] *= BASS_VOTE_DECAY;
-        if (hasMusicalContent && winnerPc >= 0 && winnerVal > 0.01) bassRootVotes[winnerPc] += 1;
+        if (hasMusicalContent && winnerPc >= 0 && winnerVal > (ADAPTIVE_CONTENT_GATE_ENABLED ? BASS_MIN_ENERGY_ADAPTIVE : BASS_MIN_ENERGY_LEGACY)) bassRootVotes[winnerPc] += 1; // AI-KEY-ENGINE-COMPLETE-01: 0.01 tuyệt đối làm bass không bao giờ bỏ phiếu khi nhạc nhỏ
 
         levelListeners.forEach((cb) => cb(chromaVector));
     }
@@ -538,7 +584,7 @@ const KeyEngine = (() => {
     function longEvidenceAllows(candidateFullKey, lockedKey) {
         if (!LONG_EVIDENCE_ENABLED || longSeconds < LONG_WARM_S || !longState.key) return { ok: true, reason: "long-not-warm" };
         if (longState.key !== candidateFullKey) return { ok: false, reason: "long-disagrees" };
-        if (!lockedKey && longSeconds < LONG_FIRST_LOCK_S && !longState.stationary) return { ok: false, reason: "long-first-lock-wait" }; // nhạc đang thay đổi hợp âm: chưa đủ để nói Key của cả đoạn
+        if (!lockedKey && longSeconds < LONG_FIRST_LOCK_S && !(longState.stationary && longSeconds >= LONG_STATIONARY_MIN_S)) return { ok: false, reason: "long-first-lock-wait" }; // nhạc đang thay đổi hợp âm: chưa đủ để nói Key của cả đoạn
         if (lockedKey && lockedKey !== candidateFullKey) {
             // ĐỔI Key đã khoá: cần Key dài hạn dẫn đầu ổn định + hơn Key đang khoá đủ biên (chống dao động theo hợp âm)
             // Cặp relative (vd C Major <-> A Minor) có cùng bộ nốt: bằng chứng rất sát nhau nên cần biên + thời gian lớn hơn để không dao động.
@@ -916,17 +962,28 @@ const KeyEngine = (() => {
 
     function onLevel(cb) { levelListeners.push(cb); }
 
+    // TASK AI-KEY-ENGINE-COMPLETE-01 — trạng thái đường vào (CHỈ chẩn đoán, không tham gia quyết định Key). NO_DEVICE do audioSource/renderer báo (KeyEngine không biết thiết bị).
+    //   NO_SIGNAL: chưa có khung / toàn -Infinity / dưới sàn tuyệt đối  | SIGNAL_NO_MUSIC: có tín hiệu nhưng chưa đủ bằng chứng hòa âm
+    //   MUSIC_EVIDENCE: có bằng chứng âm nhạc, chưa khoá Tone         | LOCKED: đã khoá Tone (đang theo dõi chuyển Tone)
+    function getInputState() {
+        if (!running && inputProbe.frames === 0) return "NO_SIGNAL";
+        if (lastLockedKey !== null) return "LOCKED";
+        if (hasMusicalContent) return "MUSIC_EVIDENCE";
+        const rmsOk = inputProbe.lastLevelDb !== null ? Math.pow(10, inputProbe.lastLevelDb / 20) > CONTENT_ABS_FLOOR_RMS : inputProbe.lastContentRms > CONTENT_ABS_FLOOR_RMS;
+        return (inputProbe.frames > 0 && inputProbe.finiteBins > 0 && rmsOk) ? "SIGNAL_NO_MUSIC" : "NO_SIGNAL";
+    }
+
     function getDebugSnapshot() {
         return {
             chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), chromaVectorLong: chromaVectorLong.slice(), longSeconds, longKey: longState.key, longStreak: longState.streak, bassRootVotes: bassRootVotes.slice(), tuningCents,
-            frameCounter, hasMusicalContent, contentEnergyEMA, inputProbe: { ...inputProbe }, loopStats: { ...loopStats },
+            frameCounter, hasMusicalContent, contentEnergyEMA, inputState: getInputState(), inputProbe: { ...inputProbe }, loopStats: { ...loopStats },
             firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
         };
     }
 
     return {
         init, stop, detectOnce, watchContinuous, estimateKeyFromChroma, estimateKeyLong, estimateKeyMid, outOfScaleRatio,
-        shortestSemitoneDelta, onLevel, onProvisionalEstimate, NOTE_NAMES, MIN_CONFIDENCE, getDebugSnapshot,
+        shortestSemitoneDelta, onLevel, onProvisionalEstimate, NOTE_NAMES, MIN_CONFIDENCE, getDebugSnapshot, getInputState,
     };
 })();
 

@@ -179,7 +179,8 @@ for (const scenario of scenarios) {
     console.log(`     top1={root:${result.top1.root}, mode:${result.top1.mode}, score:${result.top1.score.toFixed(4)}}`);
     console.log(`     top2={root:${result.top2.root}, mode:${result.top2.mode}, score:${result.top2.score.toFixed(4)}}`);
 
-    check(result.top1.score === result.confidence, "top1.score === confidence (giá trị gốc không đổi)");
+    // AI-KEY-ENGINE-COMPLETE-01: confidence = top1.score CHỈ khi qua cổng nội dung; phổ nhiễu trắng nay bị cổng thích ứng từ chối đúng (hasMusicalContent=false => confidence 0).
+    check(result.confidence === (result.hasMusicalContent ? result.top1.score : 0), "confidence = top1.score khi có nội dung nhạc, = 0 khi bị cổng từ chối (giá trị gốc không đổi)");
     check(result.top1.root === result.rootIndex, "top1.root === rootIndex (giá trị gốc không đổi)");
     check(result.top1.mode === result.mode, "top1.mode === mode (giá trị gốc không đổi)");
     check(result.margin === result.top1.score - result.top2.score, "margin = top1.score - top2.score (đúng công thức)");

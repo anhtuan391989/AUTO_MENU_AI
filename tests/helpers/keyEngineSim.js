@@ -14,12 +14,12 @@ function chordSpectrum(rootPc, mode) {
     return arr;
 }
 function create(spec) {
-    const clock = { t: 1000 }; const raf = []; const intervals = []; let iid = 0;
+    const clock = { t: 1000 }; const raf = []; const intervals = []; let iid = 0, rid = 0;
     const analyser = { fftSize: FFT, frequencyBinCount: BINS, smoothingTimeConstant: 0, getFloatFrequencyData(a) { a.set(chordSpectrum(spec.root, spec.mode)); } };
     const sb = {
         console: { log() {}, warn() {}, error() {} }, Math, Array, Float32Array, Uint8Array, Object, Number, JSON,
         Date: { now: () => clock.t },
-        requestAnimationFrame: (cb) => { raf.push(cb); return raf.length; }, cancelAnimationFrame: () => {},
+        requestAnimationFrame: (cb) => { const id = ++rid; raf.push({ id, cb }); return id; }, cancelAnimationFrame: (id) => { const i = raf.findIndex((x) => x.id === id); if (i >= 0) raf.splice(i, 1); }, // AI-KEY-ENGINE-COMPLETE-01: huỷ khung như trình duyệt thật (trước: no-op => sau stop()+init() có 2 vòng song song)
         setInterval: (fn, ms) => { intervals.push({ id: ++iid, fn, ms, next: clock.t + ms }); return iid; },
         clearInterval: (id) => { const i = intervals.findIndex((x) => x.id === id); if (i >= 0) intervals.splice(i, 1); },
         setTimeout: (fn, ms) => { const o = { id: ++iid, fn: () => { const i = intervals.indexOf(o); if (i >= 0) intervals.splice(i, 1); fn(); }, ms, next: clock.t + ms }; intervals.push(o); return iid; },
@@ -35,7 +35,7 @@ function create(spec) {
         const end = clock.t + ms;
         while (clock.t < end) {
             clock.t += 1; rafAcc += 1;               // độ phân giải 1 ms để thấy đúng thứ tự timer
-            if (rafAcc >= 1000 / 60) { rafAcc -= 1000 / 60; const cbs = raf.splice(0); cbs.forEach((cb) => cb()); }
+            if (rafAcc >= 1000 / 60) { rafAcc -= 1000 / 60; const cbs = raf.splice(0); cbs.forEach((x) => x.cb()); }
             for (const it of intervals.slice()) if (it.next <= clock.t && intervals.includes(it)) { it.next += it.ms; it.fn(); }
         }
     }

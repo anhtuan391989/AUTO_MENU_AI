@@ -1526,7 +1526,7 @@ window.__aiDiagStatus = () => {
         systemAudioExists: !!window.__systemAudioSource, systemAudioState: null, audioMonitorStarted: typeof audioMonitorStarted !== "undefined" ? audioMonitorStarted : null,
         keyEngineFrames: null, keyEngineHasMusicalContent: null, aiDiagEnabled: null };
     try { out.systemAudioState = window.__systemAudioSource?.getState?.() ?? null; } catch (e) {}
-    try { const d = typeof KeyEngine !== "undefined" && KeyEngine.getDebugSnapshot ? KeyEngine.getDebugSnapshot() : null; if (d) { out.keyEngineFrames = d.frameCounter; out.keyEngineHasMusicalContent = d.hasMusicalContent; out.keyInput = d.inputProbe || null; out.keyChroma = d.chromaVector; out.keyLoops = d.loopStats || null; } } catch (e) {}
+    try { const d = typeof KeyEngine !== "undefined" && KeyEngine.getDebugSnapshot ? KeyEngine.getDebugSnapshot() : null; if (d) { out.keyEngineFrames = d.frameCounter; out.keyEngineHasMusicalContent = d.hasMusicalContent; out.keyInput = d.inputProbe || null; out.keyInputState = d.inputState || null; /* AI-KEY-ENGINE-COMPLETE-01: NO_SIGNAL / SIGNAL_NO_MUSIC / MUSIC_EVIDENCE / LOCKED */ out.keyChroma = d.chromaVector; out.keyLoops = d.loopStats || null; } } catch (e) {}
     // TASK AI-KEY-FAST-05 — mức VU (analyser BPMEngine, cùng raw source node với KeyEngine) + thông tin track/AudioContext thật của SYSTEM_AUDIO.
     try { out.musicVuLevel = window.__aiLastLevel ? { ...window.__aiLastLevel, ageMs: Date.now() - window.__aiLastLevel.t } : null; } catch (e) {}
     try { out.sourceInfo = window.__systemAudioSource?.getDiagnostics?.() ?? null; } catch (e) {}

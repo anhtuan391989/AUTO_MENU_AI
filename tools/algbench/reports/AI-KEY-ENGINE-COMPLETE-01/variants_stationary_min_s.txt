@@ -1,0 +1,8 @@
+A/B tham số LONG_STATIONARY_MIN_S (27 ca nhạy cảm: hợp âm đầu != tonic, pop, short, rests, chord-only, mod, volchange, bass) — mô phỏng tổng hợp
+variant  n  finalOK firstLockOK anyWrongLock noResult medFirstLockS avgLocks modOK modLatMed chordOnlyKeep
+S0 (=0, hành vi cũ)  27 27 17/27 10 0 2.0  1.44 6/6 9.2 1/3
+S4 (=4)              27 23 21/23  2 4 8.8  1.00 6/6 9.2 1/3
+S6 (=6)              27 23 21/23  2 4 8.8  1.00 6/6 9.2 1/3
+S8 (=99, tắt)        27 23 21/23  2 4 8.8  1.00 6/6 9.2 1/3
+(noResult=4 là 4 ca đoạn ngắn 6 s: bản mới giữ LISTENING thay vì đoán theo hợp âm đầu)
+Chọn 4 s: gần tốc độ cũ nhất mà vẫn loại lỗi khoá-theo-hợp-âm-đầu. Dữ liệu không phân biệt được 4/6/99 -> không tối ưu thêm.

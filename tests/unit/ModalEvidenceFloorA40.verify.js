@@ -128,15 +128,15 @@ console.log("\n=== TEST 2: Major/Minor RÕ vẫn phải khoá đúng & nhanh (tr
         const { KeyEngine: KE1, advance: adv1 } = createSandboxEngine(majorChord);
         let majorLocked = null;
         KE1.detectOnce((r) => { majorLocked = r.key; });
-        adv1(4000);
-        check(majorLocked && majorLocked.includes("Major"), `${name} Major rõ khoá ĐÚNG "Major" trong <4s (thực tế: ${majorLocked || "chưa khoá"})`);
+        adv1(6000);
+        check(majorLocked && majorLocked.includes("Major"), `${name} Major rõ khoá ĐÚNG "Major" trong <6s (AI-KEY-ENGINE-COMPLETE-01: lối tắt đứng yên cần ≥4 s, trước là <4s) (thực tế: ${majorLocked || "chưa khoá"})`);
 
         const minorChord = chordSpectrum([rootHz, minThirdHz, fifthHz]);
         const { KeyEngine: KE2, advance: adv2 } = createSandboxEngine(minorChord);
         let minorLocked = null;
         KE2.detectOnce((r) => { minorLocked = r.key; });
-        adv2(4000);
-        check(minorLocked && minorLocked.includes("Minor"), `${name} Minor rõ khoá ĐÚNG "Minor" trong <4s (thực tế: ${minorLocked || "chưa khoá"})`);
+        adv2(6000);
+        check(minorLocked && minorLocked.includes("Minor"), `${name} Minor rõ khoá ĐÚNG "Minor" trong <6s (AI-KEY-ENGINE-COMPLETE-01: lối tắt đứng yên cần ≥4 s, trước là <4s) (thực tế: ${minorLocked || "chưa khoá"})`);
     });
 }
 
@@ -168,14 +168,14 @@ console.log("\n=== TEST 4: Major/Minor RÕ ở TOÀN BỘ 12 root vẫn phải k
         const { KeyEngine: KEm, advance: advm } = createSandboxEngine(majorChord);
         let majLocked = null;
         KEm.detectOnce((r) => { majLocked = r.key; });
-        advm(4000);
+        advm(6000);
         check(majLocked && majLocked.includes("Major"), `${name} Major rõ khoá ĐÚNG (thực tế: ${majLocked || "chưa khoá"})`);
 
         const minorChord = chordSpectrum([rootHz, minThirdHz, fifthHz]);
         const { KeyEngine: KEn, advance: advn } = createSandboxEngine(minorChord);
         let minLocked = null;
         KEn.detectOnce((r) => { minLocked = r.key; });
-        advn(4000);
+        advn(6000);
         check(minLocked && minLocked.includes("Minor"), `${name} Minor rõ khoá ĐÚNG (thực tế: ${minLocked || "chưa khoá"})`);
     });
 }

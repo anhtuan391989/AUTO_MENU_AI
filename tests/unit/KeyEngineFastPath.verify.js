@@ -159,6 +159,8 @@ function silenceSpectrum() { return new Float32Array(4096).fill(-100); }
 // ================================
 // TEST 1 — Fast Path chốt trong ≤2000ms với tín hiệu rõ/ổn định, đúng Key, cho NHIỀU Key khác nhau
 // ================================
+const __minS = +((require('fs').readFileSync(require('path').join(__dirname, '../../ui/js/engines/keyEngine.js'), 'utf8').match(/const LONG_STATIONARY_MIN_S = (\d+)/) || [0, 0])[1]);
+const FIRST_LOCK_MS = __minS > 0 ? __minS * 1000 + 400 : 2000; // AI-KEY-ENGINE-COMPLETE-01
 function runTest1_FastPathLatencyAndAccuracy() {
     console.log("\n=== TEST 1: Fast Path — latency ≤2000ms + đúng Key (nhiều Key khác nhau) ===");
 
@@ -175,12 +177,12 @@ function runTest1_FastPathLatencyAndAccuracy() {
             winnerCount++;
         });
 
-        advance(2500); // tua 2.5s giả lập — đủ để Fast Path (sàn 1200ms + 3 nhịp 400ms) kích hoạt nếu đúng thiết kế
+        advance(FIRST_LOCK_MS + 500); // AI-KEY-ENGINE-COMPLETE-01: lối tắt đứng yên nay cần ≥LONG_STATIONARY_MIN_S (trước: tua 2.5s) — tua — đủ để Fast Path (sàn 1200ms + 3 nhịp 400ms) kích hoạt nếu đúng thiết kế
 
-        check(winnerResult !== null, `[${expectedKey}] Fast Path CÓ chốt được Key trong 2.5s giả lập (thực tế: ${winnerResult ? "có" : "KHÔNG có kết quả nào"})`);
+        check(winnerResult !== null, `[${expectedKey}] Fast Path CÓ chốt được Key trong ${FIRST_LOCK_MS + 500}ms giả lập (thực tế: ${winnerResult ? "có" : "KHÔNG có kết quả nào"})`);
         if (winnerResult) {
             check(winnerResult.key === expectedKey, `[${expectedKey}] Key chốt ĐÚNG (thực tế: ${winnerResult.key})`);
-            check(winnerElapsedMs <= 2000, `[${expectedKey}] Latency ≤2000ms (thực tế: ${winnerElapsedMs}ms)`);
+            check(winnerElapsedMs <= FIRST_LOCK_MS, `[${expectedKey}] Latency ≤${FIRST_LOCK_MS}ms (thực tế: ${winnerElapsedMs}ms)`);
             check(winnerCount === 1, `[${expectedKey}] onWinner() chỉ gọi ĐÚNG 1 LẦN, không double-fire (thực tế: ${winnerCount} lần)`);
         }
         stop();

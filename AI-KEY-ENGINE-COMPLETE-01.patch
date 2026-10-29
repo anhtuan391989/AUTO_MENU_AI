@@ -1,0 +1,879 @@
+diff --git a/tests/helpers/keyEngineSignalSim.js b/tests/helpers/keyEngineSignalSim.js
+new file mode 100644
+index 0000000..38882c5
+--- /dev/null
++++ b/tests/helpers/keyEngineSignalSim.js
+@@ -0,0 +1,150 @@
++/**
++ * keyEngineSignalSim.js — TASK AI-KEY-ENGINE-COMPLETE-01
++ * Mô phỏng KeyEngine THẬT (ui/js/engines/keyEngine.js, nạp qua vm) với TÍN HIỆU THỜI GIAN (không phải phổ dựng sẵn):
++ *   tín hiệu tổng hợp -> cửa sổ Blackman 8192 -> FFT -> dB(|X|/N)  == cách AnalyserNode.getFloatFrequencyData tính (smoothing=0).
++ * Nhờ vậy đo được đúng đơn vị mà cổng nội dung (contentRms) nhìn thấy khi nhạc nhỏ/lớn.
++ * ĐÂY LÀ MÔ PHỎNG (mã engine thật, đầu vào tổng hợp, đồng hồ ảo) — KHÔNG phải đo runtime Windows/Electron.
++ */
++'use strict';
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const SR = 48000, FFT = 8192, BINS = FFT / 2;
++
++// ---------- FFT radix-2 ----------
++const COS = new Float64Array(FFT / 2), SIN = new Float64Array(FFT / 2);
++for (let i = 0; i < FFT / 2; i++) { COS[i] = Math.cos(2 * Math.PI * i / FFT); SIN[i] = -Math.sin(2 * Math.PI * i / FFT); }
++const REV = new Uint16Array(FFT);
++for (let i = 0; i < FFT; i++) { let r = 0, x = i; for (let b = 0; b < 13; b++) { r = (r << 1) | (x & 1); x >>= 1; } REV[i] = r; }
++const WIN = new Float64Array(FFT); // Blackman, alpha 0.16 (đúng AnalyserNode)
++for (let i = 0; i < FFT; i++) { const a = 0.16; WIN[i] = (1 - a) / 2 - 0.5 * Math.cos(2 * Math.PI * i / FFT) + (a / 2) * Math.cos(4 * Math.PI * i / FFT); }
++const re = new Float64Array(FFT), im = new Float64Array(FFT);
++function fftDb(buf, start, out) {
++    for (let i = 0; i < FFT; i++) { const s = start + i; re[REV[i]] = (s >= 0 && s < buf.length ? buf[s] : 0) * WIN[i]; im[REV[i]] = 0; }
++    for (let size = 2; size <= FFT; size <<= 1) {
++        const half = size >> 1, step = FFT / size;
++        for (let i = 0; i < FFT; i += size) for (let j = 0, k = 0; j < half; j++, k += step) {
++            const a = i + j, b = a + half, tr = re[b] * COS[k] - im[b] * SIN[k], ti = re[b] * SIN[k] + im[b] * COS[k];
++            re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
++        }
++    }
++    for (let k = 0; k < BINS; k++) { const m = Math.hypot(re[k], im[k]) / FFT; out[k] = m > 0 ? 20 * Math.log10(m) : -Infinity; }
++}
++
++// ---------- RNG có hạt giống (tái lập) ----------
++function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
++
++// ---------- Tổng hợp ----------
++const TIMBRES = {
++    piano:  { amps: [1, 0.55, 0.35, 0.22, 0.12, 0.08, 0.05, 0.03], decay: 1.2 },
++    organ:  { amps: [1, 0.9, 0.5, 0.6, 0.2, 0.3, 0.1, 0.15], decay: 0 },
++    guitar: { amps: [1, 0.7, 0.45, 0.3, 0.2, 0.12, 0.08, 0.05], decay: 0.8 },
++    pad:    { amps: [1, 0.25, 0.1, 0.05], decay: 0 },
++    brass:  { amps: [1, 0.8, 0.7, 0.55, 0.4, 0.3, 0.2, 0.12], decay: 0.5 },
++};
++/** Thêm 1 nốt (MIDI) vào buf trong [t0,t1) giây, biên độ amp (đỉnh), lệch tuning cent. */
++function addNote(buf, midi, t0, t1, amp, timbre, cents, phase0) {
++    const T = TIMBRES[timbre] || TIMBRES.piano;
++    const f0 = 440 * Math.pow(2, (midi - 69) / 12 + (cents || 0) / 1200);
++    const s0 = Math.max(0, Math.round(t0 * SR)), s1 = Math.min(buf.length, Math.round(t1 * SR));
++    for (let h = 0; h < T.amps.length; h++) {
++        const f = f0 * (h + 1); if (f > SR / 2 - 200) break;
++        const w = 2 * Math.PI * f / SR, a = amp * T.amps[h], ph = (phase0 || 0) * (h + 1);
++        for (let s = s0; s < s1; s++) {
++            const t = (s - s0) / SR;
++            const env = T.decay ? Math.exp(-t * T.decay) * 0.6 + 0.4 : 1;
++            buf[s] += a * env * Math.sin(w * s + ph);
++        }
++    }
++}
++const MAJ = [0, 4, 7], MIN = [0, 3, 7];
++/** Hợp âm (root pc, kiểu) quanh C4 + bass 1 quãng 8 thấp hơn. opts: {no3, power, bassOnly} */
++function addChord(buf, rootPc, quality, t0, t1, amp, o) {
++    o = o || {};
++    const base = 60 + rootPc, iv = o.power ? [0, 7] : (quality === 'minor' ? MIN : MAJ);
++    const notes = o.no3 ? [0, 7] : iv;
++    if (!o.bassOnly) for (const n of notes) addNote(buf, base + n, t0, t1, amp, o.timbre, o.cents, o.phase);
++    addNote(buf, base - 12 + (o.bassIv || 0), t0, t1, amp * (o.bassGain === undefined ? 1.2 : o.bassGain), o.timbre === 'pad' ? 'organ' : (o.timbre || 'piano'), o.cents);
++}
++/** Vòng hợp âm diatonic của Key (root pc, mode) — bậc I-V-vi-IV (trưởng) hoặc i-VI-III-VII (thứ). */
++function progression(rootPc, mode) {
++    if (mode === 'major') return [[0, 'major'], [7, 'major'], [9, 'minor'], [5, 'major']].map(([d, q]) => [(rootPc + d) % 12, q]);
++    return [[0, 'minor'], [8, 'major'], [3, 'major'], [10, 'major']].map(([d, q]) => [(rootPc + d) % 12, q]);
++}
++function addProgression(buf, rootPc, mode, t0, t1, amp, o) {
++    o = o || {}; const ch = progression(rootPc, mode), len = o.chordSec || 2; let i = 0;
++    for (let t = t0; t < t1; t += len, i++) {
++        const [r, q] = ch[(i + (o.startAt || 0)) % ch.length];
++        addChord(buf, r, q, t, Math.min(t + len, t1), amp, o);
++    }
++}
++function addNoise(buf, t0, t1, rms, seed, kind) {
++    const r = rng(seed || 7), s0 = Math.round(t0 * SR), s1 = Math.min(buf.length, Math.round(t1 * SR)); let b = 0;
++    for (let s = s0; s < s1; s++) {
++        const w = (r() + r() + r() + r() - 2) * 1.732 * 0.5; // ~N(0,1)·hệ số
++        if (kind === 'brown') { b = b * 0.995 + w * 0.1; buf[s] += b * rms * 8; } else buf[s] += w * rms * 2;
++    }
++}
++const dbToLin = (db) => Math.pow(10, db / 20);
++function rmsDbfs(buf) { let s = 0; for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i]; return 10 * Math.log10(s / buf.length + 1e-30); }
++function scaleToRmsDb(buf, db) { const cur = rmsDbfs(buf); const g = Math.pow(10, (db - cur) / 20); for (let i = 0; i < buf.length; i++) buf[i] *= g; return buf; }
++
++// ---------- Mô phỏng engine ----------
++/** buf: Float32Array tín hiệu; opts.engineSrc: nguồn keyEngine.js (mặc định bản trong repo). */
++function create(buf, opts) {
++    opts = opts || {};
++    const clock = { t: 1000 }, t0 = clock.t; const raf = []; const intervals = []; let iid = 0, rid = 0;
++    const tele = [];
++    const analyser = {
++        fftSize: FFT, frequencyBinCount: BINS, smoothingTimeConstant: 0,
++        getFloatFrequencyData(a) { const end = Math.round((clock.t - t0) / 1000 * SR); fftDb(buf, end - FFT, a); },
++    };
++    const sb = {
++        console: { log() {}, warn() {}, error() {} }, Math, Array, Float32Array, Float64Array, Uint8Array, Object, Number, JSON, String, Infinity, isFinite, parseFloat, Set, Map, Error,
++        Date: { now: () => clock.t },
++        requestAnimationFrame: (cb) => { const id = ++rid; raf.push({ id, cb }); return id; }, cancelAnimationFrame: (id) => { const i = raf.findIndex((x) => x.id === id); if (i >= 0) raf.splice(i, 1); },
++        setInterval: (fn, ms) => { intervals.push({ id: ++iid, fn, ms, next: clock.t + ms }); return iid; },
++        clearInterval: (id) => { const i = intervals.findIndex((x) => x.id === id); if (i >= 0) intervals.splice(i, 1); },
++        setTimeout: (fn, ms) => { const o = { id: ++iid, fn: () => { const i = intervals.indexOf(o); if (i >= 0) intervals.splice(i, 1); fn(); }, ms, next: clock.t + ms }; intervals.push(o); return iid; },
++        clearTimeout: (id) => { const i = intervals.findIndex((x) => x.id === id); if (i >= 0) intervals.splice(i, 1); },
++        performance: { now: () => clock.t },
++    };
++    sb.window = sb; sb.window.electronAPI = { sendTelemetry: (r) => tele.push(Object.assign({ at: (clock.t - t0) / 1000 }, r)) };
++    vm.createContext(sb);
++    const src = opts.engineSrc || fs.readFileSync(path.join(__dirname, '../../ui/js/engines/keyEngine.js'), 'utf8');
++    vm.runInContext(src + '\nthis.KeyEngine = KeyEngine;', sb);
++    const ctx = { sampleRate: SR, createAnalyser: () => analyser };
++    let rafAcc = 0;
++    function step(ms) {
++        const end = clock.t + ms;
++        while (clock.t < end) {
++            clock.t += 1; rafAcc += 1;
++            if (rafAcc >= 1000 / 60) { rafAcc -= 1000 / 60; raf.splice(0).forEach((x) => x.cb()); }
++            for (const it of intervals.slice()) if (it.next <= clock.t && intervals.includes(it)) { it.next += it.ms; it.fn(); }
++        }
++    }
++    return { KeyEngine: sb.KeyEngine, ctx, step, now: () => (clock.t - t0) / 1000, tele, sb };
++}
++
++/**
++ * Chạy 1 ca: trả danh sách khoá (key,time) theo watchContinuous (cùng đường renderer dùng detectOnce lặp lại).
++ * durationS: tổng thời gian; trả {locks:[{t,key}], first, snap}
++ */
++function runCase(buf, durationS, opts) {
++    opts = opts || {};
++    const e = create(buf, opts);
++    e.KeyEngine.init(e.ctx, { connect() {} });
++    const locks = [];
++    e.KeyEngine.watchContinuous((r) => locks.push({ t: e.now(), key: r.key, conf: r.confidence, margin: r.margin }));
++    const stepMs = 250;
++    const probes = [];
++    for (let t = 0; t < durationS * 1000; t += stepMs) {
++        e.step(stepMs);
++        if (opts.probeEveryS && Math.abs((t + stepMs) / 1000 % opts.probeEveryS) < 1e-9) probes.push({ t: e.now(), snap: e.KeyEngine.getDebugSnapshot() });
++    }
++    const snap = e.KeyEngine.getDebugSnapshot();
++    return { locks, first: locks[0] || null, last: locks.length ? locks[locks.length - 1] : null, snap, probes, tele: e.tele, e };
++}
++
++const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
++const labelOf = (pc, mode) => `${NOTE_NAMES[pc]} ${mode === 'major' ? 'Major' : 'Minor'}`;
++
++module.exports = { SR, FFT, create, runCase, addNote, addChord, addProgression, addNoise, progression, scaleToRmsDb, rmsDbfs, dbToLin, rng, labelOf, NOTE_NAMES, fftDb, TIMBRES };
+diff --git a/tests/helpers/keyEngineSim.js b/tests/helpers/keyEngineSim.js
+index b9345b4..2dccf4e 100644
+--- a/tests/helpers/keyEngineSim.js
++++ b/tests/helpers/keyEngineSim.js
+@@ -14,12 +14,12 @@ function chordSpectrum(rootPc, mode) {
+     return arr;
+ }
+ function create(spec) {
+-    const clock = { t: 1000 }; const raf = []; const intervals = []; let iid = 0;
++    const clock = { t: 1000 }; const raf = []; const intervals = []; let iid = 0, rid = 0;
+     const analyser = { fftSize: FFT, frequencyBinCount: BINS, smoothingTimeConstant: 0, getFloatFrequencyData(a) { a.set(chordSpectrum(spec.root, spec.mode)); } };
+     const sb = {
+         console: { log() {}, warn() {}, error() {} }, Math, Array, Float32Array, Uint8Array, Object, Number, JSON,
+         Date: { now: () => clock.t },
+-        requestAnimationFrame: (cb) => { raf.push(cb); return raf.length; }, cancelAnimationFrame: () => {},
++        requestAnimationFrame: (cb) => { const id = ++rid; raf.push({ id, cb }); return id; }, cancelAnimationFrame: (id) => { const i = raf.findIndex((x) => x.id === id); if (i >= 0) raf.splice(i, 1); }, // AI-KEY-ENGINE-COMPLETE-01: huỷ khung như trình duyệt thật (trước: no-op => sau stop()+init() có 2 vòng song song)
+         setInterval: (fn, ms) => { intervals.push({ id: ++iid, fn, ms, next: clock.t + ms }); return iid; },
+         clearInterval: (id) => { const i = intervals.findIndex((x) => x.id === id); if (i >= 0) intervals.splice(i, 1); },
+         setTimeout: (fn, ms) => { const o = { id: ++iid, fn: () => { const i = intervals.indexOf(o); if (i >= 0) intervals.splice(i, 1); fn(); }, ms, next: clock.t + ms }; intervals.push(o); return iid; },
+@@ -35,7 +35,7 @@ function create(spec) {
+         const end = clock.t + ms;
+         while (clock.t < end) {
+             clock.t += 1; rafAcc += 1;               // độ phân giải 1 ms để thấy đúng thứ tự timer
+-            if (rafAcc >= 1000 / 60) { rafAcc -= 1000 / 60; const cbs = raf.splice(0); cbs.forEach((cb) => cb()); }
++            if (rafAcc >= 1000 / 60) { rafAcc -= 1000 / 60; const cbs = raf.splice(0); cbs.forEach((x) => x.cb()); }
+             for (const it of intervals.slice()) if (it.next <= clock.t && intervals.includes(it)) { it.next += it.ms; it.fn(); }
+         }
+     }
+diff --git a/tests/unit/AiKeyEngineComplete01.verify.js b/tests/unit/AiKeyEngineComplete01.verify.js
+new file mode 100644
+index 0000000..be851a8
+--- /dev/null
++++ b/tests/unit/AiKeyEngineComplete01.verify.js
+@@ -0,0 +1,137 @@
++/**
++ * AiKeyEngineComplete01.verify.js — TASK AI-KEY-ENGINE-COMPLETE-01
++ * Kiểm thử Key Engine THẬT (ui/js/engines/keyEngine.js, nạp qua vm) bằng TÍN HIỆU THỜI GIAN tổng hợp -> FFT như Web Audio -> đồng hồ ảo.
++ * ĐÂY LÀ KIỂM THỬ TỰ ĐỘNG TRÊN TÍN HIỆU TỔNG HỢP — KHÔNG phải nhạc thật, KHÔNG phải Windows/Electron/thiết bị âm thanh thật.
++ * Chạy: node tests/unit/AiKeyEngineComplete01.verify.js     (khoảng 2–4 phút)
++ */
++'use strict';
++const fs = require('fs'), path = require('path');
++const S = require('../helpers/keyEngineSignalSim.js');
++const read = (f) => fs.readFileSync(path.join(__dirname, '../..', f), 'utf8');
++const NEW = read('ui/js/engines/keyEngine.js');
++// Mô phỏng ĐÚNG hành vi trước task bằng cách TẮT công tắc (đồng thời chứng minh công tắc hoàn nguyên hoạt động):
++const LEGACY = NEW.replace('const ADAPTIVE_CONTENT_GATE_ENABLED = true;', 'const ADAPTIVE_CONTENT_GATE_ENABLED = false;').replace(/const LONG_STATIONARY_MIN_S = \d+;/, 'const LONG_STATIONARY_MIN_S = 0;');
++const MIN0 = NEW.replace(/const LONG_STATIONARY_MIN_S = \d+;/, 'const LONG_STATIONARY_MIN_S = 0;'); // chỉ khác bản mới ở lối tắt "đứng yên" (để so sánh A/B)
++let pass = 0, fail = 0;
++const ok = (c, m) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.error('  FAIL', m); } };
++const known = (m) => console.log('  KNOWN-LIMITATION', m);
++
++const PROG = { maj: [[0, 'major'], [5, 'major'], [7, 'major'], [0, 'major']], min: [[0, 'minor'], [5, 'minor'], [7, 'major'], [0, 'minor']] };
++function prog(b, mode, root, t0, t1, o) { const ch = PROG[mode === 'major' ? 'maj' : 'min'], len = 2; let i = 0; for (let t = t0; t < t1; t += len, i++) { const [d, q] = ch[(i + ((o && o.startAt) || 0)) % ch.length]; S.addChord(b, (root + d) % 12, q, t, Math.min(t + len, t1), 1, o); } }
++function sig(dur, db, fn) { const b = new Float32Array(Math.round(S.SR * dur)); fn(b); if (db !== null) S.scaleToRmsDb(b, db); return b; }
++const lockKeys = (r) => r.locks.map((l) => l.key);
++
++console.log('\n== 1. NGUYÊN NHÂN GỐC: cổng nội dung tuyệt đối 0.0005 chặn nhạc nhỏ (bản cũ) / cổng thích ứng (bản mới) ==');
++{
++    const music = (db) => sig(20, db, (b) => prog(b, 'major', 0, 0, 20, { timbre: 'piano' }));
++    for (const db of [-35, -45, -55]) {
++        const m = music(db);
++        const o = S.runCase(m, 20, { engineSrc: LEGACY }), n = S.runCase(m, 20);
++        ok(o.snap.inputProbe.framesWithContent === 0 && o.locks.length === 0, `cũ @${db} dBFS: 0 khung đạt cổng (maxContentRms=${o.snap.inputProbe.maxContentRms.toExponential(2)} < 0.0005), không có Tone`);
++        ok(n.snap.hasMusicalContent === true && lockKeys(n)[0] === 'C Major', `mới @${db} dBFS: hasMusicalContent=true, khoá C Major @${n.first && n.first.t}s`);
++    }
++    const m25 = music(-25); ok(lockKeys(S.runCase(m25, 20, { engineSrc: LEGACY })).pop() === 'C Major' && lockKeys(S.runCase(m25, 20)).pop() === 'C Major', 'nhạc lớn (-25 dBFS) vẫn khoá đúng ở cả bản cũ lẫn mới (không hồi quy)');
++    const nlog = S.runCase(music(-35), 20).snap.inputProbe;
++    ok(nlog.maxTonalPeaks >= 10 && nlog.framesAccepted > 1000, `probe mới có số liệu: maxTonalPeaks=${nlog.maxTonalPeaks}, framesAccepted=${nlog.framesAccepted}`);
++}
++
++console.log('\n== 2. IM LẶNG / NHIỄU KHÔNG TẠO TONE GIẢ (cả bản mới) ==');
++{
++    const cases = [['im lặng', sig(20, null, () => {})], ['nhiễu trắng -40', sig(20, -40, (b) => S.addNoise(b, 0, 20, 1, 3))], ['nhiễu trắng -25', sig(20, -25, (b) => S.addNoise(b, 0, 20, 1, 5))], ['nhiễu trắng -60', sig(20, -60, (b) => S.addNoise(b, 0, 20, 1, 8))], ['nhiễu nâu -30', sig(20, -30, (b) => S.addNoise(b, 0, 20, 1, 9, 'brown'))]];
++    for (const [nm, b] of cases) { const r = S.runCase(b, 20); ok(r.locks.length === 0 && r.snap.hasMusicalContent === false && r.snap.chromaVector.every((v) => v === 0), `${nm}: không khoá Tone, hasMusicalContent=false, chroma = 0`); }
++    const hum = sig(20, -35, (b) => { for (let h = 1; h <= 8; h++) S.addNote(b, 69 + 12 * Math.log2(60 * h / 440), 0, 20, 1 / h, 'organ'); });
++    const rh = S.runCase(hum, 20), rhOld = S.runCase(sig(20, -20, (b) => { for (let h = 1; h <= 8; h++) S.addNote(b, 69 + 12 * Math.log2(60 * h / 440), 0, 20, 1 / h, 'organ'); }), 20, { engineSrc: LEGACY });
++    if (rh.locks.length) known(`ù 60 Hz (1 âm đơn + chuỗi hài đứng yên) bị coi là có Tone (${lockKeys(rh)[0]}). Bản cũ cũng khoá giả ở ≥ -25 dBFS (${lockKeys(rhOld)[0] || '-'}) — không phân biệt được với 1 nốt kéo dài; SYSTEM_AUDIO số không có ù điện lưới.`); else ok(true, 'ù 60 Hz không khoá');
++}
++
++console.log('\n== 3. ĐỦ 24 TONE (12 trưởng + 12 thứ), piano, -35 dBFS, 24 s, hợp âm đầu = tonic ==');
++{
++    let good = 0, majOk = 0, minOk = 0; const bad = [];
++    for (let pc = 0; pc < 12; pc++) for (const mode of ['major', 'minor']) {
++        const r = S.runCase(sig(24, -35, (b) => prog(b, mode, pc, 0, 24, { timbre: 'piano' })), 24), want = S.labelOf(pc, mode), got = r.last && r.last.key;
++        if (got === want) { good++; mode === 'major' ? majOk++ : minOk++; } else bad.push(`${want}->${got || 'none'}`);
++    }
++    ok(good === 24 && majOk === 12 && minOk === 12, `24/24 Tone đúng (Major ${majOk}/12, Minor ${minOk}/12)${bad.length ? ' — sai: ' + bad.join(', ') : ''}`);
++}
++
++console.log('\n== 4. HỢP ÂM MỞ ĐẦU KHÔNG ĐẠI DIỆN CHO TONE (bắt đầu từ bậc IV/iv) — khoá ĐẦU TIÊN không được là Tone của hợp âm đầu ==');
++{
++    let firstBad = 0, finalBad = 0, n = 0; const rows = [];
++    for (const [pc, mode] of [[0, 'major'], [4, 'major'], [8, 'major'], [9, 'minor'], [2, 'minor'], [6, 'minor']]) {
++        const want = S.labelOf(pc, mode), run = (src) => S.runCase(sig(24, -35, (b) => prog(b, mode, pc, 0, 24, { timbre: 'piano', startAt: 1 })), 24, src ? { engineSrc: src } : undefined);
++        const r = run(); n++; if (r.first && r.first.key !== want) firstBad++; if (!r.last || r.last.key !== want) finalBad++;
++        const o = run(MIN0);
++        rows.push(`${want}: mới ${r.first ? r.first.key + '@' + r.first.t : 'none'} | MIN_S=0 ${o.first ? o.first.key + '@' + o.first.t : 'none'}`);
++    }
++    rows.forEach((x) => console.log('     ', x));
++    ok(firstBad === 0 && finalBad === 0, `${n} ca: khoá đầu sai = ${firstBad}, khoá cuối sai = ${finalBad}`);
++}
++
++console.log('\n== 5. HỢP ÂM THIẾU QUÃNG 3 (rỗng) — không ép Major/Minor; bass mạnh; âm lượng thay đổi; nghỉ; đoạn ngắn ==');
++{
++    for (const [pc, mode] of [[0, 'major'], [9, 'minor']]) {
++        const r = S.runCase(sig(24, -35, (b) => prog(b, mode, pc, 0, 24, { timbre: 'guitar', power: true })), 24);
++        ok(r.locks.length === 0, `${S.labelOf(pc, mode)}: chỉ hợp âm rỗng (root+5) -> KHÔNG khoá Major/Minor (khoá: ${lockKeys(r).join(',') || 'không'})`);
++        const rb = S.runCase(sig(24, -35, (b) => prog(b, mode, pc, 0, 24, { timbre: 'organ', bassGain: 4, startAt: 1 })), 24);
++        ok(rb.last && rb.last.key === S.labelOf(pc, mode) && (!rb.first || rb.first.key === S.labelOf(pc, mode)), `${S.labelOf(pc, mode)}: bass mạnh x4 không kéo Tone sang gốc hợp âm (khoá: ${lockKeys(rb).join(',')})`);
++        const rr = S.runCase(sig(24, -35, (b) => { prog(b, mode, pc, 0, 10, { timbre: 'piano' }); prog(b, mode, pc, 13, 24, { timbre: 'piano', startAt: 2 }); }), 24);
++        ok(rr.last && rr.last.key === S.labelOf(pc, mode) && rr.locks.every((l) => l.key === S.labelOf(pc, mode)), `${S.labelOf(pc, mode)}: nghỉ im lặng 3 s giữa bài không làm đổi Tone (khoá: ${lockKeys(rr).join(',')})`);
++        const rs = S.runCase(sig(6, -35, (b) => prog(b, mode, pc, 0, 6, { timbre: 'piano' })), 6);
++        ok(rs.locks.length === 0 || lockKeys(rs).every((k) => k === S.labelOf(pc, mode)), `${S.labelOf(pc, mode)}: đoạn 6 s — không trả sai (kết quả: ${lockKeys(rs).join(',') || 'LISTENING, chưa đủ bằng chứng'})`);
++    }
++    const vb = sig(30, null, (b) => { prog(b, 'minor', 9, 0, 30, { timbre: 'piano' }); for (let i = 0; i < b.length; i++) { const t = i / S.SR; b[i] *= t < 8 ? 1 : t < 16 ? 0.03 : 0.2; } S.scaleToRmsDb(b, -26); });
++    const rv = S.runCase(vb, 30);
++    ok(rv.locks.length >= 1 && rv.locks.every((l) => l.key === 'A Minor'), `đổi âm lượng -20 → -50 → -30 dBFS: Tone giữ A Minor (khoá: ${lockKeys(rv).join(',')})`);
++}
++
++console.log('\n== 6. CHUYỂN TONE THẬT và CHỈ ĐỔI HỢP ÂM ==');
++{
++    const rm = S.runCase(sig(62, -35, (b) => { prog(b, 'major', 2, 0, 30, { timbre: 'piano' }); prog(b, 'major', 3, 30, 62, { timbre: 'piano' }); }), 62);
++    const lat = (rm.locks.find((l) => l.t >= 30 && l.key === 'D# Major') || {}).t;
++    ok(rm.locks[0].key === 'D Major' && rm.last.key === 'D# Major' && lat !== undefined, `D Major → D# Major tại 30 s: giữ D Major trước đó, nhận D# Major sau ${lat !== undefined ? (lat - 30).toFixed(1) : '?'} s`);
++    const mm = S.runCase(sig(62, -35, (b) => { prog(b, 'minor', 9, 0, 30, { timbre: 'piano' }); prog(b, 'minor', 10, 30, 62, { timbre: 'piano' }); }), 62);
++    ok(mm.locks[0].key === 'A Minor' && mm.last.key === 'A# Minor', `A Minor → A# Minor tại 30 s: ${lockKeys(mm).join(' → ')}`);
++    const borrowed = [[10, 'major'], [2, 'major'], [4, 'major'], [5, 'minor']], ch = PROG.maj;
++    const co = S.runCase(sig(40, -35, (b) => { let t = 0, i = 0, bi = 0; while (t < 40) { let d, q; if (i % 3 === 2) [d, q] = borrowed[bi++ % 4]; else [d, q] = ch[(i - Math.floor(i / 3)) % 4]; S.addChord(b, d, q, t, Math.min(40, t + 2), 1, { timbre: 'piano' }); t += 2; i++; } }), 40);
++    ok(co.last && co.last.key === 'C Major', `C Major + hợp âm vay mượn thưa (bVII, V/V, V/vi, iv): Tone CUỐI = C Major (khoá: ${lockKeys(co).join(' → ')})`);
++    if (co.locks.some((l) => l.key !== 'C Major')) known(`C Major + hợp âm vay mượn thưa: khoá ĐẦU sai tạm thời (${lockKeys(co)[0]}@${co.locks[0].t}s, margin ${co.locks[0].margin}) rồi tự sửa ở ${co.last.t}s — chưa khắc phục (dữ liệu margin chưa đủ tách đúng/sai, xem REPORT mục 7).`);
++}
++
++console.log('\n== 7. DIAGNOSTIC 5 TRẠNG THÁI đường vào (getInputState) ==');
++{
++    const e0 = S.runCase(sig(6, null, () => {}), 6); ok(e0.snap.inputState === 'NO_SIGNAL', `im lặng -> NO_SIGNAL (${e0.snap.inputState})`);
++    const e1 = S.runCase(sig(6, -40, (b) => S.addNoise(b, 0, 6, 1, 3)), 6); ok(e1.snap.inputState === 'SIGNAL_NO_MUSIC', `nhiễu -40 dBFS (có tín hiệu, không hòa âm) -> SIGNAL_NO_MUSIC (${e1.snap.inputState})`);
++    const e2 = S.create(sig(20, -35, (b) => prog(b, 'major', 0, 0, 20, { timbre: 'piano' }))); e2.KeyEngine.init(e2.ctx, { connect() {} }); e2.step(1500);
++    ok(e2.KeyEngine.getInputState() === 'MUSIC_EVIDENCE', `1,5 s nhạc (chưa khoá) -> MUSIC_EVIDENCE (${e2.KeyEngine.getInputState()})`);
++    const e3 = S.runCase(sig(24, -35, (b) => prog(b, 'major', 0, 0, 24, { timbre: 'piano' })), 24); ok(e3.snap.inputState === 'LOCKED', `đã khoá -> LOCKED (${e3.snap.inputState})`);
++    ok(/"NO_DEVICE"|NO_DEVICE/.test(read('ui/js/audioSource.js')), 'NO_DEVICE do audioSource (SYSTEM_AUDIO) báo — KeyEngine không tự suy ra');
++}
++
++console.log('\n== 8. AUTO DETECT / KHỞI ĐỘNG LẠI (mức engine; luồng renderer do A72/A75/AiKeyFast* kiểm tra) ==');
++{
++    const b = sig(60, -35, (bb) => prog(bb, 'major', 7, 0, 60, { timbre: 'piano' }));
++    const e = S.create(b); const K = e.KeyEngine; const got = { a: [], b: [], c: [] };
++    K.init(e.ctx, { connect() {} }); const stopA = K.detectOnce((r) => got.a.push(r.key)); e.step(3000);
++    stopA(); K.stop(); K.init(e.ctx, { connect() {} }); // = bindAiEnginesToSystemAudio: stop()+init() trên cùng nguồn
++    const stopB = K.detectOnce((r) => got.b.push(r.key)); e.step(12000);
++    ok(got.a.length === 0, 'watcher cũ đã stop: KHÔNG có kết quả của chu kỳ trước ghi đè chu kỳ mới');
++    ok(got.b.length === 1 && got.b[0] === 'G Major', `chu kỳ mới sau reset khoá lại đúng G Major (${got.b.join(',')})`);
++    const ls = K.getDebugSnapshot().loopStats; ok(ls.active === 0 && ls.started === ls.stopped, `không còn vòng chạy song song: started=${ls.started} stopped=${ls.stopped} active=${ls.active}`);
++    stopB();
++    for (let i = 0; i < 3; i++) { K.stop(); K.init(e.ctx, { connect() {} }); const st = K.detectOnce((r) => got.c.push(r.key)); e.step(10000); st(); }
++    ok(got.c.length === 3 && got.c.every((k) => k === 'G Major'), `3 lần AUTO DETECT liên tiếp: mỗi lần đúng 1 kết quả G Major (${got.c.join(',')})`);
++    const ls2 = K.getDebugSnapshot().loopStats; ok(ls2.active === 0, `sau 3 lần reset: active=${ls2.active}, maxActive=${ls2.maxActive}`);
++}
++
++console.log('\n== 9. HOÀN NGUYÊN & PHẠM VI ==');
++{
++    ok(/const ADAPTIVE_CONTENT_GATE_ENABLED = true;/.test(NEW) && /const LONG_STATIONARY_MIN_S = 4;/.test(NEW), 'công tắc ADAPTIVE_CONTENT_GATE_ENABLED + LONG_STATIONARY_MIN_S có trong file');
++    ok(/const frameHasContent = contentCount > 0 && Math\.sqrt\(contentRms \/ contentCount\) > 0\.0005;/.test(NEW), 'cổng cũ 0.0005 vẫn còn nguyên làm số đo chẩn đoán (framesWithContent)');
++    const mod = read('ui/js/engines/modEngine.js'), bpm = read('ui/js/engines/bpmEngine.js');
++    ok(!/ADAPTIVE_CONTENT_GATE|getInputState|tonalPeaks/.test(mod + bpm), 'ModEngine/BPMEngine không bị sửa/không phụ thuộc cổng mới');
++    ok(/getDebugSnapshot,\s*getInputState/.test(NEW) && /estimateKeyLong/.test(NEW) && /outOfScaleRatio/.test(NEW), 'API KeyEngine mà ModEngine dùng (estimateKeyFromChroma/estimateKeyLong/outOfScaleRatio/shortestSemitoneDelta) giữ nguyên');
++    const r = read('ui/js/renderer.js'); ok(/KeyEngine\.init\(audioContext, source\)/.test(r) && /KeyEngine\.detectOnce\(/.test(r), 'renderer vẫn gọi KeyEngine.init(audioContext, source) + detectOnce như cũ (đường SYSTEM_AUDIO không đổi)');
++    ok(!/createMicSource[\s\S]{0,400}exposeRawNodeForAdapter:\s*true/.test(read('ui/js/audioSource.js')), 'MIC vẫn không có getter cho adapter AI (SYSTEM_AUDIO là nguồn duy nhất)');
++}
++
++console.log(`\n== KẾT QUẢ: ${pass} PASS, ${fail} FAIL ==`); process.exit(fail ? 1 : 0);
+diff --git a/tests/unit/AiKeyFast02.verify.js b/tests/unit/AiKeyFast02.verify.js
+index 7e70e3e..d4426d9 100644
+--- a/tests/unit/AiKeyFast02.verify.js
++++ b/tests/unit/AiKeyFast02.verify.js
+@@ -7,6 +7,9 @@ const { create } = require('../helpers/keyEngineSim.js');
+ let pass = 0, fail = 0;
+ const ok = (c, m) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.error('  FAIL ', m); } };
+ const src = fs.readFileSync(path.join(__dirname, '../../ui/js/renderer.js'), 'utf8');
++// AI-KEY-ENGINE-COMPLETE-01: lối tắt 'đứng yên' nay cần ≥ LONG_STATIONARY_MIN_S giây nhạc (trước: khoá ở 2000 ms theo hợp âm đầu — sai ở ~37% ca có hợp âm đầu ≠ tonic). Thời điểm khoá đầu tính từ hằng số trong keyEngine.js (đặt =0 trả lại 2000 ms).
++const __minS = +((fs.readFileSync(path.join(__dirname, '../../ui/js/engines/keyEngine.js'), 'utf8').match(/const LONG_STATIONARY_MIN_S = (\d+)/) || [0, 0])[1]);
++const FIRST = __minS > 0 ? __minS * 1000 + 400 : 2000;
+ function fnText(name) { const st = src.indexOf(`function ${name}(`); let i = src.indexOf('{', st), d = 0; for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) break; } return src.slice(st, i + 1); }
+ 
+ function rig() {
+@@ -30,17 +33,17 @@ function rig() {
+ function watchFirst(r) { r.first = null; const orig = r.sb.refreshKeySourceDisplay; r.sb.refreshKeySourceDisplay = () => { if (r.first === null) r.first = Math.round(r.e.now()); }; }
+ 
+ console.log('\n== A. Trigger @0, lặp @1990 (timer 2s xuất hiện trước kết quả) ==');
+-{ const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(1990); r.api.trigger(); r.e.step(5000);
+-  ok(r.first === 2000, `Key đầu @2000ms (trước fix mô phỏng: 3990ms) — thực tế ${r.first}`);
++{ const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(1990); r.api.trigger(); r.e.step(FIRST + 3000);
++  ok(r.first === FIRST, `Key đầu @${FIRST}ms (không bị trễ thêm bởi trigger lặp @1990) — thực tế ${r.first}`);
+   ok(r.cnt('WATCHER_CANCEL') === 0 && r.cnt('KEY_TRIGGER_KEPT_VALID_WATCHER') === 1, 'lần lặp bị bỏ qua, KHÔNG huỷ watcher hợp lệ');
+   ok(r.keyVal() === 'C Major', 'kết quả đúng (C Major)'); }
+ console.log('\n== B. Trigger @0, lặp @2010 (sau kết quả) ==');
+-{ const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(2010); r.api.trigger(); r.e.step(5000);
+-  ok(r.first === 2000, 'Key đầu vẫn @2000ms'); ok(r.cnt('WATCHER_CANCEL') === 0, 'không huỷ vòng dò liên tục đang chạy (không tạo lượt dò trùng)'); }
++{ const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(FIRST + 10); r.api.trigger(); r.e.step(5000);
++  ok(r.first === FIRST, `Key đầu vẫn @${FIRST}ms`); ok(r.cnt('WATCHER_CANCEL') === 0, 'không huỷ vòng dò liên tục đang chạy (không tạo lượt dò trùng)'); }
+ console.log('\n== C. Đổi bài A→B trước khi Key của A xuất hiện (AUTO DETECT: gen++, bind, huỷ, trigger) ==');
+ { const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(800);
+-  r.api.newSong(); r.bind(r.src1); r.cancelExternal(); r.api.trigger(); r.e.step(5000);
+-  ok(r.first === 800 + 2000, `Key của B @800+2000 — thực tế ${r.first}`); ok(r.keyVal() === 'C Major', 'chỉ có 1 kết quả hợp lệ'); }
++  r.api.newSong(); r.bind(r.src1); r.cancelExternal(); r.api.trigger(); r.e.step(FIRST + 3000);
++  ok(r.first === 800 + FIRST, `Key của B @800+${FIRST} — thực tế ${r.first}`); ok(r.keyVal() === 'C Major', 'chỉ có 1 kết quả hợp lệ'); }
+ console.log('\n== C2. Đổi bài nhưng watcher cũ KHÔNG bị huỷ ngoài => trigger tự huỷ do khác token ==');
+ { const r = rig(); r.bind(r.src1); r.api.trigger(); r.e.step(500); r.api.newSong(); r.api.trigger();
+   ok(r.cnt('WATCHER_CANCEL') === 1 && r.cnt('KEY_TRIGGER_KEPT_VALID_WATCHER') === 0, 'khác generation token => huỷ + khởi động mới đúng 1 lần'); }
+@@ -52,7 +55,7 @@ console.log('\n== E. Nguồn mất / không RUNNING: không tạo Key giả ==')
+ { const r = rig(); watchFirst(r); r.bind(r.src1); r.api.trigger(); r.e.step(300); r.e.KeyEngine.stop(); r.cancelExternal(); r.e.step(10000);
+   ok(r.first === null && r.keyVal() === null, 'engine dừng + watcher huỷ => không có kết quả'); }
+ console.log('\n== F. Watcher đã kết thúc/null => được khởi động lại (phục hồi) ==');
+-{ const r = rig(); watchFirst(r); r.bind(r.src1); r.cancelExternal(); r.api.trigger(); r.e.step(2500); ok(r.first === 2000, 'không có watcher => trigger tạo mới và ra Key @2000'); }
++{ const r = rig(); watchFirst(r); r.bind(r.src1); r.cancelExternal(); r.api.trigger(); r.e.step(FIRST + 500); ok(r.first === FIRST, `không có watcher => trigger tạo mới và ra Key @${FIRST}`); }
+ console.log('\n== G. Bất biến / ngưỡng không đổi ==');
+ { const k = fs.readFileSync(path.join(__dirname, '../../ui/js/engines/keyEngine.js'), 'utf8');
+   ok(/FAST_PATH_MIN_ELAPSED_MS\s*=\s*1200/.test(k) && /FAST_PATH_STREAK_REQUIRED\s*=\s*3/.test(k), 'hằng fast-path keyEngine không đổi');
+diff --git a/tests/unit/AiKeyFast06.verify.js b/tests/unit/AiKeyFast06.verify.js
+index 2fc446c..fce588a 100644
+--- a/tests/unit/AiKeyFast06.verify.js
++++ b/tests/unit/AiKeyFast06.verify.js
+@@ -7,6 +7,10 @@ const { create } = require('../helpers/keyEngineSim.js');
+ let pass = 0, fail = 0;
+ const ok = (c, m) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.error('  FAIL ', m); } };
+ const src = fs.readFileSync(path.join(__dirname, '../../ui/js/renderer.js'), 'utf8');
++// AI-KEY-ENGINE-COMPLETE-01: lối tắt 'đứng yên' nay cần ≥ LONG_STATIONARY_MIN_S giây nhạc (trước: khoá @2000 ms theo hợp âm đầu). Đặt hằng số =0 trả lại hành vi cũ.
++const __minS = +((require('fs').readFileSync(require('path').join(__dirname, '../../ui/js/engines/keyEngine.js'), 'utf8').match(/const LONG_STATIONARY_MIN_S = (\d+)/) || [0, 0])[1]);
++const FIRST = __minS > 0 ? __minS * 1000 + 400 : 2000;
++
+ function fnText(name) { const st = src.indexOf(`function ${name}(`); let i = src.indexOf('{', st), d = 0; for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) break; } return src.slice(st, i + 1); }
+ 
+ function rig() {
+@@ -33,7 +37,7 @@ console.log('\n== A. Lần click đầu: trigger khi CHƯA có engine; bind 73ms
+   ok(r.maxActive() === 1, `số vòng runVoteLoop đồng thời tối đa = ${r.maxActive()} (huỷ trước khi tạo mới)`);
+   ok(r.cnt('KEY_RESULT') >= 1, `sau đó có KEY_RESULT (${r.cnt('KEY_RESULT')})`); }
+ console.log('\n== A2. Cùng kịch bản nhưng timer bắn SAU khi watcher #1 đã có kết quả và re-arm (watcher mới đã mang epoch hiện tại) ==');
+-{ const r = rig(); r.api.trigger(); r.step(73); r.bind(); r.step(2100); r.api.trigger(); r.step(3000);
++{ const r = rig(); r.api.trigger(); r.step(73); r.bind(); r.step(FIRST + 100); r.api.trigger(); r.step(3000);
+   ok(r.cnt('WATCHER_CANCEL') === 0 && r.cnt('KEY_TRIGGER_KEPT_VALID_WATCHER') === 1, 'trigger của timer giữ watcher re-arm hợp lệ (không reset vote)'); ok(r.maxActive() === 1, 'tối đa 1 vòng'); }
+ console.log('\n== B. AUTO DETECT bấm 3 lần (0/500/1000ms) + 3 timer 2s của 3 lần bind ==');
+ { const r = rig(); r.autoDetect(); r.step(500); r.autoDetect(); r.step(500); r.autoDetect();
+diff --git a/tests/unit/AiNowPlayingOpt02.verify.js b/tests/unit/AiNowPlayingOpt02.verify.js
+index e63df8a..7ef618e 100644
+--- a/tests/unit/AiNowPlayingOpt02.verify.js
++++ b/tests/unit/AiNowPlayingOpt02.verify.js
+@@ -28,7 +28,10 @@ console.log('\n== 2. Thứ tự trong 1 chu trình đổi bài (tĩnh) ==');
+ }
+ 
+ console.log('\n== 3. MÔ PHỎNG engine thật: lần dò thứ hai có làm mất tiến độ không? ==');
+-function scenario(spec, triggers, runMs = 12000) {
++// AI-KEY-ENGINE-COMPLETE-01: lối tắt 'đứng yên' cần ≥ LONG_STATIONARY_MIN_S giây nhạc (trước: Key đầu @~2000 ms theo hợp âm đầu). Đặt hằng số =0 trả lại 2000.
++const __minS = +((fs.readFileSync(path.join(__dirname, '../../ui/js/engines/keyEngine.js'), 'utf8').match(/const LONG_STATIONARY_MIN_S = (\d+)/) || [0, 0])[1]);
++const FIRST = __minS > 0 ? __minS * 1000 + 400 : 2000;
++function scenario(spec, triggers, runMs = 16000) {
+     const e = create(spec); e.KeyEngine.init(e.ctx, { connect() {} });
+     let watcher = null, firedAt = null, key = null, starts = 0, cancels = 0;
+     const trigger = () => { starts++; if (watcher) { watcher(); cancels++; watcher = null; } watcher = e.KeyEngine.detectOnce((r) => { if (firedAt === null) { firedAt = e.now(); key = r.key; } }); };
+@@ -39,17 +42,18 @@ function scenario(spec, triggers, runMs = 12000) {
+ {
+     const spec = { root: 0, mode: 'major' };
+     const S1 = scenario(spec, [0]), S3 = scenario(spec, [2000]);
+-    const early = scenario(spec, [0, 1990]), late = scenario(spec, [0, 2010]);
++    const early = scenario(spec, [0, FIRST - 10]), late = scenario(spec, [0, FIRST + 10]);
+     console.log('    S1 một lần @0           :', JSON.stringify(S1));
+     console.log('    S3 chỉ lần trễ @2000    :', JSON.stringify(S3));
+     console.log('    S2 dò lại SỚM 10ms (<2s):', JSON.stringify(early));
+     console.log('    S2 dò lại TRỄ 10ms (>2s):', JSON.stringify(late));
+     ok([S1, S3, early, late].every((r) => r.key === 'C Major'), 'mọi kịch bản ra ĐÚNG khoá C Major (thuật toán không bị đổi)');
+-    ok(S1.firstKeyMs >= 1900 && S1.firstKeyMs <= 2100, `engine ra Key đầu tiên sau ~2000ms (ảo) khi dò 1 lần: ${S1.firstKeyMs}ms`);
++    ok(S1.firstKeyMs >= FIRST - 100 && S1.firstKeyMs <= FIRST + 100, `engine ra Key đầu tiên sau ~${FIRST}ms (ảo) khi dò 1 lần: ${S1.firstKeyMs}ms`);
+     ok(late.firstKeyMs === S1.firstKeyMs, 'dò lại SAU khi đã có kết quả: không mất gì');
+     ok(early.firstKeyMs >= S1.firstKeyMs + 1500, `dò lại TRƯỚC khi vòng đầu ra kết quả bị mất tiến độ: ${early.firstKeyMs}ms so với ${S1.firstKeyMs}ms (chậm thêm ~${early.firstKeyMs - S1.firstKeyMs}ms)`);
+     ok(early.cancels === 1 && early.starts === 2, 'đúng 2 lần khởi chạy, 1 lần huỷ watcher (không chạy song song)');
+-    ok(S3.firstKeyMs >= S1.firstKeyMs + 1900, 'chỉ có lần trễ 2s: Key ra sau ~4s (tức lần dò TRỰC TIẾP trong handler có tác dụng làm nhanh)');
++    // AI-KEY-ENGINE-COMPLETE-01: bộ đếm bằng chứng dài hạn tính từ lúc engine init (không phải từ lúc watcher tạo), nên lần dò muộn không còn phải chờ lại từ đầu; chỉ yêu cầu không ra SỚM hơn lần dò trực tiếp.
++    ok(S3.firstKeyMs !== null && S3.firstKeyMs >= S1.firstKeyMs, `chỉ có lần trễ @2000: Key ra ${S3.firstKeyMs}ms, không sớm hơn lần dò trực tiếp (${S1.firstKeyMs}ms)`);
+ }
+ 
+ console.log('\n== 4. Log chẩn đoán: hành vi (chạy hàm thật aiDiag) và ranh giới ==');
+diff --git a/tests/unit/KeyEngineFastPath.verify.js b/tests/unit/KeyEngineFastPath.verify.js
+index f1db94a..3cf3e23 100644
+--- a/tests/unit/KeyEngineFastPath.verify.js
++++ b/tests/unit/KeyEngineFastPath.verify.js
+@@ -159,6 +159,8 @@ function silenceSpectrum() { return new Float32Array(4096).fill(-100); }
+ // ================================
+ // TEST 1 — Fast Path chốt trong ≤2000ms với tín hiệu rõ/ổn định, đúng Key, cho NHIỀU Key khác nhau
+ // ================================
++const __minS = +((require('fs').readFileSync(require('path').join(__dirname, '../../ui/js/engines/keyEngine.js'), 'utf8').match(/const LONG_STATIONARY_MIN_S = (\d+)/) || [0, 0])[1]);
++const FIRST_LOCK_MS = __minS > 0 ? __minS * 1000 + 400 : 2000; // AI-KEY-ENGINE-COMPLETE-01
+ function runTest1_FastPathLatencyAndAccuracy() {
+     console.log("\n=== TEST 1: Fast Path — latency ≤2000ms + đúng Key (nhiều Key khác nhau) ===");
+ 
+@@ -175,12 +177,12 @@ function runTest1_FastPathLatencyAndAccuracy() {
+             winnerCount++;
+         });
+ 
+-        advance(2500); // tua 2.5s giả lập — đủ để Fast Path (sàn 1200ms + 3 nhịp 400ms) kích hoạt nếu đúng thiết kế
++        advance(FIRST_LOCK_MS + 500); // AI-KEY-ENGINE-COMPLETE-01: lối tắt đứng yên nay cần ≥LONG_STATIONARY_MIN_S (trước: tua 2.5s) — tua — đủ để Fast Path (sàn 1200ms + 3 nhịp 400ms) kích hoạt nếu đúng thiết kế
+ 
+-        check(winnerResult !== null, `[${expectedKey}] Fast Path CÓ chốt được Key trong 2.5s giả lập (thực tế: ${winnerResult ? "có" : "KHÔNG có kết quả nào"})`);
++        check(winnerResult !== null, `[${expectedKey}] Fast Path CÓ chốt được Key trong ${FIRST_LOCK_MS + 500}ms giả lập (thực tế: ${winnerResult ? "có" : "KHÔNG có kết quả nào"})`);
+         if (winnerResult) {
+             check(winnerResult.key === expectedKey, `[${expectedKey}] Key chốt ĐÚNG (thực tế: ${winnerResult.key})`);
+-            check(winnerElapsedMs <= 2000, `[${expectedKey}] Latency ≤2000ms (thực tế: ${winnerElapsedMs}ms)`);
++            check(winnerElapsedMs <= FIRST_LOCK_MS, `[${expectedKey}] Latency ≤${FIRST_LOCK_MS}ms (thực tế: ${winnerElapsedMs}ms)`);
+             check(winnerCount === 1, `[${expectedKey}] onWinner() chỉ gọi ĐÚNG 1 LẦN, không double-fire (thực tế: ${winnerCount} lần)`);
+         }
+         stop();
+diff --git a/tests/unit/MarginEngine.verify.js b/tests/unit/MarginEngine.verify.js
+index 9f63f15..3e1b963 100644
+--- a/tests/unit/MarginEngine.verify.js
++++ b/tests/unit/MarginEngine.verify.js
+@@ -179,7 +179,8 @@ for (const scenario of scenarios) {
+     console.log(`     top1={root:${result.top1.root}, mode:${result.top1.mode}, score:${result.top1.score.toFixed(4)}}`);
+     console.log(`     top2={root:${result.top2.root}, mode:${result.top2.mode}, score:${result.top2.score.toFixed(4)}}`);
+ 
+-    check(result.top1.score === result.confidence, "top1.score === confidence (giá trị gốc không đổi)");
++    // AI-KEY-ENGINE-COMPLETE-01: confidence = top1.score CHỈ khi qua cổng nội dung; phổ nhiễu trắng nay bị cổng thích ứng từ chối đúng (hasMusicalContent=false => confidence 0).
++    check(result.confidence === (result.hasMusicalContent ? result.top1.score : 0), "confidence = top1.score khi có nội dung nhạc, = 0 khi bị cổng từ chối (giá trị gốc không đổi)");
+     check(result.top1.root === result.rootIndex, "top1.root === rootIndex (giá trị gốc không đổi)");
+     check(result.top1.mode === result.mode, "top1.mode === mode (giá trị gốc không đổi)");
+     check(result.margin === result.top1.score - result.top2.score, "margin = top1.score - top2.score (đúng công thức)");
+diff --git a/tests/unit/ModalEvidenceFloorA40.verify.js b/tests/unit/ModalEvidenceFloorA40.verify.js
+index 7e256fd..9d8a80f 100644
+--- a/tests/unit/ModalEvidenceFloorA40.verify.js
++++ b/tests/unit/ModalEvidenceFloorA40.verify.js
+@@ -128,15 +128,15 @@ console.log("\n=== TEST 2: Major/Minor RÕ vẫn phải khoá đúng & nhanh (tr
+         const { KeyEngine: KE1, advance: adv1 } = createSandboxEngine(majorChord);
+         let majorLocked = null;
+         KE1.detectOnce((r) => { majorLocked = r.key; });
+-        adv1(4000);
+-        check(majorLocked && majorLocked.includes("Major"), `${name} Major rõ khoá ĐÚNG "Major" trong <4s (thực tế: ${majorLocked || "chưa khoá"})`);
++        adv1(6000);
++        check(majorLocked && majorLocked.includes("Major"), `${name} Major rõ khoá ĐÚNG "Major" trong <6s (AI-KEY-ENGINE-COMPLETE-01: lối tắt đứng yên cần ≥4 s, trước là <4s) (thực tế: ${majorLocked || "chưa khoá"})`);
+ 
+         const minorChord = chordSpectrum([rootHz, minThirdHz, fifthHz]);
+         const { KeyEngine: KE2, advance: adv2 } = createSandboxEngine(minorChord);
+         let minorLocked = null;
+         KE2.detectOnce((r) => { minorLocked = r.key; });
+-        adv2(4000);
+-        check(minorLocked && minorLocked.includes("Minor"), `${name} Minor rõ khoá ĐÚNG "Minor" trong <4s (thực tế: ${minorLocked || "chưa khoá"})`);
++        adv2(6000);
++        check(minorLocked && minorLocked.includes("Minor"), `${name} Minor rõ khoá ĐÚNG "Minor" trong <6s (AI-KEY-ENGINE-COMPLETE-01: lối tắt đứng yên cần ≥4 s, trước là <4s) (thực tế: ${minorLocked || "chưa khoá"})`);
+     });
+ }
+ 
+@@ -168,14 +168,14 @@ console.log("\n=== TEST 4: Major/Minor RÕ ở TOÀN BỘ 12 root vẫn phải k
+         const { KeyEngine: KEm, advance: advm } = createSandboxEngine(majorChord);
+         let majLocked = null;
+         KEm.detectOnce((r) => { majLocked = r.key; });
+-        advm(4000);
++        advm(6000);
+         check(majLocked && majLocked.includes("Major"), `${name} Major rõ khoá ĐÚNG (thực tế: ${majLocked || "chưa khoá"})`);
+ 
+         const minorChord = chordSpectrum([rootHz, minThirdHz, fifthHz]);
+         const { KeyEngine: KEn, advance: advn } = createSandboxEngine(minorChord);
+         let minLocked = null;
+         KEn.detectOnce((r) => { minLocked = r.key; });
+-        advn(4000);
++        advn(6000);
+         check(minLocked && minLocked.includes("Minor"), `${name} Minor rõ khoá ĐÚNG (thực tế: ${minLocked || "chưa khoá"})`);
+     });
+ }
+diff --git a/tools/algbench/keybench01.js b/tools/algbench/keybench01.js
+new file mode 100644
+index 0000000..1162efd
+--- /dev/null
++++ b/tools/algbench/keybench01.js
+@@ -0,0 +1,200 @@
++/**
++ * keybench01.js — TASK AI-KEY-ENGINE-COMPLETE-01. Benchmark Key Engine trên tín hiệu TỔNG HỢP có ground truth (mã engine THẬT qua vm, FFT như Web Audio, đồng hồ ảo).
++ * KHÔNG phải nhạc thật, KHÔNG phải đo Windows/Electron. Kết quả chỉ chứng minh hành vi trên bộ ca đã nêu.
++ *
++ *   node tools/algbench/keybench01.js run    --engine <keyEngine.js> --out out.json [--shard 0/2] [--only <prefix>]
++ *   node tools/algbench/keybench01.js report --base base.json[,base2.json] --new new.json[,new2.json] --md report.md
++ */
++'use strict';
++const fs = require('fs'), path = require('path');
++const S = require('../../tests/helpers/keyEngineSignalSim.js');
++const DUR = 24;
++const mk = (fn, dur, db) => () => { const b = new Float32Array(Math.round(S.SR * dur)); fn(b); if (db !== null && db !== undefined) S.scaleToRmsDb(b, db); return b; };
++const K = (pc, mode) => ({ pc, mode });
++
++// Tiến trình hợp âm (bậc theo root + chất): rõ ràng (có chứa V/iv đặc trưng) và "pop" (có thể mơ hồ relative)
++const PROG = {
++    maj_clear: [[0, 'major'], [5, 'major'], [7, 'major'], [0, 'major']],           // I IV V I
++    maj_pop:   [[0, 'major'], [7, 'major'], [9, 'minor'], [5, 'major']],           // I V vi IV
++    min_clear: [[0, 'minor'], [5, 'minor'], [7, 'major'], [0, 'minor']],           // i iv V i (V trưởng = âm dẫn)
++    min_pop:   [[0, 'minor'], [8, 'major'], [3, 'major'], [10, 'major']],          // i VI III VII  (== vi IV I V của relative major: MƠ HỒ)
++};
++function prog(buf, name, rootPc, t0, t1, amp, o) {
++    o = o || {}; const ch = PROG[name], len = o.chordSec || 2; let i = 0;
++    for (let t = t0; t < t1; t += len, i++) { const [d, q] = ch[(i + (o.startAt || 0)) % ch.length]; S.addChord(buf, (rootPc + d) % 12, q, t, Math.min(t + len, t1), amp, o); }
++}
++const relMajor = (pc) => (pc + 3) % 12, relMinor = (pc) => (pc + 9) % 12;
++
++function buildCases() {
++    const C = [];
++    const add = (c) => C.push(c);
++    // ---- Nhóm 1: cơ bản ----
++    add({ id: 'g1.silence', g: 1, desc: 'im lặng hoàn toàn', truth: null, dur: DUR, build: mk(() => {}, DUR, null) });
++    add({ id: 'g1.white-40', g: 1, desc: 'nhiễu trắng -40 dBFS', truth: null, dur: DUR, build: mk((b) => { S.addNoise(b, 0, DUR, 1, 3); }, DUR, -40) });
++    add({ id: 'g1.white-25', g: 1, desc: 'nhiễu trắng -25 dBFS', truth: null, dur: DUR, build: mk((b) => { S.addNoise(b, 0, DUR, 1, 5); }, DUR, -25) });
++    add({ id: 'g1.brown-30', g: 1, desc: 'nhiễu nâu -30 dBFS', truth: null, dur: DUR, build: mk((b) => { S.addNoise(b, 0, DUR, 1, 9, 'brown'); }, DUR, -30) });
++    add({ id: 'g1.hum60-35', g: 1, desc: 'ù 60 Hz + hài (1..8) -35 dBFS (không phải nhạc)', truth: null, dur: DUR, build: mk((b) => { for (let h = 1; h <= 8; h++) S.addNote(b, 69 + 12 * Math.log2(60 * h / 440), 0, DUR, 1 / h, 'organ'); }, DUR, -35) });
++    for (const db of [-20, -45, -55]) add({ id: `g1.level.${db}`, g: 1, desc: `C Major (I-IV-V-I) ở ${db} dBFS`, truth: K(0, 'major'), dur: DUR, build: mk((b) => prog(b, 'maj_clear', 0, 0, DUR, 1, { timbre: 'piano' }), DUR, db) });
++    for (let pc = 0; pc < 12; pc++) for (const mode of ['major', 'minor']) {
++        const nm = S.labelOf(pc, mode), name = mode === 'major' ? 'maj_clear' : 'min_clear';
++        add({ id: `g1.key.${nm}`, g: 1, set: 'main', desc: `${nm}, piano, -35 dBFS, hợp âm đầu = tonic`, truth: K(pc, mode), dur: DUR, build: mk((b) => prog(b, name, pc, 0, DUR, 1, { timbre: 'piano' }), DUR, -35) });
++        add({ id: `g1.keyF.${nm}`, g: 2, set: 'main', desc: `${nm}, hợp âm ĐẦU KHÔNG phải tonic (bắt đầu từ bậc IV/iv)`, truth: K(pc, mode), dur: DUR, build: mk((b) => prog(b, name, pc, 0, DUR, 1, { timbre: 'piano', startAt: 1 }), DUR, -35) });
++        add({ id: `g1.pop.${nm}`, g: 1, set: 'pop', desc: `${nm}, tiến trình pop (${mode === 'major' ? 'I-V-vi-IV' : 'i-VI-III-VII'}) — relative MƠ HỒ`, truth: K(pc, mode), ambiguousRel: true, dur: DUR, build: mk((b) => prog(b, mode === 'major' ? 'maj_pop' : 'min_pop', pc, 0, DUR, 1, { timbre: 'guitar' }), DUR, -35) });
++    }
++    for (const tb of ['organ', 'guitar', 'pad', 'brass']) for (let pc = 0; pc < 12; pc++) for (const mode of ['major', 'minor']) {
++        const nm = S.labelOf(pc, mode), name = mode === 'major' ? 'maj_clear' : 'min_clear';
++        if (pc % 3 !== (tb.length % 3)) continue; // mỗi âm sắc 4 root x 2 mode = 8 ca (giảm thời gian chạy, vẫn phủ mọi root qua 4 âm sắc)
++        add({ id: `g1.timbre.${tb}.${nm}`, g: 1, set: 'main', desc: `${nm}, âm sắc ${tb}, -35 dBFS`, truth: K(pc, mode), dur: DUR, build: mk((b) => prog(b, name, pc, 0, DUR, 1, { timbre: tb, startAt: 1 }), DUR, -35) });
++    }
++    for (const cents of [-35, -20, 20, 35]) for (let pc = 0; pc < 12; pc += 2) for (const mode of ['major', 'minor']) {
++        const nm = S.labelOf(pc, mode), name = mode === 'major' ? 'maj_clear' : 'min_clear';
++        if (((pc / 2) + (cents > 0 ? 1 : 0)) % 2 !== (mode === 'major' ? 0 : 1)) continue; // chia nửa tập để giảm thời gian
++        add({ id: `g1.detune${cents}.${nm}`, g: 1, set: 'main', desc: `${nm}, lệch tuning ${cents} cent, -35 dBFS`, truth: K(pc, mode), dur: DUR, build: mk((b) => prog(b, name, pc, 0, DUR, 1, { timbre: 'piano', cents, startAt: 1 }), DUR, -35) });
++    }
++    // thay đổi âm lượng mà không đổi Tone: -20 dB -> -50 dB (tại 8 s) -> -30 dB (tại 16 s)
++    add({ id: 'g1.volchange', g: 1, desc: 'đổi âm lượng -20→-50→-30 dBFS, Tone không đổi (A Minor)', truth: K(9, 'minor'), dur: 30, volume: true, build: mk((b) => { prog(b, 'min_clear', 9, 0, 30, 1, { timbre: 'piano' }); for (let i = 0; i < b.length; i++) { const t = i / S.SR; b[i] *= t < 8 ? 1 : t < 16 ? 0.03 : 0.2; } S.scaleToRmsDb(b, -26); }, 30, null) });
++    // ---- Nhóm 2: chống nhầm ----
++    for (const [pc, mode] of [[0, 'major'], [9, 'minor'], [7, 'major'], [2, 'minor']]) {
++        const nm = S.labelOf(pc, mode), name = mode === 'major' ? 'maj_clear' : 'min_clear';
++        add({ id: `g2.bass.${nm}`, g: 2, desc: `${nm}, bass RẤT mạnh (x4), bass chơi quãng 5`, truth: K(pc, mode), dur: DUR, build: mk((b) => prog(b, name, pc, 0, DUR, 1, { timbre: 'organ', bassGain: 4, startAt: 1 }), DUR, -35) });
++        add({ id: `g2.no3.${nm}`, g: 2, desc: `${nm}: chỉ hợp âm rỗng (root+5, thiếu quãng 3) — Major/Minor KHÔNG xác định được`, truth: null, noThird: true, root: pc, dur: DUR, build: mk((b) => prog(b, name, pc, 0, DUR, 1, { timbre: 'guitar', power: true }), DUR, -35) });
++        add({ id: `g2.short.${nm}`, g: 2, desc: `${nm}: đoạn ngắn 6 s`, truth: K(pc, mode), dur: 6, build: mk((b) => prog(b, name, pc, 0, 6, 1, { timbre: 'piano' }), 6, -35), shortExcerpt: true });
++        add({ id: `g2.rests.${nm}`, g: 2, desc: `${nm}: có đoạn nghỉ im lặng 3 s giữa bài`, truth: K(pc, mode), dur: DUR, build: mk((b) => { prog(b, name, pc, 0, 10, 1, { timbre: 'piano' }); prog(b, name, pc, 13, DUR, 1, { timbre: 'piano', startAt: 2 }); }, DUR, -35) });
++    }
++    add({ id: 'g2.firstchord.vi', g: 2, desc: 'C Major nhưng 6 s đầu chỉ ngân hợp âm Am (vi) rồi mới vào I-IV-V-I', truth: K(0, 'major'), firstChordTrap: true, dur: 30, build: mk((b) => { S.addChord(b, 9, 'minor', 0, 6, 1, { timbre: 'pad' }); prog(b, 'maj_clear', 0, 6, 30, 1, { timbre: 'piano' }); }, 30, -35) });
++    add({ id: 'g2.firstchord.IV', g: 2, desc: 'G Major nhưng 6 s đầu chỉ ngân hợp âm C (IV) rồi mới vào I-IV-V-I', truth: K(7, 'major'), firstChordTrap: true, dur: 30, build: mk((b) => { S.addChord(b, 0, 'major', 0, 6, 1, { timbre: 'pad' }); prog(b, 'maj_clear', 7, 6, 30, 1, { timbre: 'piano' }); }, 30, -35) });
++    // chỉ đổi hợp âm, KHÔNG chuyển Tone.
++    //  (a) chordonly: hợp âm vay mượn/dominant phụ THƯA xen giữa hợp âm trong thang (thực tế: bVII, V/V, V/vi, iv mượn) — BẮT BUỘC giữ Tone.
++    //  (b) chordstress: 8 s LIÊN TỤC 4 hợp âm ngoài thang (D, Bb, E, Fm trong C) — thông tin (INFO), không tính PASS/FAIL vì đây đã gần như chuyển giọng.
++    for (const [pc, mode] of [[0, 'major'], [4, 'major'], [9, 'minor']]) {
++        const nm = S.labelOf(pc, mode), base = mode === 'major' ? 'maj_clear' : 'min_clear';
++        const borrowed = mode === 'major' ? [[10, 'major'], [2, 'major'], [4, 'major'], [5, 'minor']] : [[2, 'major'], [4, 'major'], [10, 'major'], [8, 'major']];
++        add({ id: `g2.chordonly.${nm}`, g: 2, desc: `${nm}: xen hợp âm vay mượn THƯA (1/3 số hợp âm), KHÔNG chuyển Tone`, truth: K(pc, mode), chordOnly: true, dur: 40, build: mk((b) => {
++            const ch = PROG[base]; let t = 0, i = 0, bi = 0;
++            while (t < 40) { let d, q; if (i % 3 === 2) { [d, q] = borrowed[bi++ % borrowed.length]; } else { [d, q] = ch[(i - Math.floor(i / 3)) % ch.length]; } S.addChord(b, (pc + d) % 12, q, t, Math.min(40, t + 2), 1, { timbre: 'piano' }); t += 2; i++; }
++        }, 40, -35) });
++        add({ id: `g2.chordstress.${nm}`, g: 2, desc: `${nm}: 8 s liên tục hợp âm NGOÀI thang rồi quay về (INFO)`, truth: K(pc, mode), chordOnly: true, info: true, dur: 40, build: mk((b) => {
++            prog(b, base, pc, 0, 20, 1, { timbre: 'piano' });
++            let t = 20, i = 0; while (t < 28) { const [d, q] = borrowed[i % borrowed.length]; S.addChord(b, (pc + d) % 12, q, t, t + 2, 1, { timbre: 'piano' }); t += 2; i++; }
++            prog(b, base, pc, 28, 40, 1, { timbre: 'piano' });
++        }, 40, -35) });
++    }
++    // ---- Chuyển Tone thật (lên 1 / 2 bán cung) ----
++    for (const [pc, mode, up] of [[2, 'major', 1], [7, 'major', 2], [9, 'minor', 1], [4, 'minor', 2], [0, 'major', 1], [11, 'minor', 2]]) {
++        const a = S.labelOf(pc, mode), nb = S.labelOf((pc + up) % 12, mode), name = mode === 'major' ? 'maj_clear' : 'min_clear';
++        add({ id: `g2.mod.${a}+${up}`, g: 2, desc: `chuyển Tone thật ${a} → ${nb} tại 30 s`, truth: K((pc + up) % 12, mode), before: K(pc, mode), modAt: 30, dur: 62, build: mk((b) => { prog(b, name, pc, 0, 30, 1, { timbre: 'piano' }); prog(b, name, (pc + up) % 12, 30, 62, 1, { timbre: 'piano' }); }, 62, -35) });
++    }
++    return C;
++}
++
++// ---------- Chạy ----------
++function runOne(c, engineSrc) {
++    const buf = c.build();
++    const t0 = Date.now();
++    const r = S.runCase(buf, c.dur, { engineSrc });
++    const locks = r.locks.map((l) => ({ t: +l.t.toFixed(2), key: l.key, conf: +(l.conf || 0).toFixed(3), margin: +(l.margin || 0).toFixed(3) }));
++    return { id: c.id, g: c.g, set: c.set || null, locks, wallMs: Date.now() - t0, inputState: r.snap.inputState || null, framesAccepted: r.snap.inputProbe.framesAccepted ?? null, framesLegacy: r.snap.inputProbe.framesWithContent, hasMusic: r.snap.hasMusicalContent };
++}
++function cmdRun(args) {
++    const engineSrc = fs.readFileSync(args.engine, 'utf8');
++    const [si, sn] = (args.shard || '0/1').split('/').map(Number);
++    let cases = buildCases().filter((c, i) => i % sn === si);
++    if (args.only) cases = cases.filter((c) => c.id.startsWith(args.only));
++    const out = [];
++    cases.forEach((c, i) => { out.push(runOne(c, engineSrc)); if (args.verbose) console.error(`[${si}/${sn}] ${i + 1}/${cases.length} ${c.id} -> ${out[out.length - 1].locks.map((l) => l.key + '@' + l.t).join(',') || '-'}`); });
++    fs.writeFileSync(args.out, JSON.stringify({ engine: args.engine, results: out }, null, 1));
++}
++
++// ---------- Đánh giá ----------
++const normKey = (k) => k; // "C Major" / "C# Minor"
++function evalCase(c, res) {
++    const final = res.locks.length ? res.locks[res.locks.length - 1] : null;
++    const tl = (t) => { let k = null; for (const l of res.locks) if (l.t <= t) k = l.key; return k; };
++    const truthLabel = c.truth ? S.labelOf(c.truth.pc, c.truth.mode) : null;
++    const o = { id: c.id, g: c.g, set: c.set, desc: c.desc, truth: truthLabel, final: final ? final.key : null, nLocks: res.locks.length, first: res.locks[0] || null };
++    if (c.truth === null) { // phải KHÔNG có Tone
++        o.expect = c.noThird ? 'NO_WRONG_MODE' : 'NO_KEY';
++        if (c.noThird) { const rootOk = res.locks.every((l) => l.key.startsWith(S.NOTE_NAMES[c.root] + ' ')); o.ok = res.locks.length === 0; o.soft = res.locks.length === 0 ? 'no-lock' : (rootOk ? 'lock-root-only' : 'lock-wrong-root'); }
++        else o.ok = res.locks.length === 0;
++        return o;
++    }
++    if (c.modAt) {
++        const before = S.labelOf(c.before.pc, c.before.mode);
++        const firstNew = res.locks.find((l) => l.t >= c.modAt && l.key === truthLabel);
++        o.expect = 'MODULATION'; o.beforeOk = tl(c.modAt - 0.1) === before; o.detectLatency = firstNew ? +(firstNew.t - c.modAt).toFixed(1) : null; o.ok = !!firstNew && final && final.key === truthLabel; return o;
++    }
++    if (c.chordOnly) { o.expect = c.info ? 'INFO_KEEP_KEY' : 'KEEP_KEY'; o.info = !!c.info; const wrong = res.locks.filter((l) => l.key !== truthLabel); o.ok = !!final && final.key === truthLabel && wrong.length === 0; o.wrongLocks = wrong.length; return o; }
++    if (c.volume) { o.expect = 'KEEP_KEY'; o.ok = !!final && final.key === truthLabel && res.locks.every((l) => l.key === truthLabel); return o; }
++    o.expect = 'EXACT';
++    o.ok = !!final && final.key === truthLabel;
++    o.firstCorrectT = (res.locks.find((l) => l.key === truthLabel) || {}).t ?? null;
++    if (final && !o.ok) { // phân loại lỗi
++        const [fn, fm] = final.key.split(' '), fpc = S.NOTE_NAMES.indexOf(fn), fmode = fm.toLowerCase();
++        o.err = (fpc === c.truth.pc && fmode !== c.truth.mode) ? 'parallel' : ((c.truth.mode === 'major' && fmode === 'minor' && fpc === relMinor(c.truth.pc)) || (c.truth.mode === 'minor' && fmode === 'major' && fpc === relMajor(c.truth.pc))) ? 'relative' : (fmode === c.truth.mode && Math.abs(((fpc - c.truth.pc + 18) % 12) - 6) === 1) ? 'fifth-neighbor' : 'other';
++    }
++    o.noResult = !final; return o;
++}
++const pct = (a, b) => b ? (100 * a / b).toFixed(1) + '%' : 'n/a';
++function summarize(cases, results) {
++    const byId = Object.fromEntries(results.map((r) => [r.id, r]));
++    const ev = cases.filter((c) => byId[c.id]).map((c) => Object.assign(evalCase(c, byId[c.id]), { _c: c }));
++    return ev;
++}
++function stats(ev) {
++    const main = ev.filter((e) => e.set === 'main' && e.expect === 'EXACT');
++    const maj = main.filter((e) => /Major$/.test(e.truth)), min = main.filter((e) => /Minor$/.test(e.truth));
++    const ok = (a) => a.filter((e) => e.ok).length;
++    const noRes = (a) => a.filter((e) => e.noResult).length;
++    const wrongLock = (a) => a.filter((e) => !e.ok && !e.noResult).length;
++    const lat = main.filter((e) => e.ok && e.firstCorrectT !== null).map((e) => e.firstCorrectT).sort((a, b) => a - b);
++    const first = main.filter((e) => e.first).map((e) => e.first.t).sort((a, b) => a - b);
++    const med = (a) => a.length ? a[Math.floor(a.length / 2)] : null;
++    return { n: main.length, acc: pct(ok(main), main.length), accMajor: pct(ok(maj), maj.length), nMaj: maj.length, accMinor: pct(ok(min), min.length), nMin: min.length, noResult: pct(noRes(main), main.length), wrongLock: pct(wrongLock(main), main.length), nWrongLock: wrongLock(main), medFirstLockS: med(first), medFirstCorrectS: med(lat), p90FirstLockS: first.length ? first[Math.floor(first.length * 0.9)] : null };
++}
++function confusion(ev) {
++    const labels = []; for (let pc = 0; pc < 12; pc++) for (const m of ['Major', 'Minor']) labels.push(`${S.NOTE_NAMES[pc]} ${m}`);
++    const M = {}; labels.forEach((l) => { M[l] = {}; labels.concat(['none']).forEach((x) => { M[l][x] = 0; }); });
++    ev.filter((e) => e.set === 'main' && e.expect === 'EXACT').forEach((e) => { M[e.truth][e.final || 'none']++; });
++    return { labels, M };
++}
++function cmdReport(args) {
++    const cases = buildCases();
++    const load = (s) => [].concat(...s.split(',').map((f) => JSON.parse(fs.readFileSync(f, 'utf8')).results));
++    const B = summarize(cases, load(args.base)), N = summarize(cases, load(args.new));
++    const lines = [];
++    const sb = stats(B), sn = stats(N);
++    lines.push('### Tổng hợp tập chính (set=main, tín hiệu tổng hợp; mỗi ca 24 s; ground truth = Tone dùng để tổng hợp)\n');
++    lines.push('| Chỉ số | Baseline (main trước sửa) | Bản mới |\n|---|---|---|');
++    const row = (n, k) => lines.push(`| ${n} | ${sb[k]} | ${sn[k]} |`);
++    row('Số ca', 'n'); row('Accuracy (đúng Tone chính xác, khoá cuối)', 'acc'); row(`Accuracy Major (${sn.nMaj} ca)`, 'accMajor'); row(`Accuracy Minor (${sn.nMin} ca)`, 'accMinor');
++    row('Không trả kết quả', 'noResult'); row('Sai nhưng ĐÃ khoá (tự tin)', 'wrongLock'); row('Số ca sai-có-khoá', 'nWrongLock');
++    row('Thời gian khoá đầu tiên — trung vị (s)', 'medFirstLockS'); row('Thời gian khoá đầu tiên — p90 (s)', 'p90FirstLockS'); row('Thời gian tới khoá ĐÚNG đầu tiên — trung vị (s)', 'medFirstCorrectS');
++    // theo nhóm con
++    const sub = (ev, pre) => ev.filter((e) => e.id.startsWith(pre));
++    lines.push('\n### Theo điều kiện (set=main)\n\n| Điều kiện | n | Baseline đúng | Mới đúng |\n|---|---|---|---|');
++    const conds = [['g1.key.', 'hợp âm đầu = tonic, piano, -35 dBFS'], ['g1.keyF.', 'hợp âm đầu KHÔNG phải tonic'], ['g1.timbre.', 'âm sắc organ/guitar/pad/brass'], ['g1.detune', 'lệch tuning ±20/±35 cent']];
++    for (const [p, d] of conds) { const b = sub(B, p), n = sub(N, p); lines.push(`| ${d} | ${n.length} | ${b.filter((e) => e.ok).length}/${b.length} | ${n.filter((e) => e.ok).length}/${n.length} |`); }
++    // pop mơ hồ
++    const popN = N.filter((e) => e.set === 'pop'), popB = B.filter((e) => e.set === 'pop');
++    const cnt = (a, f) => a.filter(f).length;
++    lines.push(`\n### Tiến trình pop (relative MƠ HỒ: Am-F-C-G ≡ C: vi-IV-I-V) — ${popN.length} ca\n\n| | Đúng chính xác | Relative (cùng bộ nốt) | Không kết quả | Lỗi khác |\n|---|---|---|---|---|`);
++    for (const [nm, a] of [['Baseline', popB], ['Bản mới', popN]]) lines.push(`| ${nm} | ${cnt(a, (e) => e.ok)} | ${cnt(a, (e) => !e.ok && e.err === 'relative')} | ${cnt(a, (e) => e.noResult)} | ${cnt(a, (e) => !e.ok && !e.noResult && e.err !== 'relative')} |`);
++    // nhóm 1/2 đặc biệt
++    lines.push('\n### Từng ca đặc biệt (không thuộc tập main)\n\n| Ca | Mong đợi | Baseline | Bản mới |\n|---|---|---|---|');
++    const fmt = (e) => !e ? 'n/a' : `${e.info ? 'INFO' : (e.ok ? 'PASS' : 'FAIL')} (${e.final || 'không khoá'}${e.nLocks > 1 ? `, ${e.nLocks} lần khoá` : ''}${e.soft ? ', ' + e.soft : ''}${e.detectLatency !== undefined && e.detectLatency !== null ? ', trễ ' + e.detectLatency + ' s' : ''})`;
++    const bm = Object.fromEntries(B.map((e) => [e.id, e]));
++    N.filter((e) => e.set !== 'main' && e.set !== 'pop').forEach((e) => lines.push(`| ${e.id} — ${e.desc} | ${e.expect}${e.truth ? ' ' + e.truth : ''} | ${fmt(bm[e.id])} | ${fmt(e)} |`));
++    // confusion
++    const cm = confusion(N), cb = confusion(B);
++    const confMd = (c, title) => { const L = c.labels.concat(['none']); let s = `\n#### ${title}\n(hàng = Tone thật, cột = kết quả khoá cuối; chỉ in các ô ≠ 0 ngoài đường chéo)\n\n`; const bad = []; c.labels.forEach((t) => L.forEach((p) => { if (t !== p && c.M[t][p]) bad.push(`${t} → ${p}: ${c.M[t][p]}`); })); const diag = c.labels.reduce((a, t) => a + c.M[t][t], 0); const tot = c.labels.reduce((a, t) => a + L.reduce((b, p) => b + c.M[t][p], 0), 0); s += `Đường chéo (đúng): ${diag}/${tot}\n\n` + (bad.length ? bad.map((x) => '- ' + x).join('\n') : '- (không có ô sai)') + '\n'; return s; };
++    lines.push('\n### Confusion matrix 24 Tone (tập main)'); lines.push(confMd(cb, 'Baseline')); lines.push(confMd(cm, 'Bản mới'));
++    // theo từng root x mode, đúng/tổng
++    lines.push('\n#### Đúng/tổng theo từng Tone (tập main, bản mới | baseline)\n\n| Tone | Mới | Baseline |\n|---|---|---|');
++    for (const l of cm.labels) { const f = (ev) => { const a = ev.filter((e) => e.set === 'main' && e.expect === 'EXACT' && e.truth === l); return `${a.filter((e) => e.ok).length}/${a.length}`; }; lines.push(`| ${l} | ${f(N)} | ${f(B)} |`); }
++    const out = lines.join('\n') + '\n';
++    if (args.md) fs.writeFileSync(args.md, out); else console.log(out);
++    if (args.json) fs.writeFileSync(args.json, JSON.stringify({ baseline: { stats: sb, eval: B.map(({ _c, ...r }) => r) }, new: { stats: sn, eval: N.map(({ _c, ...r }) => r) } }, null, 1));
++}
++const args = {}; const a = process.argv.slice(2); const cmd = a.shift(); for (let i = 0; i < a.length; i += 2) args[a[i].replace(/^--/, '')] = a[i + 1];
++if (require.main === module) { if (cmd === 'run') cmdRun(args); else if (cmd === 'report') cmdReport(args); else console.error('dùng: run | report'); }
++module.exports = { buildCases, evalCase, runOne, stats };
+diff --git a/ui/js/engines/keyEngine.js b/ui/js/engines/keyEngine.js
+index f19034f..bb4ce73 100644
+--- a/ui/js/engines/keyEngine.js
++++ b/ui/js/engines/keyEngine.js
+@@ -34,6 +34,23 @@ const KeyEngine = (() => {
+     const MUSICAL_CONTENT_MIN_ENERGY = 0.08;
+     let hasMusicalContent = false;
+ 
++    // === TASK AI-KEY-ENGINE-COMPLETE-01 — CỔNG NỘI DUNG THÍCH ỨNG (sửa nguyên nhân "VU có tín hiệu nhưng Key luôn LISTENING") ===
++    // Nguyên nhân gốc (đo bằng mô phỏng FFT thật, xem REPORT): cổng cũ so contentRms (căn trung bình bình phương biên độ của ~1000 bin 50–6000 Hz,
++    // đơn vị |X|/N của getFloatFrequencyData) với hằng số tuyệt đối 0.0005. Với cửa sổ Blackman/FFT 8192, ngưỡng đó tương đương nhạc ≈ -31 dBFS RMS:
++    // nhạc loopback ≤ -35 dBFS (rất phổ biến) có contentRms ≈ 0.00035 → 0 khung đạt → hasMusicalContent=false mãi mãi → chroma không tích luỹ.
++    // (log thật: maxContentRms≈0.000496 — ngay sát ngưỡng.) Hạ ngưỡng tuyệt đối đơn thuần sẽ cho nhiễu nền/âm trầm lọt vào => KHÔNG làm vậy.
++    // Thay bằng bằng chứng "âm nhạc" không phụ thuộc âm lượng: số ĐỈNH HÒA ÂM NỔI BẬT (đỉnh cục bộ cao hơn trung bình dB của các bin lân cận ≥ TONAL_PROMINENCE_DB).
++    // Nhiễu trắng/hồng/nâu và im lặng không có đỉnh như vậy; nhạc có hợp âm có nhiều đỉnh ở MỌI mức âm lượng. Sàn tuyệt đối chỉ để loại tín hiệu "gần số 0".
++    // Tắt/hoàn nguyên: ADAPTIVE_CONTENT_GATE_ENABLED = false (cổng 0.0005 + ngưỡng bass 0.01 trở về y hệt trước task này).
++    const ADAPTIVE_CONTENT_GATE_ENABLED = true;
++    const CONTENT_ABS_FLOOR_RMS = 1e-6;     // sàn tuyệt đối (≈ -85 dBFS nhạc) — chỉ loại số 0 / dither cực nhỏ
++    const TONAL_PROMINENCE_DB = 15;         // đỉnh phải cao hơn trung bình dB của bin lân cận ≥ 15 dB (nhiễu Rayleigh: xác suất ~0)
++    const TONAL_MIN_PEAKS = 4;              // cần ≥ 4 đỉnh nổi bật trong khung (hợp âm 3 nốt + hài đã cho ≥ 10)
++    const TONAL_NEIGHBOR_NEAR = 7;          // lân cận tính từ ±7 .. ±11 bin (ngoài thuỳ chính Blackman ±3)
++    const TONAL_NEIGHBOR_FAR = 11;
++    const BASS_MIN_ENERGY_LEGACY = 0.01;    // ngưỡng bass tuyệt đối cũ (chỉ dùng khi tắt cổng thích ứng)
++    const BASS_MIN_ENERGY_ADAPTIVE = 1e-5;  // bản thích ứng: nhạc nhỏ vẫn bỏ phiếu bass (hasMusicalContent đã chặn nhiễu)
++
+     let frameCounter = 0;
+     let firstEvidenceAt = null;
+     let firstEvidenceFrame = null;
+@@ -93,6 +110,10 @@ const KeyEngine = (() => {
+     const LONG_LOCK_MIN_MODAL = 0.2;  // khoá thẳng theo dài hạn chỉ khi có bằng chứng quãng 3 rõ (hợp âm thiếu quãng 3 = mập mờ Major/Minor, không khoá)
+     const LONG_FIRST_LOCK_S = 8;      // khoá LẦN ĐẦU: chờ ≥ 8 s nhạc, trừ khi tín hiệu "đứng yên" (1 hợp âm giữ lâu: ngắn ≈ dài)
+     const LONG_STATIONARY_COS = 0.97; // cosine(ngắn, dài) ≥ 0.97 => không có gì để lấy trung bình, khoá sớm vẫn đúng
++    // TASK AI-KEY-ENGINE-COMPLETE-01 — lối tắt "đứng yên" (1 hợp âm giữ lâu) CHỈ hợp lệ sau LONG_STATIONARY_MIN_S giây nhạc tích luỹ.
++    // Đo (benchmark keybench01): với 0 s, hợp âm mở đầu được giữ 2 s => khoá Tone của HỢP ÂM đó ngay tại 2,0 s (sai ở ~55% ca có hợp âm đầu ≠ tonic), sau đó mới tự sửa.
++    // Đặt 0 = hành vi cũ (như trước task này). A/B đo được (27 ca nhạy cảm): 0 s → khoá đầu sai 10/27, trung vị khoá đầu 2,0 s; ≥4 s → khoá đầu sai 2/27, trung vị 8,8 s (đoạn <8 s giữ LISTENING).
++    const LONG_STATIONARY_MIN_S = 4;
+     const LONG_BASS_WEIGHT = 0.05;    // trọng số bass khi xếp hạng Key dài hạn (mặc định cũ 0.5 làm lệch về gốc hợp âm thường gặp nhất — xem báo cáo AI-ALG-05)
+     let chromaVectorLong = new Array(12).fill(0); // = longSum/longMass (hướng chroma dài hạn)
+     let longSum = new Array(12).fill(0), longMass = 0;
+@@ -151,7 +172,7 @@ const KeyEngine = (() => {
+     // quyết định Key). Đọc qua getDebugSnapshot().inputProbe.
+     // TASK AI-KEY-FAST-06 — đếm vòng runVoteLoop (chỉ để chẩn đoán lifecycle; không tham gia quyết định): active>1 = có vòng chạy song song.
+     const loopStats = { started: 0, stopped: 0, active: 0, maxActive: 0 };
+-    const inputProbe = { frames: 0, framesWithContent: 0, lastContentRms: 0, maxContentRms: 0, lastMaxDb: null, maxDbEver: null, finiteBins: 0, sampleRate: null, fftSize: null, binCount: null, lastFrameAt: null };
++    const inputProbe = { frames: 0, framesAccepted: 0, tonalPeaks: 0, maxTonalPeaks: 0, lastLevelDb: null, framesWithContent: 0, lastContentRms: 0, maxContentRms: 0, lastMaxDb: null, maxDbEver: null, finiteBins: 0, sampleRate: null, fftSize: null, binCount: null, lastFrameAt: null };
+ 
+     function init(audioContext, sourceNode) {
+         audioCtxRef = audioContext;
+@@ -174,7 +195,7 @@ const KeyEngine = (() => {
+         candidateHistory = {};
+ 
+         frameCounter = 0;
+-        inputProbe.frames = 0; inputProbe.framesWithContent = 0; inputProbe.lastContentRms = 0; inputProbe.maxContentRms = 0; inputProbe.lastMaxDb = null; inputProbe.maxDbEver = null; inputProbe.finiteBins = 0; // TASK AI-KEY-FAST-05
++        inputProbe.frames = 0; inputProbe.framesAccepted = 0; inputProbe.tonalPeaks = 0; inputProbe.maxTonalPeaks = 0; inputProbe.lastLevelDb = null; inputProbe.framesWithContent = 0; inputProbe.lastContentRms = 0; inputProbe.maxContentRms = 0; inputProbe.lastMaxDb = null; inputProbe.maxDbEver = null; inputProbe.finiteBins = 0; // TASK AI-KEY-FAST-05
+         firstEvidenceAt = null;
+         firstEvidenceFrame = null;
+         firstProvisionalAt = null;
+@@ -280,7 +301,32 @@ const KeyEngine = (() => {
+             inputProbe.finiteBins = finite; inputProbe.sampleRate = sampleRate; inputProbe.fftSize = chromaAnalyser.fftSize; inputProbe.binCount = binCount; inputProbe.lastFrameAt = Date.now();
+         } catch (e) { /* probe không bao giờ được làm hỏng vòng phân tích */ }
+ 
+-        contentEnergyEMA = contentEnergyEMA * 0.9 + (frameHasContent ? 1 : 0) * 0.1;
++        // TASK AI-KEY-ENGINE-COMPLETE-01 — cổng thích ứng (xem khối chú thích ở đầu file). frameHasContent (cổng cũ 0.0005) GIỮ NGUYÊN làm số đo chẩn đoán.
++        let frameAccepted = frameHasContent;
++        if (ADAPTIVE_CONTENT_GATE_ENABLED) {
++            const rmsNow = contentCount > 0 ? Math.sqrt(contentRms / contentCount) : 0;
++            let peaks = 0;
++            if (rmsNow > CONTENT_ABS_FLOOR_RMS) {
++                const lo = BIN_LO + TONAL_NEIGHBOR_FAR, hi = BIN_HI - TONAL_NEIGHBOR_FAR;
++                for (let b = lo; b <= hi; b++) {
++                    const d = chromaDataArray[b];
++                    if (!(d > -140) || d < chromaDataArray[b - 1] || d < chromaDataArray[b + 1]) continue; // chỉ xét đỉnh cục bộ (bỏ -Infinity/NaN)
++                    let sum = 0;
++                    for (let k = TONAL_NEIGHBOR_NEAR; k <= TONAL_NEIGHBOR_FAR; k++) {
++                        const l = chromaDataArray[b - k], r = chromaDataArray[b + k];
++                        sum += (l > -140 ? l : -140) + (r > -140 ? r : -140);
++                    }
++                    if (d - sum / (2 * (TONAL_NEIGHBOR_FAR - TONAL_NEIGHBOR_NEAR + 1)) >= TONAL_PROMINENCE_DB) peaks++;
++                }
++            }
++            frameAccepted = rmsNow > CONTENT_ABS_FLOOR_RMS && peaks >= TONAL_MIN_PEAKS;
++            try {
++                inputProbe.tonalPeaks = peaks; if (peaks > inputProbe.maxTonalPeaks) inputProbe.maxTonalPeaks = peaks;
++                inputProbe.lastLevelDb = rmsNow > 0 ? 20 * Math.log10(rmsNow) : null; if (frameAccepted) inputProbe.framesAccepted++;
++            } catch (e) { /* probe không được làm hỏng vòng phân tích */ }
++        }
++
++        contentEnergyEMA = contentEnergyEMA * 0.9 + (frameAccepted ? 1 : 0) * 0.1;
+         hasMusicalContent = contentEnergyEMA >= 0.5;
+         frameCounter++;
+ 
+@@ -321,7 +367,7 @@ const KeyEngine = (() => {
+             if (bassFrame[i] > winnerVal) { winnerVal = bassFrame[i]; winnerPc = i; }
+         }
+         for (let i = 0; i < 12; i++) bassRootVotes[i] *= BASS_VOTE_DECAY;
+-        if (hasMusicalContent && winnerPc >= 0 && winnerVal > 0.01) bassRootVotes[winnerPc] += 1;
++        if (hasMusicalContent && winnerPc >= 0 && winnerVal > (ADAPTIVE_CONTENT_GATE_ENABLED ? BASS_MIN_ENERGY_ADAPTIVE : BASS_MIN_ENERGY_LEGACY)) bassRootVotes[winnerPc] += 1; // AI-KEY-ENGINE-COMPLETE-01: 0.01 tuyệt đối làm bass không bao giờ bỏ phiếu khi nhạc nhỏ
+ 
+         levelListeners.forEach((cb) => cb(chromaVector));
+     }
+@@ -538,7 +584,7 @@ const KeyEngine = (() => {
+     function longEvidenceAllows(candidateFullKey, lockedKey) {
+         if (!LONG_EVIDENCE_ENABLED || longSeconds < LONG_WARM_S || !longState.key) return { ok: true, reason: "long-not-warm" };
+         if (longState.key !== candidateFullKey) return { ok: false, reason: "long-disagrees" };
+-        if (!lockedKey && longSeconds < LONG_FIRST_LOCK_S && !longState.stationary) return { ok: false, reason: "long-first-lock-wait" }; // nhạc đang thay đổi hợp âm: chưa đủ để nói Key của cả đoạn
++        if (!lockedKey && longSeconds < LONG_FIRST_LOCK_S && !(longState.stationary && longSeconds >= LONG_STATIONARY_MIN_S)) return { ok: false, reason: "long-first-lock-wait" }; // nhạc đang thay đổi hợp âm: chưa đủ để nói Key của cả đoạn
+         if (lockedKey && lockedKey !== candidateFullKey) {
+             // ĐỔI Key đã khoá: cần Key dài hạn dẫn đầu ổn định + hơn Key đang khoá đủ biên (chống dao động theo hợp âm)
+             // Cặp relative (vd C Major <-> A Minor) có cùng bộ nốt: bằng chứng rất sát nhau nên cần biên + thời gian lớn hơn để không dao động.
+@@ -916,17 +962,28 @@ const KeyEngine = (() => {
+ 
+     function onLevel(cb) { levelListeners.push(cb); }
+ 
++    // TASK AI-KEY-ENGINE-COMPLETE-01 — trạng thái đường vào (CHỈ chẩn đoán, không tham gia quyết định Key). NO_DEVICE do audioSource/renderer báo (KeyEngine không biết thiết bị).
++    //   NO_SIGNAL: chưa có khung / toàn -Infinity / dưới sàn tuyệt đối  | SIGNAL_NO_MUSIC: có tín hiệu nhưng chưa đủ bằng chứng hòa âm
++    //   MUSIC_EVIDENCE: có bằng chứng âm nhạc, chưa khoá Tone         | LOCKED: đã khoá Tone (đang theo dõi chuyển Tone)
++    function getInputState() {
++        if (!running && inputProbe.frames === 0) return "NO_SIGNAL";
++        if (lastLockedKey !== null) return "LOCKED";
++        if (hasMusicalContent) return "MUSIC_EVIDENCE";
++        const rmsOk = inputProbe.lastLevelDb !== null ? Math.pow(10, inputProbe.lastLevelDb / 20) > CONTENT_ABS_FLOOR_RMS : inputProbe.lastContentRms > CONTENT_ABS_FLOOR_RMS;
++        return (inputProbe.frames > 0 && inputProbe.finiteBins > 0 && rmsOk) ? "SIGNAL_NO_MUSIC" : "NO_SIGNAL";
++    }
++
+     function getDebugSnapshot() {
+         return {
+             chromaVector: chromaVector.slice(), chromaVectorFast: chromaVectorFast.slice(), chromaVectorLong: chromaVectorLong.slice(), longSeconds, longKey: longState.key, longStreak: longState.streak, bassRootVotes: bassRootVotes.slice(), tuningCents,
+-            frameCounter, hasMusicalContent, contentEnergyEMA, inputProbe: { ...inputProbe }, loopStats: { ...loopStats },
++            frameCounter, hasMusicalContent, contentEnergyEMA, inputState: getInputState(), inputProbe: { ...inputProbe }, loopStats: { ...loopStats },
+             firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
+         };
+     }
+ 
+     return {
+         init, stop, detectOnce, watchContinuous, estimateKeyFromChroma, estimateKeyLong, estimateKeyMid, outOfScaleRatio,
+-        shortestSemitoneDelta, onLevel, onProvisionalEstimate, NOTE_NAMES, MIN_CONFIDENCE, getDebugSnapshot,
++        shortestSemitoneDelta, onLevel, onProvisionalEstimate, NOTE_NAMES, MIN_CONFIDENCE, getDebugSnapshot, getInputState,
+     };
+ })();
+ 
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 1819b7f..0e91d43 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -1526,7 +1526,7 @@ window.__aiDiagStatus = () => {
+         systemAudioExists: !!window.__systemAudioSource, systemAudioState: null, audioMonitorStarted: typeof audioMonitorStarted !== "undefined" ? audioMonitorStarted : null,
+         keyEngineFrames: null, keyEngineHasMusicalContent: null, aiDiagEnabled: null };
+     try { out.systemAudioState = window.__systemAudioSource?.getState?.() ?? null; } catch (e) {}
+-    try { const d = typeof KeyEngine !== "undefined" && KeyEngine.getDebugSnapshot ? KeyEngine.getDebugSnapshot() : null; if (d) { out.keyEngineFrames = d.frameCounter; out.keyEngineHasMusicalContent = d.hasMusicalContent; out.keyInput = d.inputProbe || null; out.keyChroma = d.chromaVector; out.keyLoops = d.loopStats || null; } } catch (e) {}
++    try { const d = typeof KeyEngine !== "undefined" && KeyEngine.getDebugSnapshot ? KeyEngine.getDebugSnapshot() : null; if (d) { out.keyEngineFrames = d.frameCounter; out.keyEngineHasMusicalContent = d.hasMusicalContent; out.keyInput = d.inputProbe || null; out.keyInputState = d.inputState || null; /* AI-KEY-ENGINE-COMPLETE-01: NO_SIGNAL / SIGNAL_NO_MUSIC / MUSIC_EVIDENCE / LOCKED */ out.keyChroma = d.chromaVector; out.keyLoops = d.loopStats || null; } } catch (e) {}
+     // TASK AI-KEY-FAST-05 — mức VU (analyser BPMEngine, cùng raw source node với KeyEngine) + thông tin track/AudioContext thật của SYSTEM_AUDIO.
+     try { out.musicVuLevel = window.__aiLastLevel ? { ...window.__aiLastLevel, ageMs: Date.now() - window.__aiLastLevel.t } : null; } catch (e) {}
+     try { out.sourceInfo = window.__systemAudioSource?.getDiagnostics?.() ?? null; } catch (e) {}
