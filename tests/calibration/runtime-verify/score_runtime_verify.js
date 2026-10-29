@@ -22,8 +22,12 @@ function parseCsv(text) {
     const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim().length);
     const split = (line) => {
         const out = []; let cur = ""; let q = false;
-        for (const ch of line) {
-            if (ch === '"') q = !q;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === '"') {
+                if (q && line[i + 1] === '"') { cur += '"'; i++; } // "" trong ô được trích dẫn = 1 dấu "
+                else q = !q;
+            }
             else if (ch === "," && !q) { out.push(cur); cur = ""; }
             else cur += ch;
         }
@@ -36,6 +40,13 @@ function parseCsv(text) {
         head.forEach((h, i) => { o[h] = c[i] === undefined ? "" : c[i]; });
         return o;
     });
+}
+
+// Tên cột của results.csv chuẩn (đồng bộ với results_template.csv và record_result.js)
+const RESULT_COLUMNS = ["id", "shown_key", "shown_bpm", "session", "t_lock_s", "level_ok", "notes"];
+function csvHeader(text) {
+    const first = text.replace(/^\uFEFF/, "").split(/\r?\n/).find((l) => l.trim().length) || "";
+    return first.split(",").map((x) => x.replace(/^"|"$/g, "").trim());
 }
 
 // "F# minor" / "F♯ Minor" / "Gb major" / "Am" -> { pc, mode } hoặc null
@@ -128,6 +139,13 @@ function score(truthRows, resultRows, sessions) {
         if (!Number.isFinite(tLock) && sess && sess.firstLockTime != null) tLock = sess.firstLockTime;
         if (!Number.isFinite(tLock)) tLock = null;
 
+        // Hàng không có bất kỳ dữ liệu nào (kể cả ghi chú/session) = CHƯA KIỂM THỬ, không phải "sai"
+        const untested = RESULT_COLUMNS.slice(1).every((c) => !String(r[c] || "").trim());
+        if (untested) {
+            rows.push({ t, shownKey: "", keySrc: "", shown_bpm: "", keyClass: "UNTESTED", bpmClass: "UNTESTED", tLock: null, cause: "CHUA_KIEM_THU", quiet: false, hasResult: false, untested: true });
+            continue;
+        }
+
         const keyClass = t.key ? classifyKey(shownKey, t.key, alts) : "NO_TRUTH";
         const bpmClass = t.bpm ? classifyBpm(r.shown_bpm, t.bpm, t.bpm_alt) : "NO_TRUTH";
 
@@ -139,26 +157,28 @@ function score(truthRows, resultRows, sessions) {
         if (bpmClass === "HALF" || bpmClass === "DOUBLE") cause = cause ? cause + "+BPM_" + bpmClass : "BPM_" + bpmClass;
         else if (bpmClass === "WRONG") cause = cause ? cause + "+SAI_BPM" : "SAI_BPM";
 
-        rows.push({ t, shownKey, keySrc, shown_bpm: r.shown_bpm || "", keyClass, bpmClass, tLock, cause, quiet: !!quiet, hasResult: !!(shownKey || r.shown_bpm) });
+        rows.push({ t, shownKey, keySrc, shown_bpm: r.shown_bpm || "", keyClass, bpmClass, tLock, cause, quiet: !!quiet, hasResult: !!(shownKey || r.shown_bpm), untested: false });
     }
     return rows;
 }
 
 function summarize(rows) {
-    const k = rows.filter((x) => x.keyClass !== "NO_TRUTH");
-    const b = rows.filter((x) => x.bpmClass !== "NO_TRUTH");
+    const done = rows.filter((x) => !x.untested);
+    const k = done.filter((x) => x.keyClass !== "NO_TRUTH");
+    const b = done.filter((x) => x.bpmClass !== "NO_TRUTH");
     const count = (arr, f, v) => arr.filter((x) => x[f] === v).length;
     const kAnswered = k.filter((x) => x.keyClass !== "NO_RESULT");
     const bAnswered = b.filter((x) => x.bpmClass !== "NO_RESULT");
     return {
+        songs: rows.length, tested: done.length, untested: rows.length - done.length,
         keyTotal: k.length, keyAnswered: kAnswered.length,
         keyExact: count(k, "keyClass", "EXACT"),
         keyExactAlt: count(k, "keyClass", "EXACT") + count(k, "keyClass", "ALT_ACCEPTED"),
         keyExactAltRel: count(k, "keyClass", "EXACT") + count(k, "keyClass", "ALT_ACCEPTED") + count(k, "keyClass", "RELATIVE"),
         bpmTotal: b.length, bpmAnswered: bAnswered.length,
         bpmOk: count(b, "bpmClass", "OK"), bpmHalf: count(b, "bpmClass", "HALF"), bpmDouble: count(b, "bpmClass", "DOUBLE"), bpmWrong: count(b, "bpmClass", "WRONG"),
-        lockMedian: median(rows.map((x) => x.tLock).filter((v) => v !== null)),
-        lockCount: rows.filter((x) => x.tLock !== null).length,
+        lockMedian: median(done.map((x) => x.tLock).filter((v) => v !== null)),
+        lockCount: done.filter((x) => x.tLock !== null).length,
         quiet: rows.filter((x) => x.cause.startsWith("NGUON_AM_QUA_NHO")).length,
         insufficient: rows.filter((x) => x.cause.startsWith("KHONG_DU_DU_LIEU")).length
     };
@@ -172,13 +192,14 @@ function report(rows, sum) {
         L.push(`| ${x.t.id} | ${x.t.title} | ${x.t.key || "—"} | ${x.shownKey || "—"} | ${x.keyClass} | ${x.t.bpm || "—"}${x.t.bpm_alt ? "/" + x.t.bpm_alt : ""} | ${x.shown_bpm || "—"} | ${x.bpmClass} | ${x.tLock === null ? "—" : x.tLock} | ${x.cause || ""} |`);
     }
     L.push("", "## Tổng hợp", "");
+    L.push(`- Đã kiểm thử: ${sum.tested}/${sum.songs} bài; chưa kiểm thử: ${sum.untested} bài (không tính vào tỉ lệ bên dưới)`);
     L.push(`- Key đúng tuyệt đối: ${pct(sum.keyExact, sum.keyTotal)}`);
     L.push(`- Key đúng + chấp nhận thang âm tương đương (ALT): ${pct(sum.keyExactAlt, sum.keyTotal)}`);
     L.push(`- Key đúng + ALT + tương đối trưởng/thứ (báo riêng): ${pct(sum.keyExactAltRel, sum.keyTotal)}`);
     L.push(`- BPM đúng (±2): ${pct(sum.bpmOk, sum.bpmTotal)}; nửa nhịp: ${sum.bpmHalf}; gấp đôi nhịp: ${sum.bpmDouble}; sai khác: ${sum.bpmWrong}`);
     L.push(`- Thời gian tới LOCK đầu tiên (trung vị): ${sum.lockMedian === null ? "N/A" : sum.lockMedian + " s"} (n=${sum.lockCount})`);
     L.push(`- Không đủ dữ liệu: ${sum.insufficient} bài; nguồn âm quá nhỏ: ${sum.quiet} bài`);
-    const bad = rows.filter((x) => x.cause);
+    const bad = rows.filter((x) => x.cause && !x.untested);
     L.push("", "## Ca sai / thiếu", "");
     if (!bad.length) L.push("Không có.");
     for (const x of bad) L.push(`- ${x.t.id} ${x.t.title}: ${x.cause} (Key ${x.shownKey || "—"} vs ${x.t.key || "—"}; BPM ${x.shown_bpm || "—"} vs ${x.t.bpm || "—"})`);
@@ -196,11 +217,21 @@ function main(argv) {
     const truthFile = arg("--truth"), resFile = arg("--results");
     if (!truthFile || !resFile) { console.error("Thiếu --truth hoặc --results (xem đầu file)."); return 2; }
     const sessions = arg("--log") ? sessionsFromLog(arg("--log")) : null;
-    const rows = score(parseCsv(fs.readFileSync(truthFile, "utf-8")), parseCsv(fs.readFileSync(resFile, "utf-8")), sessions);
+    const resText = fs.readFileSync(resFile, "utf-8");
+    const head = csvHeader(resText);
+    const miss = RESULT_COLUMNS.filter((c) => !head.includes(c));
+    if (miss.length) {
+        console.error("File kết quả sai định dạng: thiếu cột " + miss.join(", ") + ".\n" +
+            "Cột hiện có: " + head.join(" | ") + "\n" +
+            "Dùng file chuẩn tests/calibration/runtime-verify/results.csv (xem README-GHI-KET-QUA.md). " +
+            "Nếu là file cũ (cột tiếng Việt) thì chuyển bằng: node record_result.js import-legacy <file>");
+        return 3;
+    }
+    const rows = score(parseCsv(fs.readFileSync(truthFile, "utf-8")), parseCsv(resText), sessions);
     const md = report(rows, summarize(rows));
     if (arg("--out")) fs.writeFileSync(arg("--out"), md, "utf-8"); else console.log(md);
     return 0;
 }
 
-module.exports = { parseCsv, normKey, classifyKey, classifyBpm, sessionsFromLog, score, summarize, report };
+module.exports = { RESULT_COLUMNS, csvHeader, parseCsv, normKey, classifyKey, classifyBpm, sessionsFromLog, score, summarize, report };
 if (require.main === module) process.exit(main(process.argv.slice(2)));

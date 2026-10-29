@@ -60,13 +60,13 @@ check(by.T1.keyClass === "EXACT" && by.T1.keySrc.startsWith("log") && by.T1.tLoc
 check(by.T2.keyClass === "ALT_ACCEPTED" && by.T2.bpmClass === "HALF" && by.T2.tLock === 6 && by.T2.cause === "BPM_HALF", "T2: ALT + nửa nhịp + tLock nhập tay");
 check(by.T3.keyClass === "NO_RESULT" && by.T3.cause.startsWith("NGUON_AM_QUA_NHO"), "T3: phiên toàn conf=0 không LOCK => NGUON_AM_QUA_NHO");
 check(by.T4.cause.startsWith("NGUON_AM_QUA_NHO"), "T4: level_ok=no => NGUON_AM_QUA_NHO");
-check(by.T5.cause.startsWith("KHONG_DU_DU_LIEU"), "T5: trống => KHONG_DU_DU_LIEU (tách riêng khỏi nguồn nhỏ)");
+check(by.T5.cause === "CHUA_KIEM_THU" && by.T5.keyClass === "UNTESTED", "T5: hàng trống hoàn toàn => CHUA_KIEM_THU (không tính đúng/sai)");
 
 const sum = S.summarize(rows);
-check(sum.keyTotal === 5 && sum.keyExact === 1 && sum.keyExactAlt === 2, "tổng hợp Key: 1 exact, 2 exact+ALT / 5");
-check(sum.bpmTotal === 5 && sum.bpmOk === 1 && sum.bpmHalf === 1, "tổng hợp BPM: 1 OK, 1 nửa nhịp");
+check(sum.keyTotal === 4 && sum.keyExact === 1 && sum.keyExactAlt === 2 && sum.untested === 1 && sum.tested === 4, "tổng hợp Key: 1 exact, 2 exact+ALT / 4 bài đã thử, 1 bài chưa kiểm thử");
+check(sum.bpmTotal === 4 && sum.bpmOk === 1 && sum.bpmHalf === 1, "tổng hợp BPM: 1 OK, 1 nửa nhịp");
 check(sum.lockMedian === 5.25 && sum.lockCount === 2, "trung vị LOCK = median(4.5, 6) = 5.25");
-check(sum.quiet === 2 && sum.insufficient === 1, "đếm: 2 nguồn nhỏ, 1 thiếu dữ liệu");
+check(sum.quiet === 2 && sum.insufficient === 0, "đếm: 2 nguồn nhỏ, 0 thiếu dữ liệu (hàng trống là chưa kiểm thử)");
 check(S.report(rows, sum).includes("Tổng hợp"), "report() sinh Markdown");
 
 console.log("== bảng đáp án thật ==");
