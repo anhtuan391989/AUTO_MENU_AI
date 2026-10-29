@@ -114,10 +114,18 @@ function percentile(arr, p) {
 function distributionStats(arr) {
     const clean = arr.filter((v) => typeof v === "number" && !Number.isNaN(v));
     if (clean.length === 0) return null;
+    // Dùng vòng lặp thay vì Math.min(...clean)/Math.max(...clean): spread mảng lớn (hàng trăm
+    // nghìn bản ghi log) làm tràn stack (RangeError: Maximum call stack size exceeded).
+    let minV = clean[0];
+    let maxV = clean[0];
+    for (let i = 1; i < clean.length; i++) {
+        if (clean[i] < minV) minV = clean[i];
+        if (clean[i] > maxV) maxV = clean[i];
+    }
     return {
         count: clean.length,
-        min: Math.min(...clean),
-        max: Math.max(...clean),
+        min: minV,
+        max: maxV,
         avg: mean(clean),
         median: median(clean),
         p95: percentile(clean, 95)

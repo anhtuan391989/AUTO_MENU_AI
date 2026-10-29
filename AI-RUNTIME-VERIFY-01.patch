@@ -1,0 +1,401 @@
+diff --git a/scripts/analyzeTelemetry.js b/scripts/analyzeTelemetry.js
+index de00552..13709cb 100644
+--- a/scripts/analyzeTelemetry.js
++++ b/scripts/analyzeTelemetry.js
+@@ -114,10 +114,18 @@ function percentile(arr, p) {
+ function distributionStats(arr) {
+     const clean = arr.filter((v) => typeof v === "number" && !Number.isNaN(v));
+     if (clean.length === 0) return null;
++    // Dùng vòng lặp thay vì Math.min(...clean)/Math.max(...clean): spread mảng lớn (hàng trăm
++    // nghìn bản ghi log) làm tràn stack (RangeError: Maximum call stack size exceeded).
++    let minV = clean[0];
++    let maxV = clean[0];
++    for (let i = 1; i < clean.length; i++) {
++        if (clean[i] < minV) minV = clean[i];
++        if (clean[i] > maxV) maxV = clean[i];
++    }
+     return {
+         count: clean.length,
+-        min: Math.min(...clean),
+-        max: Math.max(...clean),
++        min: minV,
++        max: maxV,
+         avg: mean(clean),
+         median: median(clean),
+         p95: percentile(clean, 95)
+diff --git a/tests/calibration/runtime-verify/ground_truth.csv b/tests/calibration/runtime-verify/ground_truth.csv
+new file mode 100644
+index 0000000..c2068f8
+--- /dev/null
++++ b/tests/calibration/runtime-verify/ground_truth.csv
+@@ -0,0 +1,14 @@
++id,title,artist,key,key_alt,bpm,bpm_alt,tier,key_source,bpm_source,note
++S01,Take On Me,a-ha,A major,,169,,A,Wikipedia (Musicnotes sheet music),Musicnotes sheet music (qua Wikipedia),Nhac nhanh: de ra nua nhip (~85)
++S02,Someone Like You,Adele,A major,,67.5,,A,Musicnotes sheet music (qua Wikipedia),Musicnotes sheet music (qua Wikipedia),Nhac cham piano: de ra gap doi (~135)
++S03,Shape of You,Ed Sheeran,C# minor,,96,,A,Musicnotes (qua Wikipedia),Musicnotes (qua Wikipedia),
++S04,Rolling in the Deep,Adele,C minor,,105,,A,Musicnotes/EMI (qua Wikipedia),Musicnotes/EMI (qua Wikipedia),Ban live co the o B minor - chi phat ban studio
++S05,Happy,Pharrell Williams,F minor,,160,,A,Musicnotes/EMI (qua Wikipedia),Musicnotes/EMI (qua Wikipedia),De ra nua nhip (~80)
++S06,Poker Face,Lady Gaga,G# minor,,120,,A,Musicnotes/Sony (qua Wikipedia),Musicnotes/Sony (qua Wikipedia),
++S07,Don't Stop Believin',Journey,E major,,118,,A,sheetmusicdirect (qua Wikipedia),sheetmusicdirect (qua Wikipedia),
++S08,Billie Jean,Michael Jackson,F# minor,A major,117,,B,Hooktheory (qua Wikipedia),Hooktheory (qua Wikipedia),Verse la F# Dorian (= A major thang am) nen chap nhan A major
++S09,Uptown Funk,Mark Ronson ft. Bruno Mars,D minor,C major,115,,B,Wikipedia (D Dorian; nguon khong ghi ten),Wikipedia (nguon khong ghi ten),D Dorian (= C major thang am) nen chap nhan C major
++S10,Perfect,Ed Sheeran,Ab major,,190,63,B,Musicnotes (qua Wikipedia; ban live o G major),Wikipedia: 190 BPM (12/8) = ~63 BPM neu dem 4/4,BPM mo ho 12/8 - chap nhan 190 hoac 63
++S11,Hotel California,Eagles,B minor,,,,B,Tillekens (qua Wikipedia),,Chi cham Key (Wikipedia khong ghi BPM)
++S12,Smells Like Teen Spirit,Nirvana,F minor,,,,B,Rooksby (qua Wikipedia),,Chi cham Key (Wikipedia khong ghi BPM)
++S13,Stayin' Alive,Bee Gees,,,103,,C,,Wikipedia (~103 BPM; nguon la huong dan CPR),Chi cham BPM - nguon yeu
+diff --git a/tests/calibration/runtime-verify/results_template.csv b/tests/calibration/runtime-verify/results_template.csv
+new file mode 100644
+index 0000000..ceca1ce
+--- /dev/null
++++ b/tests/calibration/runtime-verify/results_template.csv
+@@ -0,0 +1,14 @@
++id,shown_key,shown_bpm,session,t_lock_s,level_ok,notes
++S01,,,,,,
++S02,,,,,,
++S03,,,,,,
++S04,,,,,,
++S05,,,,,,
++S06,,,,,,
++S07,,,,,,
++S08,,,,,,
++S09,,,,,,
++S10,,,,,,
++S11,,,,,,
++S12,,,,,,
++S13,,,,,,
+diff --git a/tests/calibration/runtime-verify/score_runtime_verify.js b/tests/calibration/runtime-verify/score_runtime_verify.js
+new file mode 100644
+index 0000000..18a32dd
+--- /dev/null
++++ b/tests/calibration/runtime-verify/score_runtime_verify.js
+@@ -0,0 +1,206 @@
++#!/usr/bin/env node
++/**
++ * AI-RUNTIME-VERIFY-01 — chấm điểm Key/BPM của engine đang chạy so với bảng đáp án.
++ * KHÔNG đụng keyEngine/bpmEngine; chỉ ĐỌC ground_truth.csv, results.csv và (tuỳ chọn) log .jsonl.
++ *
++ * Dùng:
++ *   node score_runtime_verify.js --list-sessions logs/2026-xx.jsonl
++ *   node score_runtime_verify.js --truth ground_truth.csv --results results.csv [--log logs/2026-xx.jsonl] [--out report.md]
++ *
++ * results.csv: id, shown_key, shown_bpm, session (số thứ tự phiên từ --list-sessions, tuỳ chọn),
++ *              t_lock_s (giây, tuỳ chọn — dùng khi không có session), level_ok (yes/no, tuỳ chọn), notes
++ * Telemetry KHÔNG ghi BPM => shown_bpm luôn do người dùng đọc từ giao diện.
++ */
++const fs = require("fs");
++const path = require("path");
++
++const analyzer = require(path.resolve(__dirname, "../../../scripts/analyzeTelemetry.js"));
++
++const NOTE_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
++
++function parseCsv(text) {
++    const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim().length);
++    const split = (line) => {
++        const out = []; let cur = ""; let q = false;
++        for (const ch of line) {
++            if (ch === '"') q = !q;
++            else if (ch === "," && !q) { out.push(cur); cur = ""; }
++            else cur += ch;
++        }
++        out.push(cur);
++        return out.map((s) => s.trim());
++    };
++    const head = split(lines[0]);
++    return lines.slice(1).map((l) => {
++        const c = split(l); const o = {};
++        head.forEach((h, i) => { o[h] = c[i] === undefined ? "" : c[i]; });
++        return o;
++    });
++}
++
++// "F# minor" / "F♯ Minor" / "Gb major" / "Am" -> { pc, mode } hoặc null
++function normKey(s) {
++    if (!s) return null;
++    const t = String(s).trim().replace(/♯/g, "#").replace(/♭/g, "b");
++    const m = t.match(/^([A-Ga-g])([#b]?)\s*(major|minor|maj|min|m)?$/i);
++    if (!m) return null;
++    let pc = NOTE_PC[m[1].toUpperCase()];
++    if (m[2] === "#") pc += 1; else if (m[2] === "b") pc -= 1;
++    pc = ((pc % 12) + 12) % 12;
++    const w = (m[3] || "major").toLowerCase();
++    const mode = (w === "minor" || w === "min" || (w === "m" && m[3] === "m")) ? "minor" : "major";
++    return { pc, mode };
++}
++
++function sameKey(a, b) { return a && b && a.pc === b.pc && a.mode === b.mode; }
++
++function classifyKey(shown, truth, altList) {
++    const s = normKey(shown), t = normKey(truth);
++    if (!s) return "NO_RESULT";
++    if (!t) return "NO_TRUTH";
++    if (sameKey(s, t)) return "EXACT";
++    for (const a of altList) if (sameKey(s, normKey(a))) return "ALT_ACCEPTED";
++    if (s.mode !== t.mode) {
++        const rel = t.mode === "minor" ? (t.pc + 3) % 12 : (t.pc + 9) % 12;
++        if (s.pc === rel) return "RELATIVE";
++        if (s.pc === t.pc) return "PARALLEL";
++    } else {
++        const d = (s.pc - t.pc + 12) % 12;
++        if (d === 7 || d === 5) return "FIFTH";
++    }
++    return "WRONG";
++}
++
++function classifyBpm(shown, truth, alt) {
++    const s = parseFloat(shown);
++    if (!Number.isFinite(s)) return "NO_RESULT";
++    const cands = [truth, alt].map(parseFloat).filter(Number.isFinite);
++    if (!cands.length) return "NO_TRUTH";
++    const tol = 2;
++    for (const c of cands) if (Math.abs(s - c) <= tol) return "OK";
++    for (const c of cands) {
++        if (Math.abs(s - c / 2) <= tol) return "HALF";
++        if (Math.abs(s - c * 2) <= tol) return "DOUBLE";
++    }
++    return "WRONG";
++}
++
++function sessionsFromLog(file) {
++    const recs = [];
++    for (const line of fs.readFileSync(file, "utf-8").split("\n")) {
++        if (!line.trim()) continue;
++        try { recs.push(JSON.parse(line)); } catch (e) { /* bỏ dòng hỏng */ }
++    }
++    return analyzer.groupIntoSessions(recs).map((s, i) => {
++        const a = analyzer.analyzeSession(s);
++        const locks = a.lockRecords;
++        const normal = a.normal;
++        const zero = normal.filter((r) => r.confidence === 0).length;
++        return {
++            index: i + 1,
++            records: s.records.length,
++            normalCount: normal.length,
++            zeroConfRatio: normal.length ? zero / normal.length : null,
++            firstLockKey: locks[0] ? locks[0].key : null,
++            firstLockTime: locks[0] ? locks[0].time : null,
++            finalLockKey: locks.length ? locks[locks.length - 1].key : null,
++            lockCount: locks.length
++        };
++    });
++}
++
++function median(a) { return a.length ? analyzer.median(a) : null; }
++const pct = (n, d) => (d ? (100 * n / d).toFixed(1) + "% (" + n + "/" + d + ")" : "N/A");
++
++function score(truthRows, resultRows, sessions) {
++    const byId = new Map(resultRows.map((r) => [r.id, r]));
++    const rows = [];
++    for (const t of truthRows) {
++        const r = byId.get(t.id) || {};
++        const sess = r.session && sessions ? sessions.find((x) => x.index === parseInt(r.session, 10)) : null;
++        const alts = (t.key_alt || "").split(";").map((x) => x.trim()).filter(Boolean);
++
++        let shownKey = r.shown_key || "";
++        let keySrc = "nguoi dung";
++        if (!shownKey && sess && sess.finalLockKey) { shownKey = sess.finalLockKey; keySrc = "log (LOCK cuoi)"; }
++
++        let tLock = parseFloat(r.t_lock_s);
++        if (!Number.isFinite(tLock) && sess && sess.firstLockTime != null) tLock = sess.firstLockTime;
++        if (!Number.isFinite(tLock)) tLock = null;
++
++        const keyClass = t.key ? classifyKey(shownKey, t.key, alts) : "NO_TRUTH";
++        const bpmClass = t.bpm ? classifyBpm(r.shown_bpm, t.bpm, t.bpm_alt) : "NO_TRUTH";
++
++        // Nguyên nhân (tách riêng): nguồn quá nhỏ / không đủ dữ liệu / sai Key
++        let cause = "";
++        const quiet = (r.level_ok || "").toLowerCase() === "no" || (sess && sess.lockCount === 0 && sess.zeroConfRatio !== null && sess.zeroConfRatio >= 0.9);
++        if (keyClass === "NO_RESULT") cause = quiet ? "NGUON_AM_QUA_NHO" : "KHONG_DU_DU_LIEU";
++        else if (keyClass === "WRONG" || keyClass === "FIFTH" || keyClass === "PARALLEL") cause = "SAI_KEY";
++        if (bpmClass === "HALF" || bpmClass === "DOUBLE") cause = cause ? cause + "+BPM_" + bpmClass : "BPM_" + bpmClass;
++        else if (bpmClass === "WRONG") cause = cause ? cause + "+SAI_BPM" : "SAI_BPM";
++
++        rows.push({ t, shownKey, keySrc, shown_bpm: r.shown_bpm || "", keyClass, bpmClass, tLock, cause, quiet: !!quiet, hasResult: !!(shownKey || r.shown_bpm) });
++    }
++    return rows;
++}
++
++function summarize(rows) {
++    const k = rows.filter((x) => x.keyClass !== "NO_TRUTH");
++    const b = rows.filter((x) => x.bpmClass !== "NO_TRUTH");
++    const count = (arr, f, v) => arr.filter((x) => x[f] === v).length;
++    const kAnswered = k.filter((x) => x.keyClass !== "NO_RESULT");
++    const bAnswered = b.filter((x) => x.bpmClass !== "NO_RESULT");
++    return {
++        keyTotal: k.length, keyAnswered: kAnswered.length,
++        keyExact: count(k, "keyClass", "EXACT"),
++        keyExactAlt: count(k, "keyClass", "EXACT") + count(k, "keyClass", "ALT_ACCEPTED"),
++        keyExactAltRel: count(k, "keyClass", "EXACT") + count(k, "keyClass", "ALT_ACCEPTED") + count(k, "keyClass", "RELATIVE"),
++        bpmTotal: b.length, bpmAnswered: bAnswered.length,
++        bpmOk: count(b, "bpmClass", "OK"), bpmHalf: count(b, "bpmClass", "HALF"), bpmDouble: count(b, "bpmClass", "DOUBLE"), bpmWrong: count(b, "bpmClass", "WRONG"),
++        lockMedian: median(rows.map((x) => x.tLock).filter((v) => v !== null)),
++        lockCount: rows.filter((x) => x.tLock !== null).length,
++        quiet: rows.filter((x) => x.cause.startsWith("NGUON_AM_QUA_NHO")).length,
++        insufficient: rows.filter((x) => x.cause.startsWith("KHONG_DU_DU_LIEU")).length
++    };
++}
++
++function report(rows, sum) {
++    const L = [];
++    L.push("# Kết quả chấm AI-RUNTIME-VERIFY-01", "");
++    L.push("| ID | Bài | Key đáp án | Key hiển thị | Phân loại Key | BPM đáp án | BPM hiển thị | Phân loại BPM | Tới LOCK (s) | Nguyên nhân |", "|---|---|---|---|---|---|---|---|--:|---|");
++    for (const x of rows) {
++        L.push(`| ${x.t.id} | ${x.t.title} | ${x.t.key || "—"} | ${x.shownKey || "—"} | ${x.keyClass} | ${x.t.bpm || "—"}${x.t.bpm_alt ? "/" + x.t.bpm_alt : ""} | ${x.shown_bpm || "—"} | ${x.bpmClass} | ${x.tLock === null ? "—" : x.tLock} | ${x.cause || ""} |`);
++    }
++    L.push("", "## Tổng hợp", "");
++    L.push(`- Key đúng tuyệt đối: ${pct(sum.keyExact, sum.keyTotal)}`);
++    L.push(`- Key đúng + chấp nhận thang âm tương đương (ALT): ${pct(sum.keyExactAlt, sum.keyTotal)}`);
++    L.push(`- Key đúng + ALT + tương đối trưởng/thứ (báo riêng): ${pct(sum.keyExactAltRel, sum.keyTotal)}`);
++    L.push(`- BPM đúng (±2): ${pct(sum.bpmOk, sum.bpmTotal)}; nửa nhịp: ${sum.bpmHalf}; gấp đôi nhịp: ${sum.bpmDouble}; sai khác: ${sum.bpmWrong}`);
++    L.push(`- Thời gian tới LOCK đầu tiên (trung vị): ${sum.lockMedian === null ? "N/A" : sum.lockMedian + " s"} (n=${sum.lockCount})`);
++    L.push(`- Không đủ dữ liệu: ${sum.insufficient} bài; nguồn âm quá nhỏ: ${sum.quiet} bài`);
++    const bad = rows.filter((x) => x.cause);
++    L.push("", "## Ca sai / thiếu", "");
++    if (!bad.length) L.push("Không có.");
++    for (const x of bad) L.push(`- ${x.t.id} ${x.t.title}: ${x.cause} (Key ${x.shownKey || "—"} vs ${x.t.key || "—"}; BPM ${x.shown_bpm || "—"} vs ${x.t.bpm || "—"})`);
++    return L.join("\n");
++}
++
++function main(argv) {
++    const arg = (n) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : null; };
++    if (arg("--list-sessions")) {
++        const ss = sessionsFromLog(arg("--list-sessions"));
++        console.log("session | records | lock# | first LOCK key @ s | final LOCK key | %conf=0");
++        for (const s of ss) console.log(`${s.index} | ${s.records} | ${s.lockCount} | ${s.firstLockKey || "-"} @ ${s.firstLockTime === null ? "-" : s.firstLockTime} | ${s.finalLockKey || "-"} | ${s.zeroConfRatio === null ? "-" : Math.round(s.zeroConfRatio * 100) + "%"}`);
++        return 0;
++    }
++    const truthFile = arg("--truth"), resFile = arg("--results");
++    if (!truthFile || !resFile) { console.error("Thiếu --truth hoặc --results (xem đầu file)."); return 2; }
++    const sessions = arg("--log") ? sessionsFromLog(arg("--log")) : null;
++    const rows = score(parseCsv(fs.readFileSync(truthFile, "utf-8")), parseCsv(fs.readFileSync(resFile, "utf-8")), sessions);
++    const md = report(rows, summarize(rows));
++    if (arg("--out")) fs.writeFileSync(arg("--out"), md, "utf-8"); else console.log(md);
++    return 0;
++}
++
++module.exports = { parseCsv, normKey, classifyKey, classifyBpm, sessionsFromLog, score, summarize, report };
++if (require.main === module) process.exit(main(process.argv.slice(2)));
+diff --git a/tests/unit/RuntimeVerifyScorer.verify.js b/tests/unit/RuntimeVerifyScorer.verify.js
+new file mode 100644
+index 0000000..38e8cc5
+--- /dev/null
++++ b/tests/unit/RuntimeVerifyScorer.verify.js
+@@ -0,0 +1,79 @@
++/**
++ * AI-RUNTIME-VERIFY-01 — kiểm tra bộ chấm điểm bằng dữ liệu MÔ PHỎNG có đáp số biết trước.
++ * (Đây là test của công cụ chấm, KHÔNG phải kết quả runtime của engine.)
++ * Chạy: node tests/unit/RuntimeVerifyScorer.verify.js
++ */
++const assert = require("assert");
++const fs = require("fs");
++const os = require("os");
++const path = require("path");
++const S = require(path.resolve(__dirname, "../calibration/runtime-verify/score_runtime_verify.js"));
++
++let fail = 0;
++function check(c, m) { try { assert.ok(c, m); console.log("  OK   " + m); } catch (e) { fail++; console.log("  FAIL " + m); } }
++
++console.log("== normKey ==");
++const k = S.normKey;
++check(k("F# minor").pc === 6 && k("F♯ Minor").pc === 6 && k("Gb minor").pc === 6, "F#/F♯/Gb cùng pitch class 6");
++check(k("Am").mode === "minor" && k("A").mode === "major", "Am=minor, A=major");
++check(k("Ab major").pc === 8 && k("G# Major").pc === 8, "Ab = G# (pc 8)");
++check(k("xyz") === null && k("") === null, "chuỗi lạ/rỗng => null");
++
++console.log("== classifyKey ==");
++check(S.classifyKey("A minor", "A minor", []) === "EXACT", "đúng tuyệt đối");
++check(S.classifyKey("C major", "A minor", []) === "RELATIVE", "tương đối thứ->trưởng");
++check(S.classifyKey("A minor", "C major", []) === "RELATIVE", "tương đối trưởng->thứ");
++check(S.classifyKey("C major", "D minor", ["C major"]) === "ALT_ACCEPTED", "thang âm tương đương (Dorian) chấp nhận");
++check(S.classifyKey("E minor", "A minor", []) === "FIFTH", "lệch quãng 5");
++check(S.classifyKey("A major", "A minor", []) === "PARALLEL", "cùng chủ âm khác mode");
++check(S.classifyKey("C# major", "A minor", []) === "WRONG", "sai hẳn");
++check(S.classifyKey("", "A minor", []) === "NO_RESULT", "không có kết quả");
++
++console.log("== classifyBpm ==");
++check(S.classifyBpm("118", "117", "") === "OK" && S.classifyBpm("115", "117", "") === "OK", "trong ±2");
++check(S.classifyBpm("85", "169", "") === "HALF", "nửa nhịp");
++check(S.classifyBpm("134", "67.5", "") === "DOUBLE", "gấp đôi nhịp");
++check(S.classifyBpm("63", "190", "63") === "OK", "BPM thay thế (bpm_alt) được chấp nhận");
++check(S.classifyBpm("100", "117", "") === "WRONG", "sai khác");
++check(S.classifyBpm("", "117", "") === "NO_RESULT", "không có kết quả");
++
++console.log("== chấm cả bảng + log mô phỏng ==");
++const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rv-"));
++// log mô phỏng: phiên 1 khoá C Major @4.5s rồi A Minor @9s; phiên 2 toàn conf=0 không LOCK; phiên 3 khoá F Minor @7s
++const rec = (time, conf) => JSON.stringify({ time, top1: "C Major", confidence: conf, votes: 0, locked: false });
++const lines = [
++    rec(1.5, 0.9), rec(3, 0.9), JSON.stringify({ event: "LOCK", time: 4.5, key: "C Major" }), JSON.stringify({ event: "LOCK", time: 9, key: "A Minor" }),
++    rec(1.5, 0), rec(3, 0), rec(4.5, 0), rec(6, 0),
++    rec(1.5, 0.8), JSON.stringify({ event: "LOCK", time: 7, key: "F Minor" })
++];
++const logFile = path.join(tmp, "sim.jsonl"); fs.writeFileSync(logFile, lines.join("\n"));
++const sess = S.sessionsFromLog(logFile);
++check(sess.length === 3, "tách đúng 3 phiên từ log mô phỏng (thực tế: " + sess.length + ")");
++check(sess[0].firstLockTime === 4.5 && sess[0].finalLockKey === "A Minor" && sess[0].lockCount === 2, "phiên 1: LOCK đầu 4.5s, LOCK cuối A Minor");
++check(sess[1].lockCount === 0 && sess[1].zeroConfRatio === 1, "phiên 2: không LOCK, 100% conf=0");
++
++const truth = S.parseCsv("id,title,artist,key,key_alt,bpm,bpm_alt\nT1,a,x,A minor,,120,\nT2,b,x,D minor,C major,100,\nT3,c,x,F minor,,160,\nT4,d,x,G major,,90,\nT5,e,x,E minor,,80,");
++const res = S.parseCsv("id,shown_key,shown_bpm,session,t_lock_s,level_ok\nT1,,121,1,,\nT2,C major,50,,6,\nT3,,,2,,\nT4,,,,,no\nT5,,,,,");
++const rows = S.score(truth, res, sess);
++const by = Object.fromEntries(rows.map((r) => [r.t.id, r]));
++check(by.T1.keyClass === "EXACT" && by.T1.keySrc.startsWith("log") && by.T1.tLock === 4.5 && by.T1.bpmClass === "OK", "T1: Key lấy từ log (LOCK cuối), tLock từ log, BPM OK");
++check(by.T2.keyClass === "ALT_ACCEPTED" && by.T2.bpmClass === "HALF" && by.T2.tLock === 6 && by.T2.cause === "BPM_HALF", "T2: ALT + nửa nhịp + tLock nhập tay");
++check(by.T3.keyClass === "NO_RESULT" && by.T3.cause.startsWith("NGUON_AM_QUA_NHO"), "T3: phiên toàn conf=0 không LOCK => NGUON_AM_QUA_NHO");
++check(by.T4.cause.startsWith("NGUON_AM_QUA_NHO"), "T4: level_ok=no => NGUON_AM_QUA_NHO");
++check(by.T5.cause.startsWith("KHONG_DU_DU_LIEU"), "T5: trống => KHONG_DU_DU_LIEU (tách riêng khỏi nguồn nhỏ)");
++
++const sum = S.summarize(rows);
++check(sum.keyTotal === 5 && sum.keyExact === 1 && sum.keyExactAlt === 2, "tổng hợp Key: 1 exact, 2 exact+ALT / 5");
++check(sum.bpmTotal === 5 && sum.bpmOk === 1 && sum.bpmHalf === 1, "tổng hợp BPM: 1 OK, 1 nửa nhịp");
++check(sum.lockMedian === 5.25 && sum.lockCount === 2, "trung vị LOCK = median(4.5, 6) = 5.25");
++check(sum.quiet === 2 && sum.insufficient === 1, "đếm: 2 nguồn nhỏ, 1 thiếu dữ liệu");
++check(S.report(rows, sum).includes("Tổng hợp"), "report() sinh Markdown");
++
++console.log("== bảng đáp án thật ==");
++const gt = S.parseCsv(fs.readFileSync(path.resolve(__dirname, "../calibration/runtime-verify/ground_truth.csv"), "utf-8"));
++check(gt.length >= 10, "ground_truth.csv có >= 10 bài (thực tế: " + gt.length + ")");
++check(gt.every((r) => r.key ? S.normKey(r.key) : true), "mọi Key trong bảng đều parse được");
++check(gt.filter((r) => r.key && r.bpm).length >= 7, ">= 7 bài có đủ cả Key và BPM");
++
++console.log(`\n== KẾT QUẢ: ${fail === 0 ? "TẤT CẢ PASS" : fail + " FAIL"} ==`);
++process.exit(fail === 0 ? 0 : 1);
+diff --git a/tests/unit/TelemetryAnalyzerLarge.verify.js b/tests/unit/TelemetryAnalyzerLarge.verify.js
+new file mode 100644
+index 0000000..f0313f1
+--- /dev/null
++++ b/tests/unit/TelemetryAnalyzerLarge.verify.js
+@@ -0,0 +1,33 @@
++/**
++ * AI-RUNTIME-VERIFY-01 — hồi quy: scripts/analyzeTelemetry.js phải xử lý mảng rất lớn.
++ * Trước bản sửa, distributionStats dùng Math.min(...arr) => RangeError với log ~150k dòng.
++ * Chạy: node tests/unit/TelemetryAnalyzerLarge.verify.js
++ * Không ghi file nào, không đọc logs/.
++ */
++const assert = require("assert");
++const path = require("path");
++const analyzer = require(path.resolve(__dirname, "../../scripts/analyzeTelemetry.js"));
++
++let fail = 0;
++function check(cond, msg) {
++    try { assert.ok(cond, msg); console.log("  OK   " + msg); }
++    catch (e) { fail++; console.log("  FAIL " + msg); }
++}
++
++const N = 500000;
++const big = new Array(N);
++for (let i = 0; i < N; i++) big[i] = (i % 1000) / 10 - 20; // min -20, max 79.9
++let s = null, threw = null;
++try { s = analyzer.distributionStats(big); } catch (e) { threw = e; }
++
++check(!threw, "distributionStats(500000 phần tử) không ném lỗi" + (threw ? " — " + threw.message : ""));
++check(s && s.count === N, "count = 500000");
++check(s && s.min === -20, "min đúng (-20)");
++check(s && Math.abs(s.max - 79.9) < 1e-9, "max đúng (79.9)");
++
++const small = analyzer.distributionStats([3, "x", NaN, 1, 2]);
++check(small && small.count === 3 && small.min === 1 && small.max === 3, "mảng nhỏ + giá trị rác: lọc đúng, min=1 max=3");
++check(analyzer.distributionStats([]) === null, "mảng rỗng trả null");
++
++console.log(`\n== KẾT QUẢ: ${fail === 0 ? "TẤT CẢ PASS" : fail + " FAIL"} ==`);
++process.exit(fail === 0 ? 0 : 1);
