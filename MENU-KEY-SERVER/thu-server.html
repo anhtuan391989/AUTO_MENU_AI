@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Kiểm tra Server Key</title>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: 30px auto; padding: 20px; background: #f5f5f5; }
+    input, button { padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; font-size: 16px; }
+    button { background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    #result { margin-top: 20px; padding: 15px; background: white; border-radius: 8px; white-space: pre-wrap; min-height: 60px; }
+    .ok { color: green; font-weight: bold; }
+    .err { color: red; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>🔍 Kiểm tra Server Key</h1>
+  <label>Địa chỉ server:</label>
+  <input type="text" id="serverUrl" placeholder="https://menu-key-server.ten-ban.workers.dev">
+  
+  <label>ID bài hát:</label>
+  <input type="text" id="songId" value="dQw4w9WgXcQ">
+  
+  <button onclick="traKey()">Tra Key</button>
+  <button onclick="guiPhieuThu()">Gửi phiếu thử (Key=C, Major)</button>
+  
+  <div id="result">Đang chờ...</div>
+
+  <script>
+    function getUrl() {
+      const u = document.getElementById('serverUrl').value.trim();
+      if (!u) { alert('Điền địa chỉ server!'); return null; }
+      return u;
+    }
+    
+    async function traKey() {
+      const url = getUrl();
+      if (!url) return;
+      const id = document.getElementById('songId').value.trim();
+      document.getElementById('result').textContent = 'Đang tra...';
+      try {
+        const res = await fetch(`${url}/key?id=${encodeURIComponent(id)}`);
+        const data = await res.json();
+        document.getElementById('result').innerHTML = 
+          `<b>Trạng thái:</b> ${res.status} ${res.ok ? '✅' : '❌'}\n${JSON.stringify(data, null, 2)}`;
+      } catch (e) {
+        document.getElementById('result').innerHTML = `<b class=err>LỖI:</b> ${e.message}`;
+      }
+    }
+    
+    async function guiPhieuThu() {
+      const url = getUrl();
+      if (!url) return;
+      const id = document.getElementById('songId').value.trim();
+      document.getElementById('result').textContent = 'Đang gửi...';
+      try {
+        const res = await fetch(`${url}/vote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ songId: id, key: 'C', mode: 'major', weight: 1.0 })
+        });
+        const data = await res.json();
+        document.getElementById('result').innerHTML = 
+          `<b>Gửi phiếu:</b> ${res.ok ? '<span class=ok>THÀNH CÔNG ✅</span>' : '<span class=err>THẤT BẠI ❌</span>'}\n${JSON.stringify(data, null, 2)}`;
+      } catch (e) {
+        document.getElementById('result').innerHTML = `<b class=err>LỖI:</b> ${e.message}`;
+      }
+    }
+  </script>
+</body>
+</html>
