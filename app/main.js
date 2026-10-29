@@ -1,3 +1,7 @@
+// ===== KẾT NỐI SERVER AUTO_MENU_AI =====
+const { MenuKeyClient } = require('./menu-api-client.js');
+const keyServer = new MenuKeyClient("https://menu-key-server.matuotluuly.workers.dev");
+// ======================================
 const { app, BrowserWindow, ipcMain, dialog, session, shell, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
