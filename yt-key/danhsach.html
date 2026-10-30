@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Danh sách bài hát</title>
+  <style>
+    body { font-family: Arial; max-width: 800px; margin: 30px auto; padding: 0 20px; background:#fafafa; }
+    h2 { color: #ff0000; }
+    .item { padding: 14px; margin: 10px 0; border-radius: 8px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .confirmed { border-left: 4px solid green; }
+    .provisional { border-left: 4px solid orange; }
+    .key { font-weight: bold; font-size: 18px; color: #ff0000; }
+    .title { font-size: 16px; font-weight: 600; margin: 4px 0; }
+    .meta { font-size: 13px; color: #666; }
+    #naplai { padding: 10px 20px; background: #ff0000; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    #naplai:hover { background: #cc0000; }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h2>🎵 Danh sách bài hát đã gửi</h2>
+  <button id="naplai">🔄 Tải lại</button>
+  <p>Tổng số: <span id="tong">0</span> bài</p>
+  <div id="danhsach"></div>
+  <script>
+    const SERVER = "https://menu-key-server.matuotluuly.workers.dev";
+    function fmtDuration(sec) {
+      if (!sec) return "";
+      const m = Math.floor(sec / 60), s = sec % 60;
+      return `${m}:${String(s).padStart(2,"0")}`;
+    }
+    async function taiDanhSach() {
+      const res = await fetch(`${SERVER}/list`);
+      const data = await res.json();
+      document.getElementById("tong").innerText = data.total;
+      const div = document.getElementById("danhsach");
+      div.innerHTML = "";
+      // Nhóm theo songId để hiển thị title + duration
+      const nhom = {};
+      (data.data || []).forEach(bai => {
+        if (!nhom[bai.songId]) nhom[bai.songId] = { title: bai.title || "", duration: bai.totalDurationSec || 0, segments: [] };
+        nhom[bai.songId].segments.push(bai);
+      });
+      Object.keys(nhom).forEach(songId => {
+        const g = nhom[songId];
+        const segHtml = g.segments.map(bai => {
+          const trangthai = bai.status === "confirmed" ? "✅" : "⏳";
+          return `<div class="meta">${trangthai} ${bai.startSec}s → ${bai.endSec}s · <span class="key">${bai.key}</span> ${bai.mode === "major" ? "Trưởng" : "Phụ"}</div>`;
+        }).join("");
+        div.innerHTML += `
+          <div class="item ${g.segments[0].status}">
+            <div class="title">${g.title || "(chưa có tên)"} ${g.duration ? `<span style="color:#999;font-weight:normal;font-size:13px">· ${fmtDuration(g.duration)}</span>` : ""}</div>
+            <div class="meta">ID: ${songId} · <a target="_blank" href="https://youtube.com/watch?v=${songId}">▶ Xem trên YouTube</a></div>
+            ${segHtml}
+          </div>
+        `;
+      });
+    }
+    document.getElementById("naplai").onclick = taiDanhSach;
+    taiDanhSach();
+  </script>
+</body>
+</html>

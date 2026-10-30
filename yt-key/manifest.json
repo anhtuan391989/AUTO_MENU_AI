@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Gửi Key (Tự động)",
+  "version": "2.0",
+  "description": "Tự lấy tên bài hát & thời lượng từ YouTube, gửi key lên server",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["https://*.youtube.com/*", "https://menu-key-server.matuotluuly.workers.dev/*"],
+  "action": { "default_popup": "popup.html" }
+}
