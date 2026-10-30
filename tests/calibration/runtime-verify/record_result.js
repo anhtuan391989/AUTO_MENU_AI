@@ -4,6 +4,7 @@
  * KHÔNG đụng engine/Menu. File chuẩn duy nhất: tests/calibration/runtime-verify/results.csv
  *
  *   node record_result.js status
+ *   node record_result.js capture S01 --bpm 169          (KHUYẾN NGHỊ: tự lấy Key/LOCK/tín hiệu từ log mới nhất; chỉ cần nhập BPM)
  *   node record_result.js set S01 --key "A major" --bpm 169 --lock 4.4 --level yes --notes "ghi chú"
  *   node record_result.js set S01 --session 3            (lấy Key/LOCK từ log khi chấm, xem README)
  *   node record_result.js set S01 --key "A major" --force   (ghi đè bài đã có dữ liệu; tự sao lưu trước)
@@ -140,6 +141,53 @@ function status(file, ids) {
     return out.join("\n");
 }
 
+// ---- capture: tự lấy Key / thời gian LOCK / tín hiệu từ log telemetry mới nhất ----
+// Lý do: Menu không ghi CSV và log KHÔNG có BPM; mỗi bài sinh NHIỀU phiên trong log (Now Playing tự dò lại),
+// nên bắt người dùng đoán số phiên là không khả thi. capture lấy phiên CUỐI CÙNG của log mới nhất ngay sau
+// khi nghe xong bài. Chỉ lấy dữ liệu có trong log (LOCK thật); không bịa, không suy đoán Key khi không có LOCK.
+function latestLog(logsDir) {
+    if (!fs.existsSync(logsDir)) throw new Error("Không thấy thư mục log: " + logsDir);
+    const f = fs.readdirSync(logsDir).filter((n) => n.endsWith(".jsonl") && !/_TEST\.jsonl$/.test(n) && !/^9999-/.test(n)).sort();
+    if (!f.length) throw new Error("Chưa có file log .jsonl trong " + logsDir + " (hãy mở Menu và phát nhạc trước).");
+    return path.join(logsDir, f[f.length - 1]);
+}
+
+function pickFromLog(logFile) {
+    if (!fs.existsSync(logFile)) throw new Error("Không thấy file log: " + logFile);
+    const sessions = S.sessionsFromLog(logFile);
+    if (!sessions.length) throw new Error("Log " + path.basename(logFile) + " chưa có phiên nào.");
+    let sess = null;
+    for (let i = sessions.length - 1; i >= 0; i--) if (sessions[i].lockCount > 0) { sess = sessions[i]; break; }
+    const usedLast = !sess;
+    if (!sess) sess = sessions[sessions.length - 1];
+    return { sess, total: sessions.length, fallbackNoLock: usedLast };
+}
+
+function captureRow(file, ids, id, o, logsDir) {
+    const logFile = path.resolve(o.log || latestLog(logsDir));
+    const { sess, total, fallbackNoLock } = pickFromLog(logFile);
+    const picked = { key: undefined, lock: undefined, level: undefined, notes: undefined };
+    if (!fallbackNoLock && sess.finalLockKey) {
+        picked.key = sess.finalLockKey;
+        picked.lock = sess.firstLockTime !== null ? String(sess.firstLockTime) : undefined;
+        picked.level = "yes";
+    } else if (sess.zeroConfRatio !== null && sess.zeroConfRatio >= 0.9) {
+        picked.level = "no"; // không có LOCK và ≥90% bản ghi confidence=0 => nguồn âm không có tiếng đủ
+    }
+    // Giá trị người dùng gõ tay luôn thắng giá trị lấy từ log
+    const merged = {
+        key: o.key !== undefined ? o.key : picked.key,
+        bpm: o.bpm,
+        lock: o.lock !== undefined ? o.lock : picked.lock,
+        level: o.level !== undefined ? o.level : picked.level
+    };
+    const tag = "[auto-log " + path.basename(logFile) + " phiên " + sess.index + "/" + total + (fallbackNoLock ? ", KHÔNG có LOCK" : "") + "]";
+    merged.notes = o.notes !== undefined ? tag + " " + o.notes : tag;
+    for (const k of Object.keys(merged)) if (merged[k] === undefined) delete merged[k];
+    const r = setRow(file, ids, id, merged, !!o.force);
+    return { bak: r.bak, logFile, sess, total, fallbackNoLock, saved: merged };
+}
+
 function parseArgs(argv) {
     const o = {}, pos = [];
     for (let i = 0; i < argv.length; i++) {
@@ -165,13 +213,26 @@ function main(argv) {
             console.log("Đã lưu " + String(pos[1]).toUpperCase() + " vào " + file + (r.bak ? "\nĐã sao lưu bản cũ: " + r.bak : ""));
             return 0;
         }
+        if (cmd === "capture") {
+            const logsDir = path.resolve(o.logs || path.join(DIR, "..", "..", "..", "logs"));
+            const r = captureRow(file, ids, pos[1], o, logsDir);
+            const sv = r.saved;
+            console.log("Đã lưu " + String(pos[1]).toUpperCase() + " vào " + file +
+                "\n  Lấy từ log: " + path.basename(r.logFile) + " — phiên " + r.sess.index + "/" + r.total +
+                "\n  Key=" + (sv.key || "(không có)") + "  BPM=" + (sv.bpm || "(CHƯA nhập — log không có BPM)") +
+                "  LOCK=" + (sv.lock || "-") + "s  tín hiệu=" + (sv.level || "-") +
+                (r.fallbackNoLock ? "\n  CẢNH BÁO: phiên cuối không có LOCK — không điền Key." : "") +
+                "\n  Hãy đối chiếu với số Menu đang hiện. Nếu khác: lưu lại bằng set ... --force." +
+                (r.bak ? "\nĐã sao lưu bản cũ: " + r.bak : ""));
+            return 0;
+        }
         if (cmd === "import-legacy") {
             if (!pos[1]) throw new Error("Thiếu đường dẫn file cũ.");
             const r = importLegacy(file, path.resolve(pos[1]), ids);
             console.log("Đã chuyển: " + (r.done.join(", ") || "không có hàng nào") + "\nBỏ qua: " + (r.skipped.join("; ") || "không") + (r.bak ? "\nĐã sao lưu: " + r.bak : "") + "\nFile cũ giữ nguyên, không bị xoá hay sửa.");
             return 0;
         }
-        console.error("Lệnh: status | set <ID> [--key --bpm --lock --level --session --notes --force] | import-legacy <file>");
+        console.error("Lệnh: status | capture <ID> --bpm N [--key --lock --level --notes --log <file> --force] | set <ID> [--key --bpm --lock --level --session --notes --force] | import-legacy <file>");
         return 2;
     } catch (e) {
         console.error("LỖI: " + e.message);
@@ -179,5 +240,5 @@ function main(argv) {
     }
 }
 
-module.exports = { csvEscape, load, save, setRow, importLegacy, status, validate, hasData };
+module.exports = { csvEscape, load, save, setRow, importLegacy, status, validate, hasData, latestLog, pickFromLog, captureRow };
 if (require.main === module) process.exit(main(process.argv.slice(2)));

@@ -1,0 +1,239 @@
+diff --git a/tests/calibration/runtime-verify/GHI-KET-QUA.bat b/tests/calibration/runtime-verify/GHI-KET-QUA.bat
+new file mode 100644
+index 0000000..1a702ef
+--- /dev/null
++++ b/tests/calibration/runtime-verify/GHI-KET-QUA.bat
+@@ -0,0 +1,10 @@
++@echo off
++chcp 65001 >nul
++cd /d "%~dp0..\..\.."
++echo === GHI KET QUA 1 BAI (sau khi Menu da hien Key) ===
++set /p ID=Ma bai (vi du S01): 
++set /p BPM=BPM Menu dang hien (so, vi du 169; de trong neu khong co): 
++if "%BPM%"=="" (node tests\calibration\runtime-verify\record_result.js capture "%ID%") else (node tests\calibration\runtime-verify\record_result.js capture "%ID%" --bpm "%BPM%")
++echo.
++node tests\calibration\runtime-verify\record_result.js status
++pause
+diff --git a/tests/calibration/runtime-verify/README-GHI-KET-QUA.md b/tests/calibration/runtime-verify/README-GHI-KET-QUA.md
+index efd6af8..36efb8c 100644
+--- a/tests/calibration/runtime-verify/README-GHI-KET-QUA.md
++++ b/tests/calibration/runtime-verify/README-GHI-KET-QUA.md
+@@ -3,7 +3,19 @@
+ **File kết quả DUY NHẤT:** `tests/calibration/runtime-verify/results.csv`
+ (Các file `results.csv` / `results_template.csv` ở thư mục gốc là bản CŨ — không dùng nữa, không xoá.)
+ 
+-Menu **không tự ghi** file này. Mỗi bài, bạn đọc Key/BPM trên Menu rồi gõ 1 lệnh để lưu.
++Menu **không tự ghi** file này (đã kiểm tra: không có mã nào trong `app/`, `ui/`, `core/` ghi CSV; log telemetry không có BPM).
++Vì vậy phải có một bước ghi sau MỖI bài.
++
++## CÁCH NHANH NHẤT (khuyến nghị) — bấm đúp, không cần gõ lệnh
++Sau mỗi bài, khi Menu đã hiện Key, **chưa chuyển sang bài khác**:
++1. Bấm đúp `tests\calibration\runtime-verify\GHI-KET-QUA.bat`.
++2. Nhập mã bài (S01…S13) rồi nhập BPM Menu đang hiện.
++3. Công cụ tự lấy **Key, thời gian LOCK, tín hiệu** từ log mới nhất (log được ghi ngay từng dòng nên có sẵn). Nó in ra những gì đã lưu — **đối chiếu với Menu**; nếu khác thì sửa bằng lệnh `set ... --force` bên dưới.
++- Phải ghi **ngay sau bài đó**: công cụ lấy *phiên cuối cùng có LOCK* của log mới nhất. Nếu đã phát bài kế tiếp thì sẽ lấy nhầm bài.
++- Nếu phiên cuối không có LOCK, công cụ **không điền Key** và báo cảnh báo (không đoán).
++- Tương đương dòng lệnh: `node tests\calibration\runtime-verify\record_result.js capture S01 --bpm 169`
++
++## Cách thủ công (nếu không dùng log)
+ Mở cửa sổ lệnh (CMD) tại `G:\AUTO_MENU_AI` rồi làm theo.
+ 
+ ## Mỗi bài nhạc (làm 13 lần: S01 → S13)
+diff --git a/tests/calibration/runtime-verify/record_result.js b/tests/calibration/runtime-verify/record_result.js
+index acff09c..5654538 100644
+--- a/tests/calibration/runtime-verify/record_result.js
++++ b/tests/calibration/runtime-verify/record_result.js
+@@ -4,6 +4,7 @@
+  * KHÔNG đụng engine/Menu. File chuẩn duy nhất: tests/calibration/runtime-verify/results.csv
+  *
+  *   node record_result.js status
++ *   node record_result.js capture S01 --bpm 169          (KHUYẾN NGHỊ: tự lấy Key/LOCK/tín hiệu từ log mới nhất; chỉ cần nhập BPM)
+  *   node record_result.js set S01 --key "A major" --bpm 169 --lock 4.4 --level yes --notes "ghi chú"
+  *   node record_result.js set S01 --session 3            (lấy Key/LOCK từ log khi chấm, xem README)
+  *   node record_result.js set S01 --key "A major" --force   (ghi đè bài đã có dữ liệu; tự sao lưu trước)
+@@ -140,6 +141,53 @@ function status(file, ids) {
+     return out.join("\n");
+ }
+ 
++// ---- capture: tự lấy Key / thời gian LOCK / tín hiệu từ log telemetry mới nhất ----
++// Lý do: Menu không ghi CSV và log KHÔNG có BPM; mỗi bài sinh NHIỀU phiên trong log (Now Playing tự dò lại),
++// nên bắt người dùng đoán số phiên là không khả thi. capture lấy phiên CUỐI CÙNG của log mới nhất ngay sau
++// khi nghe xong bài. Chỉ lấy dữ liệu có trong log (LOCK thật); không bịa, không suy đoán Key khi không có LOCK.
++function latestLog(logsDir) {
++    if (!fs.existsSync(logsDir)) throw new Error("Không thấy thư mục log: " + logsDir);
++    const f = fs.readdirSync(logsDir).filter((n) => n.endsWith(".jsonl") && !/_TEST\.jsonl$/.test(n) && !/^9999-/.test(n)).sort();
++    if (!f.length) throw new Error("Chưa có file log .jsonl trong " + logsDir + " (hãy mở Menu và phát nhạc trước).");
++    return path.join(logsDir, f[f.length - 1]);
++}
++
++function pickFromLog(logFile) {
++    if (!fs.existsSync(logFile)) throw new Error("Không thấy file log: " + logFile);
++    const sessions = S.sessionsFromLog(logFile);
++    if (!sessions.length) throw new Error("Log " + path.basename(logFile) + " chưa có phiên nào.");
++    let sess = null;
++    for (let i = sessions.length - 1; i >= 0; i--) if (sessions[i].lockCount > 0) { sess = sessions[i]; break; }
++    const usedLast = !sess;
++    if (!sess) sess = sessions[sessions.length - 1];
++    return { sess, total: sessions.length, fallbackNoLock: usedLast };
++}
++
++function captureRow(file, ids, id, o, logsDir) {
++    const logFile = path.resolve(o.log || latestLog(logsDir));
++    const { sess, total, fallbackNoLock } = pickFromLog(logFile);
++    const picked = { key: undefined, lock: undefined, level: undefined, notes: undefined };
++    if (!fallbackNoLock && sess.finalLockKey) {
++        picked.key = sess.finalLockKey;
++        picked.lock = sess.firstLockTime !== null ? String(sess.firstLockTime) : undefined;
++        picked.level = "yes";
++    } else if (sess.zeroConfRatio !== null && sess.zeroConfRatio >= 0.9) {
++        picked.level = "no"; // không có LOCK và ≥90% bản ghi confidence=0 => nguồn âm không có tiếng đủ
++    }
++    // Giá trị người dùng gõ tay luôn thắng giá trị lấy từ log
++    const merged = {
++        key: o.key !== undefined ? o.key : picked.key,
++        bpm: o.bpm,
++        lock: o.lock !== undefined ? o.lock : picked.lock,
++        level: o.level !== undefined ? o.level : picked.level
++    };
++    const tag = "[auto-log " + path.basename(logFile) + " phiên " + sess.index + "/" + total + (fallbackNoLock ? ", KHÔNG có LOCK" : "") + "]";
++    merged.notes = o.notes !== undefined ? tag + " " + o.notes : tag;
++    for (const k of Object.keys(merged)) if (merged[k] === undefined) delete merged[k];
++    const r = setRow(file, ids, id, merged, !!o.force);
++    return { bak: r.bak, logFile, sess, total, fallbackNoLock, saved: merged };
++}
++
+ function parseArgs(argv) {
+     const o = {}, pos = [];
+     for (let i = 0; i < argv.length; i++) {
+@@ -165,13 +213,26 @@ function main(argv) {
+             console.log("Đã lưu " + String(pos[1]).toUpperCase() + " vào " + file + (r.bak ? "\nĐã sao lưu bản cũ: " + r.bak : ""));
+             return 0;
+         }
++        if (cmd === "capture") {
++            const logsDir = path.resolve(o.logs || path.join(DIR, "..", "..", "..", "logs"));
++            const r = captureRow(file, ids, pos[1], o, logsDir);
++            const sv = r.saved;
++            console.log("Đã lưu " + String(pos[1]).toUpperCase() + " vào " + file +
++                "\n  Lấy từ log: " + path.basename(r.logFile) + " — phiên " + r.sess.index + "/" + r.total +
++                "\n  Key=" + (sv.key || "(không có)") + "  BPM=" + (sv.bpm || "(CHƯA nhập — log không có BPM)") +
++                "  LOCK=" + (sv.lock || "-") + "s  tín hiệu=" + (sv.level || "-") +
++                (r.fallbackNoLock ? "\n  CẢNH BÁO: phiên cuối không có LOCK — không điền Key." : "") +
++                "\n  Hãy đối chiếu với số Menu đang hiện. Nếu khác: lưu lại bằng set ... --force." +
++                (r.bak ? "\nĐã sao lưu bản cũ: " + r.bak : ""));
++            return 0;
++        }
+         if (cmd === "import-legacy") {
+             if (!pos[1]) throw new Error("Thiếu đường dẫn file cũ.");
+             const r = importLegacy(file, path.resolve(pos[1]), ids);
+             console.log("Đã chuyển: " + (r.done.join(", ") || "không có hàng nào") + "\nBỏ qua: " + (r.skipped.join("; ") || "không") + (r.bak ? "\nĐã sao lưu: " + r.bak : "") + "\nFile cũ giữ nguyên, không bị xoá hay sửa.");
+             return 0;
+         }
+-        console.error("Lệnh: status | set <ID> [--key --bpm --lock --level --session --notes --force] | import-legacy <file>");
++        console.error("Lệnh: status | capture <ID> --bpm N [--key --lock --level --notes --log <file> --force] | set <ID> [--key --bpm --lock --level --session --notes --force] | import-legacy <file>");
+         return 2;
+     } catch (e) {
+         console.error("LỖI: " + e.message);
+@@ -179,5 +240,5 @@ function main(argv) {
+     }
+ }
+ 
+-module.exports = { csvEscape, load, save, setRow, importLegacy, status, validate, hasData };
++module.exports = { csvEscape, load, save, setRow, importLegacy, status, validate, hasData, latestLog, pickFromLog, captureRow };
+ if (require.main === module) process.exit(main(process.argv.slice(2)));
+diff --git a/tests/unit/RuntimeVerifyCapture.verify.js b/tests/unit/RuntimeVerifyCapture.verify.js
+new file mode 100644
+index 0000000..07fa2bb
+--- /dev/null
++++ b/tests/unit/RuntimeVerifyCapture.verify.js
+@@ -0,0 +1,91 @@
++/**
++ * AI-RUNTIME-VERIFY-02 — kiểm tra lệnh `capture` (tự lấy Key/LOCK/tín hiệu từ log).
++ * Log MÔ PHỎNG trong thư mục tạm; KHÔNG phải kết quả nhạc thật, không đụng results.csv thật.
++ * Chạy: node tests/unit/RuntimeVerifyCapture.verify.js
++ */
++const assert = require("assert");
++const fs = require("fs");
++const os = require("os");
++const path = require("path");
++const cp = require("child_process");
++const RV = path.resolve(__dirname, "../calibration/runtime-verify");
++const S = require(path.join(RV, "score_runtime_verify.js"));
++const R = require(path.join(RV, "record_result.js"));
++
++let fail = 0;
++function check(c, m) { try { assert.ok(c, m); console.log("  OK   " + m); } catch (e) { fail++; console.log("  FAIL " + m); } }
++const throws = (f) => { try { f(); return false; } catch (e) { return true; } };
++
++const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rv3-"));
++const logs = path.join(tmp, "logs"); fs.mkdirSync(logs);
++const ids = S.parseCsv(fs.readFileSync(path.join(RV, "ground_truth.csv"), "utf-8")).map((r) => r.id);
++const rec = (time, conf) => JSON.stringify({ time, top1: "C Major", confidence: conf, votes: 0, locked: false });
++const lock = (time, key) => JSON.stringify({ event: "LOCK", time, key });
++const write = (name, lines) => { const p = path.join(logs, name); fs.writeFileSync(p, lines.join("\n") + "\n"); return p; };
++
++// log cũ + log mới (sắp theo tên). Log mới: phiên1 khoá A Major@4.4; phiên2 (re-lock cùng bài) khoá A Major@2; phiên3 toàn conf=0
++write("2026-10-29_10-00-00.jsonl", [rec(1.5, 0.9), lock(3, "G Major")]);
++const newest = write("2026-10-29_11-00-00.jsonl", [rec(1.5, 0.9), lock(4.4, "A Major"), rec(1.5, 0.9), lock(2, "A Major"), rec(1.5, 0), rec(3, 0), rec(4.5, 0)]);
++write("9999-01-01_00-00-01_TEST.jsonl", [rec(1.5, 0.9), lock(3, "F Minor")]);
++
++console.log("== chọn log & phiên ==");
++check(R.latestLog(logs) === newest, "latestLog chọn file MỚI NHẤT, bỏ qua file *_TEST / 9999-");
++check(throws(() => R.latestLog(path.join(tmp, "khong-co"))), "thiếu thư mục log => báo lỗi rõ");
++const emptyDir = path.join(tmp, "empty"); fs.mkdirSync(emptyDir);
++check(throws(() => R.latestLog(emptyDir)), "thư mục log rỗng => báo lỗi rõ");
++const pk = R.pickFromLog(newest);
++check(pk.total === 3 && pk.sess.index === 2 && !pk.fallbackNoLock, "bỏ phiên cuối không LOCK, lấy phiên 2 (phiên cuối CÓ LOCK)");
++
++console.log("== capture ghi đúng, chỉ dùng dữ liệu log ==");
++const f1 = path.join(tmp, "r1.csv");
++const r1 = R.captureRow(f1, ids, "S01", { bpm: "169" }, logs);
++const row1 = S.parseCsv(fs.readFileSync(f1, "utf-8")).find((r) => r.id === "S01");
++check(row1.shown_key === "A Major" && row1.shown_bpm === "169" && row1.t_lock_s === "2" && row1.level_ok === "yes", "S01: Key/LOCK/tín hiệu lấy từ log, BPM do người dùng nhập");
++check(/\[auto-log 2026-10-29_11-00-00\.jsonl phiên 2\/3\]/.test(row1.notes), "notes ghi rõ nguồn log + số phiên (truy vết được)");
++check(row1.session === "", "không ghi cột session (tránh chấm nhầm khi đổi file log)");
++check(S.classifyKey(row1.shown_key, "A major", []) === "EXACT", "bộ chấm đọc được Key 'A Major' từ log và chấm EXACT");
++
++console.log("== người dùng gõ tay thắng log ==");
++R.captureRow(f1, ids, "S02", { bpm: "67", key: "F# minor", lock: "9.5", notes: "bản live" }, logs);
++const row2 = S.parseCsv(fs.readFileSync(f1, "utf-8")).find((r) => r.id === "S02");
++check(row2.shown_key === "F# minor" && row2.t_lock_s === "9.5" && /bản live/.test(row2.notes), "--key/--lock/--notes do người dùng nhập được ưu tiên");
++
++console.log("== không có BPM => để trống, không bịa ==");
++R.captureRow(f1, ids, "S03", {}, logs);
++const row3 = S.parseCsv(fs.readFileSync(f1, "utf-8")).find((r) => r.id === "S03");
++check(row3.shown_bpm === "" && row3.shown_key === "A Major", "BPM trống khi không nhập (log không có BPM)");
++
++console.log("== log không có LOCK nào ==");
++const quiet = write("2026-10-29_12-00-00.jsonl", [rec(1.5, 0), rec(3, 0), rec(4.5, 0), rec(6, 0)]);
++const f2 = path.join(tmp, "r2.csv");
++const rq = R.captureRow(f2, ids, "S04", { log: quiet, bpm: "105" }, logs);
++const rowq = S.parseCsv(fs.readFileSync(f2, "utf-8")).find((r) => r.id === "S04");
++check(rq.fallbackNoLock && rowq.shown_key === "" && rowq.level_ok === "no" && /KHÔNG có LOCK/.test(rowq.notes), "không LOCK + conf=0: KHÔNG điền Key, level=no, ghi chú cảnh báo");
++const mid = write("2026-10-29_13-00-00.jsonl", [rec(1.5, 0.8), rec(3, 0.8), rec(4.5, 0.8)]);
++R.captureRow(f2, ids, "S05", { log: mid }, logs);
++const rowm = S.parseCsv(fs.readFileSync(f2, "utf-8")).find((r) => r.id === "S05");
++check(rowm.shown_key === "" && rowm.level_ok === "", "không LOCK nhưng conf>0: không điền Key, không đoán tín hiệu (để trống)");
++
++console.log("== an toàn dữ liệu ==");
++const before = fs.readFileSync(f1, "utf-8");
++check(throws(() => R.captureRow(f1, ids, "S01", { bpm: "1000" }, logs)) && fs.readFileSync(f1, "utf-8") === before, "BPM không hợp lệ bị từ chối, file không đổi");
++check(throws(() => R.captureRow(f1, ids, "S01", { bpm: "170" }, logs)) && fs.readFileSync(f1, "utf-8") === before, "capture lên bài đã có dữ liệu bị CHẶN, file không đổi");
++check(throws(() => R.captureRow(f1, ids, "S99", { bpm: "100" }, logs)), "ID ngoài S01–S13 bị từ chối");
++R.captureRow(f1, ids, "S01", { bpm: "170", force: true }, logs);
++check(fs.readdirSync(tmp).some((n) => n.startsWith("r1.csv.bak-")) && S.parseCsv(fs.readFileSync(f1, "utf-8"))[0].shown_bpm === "170", "--force: ghi đè nhưng có sao lưu .bak trước");
++check(throws(() => R.captureRow(f1, ids, "S06", { log: path.join(tmp, "nope.jsonl"), bpm: "120" }, logs)), "--log trỏ file không tồn tại => báo lỗi");
++
++console.log("== chạy qua dòng lệnh (CLI) ==");
++const f3 = path.join(tmp, "r3.csv");
++const logs2 = path.join(tmp, "logs2"); fs.mkdirSync(logs2); fs.copyFileSync(newest, path.join(logs2, path.basename(newest)));
++const cli = (args) => cp.spawnSync(process.execPath, [path.join(RV, "record_result.js"), ...args, "--file", f3, "--logs", logs2], { encoding: "utf-8" });
++const c1 = cli(["capture", "S07", "--bpm", "118"]);
++check(c1.status === 0 && /Key=A Major/.test(c1.stdout) && /đối chiếu/.test(c1.stdout), "CLI capture S07 thành công, nhắc đối chiếu với Menu");
++const c2 = cli(["capture", "S07", "--bpm", "118"]);
++check(c2.status === 1 && /không ghi đè/.test(c2.stderr), "CLI chặn ghi đè");
++const sc = cp.spawnSync(process.execPath, [path.join(RV, "score_runtime_verify.js"), "--truth", path.join(RV, "ground_truth.csv"), "--results", f3], { encoding: "utf-8" });
++check(sc.status === 0 && /Đã kiểm thử: 1\/13/.test(sc.stdout), "bộ chấm đọc file do capture ghi: 1/13 đã kiểm thử");
++check(fs.readFileSync(path.join(RV, "results.csv"), "utf-8").split("\n").slice(1).filter(Boolean).every((l) => /^S\d\d,+$/.test(l)), "results.csv THẬT vẫn trống (test không đụng vào)");
++
++console.log(`\n== KẾT QUẢ: ${fail === 0 ? "TẤT CẢ PASS" : fail + " FAIL"} ==`);
++process.exit(fail === 0 ? 0 : 1);

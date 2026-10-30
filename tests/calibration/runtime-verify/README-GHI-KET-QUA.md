@@ -3,7 +3,19 @@
 **File kết quả DUY NHẤT:** `tests/calibration/runtime-verify/results.csv`
 (Các file `results.csv` / `results_template.csv` ở thư mục gốc là bản CŨ — không dùng nữa, không xoá.)
 
-Menu **không tự ghi** file này. Mỗi bài, bạn đọc Key/BPM trên Menu rồi gõ 1 lệnh để lưu.
+Menu **không tự ghi** file này (đã kiểm tra: không có mã nào trong `app/`, `ui/`, `core/` ghi CSV; log telemetry không có BPM).
+Vì vậy phải có một bước ghi sau MỖI bài.
+
+## CÁCH NHANH NHẤT (khuyến nghị) — bấm đúp, không cần gõ lệnh
+Sau mỗi bài, khi Menu đã hiện Key, **chưa chuyển sang bài khác**:
+1. Bấm đúp `tests\calibration\runtime-verify\GHI-KET-QUA.bat`.
+2. Nhập mã bài (S01…S13) rồi nhập BPM Menu đang hiện.
+3. Công cụ tự lấy **Key, thời gian LOCK, tín hiệu** từ log mới nhất (log được ghi ngay từng dòng nên có sẵn). Nó in ra những gì đã lưu — **đối chiếu với Menu**; nếu khác thì sửa bằng lệnh `set ... --force` bên dưới.
+- Phải ghi **ngay sau bài đó**: công cụ lấy *phiên cuối cùng có LOCK* của log mới nhất. Nếu đã phát bài kế tiếp thì sẽ lấy nhầm bài.
+- Nếu phiên cuối không có LOCK, công cụ **không điền Key** và báo cảnh báo (không đoán).
+- Tương đương dòng lệnh: `node tests\calibration\runtime-verify\record_result.js capture S01 --bpm 169`
+
+## Cách thủ công (nếu không dùng log)
 Mở cửa sổ lệnh (CMD) tại `G:\AUTO_MENU_AI` rồi làm theo.
 
 ## Mỗi bài nhạc (làm 13 lần: S01 → S13)
