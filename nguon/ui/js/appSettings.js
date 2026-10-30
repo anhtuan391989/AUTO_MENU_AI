@@ -1,0 +1,682 @@
+const APP_SETTINGS_STORAGE_KEY = "appSettings";
+
+const DEFAULT_APP_SETTINGS = {
+    selectedDAW: "",
+    selectedAutoKey: "",
+    selectedAutoTune: "",
+    selectedSoundcard: "",
+    selectedSoundcardId: "",
+    // TASK A65 — key RIÊNG cho SYSTEM_AUDIO (BPM/Key/Mod), TÁCH BIỆT hoàn toàn khỏi
+    // "selectedSoundcardId" ở trên (dropdown Setup chung, trên máy thật đang là Mix 01/MIC —
+    // xem A64-REPORT.md GAP-1 + A65-REPORT.md). TASK B71 — nay ĐÃ có Setup UI riêng ("SYSTEM_AUDIO
+    // Input", xem setup.js initSystemAudioInputSection()); trước đó chỉ ghi được qua
+    // AudioSource.setSystemAudioDeviceId() (DevTools thủ công). Mặc định rỗng => SYSTEM_AUDIO =
+    // NO_DEVICE cho tới khi người dùng tự chọn (đúng chủ ý, không phải thiếu sót).
+    selectedSystemAudioDeviceId: "",
+    // TASK B72 (gộp B72+B72.1) — thiết bị ĐẦU RA cho Internal Audio Backend (SoundEffectEngine:
+    // CLAP/LAUGH, HTMLAudioElement.setSinkId). "" = dùng output MẶC ĐỊNH của hệ điều hành (app KHÔNG
+    // đổi output mặc định của Windows, KHÔNG đụng Speakers 01). Chỉ ảnh hưởng âm thanh do CHÍNH app
+    // phát — không điều khiển đường phát của DAW/nhạc.
+    selectedAudioOutputDeviceId: "",
+    // TASK B71 — key RIÊNG cho MIC VU trên Menu (AudioSource.createMicSource() đọc qua
+    // getMicDeviceId()), TÁCH BIỆT hoàn toàn khỏi "selectedSoundcardId" ở trên (xem
+    // B70-REPORT.md phát hiện #2: trước B71, "selectedSoundcardId" KHÔNG có tác dụng thật lên
+    // MIC VU vì createMicSource() chưa từng đọc key đó). Setup UI: "MIC Input"
+    // (initMicInputSection()). Mặc định rỗng => dùng mic mặc định của hệ điều hành (giữ nguyên
+    // hành vi từ B58, không đổi).
+    selectedMicDeviceId: "",
+    selectedBrowser: "",
+    selectedBrowserPath: "",
+    ahkExePath: "",
+    midiOutputPort: "",
+    youtubePwaId: "",
+    selectedBeMethod: "",
+    selectedFixMethod: "",
+    autokey1: "",
+    autokey2: "",
+    soundshifter: "",
+    autotunekey: "",
+    chromatic: "",
+    coordinateProfiles: {},
+    autoMenuPreset: null,
+    autoMenuData: null,
+    songDatabase: null,
+    selectedDAWPath: "",
+    launchDAW: false,
+    shortcuts: {},
+    projectPath: "",
+    projectOpenEnabled: false,
+    projectCopyEnabled: false,
+    projectOpenYoutube: false,
+    autoRestoreOnDawStart: false,
+
+    // ===== TASK B / B2 — Control/MIDI/DAW Mapping =====
+    // Mục VI (B2): Mouse Control ON/OFF toàn cục — CHỈ áp dụng cho DAW Mouse Mapping mới
+    // (actionRegistry.js), TUYỆT ĐỐI không đụng tới clickAtPoint() sẵn có trong
+    // vocalCommandRouter.js (Key/Tone Plugin fallback) — xem actionRegistry.js.
+    // Mặc định true (Mục VI B2: "Default: ON") để không đổi hành vi hiện tại.
+    mouseControlEnabled: true,
+    // Mục V/X (B2) — mapping MIDI OUTPUT cho Logical Action, LƯU RIÊNG THEO TỪNG DAW
+    // (Mục X: "Không dùng một mapping chung cho tất cả DAW"). CHƯA có giá trị mặc định nào
+    // (không tự bịa CC/note — Mục III/V). Cấu trúc:
+    // { [dawName]: { DAW_PLAY: {kind:"cc"|"note", number, channel} | null, ... } }
+    dawMidiOutMappings: {},
+
+    // ===== TASK A55 — Startup & Paths (nhóm cấu hình trong AI Setup, sau lớp khoá A52/A53) =====
+    // CHỈ là cấu hình (đọc/ghi/hiển thị) — KHÔNG launch/kill DAW, KHÔNG quản lý process nào ở
+    // đây (đúng phạm vi A55, việc thật thuộc A56). pluginPaths GIỮ NGUYÊN THỨ TỰ người dùng
+    // nhập, không sort/dedupe tự động.
+    startupPaths: {
+        autoStart: false,
+        dawExecutable: "",
+        dawProject: "",
+        pluginPaths: [],
+        midiConfig: "",
+        audioConfig: "",
+        logs: ""
+    }
+};
+
+const LEGACY_STORAGE_KEYS = [
+    "selectedDAW",
+    "selectedAutoKey",
+    "selectedAutoTune",
+    "selectedSoundcard",
+    "selectedBrowser",
+    "youtubePwaId",
+    "selectedBeMethod",
+    "selectedFixMethod",
+    "autokey1",
+    "autokey2",
+    "soundshifter",
+    "autotunekey",
+    "chromatic",
+    "autoMenuPreset",
+    "autoMenuData",
+    "songDatabase"
+];
+
+const LEGACY_JSON_KEYS = new Set([
+    "autoMenuPreset",
+    "autoMenuData",
+    "songDatabase"
+]);
+
+let appSettings = { ...DEFAULT_APP_SETTINGS };
+
+// TASK A78 — "baseline" = bản cài đặt lần cuối ĐỒNG BỘ với file dùng chung (lúc nạp/lưu thành công).
+// saveSetup() so appSettings với baseline để biết cửa sổ NÀY thực sự đổi key nào, rồi chỉ áp đúng các
+// key đó lên bản MỚI NHẤT trong file (merge 3 chiều) thay vì ghi đè toàn bộ bằng state cũ.
+// null = chưa đồng bộ với file (không chạy trong Electron / chưa nạp được) -> hành vi cũ (ghi toàn bộ).
+let __settingsBaseline = null;
+
+function __cloneSettings(obj) {
+    try { return JSON.parse(JSON.stringify(obj)); } catch { return { ...obj }; }
+}
+
+function parseLegacyValue(key, raw) {
+    if (!LEGACY_JSON_KEYS.has(key)) {
+        return raw;
+    }
+
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return raw;
+    }
+}
+
+function migrateLegacyStorage() {
+    let migrated = false;
+
+    LEGACY_STORAGE_KEYS.forEach((key) => {
+        const raw = localStorage.getItem(key);
+        if (raw === null) {
+            return;
+        }
+
+        appSettings[key] = parseLegacyValue(key, raw);
+        localStorage.removeItem(key);
+        migrated = true;
+    });
+
+    if (migrated) {
+        saveSetup();
+    }
+}
+
+// TASK A-SETUP — dữ liệu đọc từ file/localStorage chỉ được coi là hợp lệ khi là object thường
+// (không phải mảng/chuỗi/số). Trước đây một file chứa `[]` hoặc `"x"` vẫn bị spread vào appSettings.
+function isPlainSettingsObject(v) {
+    return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+function loadSetup() {
+    // 1) Ưu tiên đọc từ file dùng chung (qua main process) — chia sẻ được giữa
+    //    main window và setup window, không bị cô lập như localStorage.
+    try {
+        const fromFile = window.electronAPI?.loadSettingsSync?.();
+        if (isPlainSettingsObject(fromFile)) {
+            appSettings = { ...DEFAULT_APP_SETTINGS, ...fromFile };
+            __settingsBaseline = __cloneSettings(appSettings);
+            return appSettings;
+        }
+        if (typeof window.electronAPI?.loadSettingsSync === "function") {
+            // Đọc được nhưng chưa có file (lần chạy đầu) hoặc file hỏng đã được main.js sao lưu .corrupt-*.
+            __settingsBaseline = __cloneSettings(DEFAULT_APP_SETTINGS);
+        }
+    } catch (err) {
+        console.error("loadSetup (file dùng chung) lỗi:", err);
+    }
+
+    // 2) Dự phòng: nếu electronAPI chưa sẵn sàng (vd mở file .html trực tiếp bằng
+    //    trình duyệt để test nhanh, không qua Electron) thì tạm dùng localStorage.
+    try {
+        const raw = localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
+        appSettings = raw
+            ? { ...DEFAULT_APP_SETTINGS, ...JSON.parse(raw) }
+            : { ...DEFAULT_APP_SETTINGS };
+    } catch (err) {
+        console.error("loadSetup (localStorage dự phòng) lỗi:", err);
+        appSettings = { ...DEFAULT_APP_SETTINGS };
+    }
+
+    migrateLegacyStorage();
+    return appSettings;
+}
+
+// TASK A55: trước đây hàm này không trả về gì (fire-and-forget), khiến không nơi nào trong
+// renderer biết được 1 lần lưu có THẬT SỰ thành công hay không (ipcRenderer.sendSync trả về
+// đúng giá trị writeSettingsFile() ở main process — true/false — nhưng bị bỏ qua ở đây). Giữ
+// NGUYÊN 100% hành vi cũ (early-return ngay khi có electronAPI, không rơi xuống localStorage
+// dự phòng) — chỉ thêm việc TRẢ VỀ kết quả thật. Các caller cũ (không đọc giá trị trả về) hoàn
+// toàn không bị ảnh hưởng.
+// TASK A78 — Merge 3 chiều khi lưu. Trả về true/false như cũ (caller cũ không đổi).
+//  - Đọc bản MỚI NHẤT trong file; NẾU KHÔNG ĐỌC ĐƯỢC (IPC ném lỗi) -> KHÔNG ghi, trả false
+//    (tuyệt đối không âm thầm ghi cả state cũ đè lên dữ liệu có thể mới hơn).
+//  - Chỉ áp lên bản mới nhất những key mà cửa sổ này thật sự đổi so với baseline (+ forceKeys do
+//    setSetting truyền vào, để việc người dùng chủ động đặt 1 key luôn thắng dù giá trị trùng baseline).
+//  - Ghi thất bại -> appSettings/baseline giữ nguyên để caller hoàn tác được.
+function saveSetup(forceKeys) {
+    try {
+        if (window.electronAPI?.saveSettingsSync) {
+            let toWrite = appSettings;
+            let merged = null;
+            if (__settingsBaseline && typeof window.electronAPI.loadSettingsSync === "function") {
+                const latest = window.electronAPI.loadSettingsSync(); // có thể ném -> catch bên dưới, KHÔNG ghi
+                const base = isPlainSettingsObject(latest) ? latest : {};
+                merged = { ...DEFAULT_APP_SETTINGS, ...base };
+                const force = new Set(Array.isArray(forceKeys) ? forceKeys : []);
+                Object.keys(appSettings).forEach((k) => {
+                    const changed = force.has(k) ||
+                        JSON.stringify(appSettings[k]) !== JSON.stringify(__settingsBaseline[k]);
+                    if (changed) merged[k] = appSettings[k];
+                });
+                toWrite = merged;
+            }
+            const ok = window.electronAPI.saveSettingsSync(toWrite);
+            if (ok === false) return false; // sendSync qua kênh lỗi hiếm khi trả undefined -> chỉ coi là fail khi rõ ràng false
+            if (merged) {
+                appSettings = merged;
+                __settingsBaseline = __cloneSettings(merged);
+            }
+            return true;
+        }
+    } catch (err) {
+        console.error("saveSetup (file dùng chung) lỗi — KHÔNG ghi để tránh đè dữ liệu:", err);
+        return false;
+    }
+
+    // Dự phòng localStorage (chỉ dùng khi không chạy trong Electron)
+    try {
+        localStorage.setItem(APP_SETTINGS_STORAGE_KEY, JSON.stringify(appSettings));
+        return true;
+    } catch (err) {
+        console.error("saveSetup (localStorage dự phòng) lỗi:", err);
+        return false;
+    }
+}
+
+function getSetting(key, fallback = "") {
+    const value = appSettings[key];
+    return value != null && value !== "" ? value : fallback;
+}
+
+// TASK A55: cũng trả về kết quả saveSetup() thật (trước đây bỏ qua) — giữ nguyên chữ ký/hành
+// vi ghi appSettings[key], chỉ thêm return.
+// TASK A-SETUP/A78 — LỖI GỐC "ghi đè bằng state cũ": mainWin và setupWin mỗi cửa sổ giữ 1 bản
+// appSettings riêng; Setup sống lâu (chỉ hide/show) nên bản của nó cũ dần. Việc chống ghi đè nằm
+// trong saveSetup() (merge theo key đã đổi). setSetting() chỉ đánh dấu key này là "chủ động đổi".
+function setSetting(key, value) {
+    appSettings[key] = value;
+    return saveSetup([key]);
+}
+
+// Nạp lại bản mới nhất từ file dùng chung trước các thao tác người dùng cần dữ liệu ĐÚNG HIỆN TẠI
+// (Preset, Backup). Trả về false nếu KHÔNG đọc được (caller phải dừng, không được đoán). Không có
+// electronAPI (chạy ngoài Electron) -> trả true, giữ state hiện tại.
+function refreshFromSharedFile() {
+    if (typeof window.electronAPI?.loadSettingsSync !== "function") return true;
+    try {
+        const latest = window.electronAPI.loadSettingsSync();
+        appSettings = { ...DEFAULT_APP_SETTINGS, ...(isPlainSettingsObject(latest) ? latest : {}) };
+        __settingsBaseline = __cloneSettings(appSettings);
+        return true;
+    } catch (err) {
+        console.error("refreshFromSharedFile lỗi (không đọc được bản mới nhất):", err);
+        return false;
+    }
+}
+
+// ===== TASK A55 — Startup & Paths: getter/setter dùng CHUNG cơ chế getSetting/setSetting đã
+// có sẵn ở trên (KHÔNG tạo configuration system thứ 2). getStartupPaths() tự phục hồi an toàn
+// khi config thiếu field hoặc pluginPaths không phải mảng (config cũ/hỏng) — không bao giờ trả
+// về giá trị làm crash UI gọi nó. =====
+const DEFAULT_STARTUP_PATHS = {
+    autoStart: false,
+    dawExecutable: "",
+    dawProject: "",
+    pluginPaths: [],
+    midiConfig: "",
+    audioConfig: "",
+    logs: ""
+};
+
+function getStartupPaths() {
+    const stored = getSetting("startupPaths", null);
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+        return { ...DEFAULT_STARTUP_PATHS };
+    }
+    return {
+        ...DEFAULT_STARTUP_PATHS,
+        ...stored,
+        autoStart: stored.autoStart === true,
+        pluginPaths: Array.isArray(stored.pluginPaths) ? stored.pluginPaths.slice() : []
+    };
+}
+
+// Merge một phần thay đổi vào cấu hình hiện tại rồi lưu qua đúng 1 đường setSetting() ->
+// saveSetup() -> saveSettingsSync (IPC) -> writeSettingsFile() (main process, atomic — xem
+// app/main.js). Trả về {ok, value} để UI (setupStartupPaths.js) biết chính xác lưu có thành
+// công hay không, KHÔNG bao giờ tự báo "Saved" nếu ok !== true.
+function setStartupPaths(partial) {
+    const merged = { ...getStartupPaths(), ...partial };
+    const ok = setSetting("startupPaths", merged);
+    return { ok: ok === true, value: merged };
+}
+
+// TASK B6 (Beat/Master) — accessor SEMANTIC riêng cho từng control, KHÔNG dùng tên chung
+// "volume" cho cả hai. Đọc đúng appSettings.autoMenuData.knobs (KHÔNG tạo storage mới, giữ
+// nguyên 100% format cũ `{id, value}` — backward-compatible) nhưng lộ ra tên hàm RÕ NGHĨA để
+// có thể chứng minh khi audit: Beat state và Master state là 2 đường đọc TÁCH BIỆT, không có
+// hàm chung nào gộp cả hai. Đúng định nghĩa bắt buộc: Beat = INPUT MUSIC LEVEL (musicKnob),
+// Master = FINAL DAW OUTPUT LEVEL (masterKnob) — 2 khái niệm khác nhau, không phải cùng 1
+// "volume". Chỉ đọc (getter) — việc GHI vẫn qua đúng 1 đường saveData() sẵn có (renderer.js),
+// tránh tạo 2 cơ chế ghi cạnh tranh cho cùng 1 dữ liệu.
+function getBeatInputVolume() {
+    const knob = appSettings.autoMenuData?.knobs?.find((k) => k.id === "musicKnob");
+    return knob ? knob.value : null;
+}
+
+function getMasterOutputVolume() {
+    const knob = appSettings.autoMenuData?.knobs?.find((k) => k.id === "masterKnob");
+    return knob ? knob.value : null;
+}
+
+/* ==========================================================
+   MIDI (Web MIDI API — có sẵn trong Chromium/Electron, không cần cài thư viện Node nào).
+   Dùng để gửi Key/lệnh sang DAW qua 1 cổng MIDI ảo (vd loopMIDI), thay cho click tọa độ
+   ở những chỗ plugin/DAW hỗ trợ MIDI Learn — nhanh và chuẩn hơn hẳn khi hát live.
+   ========================================================== */
+let midiAccessPromise = null;
+
+function getMidiAccess() {
+    if (!navigator.requestMIDIAccess) {
+        return Promise.reject(new Error("Trình duyệt/Electron này không hỗ trợ Web MIDI API."));
+    }
+    if (!midiAccessPromise) {
+        midiAccessPromise = navigator.requestMIDIAccess({ sysex: false });
+    }
+    return midiAccessPromise;
+}
+
+// Liệt kê tất cả cổng MIDI output đang có trên máy (vd cổng ảo tạo bằng loopMIDI)
+async function listMidiOutputs() {
+    // MIDI-RECOVERY-01 — trong Electron, danh sách Output phải là danh sách THẬT của backend sẽ GỬI (easymidi ở main
+    // process), không phải của Web MIDI (Chromium có thể không liệt kê "AUTO MENU AI" dù backend gửi được).
+    // Không có electronAPI/IPC lỗi -> rơi về Web MIDI như cũ (trình duyệt thường, test).
+    try {
+        if (typeof window !== "undefined" && window.electronAPI?.listMidiPorts) {
+            const r = await window.electronAPI.listMidiPorts();
+            if (r && r.ok && Array.isArray(r.outputs)) {
+                window.__midiOutputListSource = "main-easymidi";
+                return r.outputs.map((name) => ({ id: name, name }));
+            }
+        }
+    } catch (err) {
+        console.warn("listMidiPorts (main) lỗi, dùng Web MIDI:", err);
+    }
+    if (typeof window !== "undefined") window.__midiOutputListSource = "web-midi";
+    try {
+        const access = await getMidiAccess();
+        return [...access.outputs.values()].map((o) => ({ id: o.id, name: o.name }));
+    } catch (err) {
+        console.error("Không lấy được danh sách cổng MIDI:", err);
+        return [];
+    }
+}
+
+// TASK MIDI-01 — CHẨN ĐOÁN đường MIDI (chỉ ghi nhận, không đổi giao thức). Trạng thái:
+//   MIDI_UNINITIALIZED / MIDI_NO_OUTPUT (Web MIDI không dùng được) / MIDI_PORT_NOT_SELECTED / MIDI_PORT_NOT_FOUND / MIDI_PORT_CLOSED (port
+//   state "disconnected" hoặc send() ném InvalidStateError) / MIDI_SEND_ATTEMPTED / MIDI_SEND_FAILED / MIDI_SENT_UNCONFIRMED.
+//   Web MIDI KHÔNG có xác nhận phía đích => KHÔNG BAO GIỜ có MIDI_RECEIVED_AT_DESTINATION từ mã này (cần MIDI monitor/loopback ngoài).
+//   Đọc trong DevTools: window.__midiDiagReport(). Bộ đệm vòng 60 mục; chỉ console.warn khi lỗi MỚI khác lỗi liền trước (không log lặp).
+const __midiDiagBuf = [];
+let __midiDiagLastWarn = null;
+function midiDiag(state, extra) {
+    try {
+        const corr = (typeof window !== "undefined" && window.__midiCorrelation) || null;
+        const rec = { t: Date.now(), state, corr: corr ? corr.id : null, ...(extra || {}) };
+        __midiDiagBuf.push(rec); if (__midiDiagBuf.length > 60) __midiDiagBuf.shift();
+        if (/FAILED|NOT_FOUND|NOT_SELECTED|CLOSED|NO_OUTPUT/.test(state)) {
+            const sig = state + "|" + (extra && (extra.port || extra.error) || "");
+            if (sig !== __midiDiagLastWarn) { __midiDiagLastWarn = sig; console.warn("[MIDI-DIAG]", rec); }
+        } else if (state === "MIDI_SENT_UNCONFIRMED") { __midiDiagLastWarn = null; }
+    } catch (e) { /* chẩn đoán không bao giờ được làm hỏng đường gửi */ }
+}
+if (typeof window !== "undefined") window.__midiDiagReport = () => __midiDiagBuf.slice();
+
+// Lấy đúng cổng MIDI đã lưu trong Setup (theo tên cổng)
+async function getSelectedMidiOutput() {
+    const portName = getSetting("midiOutputPort");
+    if (!portName) { midiDiag("MIDI_PORT_NOT_SELECTED"); return null; }
+
+    try {
+        const access = await getMidiAccess();
+        const port = [...access.outputs.values()].find((o) => o.name === portName) || null;
+        if (!port) midiDiag("MIDI_PORT_NOT_FOUND", { port: portName, available: [...access.outputs.values()].length });
+        return port;
+    } catch (err) {
+        console.error("Không mở được cổng MIDI:", err);
+        midiDiag("MIDI_NO_OUTPUT", { port: portName, error: String(err && err.message || err) });
+        return null;
+    }
+}
+
+// TASK MIDI-01 — output.send() có thể NÉM (vd InvalidStateError khi cổng bị rút/loopMIDI tắt). Hợp đồng của các hàm gửi (xem
+// actionRegistry.js, vocalCommandRouter.js) là trả false, KHÔNG throw; trước đây ngoại lệ lan lên sendKeyToAutotune()
+// => bỏ qua nhánh fallback + promise bị reject không ai bắt. Nay bắt lỗi và trả false (kết quả true vẫn chỉ nghĩa "API send không ném", chưa xác nhận đích).
+function __midiSend(output, bytes, label) {
+    const info = { port: output.name, label, bytes: bytes.slice(), portState: output.state, connection: output.connection };
+    midiDiag("MIDI_SEND_ATTEMPTED", info);
+    try {
+        output.send(bytes);
+    } catch (err) {
+        const closed = output.state === "disconnected" || (err && err.name === "InvalidStateError");
+        midiDiag(closed ? "MIDI_PORT_CLOSED" : "MIDI_SEND_FAILED", { ...info, error: String(err && err.name || "") + ": " + String(err && err.message || err) });
+        return false;
+    }
+    midiDiag("MIDI_SENT_UNCONFIRMED", info);
+    return true;
+}
+
+// MIDI-RECOVERY-01 — ĐƯỜNG GỬI CÓ THẨM QUYỀN: trong Electron mọi Note/CC (Setup Test, actionRegistry,
+// vocalCommandRouter — tất cả đều đi qua sendMidiCC/sendMidiNoteOn/Off/Pulse bên dưới) gửi qua IPC tới MidiDriver
+// (easymidi) ở main process — cùng backend/cổng với dispatch thật và Verify. Web MIDI chỉ còn là đường dự phòng khi
+// KHÔNG có electronAPI.sendMidiMessage (trình duyệt thường/test). Khi main trả lỗi thì KHÔNG tự rơi sang Web MIDI
+// (tránh gửi mù sang cổng khác). Trả true = "send() không ném" (chưa xác nhận DAW nhận), false = chắc chắn không gửi.
+// Kết quả chi tiết (tầng, lý do, lỗi gốc) ở window.__lastMidiSendResult / getLastMidiSendResult().
+let __lastMidiSendResult = null;
+function getLastMidiSendResult() { return __lastMidiSendResult; }
+if (typeof window !== "undefined") window.getLastMidiSendResult = getLastMidiSendResult;
+
+async function __midiSendViaMain(kind, number, value, channel) {
+    if (typeof window === "undefined" || !window.electronAPI?.sendMidiMessage) return undefined; // không có đường main -> caller dùng Web MIDI
+    let r;
+    try {
+        r = await window.electronAPI.sendMidiMessage({ kind, number, value, channel });
+    } catch (err) {
+        r = { ok: false, via: "main-midi-driver", reason: "IPC_ERROR", detail: String(err && err.message || err) };
+    }
+    __lastMidiSendResult = { sender: "main-midi-driver (easymidi)", kind, ...r };
+    midiDiag(r.ok ? "MIDI_SENT_UNCONFIRMED" : "MIDI_SEND_FAILED", { via: "main", kind, port: r.port || null, reason: r.reason || null, error: r.detail || null });
+    return !!r.ok;
+}
+
+async function sendMidiNoteOn(noteNumber, velocity = 100, channel = 0) {
+    const viaMain = await __midiSendViaMain("noteon", noteNumber, velocity, channel);
+    if (viaMain !== undefined) return viaMain;
+    __lastMidiSendResult = { sender: "web-midi (fallback, không có main IPC)", kind: "noteon" };
+    const output = await getSelectedMidiOutput();
+    if (!output) return false;
+    return __midiSend(output, [0x90 | (channel & 0x0f), noteNumber & 0x7f, velocity & 0x7f], "NOTE_ON");
+}
+
+async function sendMidiNoteOff(noteNumber, channel = 0) {
+    const viaMain = await __midiSendViaMain("noteoff", noteNumber, 0, channel);
+    if (viaMain !== undefined) return viaMain;
+    const output = await getSelectedMidiOutput();
+    if (!output) return false;
+    return __midiSend(output, [0x80 | (channel & 0x0f), noteNumber & 0x7f, 0], "NOTE_OFF");
+}
+
+// Gửi Note On rồi tự Note Off sau 1 khoảng ngắn — kiểu gửi phù hợp cho "MIDI Learn" theo nốt
+async function sendMidiNotePulse(noteNumber, velocity = 100, channel = 0, durationMs = 120) {
+    const sent = await sendMidiNoteOn(noteNumber, velocity, channel);
+    if (!sent) return false;
+    setTimeout(() => sendMidiNoteOff(noteNumber, channel), durationMs);
+    return true;
+}
+
+async function sendMidiCC(ccNumber, value, channel = 0) {
+    const viaMain = await __midiSendViaMain("cc", ccNumber, value, channel);
+    if (viaMain !== undefined) return viaMain;
+    __lastMidiSendResult = { sender: "web-midi (fallback, không có main IPC)", kind: "cc" };
+    const output = await getSelectedMidiOutput();
+    if (!output) return false;
+    return __midiSend(output, [0xb0 | (channel & 0x0f), ccNumber & 0x7f, value & 0x7f], "CC");
+}
+
+/* ==========================================================
+   HỒ SƠ TỌA ĐỘ RIÊNG THEO TỪNG DAW
+   (Cubase/Studio One/... có layout giao diện khác nhau -> mỗi DAW cần 1 bộ tọa độ riêng,
+   tự động chuyển đổi theo DAW đang chọn ở "selectedDAW", không cần thao tác thêm) 
+   ========================================================== */
+const COORDINATE_KEYS = ["autokey1", "autokey2", "autotunekey", "chromatic"];
+
+function getCoordinateProfile(dawName) {
+    const profiles = getSetting("coordinateProfiles") || {};
+    return profiles[dawName] || {};
+}
+
+// Lấy 1 tọa độ đã lưu CHO DAW ĐANG CHỌN hiện tại (selectedDAW)
+function getCoordinate(key) {
+    const daw = getSetting("selectedDAW");
+    if (!daw) return "";
+    const profile = getCoordinateProfile(daw);
+    return profile[key] || "";
+}
+
+// Lưu 1 tọa độ vào hồ sơ của DAW ĐANG CHỌN hiện tại. Trả về false nếu chưa chọn DAW nào.
+function setCoordinate(key, value) {
+    const daw = getSetting("selectedDAW");
+    if (!daw) return false;
+
+    const profiles = getSetting("coordinateProfiles") || {};
+    if (!profiles[daw]) profiles[daw] = {};
+    profiles[daw][key] = value;
+
+    setSetting("coordinateProfiles", profiles);
+    return true;
+}
+
+// TASK B26.2 — trước đây getSetupReadinessChecklist() chỉ kiểm tra CÓ TÊN soundcard đã lưu hay
+// không, KHÔNG biết thiết bị đó còn tồn tại thật trên máy hay không (đã "rút dây"/đổi driver).
+// Kết quả: progress bar/READY có thể báo "đã xong" dù badge Soundcard đang cảnh báo "không khả
+// dụng" — đúng kiểu "cấu hình cũ nhưng device không còn tồn tại" mà B26.2 yêu cầu rà soát.
+//
+// Fix TỐI THIỂU, KHÔNG đổi kiến trúc: chỉ 1 biến hint trong module này, do setup.js cập nhật MỖI
+// khi nó thực sự enumerate lại thiết bị (populateSoundcardOptions() -> foundInRealList — dữ liệu
+// đã có sẵn, không tự thêm getUserMedia/enumerateDevices() nào mới ở đây). Mặc định là null
+// ("chưa biết gì") để giữ NGUYÊN hành vi cũ (trust tên đã lưu) cho tới khi thực sự đã enumerate —
+// không đổi behavior của bất kỳ nơi nào khác đang gọi các hàm này trước khi Setup mở lần đầu.
+let __soundcardAvailabilityHint = null; // null = chưa biết | true/false = đã enumerate xong
+
+function setSoundcardAvailabilityHint(isAvailable) {
+    __soundcardAvailabilityHint = isAvailable === true || isAvailable === false ? isAvailable : null;
+}
+
+// TASK A76-FIX-R1 (R1-05) — CÙNG cơ chế với __soundcardAvailabilityHint nhưng cho SYSTEM_AUDIO:
+// trước đây mục selectedSystemAudioDeviceId chỉ kiểm tra "chuỗi khác rỗng" nên thiết bị đã lưu
+// nhưng đã bị rút vẫn được tính READY. setup.js gọi hàm này sau khi enumerate thật.
+let __systemAudioAvailabilityHint = null; // null = chưa biết | true/false = đã enumerate xong
+
+function setSystemAudioAvailabilityHint(isAvailable) {
+    __systemAudioAvailabilityHint = isAvailable === true || isAvailable === false ? isAvailable : null;
+}
+
+// TASK B30.2 — CÙNG BẢN CHẤT với __soundcardAvailabilityHint ở trên nhưng cho đường dẫn trình
+// duyệt (selectedBrowserPath): trước đây checklist chỉ kiểm tra 2 chuỗi khác rỗng, không biết file
+// .exe đã lưu có còn tồn tại trên đĩa hay không (đã bị xoá/di chuyển sau khi lưu). setup.js chịu
+// trách nhiệm gọi setBrowserPathAvailabilityHint() SAU khi thực sự kiểm tra bằng
+// window.electronAPI.checkPathExists() (IPC filesystem có sẵn, xem app/main.js) — module này không
+// tự gọi filesystem gì cả. Mặc định null giữ nguyên hành vi cũ.
+let __browserPathAvailabilityHint = null; // null = chưa biết | true/false = đã kiểm tra xong
+
+function setBrowserPathAvailabilityHint(isAvailable) {
+    __browserPathAvailabilityHint = isAvailable === true || isAvailable === false ? isAvailable : null;
+}
+
+// TASK B30.1 — MIDI dashboard pill (2 vị trí trong setup.js) trước đây chỉ kiểm tra
+// midiOutputPort có khác rỗng hay không, không biết cổng đã lưu có còn trong danh sách MIDI thật
+// (`ports` từ listMidiOutputs()) hay không — B29 phát hiện đây cũng là 1 dạng READY giả.
+// setup.js gọi setMidiPortAvailabilityHint() ngay sau khi so khớp `saved` với `ports` thật (dữ
+// liệu đã có sẵn từ populatePorts(), KHÔNG thêm probing/I/O MIDI mới). getMidiDashboardPillState()
+// là NGUỒN DUY NHẤT tính ra trạng thái pill — cả 2 vị trí trong setup.js đều gọi hàm này, tránh 2
+// nguồn sự thật khác nhau như yêu cầu B30.1.
+let __midiPortAvailabilityHint = null; // null = chưa biết | true/false = đã so khớp xong
+
+function setMidiPortAvailabilityHint(isAvailable) {
+    __midiPortAvailabilityHint = isAvailable === true || isAvailable === false ? isAvailable : null;
+}
+
+function getMidiDashboardPillState() {
+    const portName = getSetting("midiOutputPort", "");
+    if (!portName) {
+        return { text: "Chưa cấu hình", className: "status-pill status-pill--dim", title: "" };
+    }
+    if (__midiPortAvailabilityHint === false) {
+        return {
+            text: "⚠ Cổng MIDI không khả dụng",
+            className: "status-pill status-pill--error", // class đã có sẵn trong ui/css/setup.css, không thêm CSS mới
+            title: "Cổng đã lưu (" + portName + ") hiện không có trong danh sách MIDI thật — vào Setup > MIDI để chọn lại."
+        };
+    }
+    return { text: "Đã cấu hình", className: "status-pill status-pill--ok", title: "Cổng MIDI: " + portName };
+}
+
+/* Danh sách 10 mục bắt buộc để coi Setup là "hoàn tất" — dùng chung cho setup.js và renderer.js.
+   Riêng "Browser" phải có ĐỦ 2 thứ: đã chọn trình duyệt VÀ đã có đường dẫn (tự dò hoặc chọn tay),
+   thiếu 1 trong 2 vẫn coi là chưa xong. Riêng 5 mục tọa độ được kiểm tra THEO HỒ SƠ CỦA DAW
+   ĐANG CHỌN (getCoordinate), không phải giá trị chung chung nữa. Riêng "Soundcard" (B26.2) và
+   "Browser" (B30.2): nếu đã biết chắc thiết bị/file đã lưu KHÔNG còn tồn tại thật thì KHÔNG coi là
+   ready, dù vẫn còn tên/đường dẫn được lưu — tránh báo READY giả. */
+function getSetupReadinessChecklist() {
+    const soundcardConfigured = !!getSetting("selectedSoundcard");
+    const soundcardReady = soundcardConfigured && __soundcardAvailabilityHint !== false;
+    const browserConfigured = !!getSetting("selectedBrowser") && !!getSetting("selectedBrowserPath");
+    const browserReady = browserConfigured && __browserPathAvailabilityHint !== false;
+    return [
+        { key: "selectedDAW", ready: !!getSetting("selectedDAW") },
+        { key: "selectedAutoKey", ready: !!getSetting("selectedAutoKey") },
+        { key: "selectedAutoTune", ready: !!getSetting("selectedAutoTune") },
+        { key: "selectedSoundcard", ready: soundcardReady },
+        { key: "selectedBrowser", ready: browserReady },
+        { key: "autokey1", ready: !!getCoordinate("autokey1") },
+        { key: "autokey2", ready: !!getCoordinate("autokey2") },
+        { key: "autotunekey", ready: !!getCoordinate("autotunekey") },
+        { key: "chromatic", ready: !!getCoordinate("chromatic") },
+        // TASK A75-10 — PHÁT HIỆN: checklist "Setup Complete" trước đây KHÔNG kiểm tra
+        // selectedSystemAudioDeviceId — nghĩa là Setup có thể báo "configured" dù SYSTEM_AUDIO
+        // (nguồn BPM/Key/Mod) chưa có nguồn nào, đúng hiện tượng A75-10 đề bài cảnh báo. Thêm mục
+        // riêng, đúng key mà audioSource.js thật sự đọc (không phải selectedSoundcard/MIC — xem
+        // A65-A74-REPORT.md, 2 khái niệm này đã tách biệt hoàn toàn từ A65). "AI source ready"
+        // trong ngôn ngữ A75-10 = chính mục này.
+        { key: "selectedSystemAudioDeviceId", ready: !!getSetting("selectedSystemAudioDeviceId") && (typeof __systemAudioAvailabilityHint === "undefined" || __systemAudioAvailabilityHint !== false) } // A76-FIX-R1: đã lưu nhưng không còn khả dụng => NOT READY
+    ];
+}
+
+function countSetupReady() {
+    return getSetupReadinessChecklist().filter(item => item.ready).length;
+}
+
+function isSetupFullyComplete() {
+    return getSetupReadinessChecklist().every(item => item.ready);
+}
+
+/* Dùng cho nút "Mở kèm ngay" (thủ công) trong modal Project — chỉ mở Project/Youtube, không đụng tới DAW */
+async function openProjectYoutubeBundle() {
+    if (!window.electronAPI?.openProjectBundle) {
+        return { errors: ["electronAPI.openProjectBundle không khả dụng"] };
+    }
+
+    const openProject = getSetting("projectOpenEnabled") === true || getSetting("projectOpenEnabled") === "true";
+    const makeCopy = getSetting("projectCopyEnabled") === true || getSetting("projectCopyEnabled") === "true";
+    const openYoutube = getSetting("projectOpenYoutube") === true || getSetting("projectOpenYoutube") === "true";
+
+    if (!openProject && !openYoutube) {
+        return { skipped: true };
+    }
+
+    return window.electronAPI.openProjectBundle({
+        projectPath: getSetting("projectPath"),
+        openProject,
+        makeCopy,
+        openYoutube,
+        browserPath: getSetting("selectedBrowserPath"),
+        youtubeUrl: "https://www.youtube.com"
+    });
+}
+
+/* Dùng khi mở app (menu chính) — "Mở DAW cùng Menu" là công tắc chính:
+   bật lên thì tự mở DAW + (Project nếu tick) + (Youtube bằng đúng trình duyệt đã chọn, nếu tick) */
+async function runAutoStartupSequence() {
+    if (!window.electronAPI?.openProjectBundle) {
+        return { errors: ["electronAPI.openProjectBundle không khả dụng"] };
+    }
+
+    const launchDAW = getSetting("launchDAW") === true || getSetting("launchDAW") === "true";
+    if (!launchDAW) {
+        return { skipped: true };
+    }
+
+    const openProject = getSetting("projectOpenEnabled") === true || getSetting("projectOpenEnabled") === "true";
+    const makeCopy = getSetting("projectCopyEnabled") === true || getSetting("projectCopyEnabled") === "true";
+    const openYoutube = getSetting("projectOpenYoutube") === true || getSetting("projectOpenYoutube") === "true";
+
+    return window.electronAPI.openProjectBundle({
+        launchDAW: true,
+        dawPath: getSetting("selectedDAWPath"),
+        projectPath: getSetting("projectPath"),
+        openProject,
+        makeCopy,
+        openYoutube,
+        browserPath: getSetting("selectedBrowserPath"),
+        youtubeUrl: "https://www.youtube.com"
+    });
+}
+
+/* Dùng chung giữa setup.js (ghi lại tổ hợp phím) và renderer.js (so khớp khi nhấn phím) */
+function formatKeyCombo(e) {
+    const parts = [];
+    if (e.ctrlKey) parts.push("Ctrl");
+    if (e.altKey) parts.push("Alt");
+    if (e.shiftKey) parts.push("Shift");
+
+    const key = e.key;
+    if (!["Control", "Alt", "Shift", "Meta"].includes(key)) {
+        parts.push(key.length === 1 ? key.toUpperCase() : key);
+    }
+
+    return parts.join("+");
+}

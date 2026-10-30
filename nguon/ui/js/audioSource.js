@@ -1,0 +1,631 @@
+/* ==========================================================
+   audioSource.js — TASK B58 (Claude B — Audio Source + 4 VU)
+   -----------------------------------------------------------
+   File MỚI. KHÔNG đụng keyEngine.js/bpmEngine.js/modEngine.js (thuật toán AI vẫn
+   nguyên vẹn, thuộc Claude A). Trách nhiệm DUY NHẤT của file này: tách 3 loại
+   nguồn audio (MIC / SYSTEM_AUDIO / DAW_MASTER) thành 3 abstraction riêng, mỗi
+   cái có state machine + AudioLevel/AudioFrame contract riêng — đúng yêu cầu B58:
+   "Không dùng một biến device duy nhất để mang nhiều semantic khác nhau."
+
+   MIC        -> chỉ nuôi Mic VU. KHÔNG BAO GIỜ có onFrame consumer nối vào AI.
+   SYSTEM_AUDIO -> nguồn DUY NHẤT được phép nuôi Key/BPM/Mod (qua renderer.js,
+                   không đổi ở đây) + Music VU.
+   DAW_MASTER -> CHƯA có native capture trong B58 (xem B58-REPORT.md mục 6/9).
+                 Đây CHỈ là architecture boundary — state cố định NO_DEVICE,
+                 không giả lập bằng SYSTEM_AUDIO.
+   ========================================================== */
+(function (global) {
+    "use strict";
+
+    const AudioSourceType = Object.freeze({
+        MIC: "MIC",
+        SYSTEM_AUDIO: "SYSTEM_AUDIO",
+        DAW_MASTER: "DAW_MASTER",
+    });
+
+    const AudioSourceState = Object.freeze({
+        NO_DEVICE: "NO_DEVICE",
+        STARTING: "STARTING",
+        RUNNING: "RUNNING",
+        STOPPING: "STOPPING",
+        ERROR: "ERROR",
+    });
+
+    // ---------------------------------------------------------
+    // TASK A65 — SYSTEM_AUDIO / MIC source contract separation.
+    //
+    // A64 (audit) đã chứng minh: "selectedSoundcardId" là 1 dropdown DUY NHẤT
+    // trong Setup liệt kê MỌI thiết bị audioinput (không lọc/gợi ý loopback),
+    // và trên máy chạy thực tế giá trị đó là "Mix 01" — tức là MIC (theo baseline
+    // topology: MIC -> ASIO Link Pro -> ASIOVADPRO MIX OUT -> Mix 01). Bản B58 cũ
+    // (migration shim phía trên, đã XOÁ ở A65) coi thẳng "selectedSoundcardId" là
+    // SYSTEM_AUDIO -> nghĩa là BPM/Key/Mod thực chất đang phân tích MIC, dù code
+    // gọi nó là "SYSTEM_AUDIO". Đây LÀ root cause được A64-REPORT.md ghi nhận là
+    // GAP-1 (architecture gap).
+    //
+    // A65 XOÁ HẲN fallback "systemAudioDeviceId" (key không ai từng ghi) VÀ
+    // fallback "selectedSoundcardId" (key mang semantic MIC/Mix 01 trên máy thật).
+    // SYSTEM_AUDIO giờ có key cấu hình RIÊNG, KHÔNG chia sẻ với bất kỳ dropdown
+    // chung nào: "selectedSystemAudioDeviceId" (mặc định trong appSettings.js).
+    //
+    // Setup UI hiện KHÔNG có ô chọn riêng cho SYSTEM_AUDIO (việc thêm UI/HTML mới
+    // ngoài phạm vi A65 — xem A65-REPORT.md mục "Device/configuration contract" +
+    // "Remaining hardware dependency"). Do đó cho tới khi có UI hoặc endpoint thật:
+    //     selectedSystemAudioDeviceId luôn rỗng -> SYSTEM_AUDIO luôn NO_DEVICE
+    //     -> BPM/Key/Mod KHÔNG chạy.
+    // Đây là hành vi DÙNG ĐÚNG CHỦ Ý (AC-1/AC-4/AC-5 của A65), KHÔNG phải bug và
+    // KHÔNG được "vá tạm" bằng cách quay lại đọc selectedSoundcardId/Mix 01.
+    //
+    // setSystemAudioDeviceId() bên dưới là lối cấu hình THỦ CÔNG duy nhất hiện có
+    // (gọi tay qua DevTools console, hoặc 1 Setup UI trong tương lai) — KHÔNG tự
+    // suy đoán/gán 1 device nào mặc định.
+    // ---------------------------------------------------------
+    function getSystemAudioDeviceId() {
+        if (typeof getSetting !== "function") return "";
+        return getSetting("selectedSystemAudioDeviceId", "");
+    }
+
+    function setSystemAudioDeviceId(deviceId) {
+        if (typeof setSetting !== "function") return false;
+        return setSetting("selectedSystemAudioDeviceId", deviceId || "");
+    }
+
+    // Mic device: TASK B71 — nay ĐÃ có Setup UI riêng (mục "MIC Input" trong panel Audio, xem
+    // setup.js initMicInputSection()) ghi "selectedMicDeviceId". Trước B71, key này không có UI
+    // nào ghi (xem B58-REPORT.md "Known limitations" + B70-REPORT.md phát hiện #2). Hàm này
+    // KHÔNG đổi — vẫn trả "" khi chưa chọn, MIC source vẫn dùng thiết bị mic mặc định của hệ
+    // điều hành/trình duyệt một cách TƯỜNG MINH trong trường hợp đó (không phải fallback ngầm
+    // của SYSTEM_AUDIO — đây là hành vi ĐÚNG cho chính MIC source, giữ nguyên từ B58).
+    function getMicDeviceId() {
+        if (typeof getSetting !== "function") return "";
+        return getSetting("selectedMicDeviceId", ""); // "" => dùng mic mặc định hệ thống
+    }
+
+    function nowSeconds(audioContext) {
+        // Timestamp THẬT lấy từ AudioContext.currentTime khi có; fallback duy nhất
+        // là performance.now() (không phải hard-code số 0/giá trị giả).
+        if (audioContext && typeof audioContext.currentTime === "number") {
+            return audioContext.currentTime;
+        }
+        return performance.now() / 1000;
+    }
+
+    function computeRmsDbfsPeak(timeData) {
+        // timeData: Uint8Array từ analyser.getByteTimeDomainData() (0..255, 128 = im lặng).
+        let sumSquares = 0;
+        let peak = 0;
+        for (let i = 0; i < timeData.length; i++) {
+            const v = (timeData[i] - 128) / 128;
+            const av = Math.abs(v);
+            if (av > peak) peak = av;
+            sumSquares += v * v;
+        }
+        const rms = Math.sqrt(sumSquares / timeData.length);
+        const dbfs = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+        return { rms, dbfs, peak };
+    }
+
+    function dbfsToPercent(dbfs, floor, ceiling) {
+        if (dbfs === -Infinity) return 0;
+        const pct = ((dbfs - floor) / (ceiling - floor)) * 100;
+        return Math.max(0, Math.min(100, pct));
+    }
+
+    const VU_DB_FLOOR = -50;
+    const VU_DB_CEILING = -6;
+
+    /* ---------------------------------------------------------
+       createMediaDeviceSource — cơ chế CHUNG cho MIC và SYSTEM_AUDIO (cả 2 đều
+       là getUserMedia + AnalyserNode). Khác nhau ở: deviceId đến từ đâu, và
+       MIC hoàn toàn KHÔNG có onFrame consumer nào được nối tới AI ở renderer.js.
+       DAW_MASTER KHÔNG dùng factory này (xem createDawMasterSource riêng, không
+       có capture thật trong B58).
+       --------------------------------------------------------- */
+    function createMediaDeviceSource(sourceType, resolveDeviceId, options = {}) {
+        let state = AudioSourceState.NO_DEVICE;
+        let stream = null;
+        let audioContext = null;
+        let analyser = null;
+        let mediaSourceNode = null; // MediaStreamAudioSourceNode thật — chỉ dùng để adapter cho AI (xem getRawSourceNode)
+        let rafId = null;
+        let timeData = null;
+        let freqData = null;
+
+        // TASK C62 — auto-reconnect (chỉ hoạt động khi options.autoReconnect === true, hiện tại
+        // CHỈ bật cho SYSTEM_AUDIO — xem createSystemAudioSource()). Mục tiêu: khi mất thiết bị
+        // giữa chừng, tự thử lại theo backoff tăng dần thay vì chờ user reload cả app (bug C61
+        // đã ghi nhận: startAudioMonitor() ở renderer.js chỉ được gọi 1 lần qua listener
+        // {once:true}, không có đường nào tự gọi lại).
+        let retryTimerId = null;
+        let retryDelayMs = 0;
+        const RETRY_BASE_MS = 2000;
+        const RETRY_MAX_MS = 15000;
+
+        const levelListeners = [];
+        const frameListeners = [];
+        const deviceLostListeners = [];
+        const stateChangeListeners = []; // TASK C62 — renderer.js dùng để biết CHÍNH XÁC lúc nào
+
+        // cần (re)bind Key/BPM vào audioContext/source MỚI — dùng chung 1 sự kiện cho cả lần
+        // start() đầu tiên lẫn mọi lần tự reconnect sau này (1 code path, không rẽ nhánh riêng).
+
+        function clearRetryTimer() {
+            if (retryTimerId) { clearTimeout(retryTimerId); retryTimerId = null; }
+        }
+
+        function scheduleRetry() {
+            if (!options.autoReconnect) return;
+            if (retryTimerId) return; // đã có 1 lịch retry đang chờ — KHÔNG tạo thêm (chống duplicate retry loop, mục 7/10 đề bài C62)
+            retryDelayMs = retryDelayMs ? Math.min(retryDelayMs * 2, RETRY_MAX_MS) : RETRY_BASE_MS;
+            console.log(`[AudioSource:${sourceType}] Sẽ tự thử kết nối lại sau ${retryDelayMs}ms...`);
+            retryTimerId = setTimeout(() => {
+                retryTimerId = null;
+                if (state === AudioSourceState.STOPPING || state === AudioSourceState.RUNNING) return; // đã stop() hoặc đã có nguồn khác start() lại trong lúc chờ
+                start();
+            }, retryDelayMs);
+        }
+
+        function setState(next) {
+            state = next;
+            emitStateChange(next);
+        }
+
+        function emitLevel(level) {
+            for (const cb of levelListeners) {
+                try { cb(level); } catch (e) { console.error(`[AudioSource:${sourceType}] onLevel listener lỗi:`, e); }
+            }
+        }
+        function emitFrame(frame) {
+            for (const cb of frameListeners) {
+                try { cb(frame); } catch (e) { console.error(`[AudioSource:${sourceType}] onFrame listener lỗi:`, e); }
+            }
+        }
+        function emitDeviceLost(reason) {
+            for (const cb of deviceLostListeners) {
+                try { cb(reason); } catch (e) { console.error(`[AudioSource:${sourceType}] onDeviceLost listener lỗi:`, e); }
+            }
+        }
+        function emitStateChange(next) {
+            for (const cb of stateChangeListeners) {
+                try { cb(next); } catch (e) { console.error(`[AudioSource:${sourceType}] onStateChange listener lỗi:`, e); }
+            }
+        }
+
+        function teardown() {
+            // Mục 14 đề bài: không được để requestAnimationFrame/AudioContext/MediaStream/
+            // AnalyserNode tiếp tục chạy vô hạn sau khi source đã chết.
+            if (rafId) cancelAnimationFrame(rafId);
+            rafId = null;
+            if (stream) {
+                stream.getTracks().forEach((t) => t.stop());
+                stream = null;
+            }
+            if (audioContext) {
+                audioContext.close().catch(() => {});
+                audioContext = null;
+            }
+            analyser = null;
+        }
+
+        async function start() {
+            if (state === AudioSourceState.RUNNING || state === AudioSourceState.STARTING) return;
+            const deviceId = resolveDeviceId();
+            if (!deviceId && options.requireExplicitDevice) {
+                // SYSTEM_AUDIO bắt buộc user tự chọn ở Setup — không rơi về mic mặc định
+                // (đúng nguyên tắc B56/B57 đã audit, giữ nguyên hành vi cũ, không đổi).
+                setState(AudioSourceState.NO_DEVICE);
+                return;
+            }
+
+            setState(AudioSourceState.STARTING);
+            try {
+                const constraints = deviceId
+                    ? { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                    : { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+                stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioContext.state !== "running") await audioContext.resume();
+
+                mediaSourceNode = audioContext.createMediaStreamSource(stream);
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = options.fftSize || 2048;
+                mediaSourceNode.connect(analyser);
+
+                timeData = new Uint8Array(analyser.fftSize);
+                freqData = new Uint8Array(analyser.frequencyBinCount);
+
+                // Phát hiện device bị rút giữa chừng (track kết thúc ngoài ý muốn).
+                const track = stream.getAudioTracks()[0];
+                if (track) {
+                    track.addEventListener("ended", () => {
+                        if (state !== AudioSourceState.STOPPING) {
+                            setState(AudioSourceState.ERROR);
+                            teardown();
+                            emitDeviceLost("TRACK_ENDED");
+                            scheduleRetry(); // TASK C62 — thiết bị rút giữa chừng: tự thử lại thay vì treo vĩnh viễn
+                        }
+                    });
+                }
+
+                // TASK C62 — start() thành công (kể cả sau khi retry) -> reset backoff về 0 và
+                // huỷ mọi lịch retry còn sót (không nên còn, nhưng phòng hờ tránh 2 nguồn cùng gọi start()).
+                retryDelayMs = 0;
+                clearRetryTimer();
+                setState(AudioSourceState.RUNNING);
+
+                function loop() {
+                    if (state !== AudioSourceState.RUNNING) return;
+                    analyser.getByteTimeDomainData(timeData);
+                    analyser.getByteFrequencyData(freqData);
+
+                    const { rms, dbfs, peak } = computeRmsDbfsPeak(timeData);
+                    const vuPercent = dbfsToPercent(dbfs, VU_DB_FLOOR, VU_DB_CEILING);
+
+                    emitLevel({ sourceType, rms, dbfs, peak, vuPercent, timestamp: nowSeconds(audioContext) });
+
+                    if (frameListeners.length > 0) {
+                        emitFrame({
+                            sourceType,
+                            sampleRate: audioContext.sampleRate, // THẬT, đọc trực tiếp — không hard-code
+                            channelCount: track?.getSettings?.().channelCount ?? null, // null nếu trình duyệt không báo (NOT DEFINED)
+                            frequencyData: freqData,
+                            timeDomainData: timeData,
+                            timestamp: nowSeconds(audioContext),
+                        });
+                    }
+                    rafId = requestAnimationFrame(loop);
+                }
+                loop();
+            } catch (err) {
+                console.error(`[AudioSource:${sourceType}] start() lỗi:`, err);
+                setState(deviceId ? AudioSourceState.ERROR : AudioSourceState.NO_DEVICE);
+                teardown();
+                emitDeviceLost(err && err.name ? err.name : "UNKNOWN_ERROR");
+                // TASK C62 — chỉ retry khi ĐÃ có deviceId cấu hình nhưng lỗi (thiết bị mất/không mở
+                // được) — KHÔNG retry khi state là NO_DEVICE do requireExplicitDevice chưa cấu hình
+                // (đó không phải "mất thiết bị", là "chưa chọn" — không có gì để thử lại).
+                if (deviceId) scheduleRetry();
+            }
+        }
+
+        function stop() {
+            clearRetryTimer(); // TASK C62 mục 10 — 0 retry timer còn sống sau khi stop()
+            retryDelayMs = 0;
+            if (state === AudioSourceState.NO_DEVICE) return;
+            setState(AudioSourceState.STOPPING);
+            teardown();
+            setState(AudioSourceState.NO_DEVICE);
+        }
+
+        const api = {
+            type: sourceType,
+            getState: () => state,
+            start,
+            stop,
+            onLevel: (cb) => levelListeners.push(cb),
+            onFrame: (cb) => frameListeners.push(cb),
+            onDeviceLost: (cb) => deviceLostListeners.push(cb),
+            onStateChange: (cb) => stateChangeListeners.push(cb), // TASK C62
+        };
+
+        // TASK B58 Mục 7/16 — adapter boundary CHO PHÉP DUY NHẤT với SYSTEM_AUDIO:
+        // renderer.js cần audioContext + raw MediaStreamAudioSourceNode để gọi
+        // BPMEngine.init()/KeyEngine.init() Y NGUYÊN như trước (không đổi 1 dòng
+        // thuật toán AI của Claude A). MIC KHÔNG được cấp getter này — về mặt kiến
+        // trúc không có đường nào để MIC lọt vào AI qua file này.
+        if (options.exposeRawNodeForAdapter) {
+            api.getAudioContextForAdapter = () => audioContext;
+            api.getRawSourceNodeForAdapter = () => mediaSourceNode;
+            // TASK AI-KEY-FAST-05 — chẩn đoán chỉ-đọc: trạng thái AudioContext + track thật (nhãn, muted, readyState, channelCount).
+            api.getDiagnostics = () => {
+                const t = stream && stream.getAudioTracks ? stream.getAudioTracks()[0] : null;
+                let settings = null; try { settings = t && t.getSettings ? t.getSettings() : null; } catch (e) {}
+                return { state, ctxState: audioContext ? audioContext.state : null, sampleRate: audioContext ? audioContext.sampleRate : null,
+                    trackLabel: t ? t.label : null, trackMuted: t ? t.muted : null, trackEnabled: t ? t.enabled : null, trackReadyState: t ? t.readyState : null,
+                    channelCount: settings ? settings.channelCount ?? null : null, deviceIdSet: !!(settings && settings.deviceId) };
+            };
+        }
+
+        return api;
+    }
+
+    /* ---------------------------------------------------------
+       createDawMasterSource — TASK B58 Mục 9: architecture boundary ONLY.
+       KHÔNG có native capture trong B58 (không có WASAPI addon, không mượn
+       SYSTEM_AUDIO để giả lập). State CỐ ĐỊNH NO_DEVICE — start() là no-op
+       an toàn, không throw, không crash, chỉ log rõ NOT_IMPLEMENTED.
+       --------------------------------------------------------- */
+    function createDawMasterSource() {
+        const levelListeners = [];
+        const deviceLostListeners = [];
+        let warned = false;
+
+        function start() {
+            if (!warned) {
+                console.warn("[AudioSource:DAW_MASTER] NOT_IMPLEMENTED trong B58 — chưa có native capture. " +
+                    "Master VU sẽ giữ NO_DEVICE. Xem B58-REPORT.md mục DAW_MASTER status.");
+                warned = true;
+            }
+            // Phát 1 level rỗng đúng contract (rms=0, timestamp thật) để UI có thể vẽ
+            // trạng thái "NO_DEVICE" nhất quán, KHÔNG lấy số liệu từ SYSTEM_AUDIO.
+            for (const cb of levelListeners) {
+                try { cb({ sourceType: AudioSourceType.DAW_MASTER, rms: 0, dbfs: -Infinity, peak: 0, vuPercent: 0, timestamp: performance.now() / 1000, noDevice: true }); } catch (e) { console.error(e); }
+            }
+        }
+        function stop() {}
+
+        return {
+            type: AudioSourceType.DAW_MASTER,
+            getState: () => AudioSourceState.NO_DEVICE,
+            start,
+            stop,
+            onLevel: (cb) => levelListeners.push(cb),
+            onFrame: () => {}, // KHÔNG BAO GIỜ có frame — không tồn tại capture
+            onDeviceLost: (cb) => deviceLostListeners.push(cb),
+        };
+    }
+
+    function createMicSource() {
+        // requireExplicitDevice = false: MIC dùng mic mặc định hệ thống nếu user chưa
+        // chọn mic cụ thể — đây là hành vi ĐÚNG cho MIC (khác với SYSTEM_AUDIO, nơi
+        // "không tự chọn mặc định" là bắt buộc để tránh lẫn với mic).
+        return createMediaDeviceSource(AudioSourceType.MIC, getMicDeviceId, { fftSize: 1024, requireExplicitDevice: false });
+    }
+
+    function createSystemAudioSource() {
+        return createMediaDeviceSource(AudioSourceType.SYSTEM_AUDIO, getSystemAudioDeviceId, {
+            fftSize: 2048,
+            requireExplicitDevice: true,
+            exposeRawNodeForAdapter: true, // DUY NHẤT SYSTEM_AUDIO được phép — xem ghi chú ở trên
+            autoReconnect: true, // TASK C62 — CHỈ SYSTEM_AUDIO tự reconnect (đúng phạm vi bug đã audit
+                                  // ở C61: Key/BPM/Mod không được treo vĩnh viễn sau khi mất thiết bị).
+                                  // MIC/DAW_MASTER KHÔNG bật cờ này — ngoài phạm vi C62, không đổi hành vi cũ.
+        });
+    }
+
+
+    /* ---------------------------------------------------------
+       TASK AI-FX-01 — Auto FX/Send theo sự hiện diện của NHẠC (SYSTEM_AUDIO).
+       Logic THUẦN (không DOM, không MIDI trực tiếp): nhận mẫu mức dBFS của SYSTEM_AUDIO (cùng
+       nguồn Music VU, KHÔNG phải MIC), xác nhận MUSIC_PRESENT / MUSIC_SILENT có hysteresis + thời
+       gian xác nhận, rồi gọi deps.applyFx(target) ĐÚNG 1 LẦN mỗi lần cần đổi trạng thái.
+       Không có feedback đọc ngược từ DAW => thành công chỉ là SEND_SENT_UNCONFIRMED, không bao giờ
+       "đã xác nhận". Tham số mặc định là GIÁ TRỊ KHỞI ĐẦU CHƯA hiệu chuẩn trên nguồn nhạc thật.
+       --------------------------------------------------------- */
+    const FX_AUTO_DEFAULTS = Object.freeze({
+        onDbfs: -45,            // trên ngưỡng này = "có tín hiệu hữu ích" (dBFS RMS)
+        offDbfs: -52,           // dưới ngưỡng này = "im lặng" (hysteresis 7 dB so với onDbfs)
+        // MENU-FX-FIX: YÊU CẦU CỦA KHÓI — nhạc xuất hiện => FX BẬT trong ≤ 1 s; im lặng liên tục 1 s => TẮT.
+        // (Trước đây 800 ms/6000 ms + tick 500 ms => bật trễ tới ~1,3 s và tắt sau 6 s.) Ngưỡng dBFS (onDbfs/offDbfs) và tỷ lệ KHÔNG đổi.
+        // Bật: cửa sổ 500 ms + chu kỳ tick 100 ms (renderer) => tối đa ≈ 0,5–0,7 s. Tắt: cửa sổ 1000 ms => ≈ 1,0–1,15 s.
+        confirmMusicMs: 500,    // cần tín hiệu liên tục gần như đủ trong khoảng này mới coi là có nhạc
+        confirmMusicRatio: 0.8, // tỷ lệ khung phải vượt onDbfs trong cửa sổ xác nhận có nhạc
+        confirmSilenceMs: 1000, // im lặng liên tục thế này thì tắt (HỆ QUẢ: khoảng lặng/chuyển bài > 1 s sẽ tắt rồi bật lại FX)
+        diagMs: 30000,          // MENU-FX-AUTO-OFF: chu kỳ ghi log chẩn đoán mức dBFS (chỉ để quan sát, không ảnh hưởng quyết định)
+        manualHoldMs: 60000,    // MENU-FX-FIX: người dùng bấm tay => Auto KHÔNG ghi đè trong khoảng này, hết hạn thì tiếp quản theo trạng thái nhạc HIỆN TẠI
+        silenceMaxAboveRatio: 0.02, // tối đa 2% khung vượt offDbfs trong cửa sổ im lặng (chịu xung nhiễu lẻ)
+        staleMs: 2000,          // không có khung mới quá lâu => nguồn không khả dụng, ĐÓNG BĂNG (không bật/tắt)
+        retryMs: 5000,          // gửi lỗi: thử lại sau khoảng này, tối đa maxRetries lần cho cùng 1 mục tiêu
+        maxRetries: 2,
+    });
+    const FxMusicState = Object.freeze({ UNKNOWN: "UNKNOWN", MUSIC_PRESENT: "MUSIC_PRESENT", MUSIC_SILENT: "MUSIC_SILENT", SOURCE_UNAVAILABLE: "SOURCE_UNAVAILABLE" });
+    const FxActionState = Object.freeze({ IDLE: "IDLE", SEND_SENT_UNCONFIRMED: "SEND_SENT_UNCONFIRMED", FX_ACTION_FAILED: "FX_ACTION_FAILED", MANUAL_OVERRIDE: "MANUAL_OVERRIDE" });
+
+    function createFxAutoController(deps) {
+        const P = Object.assign({}, FX_AUTO_DEFAULTS, deps.params || {});
+        const now = deps.now || (() => Date.now());
+        const frames = []; // {t, db}
+        let musicState = FxMusicState.UNKNOWN;
+        let actionState = FxActionState.IDLE;
+        let sourceRunning = false, lastFrameAt = null, availableSince = null;
+        let manualOverride = false, inflight = false, retries = 0, retryAt = null, lastTarget = null;
+        let sentCount = 0, failedCount = 0, lastResult = null, lastDbfs = null, framesSeen = 0;
+        let lastDiagAt = null;
+        let manualUntil = 0, pending = false, dirty = false, manualSeq = 0; // MENU-FX-FIX
+        const notify = () => { try { deps.onState && deps.onState(getInfo()); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } };
+
+        // MENU-FX-AUTO-OFF — số liệu chẩn đoán (KHÔNG dùng để quyết định): mức dBFS min/trung bình/max trong ~1 s gần nhất + tuổi khung cuối.
+        function levelStats(t) {
+            let n = 0, nf = 0, sum = 0, mn = Infinity, mx = -Infinity;
+            for (let i = frames.length - 1; i >= 0 && frames[i].t >= t - 1000; i--) { n++; const d = frames[i].db; if (Number.isFinite(d)) { nf++; sum += d; if (d < mn) mn = d; if (d > mx) mx = d; } }
+            return { n, finite: nf, min: nf ? +mn.toFixed(1) : null, avg: nf ? +(sum / nf).toFixed(1) : null, max: nf ? +mx.toFixed(1) : null, digitalSilence: n - nf };
+        }
+        function getInfo() {
+            const tnow = now();
+            return { levelStats: levelStats(tnow), msSinceFrame: lastFrameAt === null ? null : Math.round(tnow - lastFrameAt), musicState, actionState, fxTarget: lastTarget, manualOverride, manualUntil: manualOverride ? manualUntil : null, pending, sentCount, failedCount, retries, lastResult, lastDbfs, framesSeen, sourceRunning };
+        }
+        function prune(t) {
+            const keepFrom = t - Math.max(P.confirmSilenceMs, P.confirmMusicMs) - 500;
+            let i = 0; while (i < frames.length && frames[i].t < keepFrom) i++;
+            if (i > 0) frames.splice(0, i);
+        }
+        function feedLevel(dbfs, t) {
+            const tt = t === undefined ? now() : t;
+            if (availableSince === null) availableSince = tt;
+            lastFrameAt = tt; lastDbfs = Number.isFinite(dbfs) ? +dbfs.toFixed(1) : null; framesSeen++;
+            frames.push({ t: tt, db: Number.isFinite(dbfs) ? dbfs : -Infinity });
+            prune(tt);
+        }
+        function setSourceState(running) {
+            const was = sourceRunning; sourceRunning = !!running;
+            if (!sourceRunning && was) { frames.length = 0; availableSince = null; lastFrameAt = null; }
+            if (sourceRunning && !was) { availableSince = null; }
+        }
+        // Đo trong cửa sổ [t-windowMs, t]; trả null nếu chưa đủ lịch sử để kết luận.
+        function windowStats(t, windowMs, thresholdDb) {
+            if (availableSince === null || t - availableSince < windowMs * 0.95) return null;
+            let n = 0, above = 0;
+            for (let i = frames.length - 1; i >= 0 && frames[i].t >= t - windowMs; i--) { n++; if (frames[i].db > thresholdDb) above++; }
+            return n >= 3 ? { n, ratio: above / n } : null;
+        }
+        function evaluate(t) {
+            // MENU-FX-FIX: hết thời gian giữ quyền thủ công => Auto tiếp quản theo trạng thái nhạc HIỆN TẠI (musicState được cập nhật mỗi tick,
+            // kể cả trong lúc giữ quyền; không dùng trạng thái đã lưu/cũ). Không còn "nhường tới lần chuyển nhạc kế tiếp".
+            if (deps.onDiag) { if (lastDiagAt === null) lastDiagAt = t; else if (t - lastDiagAt >= P.diagMs) { lastDiagAt = t; try { deps.onDiag(getInfo()); } catch (e) { /* chẩn đoán không được làm hỏng bộ điều khiển */ } } }
+            let released = false;
+            if (manualOverride && t >= manualUntil) {
+                manualOverride = false; retries = 0; retryAt = null; released = true;
+                if (actionState === FxActionState.MANUAL_OVERRIDE) actionState = FxActionState.IDLE;
+            }
+            if (!sourceRunning || lastFrameAt === null || t - lastFrameAt > P.staleMs) {
+                if (musicState !== FxMusicState.SOURCE_UNAVAILABLE) { musicState = FxMusicState.SOURCE_UNAVAILABLE; retryAt = null; notify(); }
+                else if (released) notify();
+                return;
+            }
+            let next = musicState;
+            if (musicState === FxMusicState.SOURCE_UNAVAILABLE) next = FxMusicState.UNKNOWN;
+            if (next === FxMusicState.MUSIC_PRESENT) {
+                const st = windowStats(t, P.confirmSilenceMs, P.offDbfs);
+                if (st && st.ratio <= P.silenceMaxAboveRatio) next = FxMusicState.MUSIC_SILENT;
+            } else {
+                const st = windowStats(t, P.confirmMusicMs, P.onDbfs);
+                if (st && st.ratio >= P.confirmMusicRatio) next = FxMusicState.MUSIC_PRESENT;
+                else if (next === FxMusicState.UNKNOWN) {
+                    const ss = windowStats(t, P.confirmSilenceMs, P.offDbfs);
+                    if (ss && ss.ratio <= P.silenceMaxAboveRatio) next = FxMusicState.MUSIC_SILENT;
+                }
+            }
+            if (next !== musicState) {
+                const prev = musicState; musicState = next;
+                // MENU-FX-FIX: chuyển trạng thái nhạc KHÔNG còn kết thúc quyền thủ công (chỉ hết 60 s mới tiếp quản).
+                if (!manualOverride && (next === FxMusicState.MUSIC_PRESENT || next === FxMusicState.MUSIC_SILENT)) { retries = 0; retryAt = null; }
+                notify();
+                if (prev !== next) reconcile(t);
+            } else if (released) { notify(); reconcile(t); }
+            else if (retryAt !== null && t >= retryAt) { retryAt = null; reconcile(t); }
+        }
+        function desiredTarget() {
+            if (musicState === FxMusicState.MUSIC_PRESENT) return true;
+            if (musicState === FxMusicState.MUSIC_SILENT) return false;
+            return null;
+        }
+        async function reconcile(t) {
+            if (manualOverride) return;
+            if (inflight) { dirty = true; return; } // MENU-FX-FIX: nhạc đổi trạng thái trong lúc lệnh trước chưa trả lời => kiểm lại sau khi nó xong (trước đây bị MẤT)
+            const target = desiredTarget();
+            if (target === null) return;
+            if (deps.getFxState() === target) { // đã đúng: KHÔNG gửi
+                if (actionState === FxActionState.FX_ACTION_FAILED) actionState = FxActionState.IDLE;
+                // MENU-FX-FIX: vẫn phải ĐỒNG BỘ NÚT với yêu cầu hiện tại. Trước đây nhánh này thoát sớm nên nút kẹt ở trạng thái cũ
+                // (vd: BẬT bị lỗi/timeout -> trạng thái "đã gửi" vẫn là TẮT -> nhạc dừng -> không gửi và nút KHÔNG được tắt).
+                lastTarget = target; try { deps.onRequest && deps.onRequest(target); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ }
+                notify(); return;
+            }
+            if (lastTarget !== target) retries = 0;
+            lastTarget = target; inflight = true; pending = true; lastResult = null; // MENU-FX-FIX: chưa có phản hồi => không giữ kết quả cũ (tránh hiện "đã gửi" giả cho yêu cầu mới)
+            const seq = manualSeq;
+            try { deps.onRequest && deps.onRequest(target); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } // AI-FIX-06: TRẠNG THÁI YÊU CẦU tách khỏi trạng thái đã gửi
+            notify(); // MENU-FX-FIX: báo ngay "đang gửi, chưa có phản hồi" để UI không giữ kết quả/tooltip cũ trong lúc chờ
+            let res;
+            try { res = await deps.applyFx(target); } catch (e) { res = { ok: false, error: String(e) }; }
+            inflight = false; pending = false;
+            if (seq !== manualSeq) { notify(); return; } // người dùng đã bấm tay trong lúc chờ: kết quả Auto cũ không được ghi đè trạng thái hiển thị thủ công
+            lastResult = res ? { ok: !!res.ok, partial: !!res.partial, reason: res.reason || res.status || null } : null;
+            if (res && res.ok) {
+                sentCount++; actionState = FxActionState.SEND_SENT_UNCONFIRMED; retryAt = null;
+            } else {
+                failedCount++; actionState = FxActionState.FX_ACTION_FAILED;
+                const nonRetryable = res && (res.reason === "NOT_CONFIGURED" || res.status === "NOT_CONFIGURED" || res.status === "MOUSE_DISABLED");
+                if (!nonRetryable && retries < P.maxRetries) { retries++; retryAt = now() + P.retryMs; } else { retryAt = null; }
+            }
+            notify();
+            if (dirty) { dirty = false; reconcile(now()); }
+        }
+        // MENU-FX-FIX: người dùng bấm FX tay => Auto nhường quyền đúng P.manualHoldMs (60 s); bấm tiếp thì tính lại 60 s.
+        // `target` (tuỳ chọn) = trạng thái người dùng yêu cầu. Kết quả gửi báo về qua reportManualResult().
+        function notifyManual(target) {
+            manualOverride = true; manualUntil = now() + P.manualHoldMs; retryAt = null; retries = 0; dirty = false; manualSeq++;
+            actionState = FxActionState.MANUAL_OVERRIDE;
+            if (typeof target === "boolean") { lastTarget = target; pending = true; lastResult = null; }
+            notify();
+        }
+        function reportManualResult(res, seq) {
+            if (seq !== undefined && seq !== manualSeq) return; // phản hồi của lần bấm cũ
+            pending = false;
+            lastResult = res ? { ok: !!res.ok, partial: !!res.partial, reason: res.reason || res.status || null } : null;
+            if (lastResult && lastResult.ok) sentCount++; else failedCount++;
+            notify();
+        }
+        function tick(t) { evaluate(t === undefined ? now() : t); }
+        return { feedLevel, setSourceState, tick, notifyManual, reportManualResult, getManualSeq: () => manualSeq, getInfo, params: P };
+    }
+
+
+    // TASK AI-FX-01 — Nhóm Send do nút FX quản lý (Reverb + Delay). Logic thuần, inject deps để test được.
+    // Chỉ điều khiển những Send ĐÃ có mapping (không đoán). Theo dõi trạng thái "đã gửi" TỪNG Send (không có
+    // feedback DAW) để không gửi trùng và để thử lại CHỈ Send bị lỗi. Kết quả: ok chỉ khi MỌI Send đã cấu hình
+    // đều gửi được; nếu một phần => partial (không tuyên bố đồng bộ toàn bộ).
+    function createFxSendGroup(deps) {
+        const names = deps.actions;            // vd ["FX_SEND_REVERB","FX_SEND_DELAY"]
+        const sent = {};                       // action -> true/false/undefined (trạng thái đã GỬI, chưa xác nhận)
+        function managed() {
+            const cfg = names.filter((n) => deps.isConfigured(n));
+            if (cfg.length) return cfg;
+            return deps.isConfigured(deps.legacyAction) ? [deps.legacyAction] : [];
+        }
+        function seed(state) { names.concat([deps.legacyAction]).forEach((n) => { if (sent[n] === undefined) sent[n] = !!state; }); }
+        // MENU-FX-FIX: lệnh không trả lời quá deps.timeoutMs => coi là LỖI (TIMEOUT), không kẹt hàng đợi vĩnh viễn và không báo "đã gửi".
+        function withTimeout(p) {
+            if (!deps.timeoutMs) return p;
+            const setT = deps.setTimer || ((typeof setTimeout === "function") ? setTimeout : null), clrT = deps.clearTimer || ((typeof clearTimeout === "function") ? clearTimeout : null);
+            if (!setT) return p;
+            return new Promise((resolve, reject) => {
+                const h = setT(() => resolve({ ok: false, reason: "TIMEOUT" }), deps.timeoutMs);
+                Promise.resolve(p).then((v) => { clrT && clrT(h); resolve(v); }, (e) => { clrT && clrT(h); reject(e); });
+            });
+        }
+        let chain = Promise.resolve(); // hàng đợi tuần tự: Auto + bấm tay không bao giờ chạy chồng nhau
+        function apply(target, opts = {}) {
+            const p = chain.then(() => applyNow(target, opts), () => applyNow(target, opts));
+            chain = p.catch(() => {});
+            return p;
+        }
+        async function applyNow(target, opts) {
+            const list = managed();
+            if (!list.length) return { ok: false, reason: "NOT_CONFIGURED", results: {} };
+            const results = {};
+            for (const n of list) {                      // tuần tự, không chồng lệnh
+                if (!opts.force && sent[n] === target) { results[n] = { ok: true, skipped: true }; continue; }
+                let r;
+                try { r = await withTimeout(deps.execute(n, target)); } catch (e) { r = { ok: false, error: String(e) }; }
+                results[n] = r;
+                if (r && r.ok) sent[n] = target;
+                // MENU-FX-FIX: runtime treo => các Send còn lại cũng sẽ treo; không chờ thêm timeout cho từng Send (UI phải báo TIMEOUT sớm).
+                if (r && r.reason === "TIMEOUT") { for (const m of list.slice(list.indexOf(n) + 1)) results[m] = { ok: false, reason: "TIMEOUT", notAttempted: true }; break; }
+            }
+            const vals = Object.values(results);
+            const okAll = vals.every((r) => r.ok), okSome = vals.some((r) => r.ok && !r.skipped);
+            const nonRetry = vals.filter((r) => !r.ok).every((r) => r.reason === "NOT_CONFIGURED" || r.status === "NOT_CONFIGURED" || r.status === "MOUSE_DISABLED");
+            return { ok: okAll, partial: !okAll && (okSome || vals.some((r) => r.ok)), reason: okAll ? undefined : (nonRetry ? "NOT_CONFIGURED" : (vals.some((r) => r.reason === "TIMEOUT") ? "TIMEOUT" : "SEND_FAILED")), results, sends: list.slice() };
+        }
+        // Bấm tay: đánh dấu các Send đã gửi theo kết quả thật (deps.execute đã được gọi bên ngoài).
+        function markSent(n, state) { sent[n] = state; }
+        // Trạng thái "đã gửi" gộp của các Send đang quản lý: true/false nếu tất cả khớp, null nếu lẫn lộn/chưa có Send nào (KHÔNG phải trạng thái DAW đã xác nhận).
+        function aggregate() {
+            const list = managed(); if (!list.length) return null;
+            const v = list.map((n) => sent[n]); return v.every((x) => x === true) ? true : v.every((x) => x === false) ? false : null;
+        }
+        return { apply, seed, markSent, aggregate, managed, getSent: () => Object.assign({}, sent) };
+    }
+
+    global.AudioSourceType = AudioSourceType;
+    global.AudioSourceState = AudioSourceState;
+    global.AudioSource = {
+        createMicSource,
+        createSystemAudioSource,
+        createDawMasterSource,
+        createFxAutoController, // TASK AI-FX-01
+        createFxSendGroup,
+        FxMusicState, FxActionState, FX_AUTO_DEFAULTS,
+        getSystemAudioDeviceId, // export để renderer.js dùng lại đúng 1 nguồn sự thật
+        setSystemAudioDeviceId, // TASK A65 — cấu hình thủ công (DevTools) cho tới khi có Setup UI riêng
+        getMicDeviceId, // TASK B71 — export để renderer.js (onSetupChanged) biết deviceId MIC mới nhất
+                        // khi Setup lưu "selectedMicDeviceId", dùng để quyết định có cần
+                        // stop()/start() lại __micSource hay không (giống hệt cơ chế C62 đã có
+                        // cho SYSTEM_AUDIO). KHÔNG thêm setMicDeviceId — Setup ghi thẳng qua
+                        // saveSetting("selectedMicDeviceId", ...) như mọi setting khác, không
+                        // cần setter riêng (khác SYSTEM_AUDIO, nơi setSystemAudioDeviceId() còn
+                        // được dùng cho DevTools thủ công trước khi B71 có UI).
+    };
+})(window);
