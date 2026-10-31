@@ -1004,6 +1004,34 @@ if (applyToneBtn) {
     applyToneBtn.disabled = true; // Mục VI: MOD OFF -> SET disabled
 }
 
+// TASK MANUAL-KEY-MOD-RESTORE-01 — danh sách lựa chọn Tone (+10…-10) và Key (24 Key) đã bị mất khỏi index.html
+// (commit a9776ef ghi đè cả file, chỉ còn 3 mục). KHÔNG sửa HTML (yêu cầu của Khói) -> khôi phục bằng JS,
+// đúng thứ tự/nhãn của bản gốc. Idempotent: chỉ nạp lại khi danh sách đang thiếu; giữ nguyên giá trị đang chọn.
+const MANUAL_TONE_VALUES = ["+10", "+9", "+8", "+7", "+6", "+5", "+4", "+3", "+2", "+1", "0", "-1", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9", "-10"];
+const MANUAL_KEY_VALUES = [
+    "AI Key Detect",
+    "C Major", "Db Major", "D Major", "Eb Major", "E Major", "F Major", "F# Major", "G Major", "Ab Major", "A Major", "Bb Major", "B Major",
+    "C Minor", "C# Minor", "D Minor", "Eb Minor", "E Minor", "F Minor", "F# Minor", "G Minor", "G# Minor", "A Minor", "Bb Minor", "B Minor",
+];
+function restoreSelectOptions(selectEl, values) {
+    if (!selectEl || !selectEl.options) return;
+    const have = Array.from(selectEl.options).map((o) => o.value);
+    if (have.length === values.length && values.every((v, i) => have[i] === v)) return; // đã đủ -> không đụng
+    const keep = selectEl.value;
+    while (selectEl.options.length) selectEl.remove(0);
+    values.forEach((v) => selectEl.add(new Option(v, v)));
+    selectEl.value = values.includes(keep) ? keep : values[0];
+}
+restoreSelectOptions(toneSelector, MANUAL_TONE_VALUES);
+if (toneSelector) toneSelector.value = "0";
+
+// Trạng thái Tone THỦ CÔNG (chỉ có nghĩa khi MOD ON): manualToneOffset = độ lệch tuyệt đối so với Key gốc đã yêu cầu ở lần SET
+// gần nhất; manualToneSet = đã SET ít nhất 1 lần trong phiên MOD ON này; soundShifterApplied = tổng bán cung đã gửi cho SoundShifter.
+let manualToneOffset = 0;
+let manualToneSet = false;
+let soundShifterApplied = 0;
+let manualToneChain = Promise.resolve(); // tuần tự hoá các lần SET bấm liên tiếp
+
 /* ==========================================================
    7. KEY TRANSPOSE (hỗ trợ cả dấu thăng # và dấu giáng b)
    ========================================================== */
@@ -1048,9 +1076,39 @@ function transposeKey(currentKey, steps) {
     let idx = notes.indexOf(normalizedNote);
     if (idx === -1) return currentKey; // an toàn: không nhận diện được nốt thì trả về nguyên bản
 
-    let newIndex = (idx + parseInt(steps, 10) + 12) % 12;
+    const stepN = parseInt(steps, 10) || 0;
+    let newIndex = (((idx + stepN) % 12) + 12) % 12; // đúng cho mọi số nguyên (kể cả < -12, > 12)
 
     return notes[newIndex] + type;
+}
+
+// Chuẩn hoá tên Key trước khi gửi xuống Auto-Tune: sendKeyToAutotune() (vocalCommandRouter.js) chỉ hiểu nốt thăng (C#, D#...);
+// tên giáng (Db, Eb...) bị đọc nhầm thành "D", "E" -> sai Key. Chỉ đổi tên gửi đi, nhãn hiển thị vẫn là nhãn người dùng chọn.
+function normalizeKeyForSend(keyName) {
+    if (typeof keyName !== "string") return keyName;
+    const m = keyName.match(/^([A-G]b)(.*)$/);
+    return m && flatToSharp[m[1]] ? flatToSharp[m[1]] + m[2] : keyName;
+}
+
+// Chữ hiển thị trong ô Key: LISTENING khi AI chưa có kết quả thật; nếu đã SET Tone thủ công (MOD ON) thì hiện Key SAU khi dịch tone
+// (phân biệt rõ Key gốc = originalKey/keySource, Tone dịch = manualToneOffset).
+function displayKeyText(value, source) {
+    if (source === "ai" && !keyEverDetected) return "LISTENING";
+    if (manualToneSet && isManualOverrideActive()) return transposeKey(value, manualToneOffset);
+    return value;
+}
+
+// Vẽ lại 3 ô MOD + ô Key theo Tone thủ công hiện hành (không gửi lệnh nào).
+function renderManualToneDisplay(statusOverride) {
+    const keyText = displayKeyText(getActiveKeyValue(), getActiveSourceName());
+    const off = manualToneOffset;
+    const modTimeEl = document.getElementById("modTime");
+    const modStatusEl = document.getElementById("modStatus");
+    const modTimelineEl = document.getElementById("modTimeline");
+    if (currentKeyEl) currentKeyEl.textContent = keyText;
+    if (modTimeEl) modTimeEl.textContent = "--:--";
+    if (modStatusEl) modStatusEl.textContent = statusOverride || (keyText === "LISTENING" ? ((off > 0 ? "+" : "") + off + " SEMITONES") : keyText);
+    if (modTimelineEl) modTimelineEl.textContent = (off > 0 ? "+" : "") + off + " SEMITONES";
 }
 
 document.getElementById("applyToneBtn")?.addEventListener("click", () => {
@@ -1059,40 +1117,37 @@ document.getElementById("applyToneBtn")?.addEventListener("click", () => {
         return;
     }
 
-    const toneVal = parseInt(document.getElementById("toneSelector")?.value ?? "0", 10);
-    const newKey = transposeKey(originalKey, toneVal);
-
-    const currentKeyEl = document.getElementById("currentKey");
-    if (currentKeyEl) currentKeyEl.textContent = newKey;
-
-    const modTimeEl = document.getElementById("modTime");
-    if (modTimeEl) modTimeEl.textContent = "--:--";
-
-    const modStatusEl = document.getElementById("modStatus");
-    if (modStatusEl) modStatusEl.textContent = "Đang gửi...";
-
-    const modTimelineEl = document.getElementById("modTimeline");
-    if (modTimelineEl) modTimelineEl.textContent = (toneVal > 0 ? "+" : "") + toneVal + " SEMITONES";
-
+    // Giá trị dropdown = độ lệch TUYỆT ĐỐI so với Key gốc (+3 nghĩa là Key gốc + 3 bán cung), KHÔNG phải "nhấn thêm 3 lần".
+    // Mỗi lần SET chỉ gửi đúng phần CHÊNH so với tone đang áp (sendToneTarget lo Auto-Tune; SoundShifter tự tính bên dưới),
+    // nên SET +1 rồi +2 rồi +3 = mỗi bước đúng 1 bán cung; SET lại cùng giá trị = không gửi gì.
+    const toneVal = parseInt(document.getElementById("toneSelector")?.value ?? "0", 10) || 0;
+    manualToneOffset = toneVal;
+    manualToneSet = true;
+    renderManualToneDisplay("Đang gửi...");
     setStatus("dot-mod", "pending"); // cam: đang gửi, chờ kết quả thực thi
 
-    // SET có 2 nhiệm vụ cùng lúc: gửi tone tới Auto-Tune (đúng số bán cung trên menu)
-    // VÀ gửi tới SoundShifter (tự nhân theo SOUNDSHIFTER_STEP_RATIO bên trong hàm) —
-    // chạy song song để không bị lệch thời điểm giữa 2 plugin.
-    Promise.all([
-        sendToneStep(toneVal),
-        sendToneStepToSoundShifter(toneVal),
-    ]).then(([autotuneResult, soundshifterResult]) => {
+    const run = () => Promise.all([
+        sendToneTarget(toneVal),
+        (async () => {
+            const r = await sendToneStepToSoundShifter(toneVal - soundShifterApplied);
+            if (r && r.ok) soundShifterApplied = toneVal;
+            return r;
+        })(),
+    ]);
+    manualToneChain = manualToneChain.then(run, run);
+    manualToneChain.then(([autotuneResult, soundshifterResult]) => {
+        if (manualToneOffset !== toneVal || !manualToneSet) return; // đã có lần SET mới hơn / MOD đã tắt -> kết quả cũ không được ghi đè hiển thị
         if (autotuneResult.ok && soundshifterResult.ok) {
             setStatus("dot-mod", "online"); // xanh: cả 2 plugin đã nhận lệnh thành công
-            if (modStatusEl) modStatusEl.textContent = newKey;
+            renderManualToneDisplay();
         } else {
             setStatus("dot-mod", "offline"); // đỏ: ít nhất 1 trong 2 plugin gửi lỗi
             const which = !autotuneResult.ok && !soundshifterResult.ok
                 ? "Auto-Tune & SoundShifter"
                 : (!autotuneResult.ok ? "Auto-Tune" : "SoundShifter");
+            const modStatusEl = document.getElementById("modStatus");
             if (modStatusEl) modStatusEl.textContent = `⚠️ Lỗi gửi Mod (${which})`;
-            if (!autotuneResult.ok) console.error("sendToneStep (Auto-Tune) lỗi:", autotuneResult.detail);
+            if (!autotuneResult.ok) console.error("sendToneTarget (Auto-Tune) lỗi:", autotuneResult.detail);
             if (!soundshifterResult.ok) console.error("sendToneStepToSoundShifter lỗi:", soundshifterResult.detail);
         }
     });
@@ -1122,7 +1177,7 @@ const keySource = {
     // REWRITE — Manual tách field rõ ràng selectedKey (preview, ghi mỗi lần đổi dropdown) vs
     // committedKey (chỉ ghi SAU KHI Auto-Tune xác nhận SEND thành công). Không dùng 1 field
     // "value" chung cho cả 2 ý nghĩa nữa (đúng yêu cầu boundary mới — xem báo cáo).
-    manual: { active: false, selectedKey: null, committedKey: null, deadlineAt: null, tickHandle: null },
+    manual: { active: false, selectedKey: null, committedKey: null, deadlineAt: null, tickHandle: null, sending: false }, // sending: lệnh SEND Manual đang bay (chưa xác nhận) — AI không được chen vào
     songDb: { active: false, value: null, bpm: null, title: null, artist: null },
     ai: { value: appState.originalKey, provisional: null }
 };
@@ -1286,7 +1341,8 @@ function applyActiveKeyToPlugin(sourceLabel) {
     // -> hiển thị LISTENING, KHÔNG hiện giá trị hạt giống nội bộ (vd "G# Minor"). `value` vẫn
     // giữ nguyên (không đổi) cho các dòng bên dưới (sendKeyToAutotune/dedupe/originalKey) — CHỈ
     // chữ hiển thị bị thay, không có rủi ro gửi "LISTENING" xuống Plugin.
-    if (currentKeyEl) currentKeyEl.textContent = (source === "ai" && !keyEverDetected) ? "LISTENING" : value;
+    const sendValue = typeof normalizeKeyForSend === "function" ? normalizeKeyForSend(value) : value; // tên giáng -> thăng cho sendKeyToAutotune (nhãn hiển thị giữ nguyên)
+    if (currentKeyEl) currentKeyEl.textContent = typeof displayKeyText === "function" ? displayKeyText(value, source) : ((source === "ai" && !keyEverDetected) ? "LISTENING" : value);
     // ===== QUY TẮC KIẾN TRÚC VĨNH VIỄN (đọc kỹ trước khi sửa vùng này) =====
     // AI Key và Manual Key là 2 nguồn điều khiển tách biệt hoàn toàn.
     // Khi AI (hoặc Song Database) đang active:
@@ -1298,12 +1354,14 @@ function applyActiveKeyToPlugin(sourceLabel) {
     //     giờ được giả lập bằng cách gọi applyKeyBtn.click() hay Manual SEND.
     // "AI Key Detect" là NHÃN MODE của dropdown, không phải một giá trị Key.
     // ========================================================================
-    if (keySelector && source !== "manual") keySelector.value = "AI Key Detect"; // KHÔNG gán key thật (mục 3/4/14/16)
+    // MANUAL-KEY-MOD-RESTORE-01: chỉ đặt nhãn mode khi người dùng KHÔNG đang giữ lựa chọn Key tay (selectedKey) — AI không được ghi đè lựa chọn của người dùng.
+    if (keySelector && source !== "manual" && !keySource.manual?.selectedKey) keySelector.value = "AI Key Detect"; // KHÔNG gán key thật (mục 3/4/14/16)
 
     logKeySource(sourceLabel);
     refreshKeySourceDisplay();
 
     if (value === lastPluginKey) return; // giá trị không đổi thật -> khỏi gửi lại, tránh spam Plugin
+    if (sendValue === lastPluginKey) return; // cùng Key nhưng khác cách viết (Db = C#): lastPluginKey lưu dạng đã chuẩn hoá
 
     if (source === "ai" && isAiControlActive()) {
 
@@ -1311,7 +1369,7 @@ function applyActiveKeyToPlugin(sourceLabel) {
         // Workflow -> PluginController -> Bridge lo phần gửi thật (xem onPluginCommand cuối file).
         console.log("[ControlSource] AI_CONTROL — bỏ qua gửi Key trực tiếp, chờ Bridge từ Core.");
         setStatus("dot-key", "online");
-        lastPluginKey = value;
+        lastPluginKey = sendValue;
         return;
 
     }
@@ -1323,14 +1381,14 @@ function applyActiveKeyToPlugin(sourceLabel) {
     // TASK MIDI-01 — correlation ID cho 1 lần áp dụng Key (đọc bởi midiDiag trong appSettings.js); AI_KEY_READY ≠ MIDI_SEND_ATTEMPTED.
     try { window.__midiCorrelation = { id: `k${Date.now().toString(36)}-${(window.__midiCorrSeq = (window.__midiCorrSeq || 0) + 1)}`, key: value, caller: sourceLabel || null };
           if (typeof midiDiag === "function") midiDiag("AI_KEY_READY", { key: value, caller: sourceLabel || null }); } catch (e) {}
-    sendKeyToAutotune(value).then((result) => {
+    sendKeyToAutotune(sendValue).then((result) => {
 
         if (typeof aiRecordPluginSend === "function") aiRecordPluginSend(value, result, sourceLabel); // TASK AI-KEY-FAST-07 (chỉ đếm/log)
         try { if (typeof midiDiag === "function") midiDiag("PLUGIN_SEND_RESULT", { key: value, ok: !!result.ok, driver: result.driverUsed || null, status: result.status || null, midi: result.midi || null, confirmation: result.confirmation || null }); } catch (e) {}
         if (result.ok) {
             if (typeof pluginSendOutcome === "function") pluginSendOutcome(value, result);
             setStatus("dot-key", "online");
-            lastPluginKey = value;
+            lastPluginKey = sendValue;
         } else {
             setStatus("dot-key", "offline");
             if (!(typeof pluginSendOutcome === "function" && pluginSendOutcome(value, result))) console.error("sendKeyToAutotune lỗi:", result.detail);
@@ -1376,6 +1434,7 @@ function startManualOverrideCountdown() {
 
             console.log("[Manual Timer] Expired");
             cancelManualOverride();
+            keySource.manual.selectedKey = null; // hết hạn Manual: nhả lựa chọn cũ để dropdown quay về "AI Key Detect" (không kẹt Key cũ)
             // Mục VII: Plugin tự nhận Key AI hiện tại, HOẶC quay về Song Database nếu đó đang
             // là nguồn hiện tại (không quay về Manual — Manual đã tắt hẳn).
             applyActiveKeyToPlugin(keySource.songDb.active ? "Song Database" : "AI Detect");
@@ -1636,7 +1695,7 @@ function startAiRealtimeLoop() {
         } catch (e) {}
         refreshKeySourceDisplay();
 
-        if (getActiveSourceName() === "ai") {
+        if (getActiveSourceName() === "ai" && !(keySource.manual && keySource.manual.sending)) { // sending: người dùng vừa bấm SEND Manual, chưa xác nhận -> AI không chen vào
 
             if (keyInfoEl) keyInfoEl.textContent = `Auto Detect (${Math.round(result.confidence * 100)}% tin cậy)`;
             applyActiveKeyToPlugin("AI Detect");
@@ -1656,6 +1715,7 @@ function startAiRealtimeLoop() {
 function triggerAiKeyDetect() {
 
     cancelManualOverride();
+    if (keySource.manual) keySource.manual.selectedKey = null; // người dùng chủ động quay về Auto: nhả lựa chọn Key tay
 
     // "Manual OFF -> Plugin lập tức dùng AI. Không mất dữ liệu. Không Detect lại từ đầu."
     // AI luôn chạy NỀN liên tục suốt lúc Manual bật (startAiRealtimeLoop không bao giờ dừng),
@@ -1706,6 +1766,7 @@ const keySelector = document.getElementById("keySelector");
 const applyKeyBtn = document.getElementById("applyKeyBtn");
 const currentKeyEl = document.getElementById("currentKey");
 const keyInfoEl = document.getElementById("keyInfo");
+restoreSelectOptions(keySelector, MANUAL_KEY_VALUES); // MANUAL-KEY-MOD-RESTORE-01: khôi phục 24 Key + "AI Key Detect" (HTML chỉ còn 3 mục)
 
 applyKeyBtn?.addEventListener("click", () => {
     // REWRITE — lấy đúng giá trị Manual ĐANG CHỌN từ chính state của Manual (selectedKey),
@@ -1721,11 +1782,9 @@ applyKeyBtn?.addEventListener("click", () => {
         return;
     }
 
-    // Nếu AI đang dò dở (foreground) từ trước -> huỷ, tránh nó tự áp kết quả đè lên Manual vừa chọn
-    if (window.__keyDetectStopWatcher) {
-        window.__keyDetectStopWatcher();
-        window.__keyDetectStopWatcher = null;
-    }
+    // MANUAL-KEY-MOD-RESTORE-01: KHÔNG huỷ watcher AI nữa (bản cũ huỷ rồi không ai chạy lại -> sau Manual AI "chết"). Thay vào đó
+    // đánh dấu `sending`: kết quả AI đến trong lúc lệnh Manual đang bay sẽ không được áp đè (xem startAiRealtimeLoop).
+    keySource.manual.sending = true;
 
     // Chỉ cập nhật hiển thị NGAY (preview, cosmetic) — KHÔNG commit keySource.manual ở đây.
     // Lý do (Mục 6: "Không được commit trước khi Auto-Tune xác nhận thành công"): nếu commit
@@ -1743,7 +1802,8 @@ applyKeyBtn?.addEventListener("click", () => {
     // theo đúng ranh giới task (Mục 20 "nếu cần sửa ngoài renderer.js: DỪNG và báo cáo trước"),
     // KHÔNG thêm tham số {source:"manual"} vào chữ ký hàm thật ở đây. Nguồn gọi (AI/Manual) vẫn
     // được phân biệt rõ 100% qua VỊ TRÍ gọi (3 call site cố định, xem báo cáo) + logKeySource().
-    sendKeyToAutotune(selectedKey).then((result) => {
+    sendKeyToAutotune(normalizeKeyForSend(selectedKey)).then((result) => {
+        keySource.manual.sending = false;
         if (result.ok) {
             // CHỈ commit Manual state khi Auto-Tune xác nhận nhận được Key (Mục 6: preview -> validate -> committed).
             keySource.manual.committedKey = selectedKey;
@@ -1755,8 +1815,9 @@ applyKeyBtn?.addEventListener("click", () => {
             logKeySource("Manual Override");
 
             // SEND thành công -> Plugin chính thức đổi, bắt đầu đếm ngược 4 phút.
-            lastPluginKey = selectedKey;
+            lastPluginKey = normalizeKeyForSend(selectedKey);
             startManualOverrideCountdown();
+            if (manualToneSet && isManualOverrideActive()) renderManualToneDisplay(); // Key gốc đổi -> Key sau dịch tone đổi theo
         } else {
             // Gửi thất bại -> KHÔNG commit Manual (committedKey/active giữ nguyên giá trị cũ,
             // đúng Test 7), KHÔNG chiếm quyền AI/Database. Khôi phục lại đúng originalKey/hiển
@@ -1770,7 +1831,7 @@ applyKeyBtn?.addEventListener("click", () => {
             console.error("sendKeyToAutotune lỗi:", result.detail);
         }
         refreshKeySourceDisplay();
-    });
+    }, () => { keySource.manual.sending = false; });
 
     // AI Realtime vẫn chạy nền liên tục (startAiRealtimeLoop tự lặp lại vô điều kiện từ lúc khởi
     // động, mục 7B) — không cần khởi động lại riêng ở đây.
@@ -1927,13 +1988,9 @@ function loadData() {
         if (el) el.value = data.tone;
     }
 
-    if (data.modEnabled) {
-        const modBtn = document.getElementById("modPowerBtn");
-        if (modBtn) {
-            modBtn.classList.add("active");
-            modBtn.textContent = "ON";
-        }
-    }
+    // MANUAL-KEY-MOD-RESTORE-01: KHÔNG khôi phục MOD "ON" nữa. Bản cũ chỉ gắn chữ "ON" mà không bật ô chọn Tone/nút SET, không bật
+    // SoundShifter, không đặt hẹn giờ tự tắt -> giao diện ON nhưng không dùng được (phải bấm 2 lần mới bật thật). MOD luôn khởi động ở OFF
+    // (đúng thực tế: SoundShifter chưa được bật sau khi mở app). Giá trị modEnabled cũ trong file cấu hình được bỏ qua.
 
     if (data.preset) {
         document.querySelectorAll(".preset-btn").forEach(btn => {
@@ -1991,8 +2048,11 @@ function turnManualOverrideOff() {
     // Khi tắt ghi đè tay: (1) tắt hẳn SoundShifter (nó chỉ dùng cho ghi đè tay, không
     // dùng cho AI tự động), (2) đưa Auto-Tune về đúng offset AI đang giữ tại thời điểm
     // này (aiSemitoneOffset, mục 12) — KHÔNG ép cứng về 0.
+    // MANUAL-KEY-MOD-RESTORE-01: trả SoundShifter về 0 (đúng phần đã dịch tay) TRƯỚC khi tắt nguồn, để lần bật MOD sau không mang theo tone cũ.
+    const shifterBack = -soundShifterApplied;
+    manualToneOffset = 0; manualToneSet = false; soundShifterApplied = 0;
     Promise.all([
-        setSoundShifterPower(false),
+        sendToneStepToSoundShifter(shifterBack).then((back) => setSoundShifterPower(false).then((off) => (back && back.ok === false ? back : off))),
         sendToneTarget(aiSemitoneOffset), // TASK AI-ALG-04 (D8): aiSemitoneOffset là TUYỆT ĐỐI so với Key gốc -> đưa Auto-Tune về đúng offset, không gửi tương đối sai
     ]).then(([shifterResult, autotuneResult]) => {
         const newKey = transposeKey(originalKey, aiSemitoneOffset);
@@ -2019,6 +2079,9 @@ modPowerBtn?.addEventListener("click", () => {
     if (isActive) {
         reportManualStateSnapshot(); // TASK B3-C — Manual Mod vừa BẬT thật, báo Core ngay. (Nhánh TẮT dùng chung turnManualOverrideOff() bên dưới — đã tự báo ở đó, không gọi trùng ở đây.)
         modPowerBtn.textContent = "ON";
+        // Phiên MOD mới: Tone thủ công bắt đầu từ 0 (đồng bộ với Auto-Tune/SoundShifter thật), dropdown về "0".
+        manualToneOffset = 0; manualToneSet = false; soundShifterApplied = 0;
+        if (toneSelector) toneSelector.value = "0";
         if (toneSelector) toneSelector.disabled = false; // Mục VII: MOD ON -> Dropdown cho phép chọn Preview
         if (applyToneBtn) applyToneBtn.disabled = false; // Mục VII: MOD ON -> SET cho phép gửi
         setStatus("dot-mod", "pending"); // cam: đang bật SoundShifter, chờ xác nhận
@@ -2109,7 +2172,7 @@ reportManualStateSnapshot(); // TASK B3-C — báo snapshot ban đầu ngay lúc
 // Vừa cập nhật UI, vừa gửi lệnh thật xuống Auto-Tune, trừ khi đang bị ghi đè tay.
 async function applyModEvent(data) {
     const newKey = transposeKey(originalKey, data.semitone);
-    updateModInfo(data.time, originalKey, newKey, data.semitone);
+    if (!(typeof manualToneSet !== "undefined" && manualToneSet && isManualOverrideActive())) updateModInfo(data.time, originalKey, newKey, data.semitone); // MOD tay đang hiển thị -> AI không ghi đè (giá trị AI vẫn được ghi nhận bên dưới)
     aiSemitoneOffset = data.semitone;
 
     // Gửi kết quả sang Core (AIContext) qua IPC — không ảnh hưởng logic gửi lệnh Auto-Tune bên dưới
@@ -2178,6 +2241,7 @@ function resetAiDisplaysToListening() {
     if (modTimeResetEl) modTimeResetEl.textContent = "";
     if (modStatusResetEl) modStatusResetEl.textContent = "LISTENING";
     if (modTimelineResetEl) modTimelineResetEl.textContent = "";
+    if (typeof manualToneSet !== "undefined" && manualToneSet && isManualOverrideActive()) renderManualToneDisplay(); // AUTO DETECT chỉ reset phần AI; Tone tay người dùng đã SET vẫn hiển thị đúng
 }
 
 document.getElementById("autoDetectBtn")?.addEventListener("click", () => {
@@ -2228,6 +2292,7 @@ function startModulationWatcher() {
     if (modTimeEl) modTimeEl.textContent = "";
     if (modStatusEl) modStatusEl.textContent = "LISTENING";
     if (modTimelineEl) modTimelineEl.textContent = "";
+    if (typeof manualToneSet !== "undefined" && manualToneSet && isManualOverrideActive()) renderManualToneDisplay(); // không xoá Tone tay đang hiển thị
 
     // TASK AI-ALG-03 — truyền mode của Key gốc để ModEngine phân biệt đổi mode / giọng tương đối / modulation thật.
     // Không parse được mode (định dạng lạ) => undefined => ModEngine chạy đúng hành vi cũ (root-only).
