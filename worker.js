@@ -188,9 +188,7 @@ export default {
     if (url.pathname === "/list") {
       const { results } = await env.DB.prepare(`
         SELECT i.song_id as songId, i.title, i.total_duration_sec as tongGiay,
-               COUNT(s.id) as soDoan, i.updated_at,
-               (SELECT key FROM song_key_segments s2 WHERE s2.song_id = i.song_id ORDER BY start_sec ASC LIMIT 1) as khoaDau,
-               (SELECT mode FROM song_key_segments s2 WHERE s2.song_id = i.song_id ORDER BY start_sec ASC LIMIT 1) as modeDau
+               COUNT(s.id) as soDoan, i.updated_at
         FROM song_info i
         LEFT JOIN song_key_segments s ON i.song_id = s.song_id
         GROUP BY i.song_id ORDER BY i.updated_at DESC LIMIT 100
@@ -202,10 +200,7 @@ export default {
           songId: r.songId,
           title: r.title || "Chua dat ten",
           tongThoiLuong: r.tongGiay ? giaySangPhutGiay(r.tongGiay) : "Chua cap nhat",
-          soDoan: r.soDoan,
-          khoaDau: r.khoaDau || null,
-          modeDau: r.modeDau || null,
-          cheDoDau: r.modeDau ? (r.modeDau === 'major' ? 'Truong' : 'Phu') : null
+          soDoan: r.soDoan
         }))
       }, { headers: corsHeaders });
     }
@@ -255,33 +250,6 @@ export default {
       }
     }
 
-    // ========== [9] XOA 1 BAI (ca thong tin + tat ca doan khoa) ==========
-    if (url.pathname === "/delete-song" && request.method === "POST") {
-      try {
-        const { songId } = await request.json();
-        if (!songId) return Response.json({ error: "thieu songId" }, { status: 400, headers: corsHeaders });
-        await env.DB.prepare("DELETE FROM song_key_segments WHERE song_id = ?").bind(songId).run();
-        await env.DB.prepare("DELETE FROM song_info WHERE song_id = ?").bind(songId).run();
-        return Response.json({ ok: true, message: "da xoa bai " + songId }, { headers: corsHeaders });
-      } catch (e) {
-        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
-      }
-    }
-    // ========== [10] SUA KHOA CHINH — xoa het doan cu, thay bang 1 doan moi ==========
-    if (url.pathname === "/set-main-key" && request.method === "POST") {
-      try {
-        const { songId, key, mode = "major" } = await request.json();
-        if (!songId || !key) return Response.json({ error: "thieu songId hoac key" }, { status: 400, headers: corsHeaders });
-        const info = await env.DB.prepare("SELECT total_duration_sec as d FROM song_info WHERE song_id = ?").bind(songId).first();
-        const endSec = (info && info.d) ? info.d : 99999;
-        await env.DB.prepare("DELETE FROM song_key_segments WHERE song_id = ?").bind(songId).run();
-        await env.DB.prepare("INSERT INTO song_key_segments (song_id, start_sec, end_sec, key, mode, weight) VALUES (?, 0, ?, ?, ?, 999)").bind(songId, endSec, String(key).trim(), mode).run();
-        await env.DB.prepare("UPDATE song_info SET updated_at = strftime('%s','now') * 1000 WHERE song_id = ?").bind(songId).run();
-        return Response.json({ ok: true, message: "da doi key thanh " + key }, { headers: corsHeaders });
-      } catch (e) {
-        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
-      }
-    }
     return Response.json({ error: "not_found" }, { status: 404, headers: corsHeaders });
   }
 };
@@ -537,15 +505,9 @@ function taoTrangChu() {
       div.innerHTML = '';
       for (var i = 0; i < data.danhSach.length; i++) {
         var bai = data.danhSach[i];
-        var badge = bai.khoaDau
-          ? ' <span class="tag ' + (bai.modeDau === 'major' ? 'tag-major' : 'tag-minor') + '" style="margin-left:8px;">' + bai.khoaDau + ' ' + bai.cheDoDau + '</span>'
-          : ' <span class="tag" style="margin-left:8px; background:#666; color:#ddd;">Chua co key</span>';
         div.innerHTML += '<div class="list-item" data-songid="' + bai.songId + '">' +
-          '<div class="list-title">' + bai.title + badge + '</div>' +
-          '<div class="list-desc">ID: ' + bai.songId + ' | Thoi luong: ' + bai.tongThoiLuong + ' | So doan: ' + bai.soDoan +
-          ' <button class="btn-sua-key" data-id="' + bai.songId + '" data-sodoan="' + bai.soDoan + '" style="margin-left:12px; padding:3px 10px; background:#4a6cf7; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:12px; font-weight:bold;">Sua Key</button>' +
-          ' <button class="btn-xoa-bai" data-id="' + bai.songId + '" style="padding:3px 10px; background:#e74c3c; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:12px; font-weight:bold;">Xoa</button>' +
-          '</div></div>';
+          '<div class="list-title">' + bai.title + '</div>' +
+          '<div class="list-desc">ID: ' + bai.songId + ' | Thoi luong: ' + bai.tongThoiLuong + ' | So doan: ' + bai.soDoan + '</div></div>';
       }
       var items = document.querySelectorAll('#danhSachTatCa .list-item');
       for (var k = 0; k < items.length; k++) {
@@ -560,54 +522,6 @@ function taoTrangChu() {
           timBai();
         });
       }
-      var btnsSua = document.querySelectorAll('#danhSachTatCa .btn-sua-key');
-      for (var m = 0; m < btnsSua.length; m++) {
-        btnsSua[m].addEventListener('click', function(e) {
-          e.stopPropagation();
-          suaKey(this.getAttribute('data-id'), this.getAttribute('data-sodoan'));
-        });
-      }
-      var btnsXoa = document.querySelectorAll('#danhSachTatCa .btn-xoa-bai');
-      for (var n = 0; n < btnsXoa.length; n++) {
-        btnsXoa[n].addEventListener('click', function(e) {
-          e.stopPropagation();
-          xoaBai(this.getAttribute('data-id'));
-        });
-      }
-    }
-
-    async function suaKey(sid, soDoan) {
-      if (soDoan && parseInt(soDoan) > 1) {
-        if (!confirm('CANH BAO: Bai nay co ' + soDoan + ' doan (co chuyen tone). Nut nay se GOP het thanh 1 doan key moi. Muon giu nhieu doan thi dung SQL Console. Tiep tuc?')) return;
-      }
-      var key = prompt('Nhap KEY moi cho bai nay (VD: C, G, Am, F#, Bm...):');
-      if (!key || !key.trim()) return;
-      var isMajor = confirm('Bam OK = Tone TRUONG (major)  |  Cancel = Tone PHU (minor)');
-      var mode = isMajor ? 'major' : 'minor';
-      try {
-        var res = await fetch(SERVER + '/set-main-key', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ songId: sid, key: key.trim(), mode: mode })
-        });
-        var data = await res.json();
-        if (data.ok) { alert('Da doi key thanh ' + key.trim() + ' (' + (mode === 'major' ? 'Truong' : 'Phu') + ')'); taiDanhSach(); }
-        else { alert('Loi: ' + (data.error || 'unknown')); }
-      } catch (err) { alert('Loi ket noi: ' + err.message); }
-    }
-
-    async function xoaBai(sid) {
-      if (!confirm('CHAC CHAN XOA bai hat nay? Du lieu khoa se BI MAT HAN!')) return;
-      try {
-        var res = await fetch(SERVER + '/delete-song', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ songId: sid })
-        });
-        var data = await res.json();
-        if (data.ok) { taiDanhSach(); }
-        else { alert('Loi: ' + (data.error || 'unknown')); }
-      } catch (err) { alert('Loi ket noi: ' + err.message); }
     }
   </script>
 </body>
