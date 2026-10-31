@@ -1,0 +1,353 @@
+diff --git a/app/main.js b/app/main.js
+index 524af8e..cb7ba54 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -728,11 +728,18 @@ ipcMain.handle("get-control-source", () => ControlSource.getControlSource());
+ // Task C — Renderer báo Key vừa dò xong (đã khoá); main gửi lên Key Server.
+ // Tên bài/ca sĩ/độ dài lấy từ CHÍNH main process (currentNowPlayingForSync), không tin renderer.
+ // Không bao giờ throw: lỗi mạng chỉ trả { ok:false, reason } để renderer bỏ qua.
++let lastServerSubmitLogAt = 0; // chống spam log: vòng dò khóa Key gọi lặp lại liên tục
+ ipcMain.handle("server-submit-key", async (event, data) => {
+     try {
+         const cur = currentNowPlayingForSync;
+-        if (!cur) return { ok: false, reason: "no-song" };
+         const d = data && typeof data === "object" ? data : {};
++        const nowMs = Date.now();
++        if (nowMs - lastServerSubmitLogAt > 60000) {
++            lastServerSubmitLogAt = nowMs;
++            const pct = Number.isFinite(Number(d.confidence)) ? Math.round(Number(d.confidence) * 100) + "%" : "không rõ";
++            console.log(`[KeyServer] AI đã khóa Key ${d.key} (${pct}) — bài: ${cur ? `"${cur.title}"` : "CHƯA BIẾT TÊN BÀI"}`);
++        }
++        if (!cur) return { ok: false, reason: "no-song" };
+         return await keyServerSync.submit({
+             title: cur.title,
+             artist: cur.artist,
+diff --git a/core/integration/KeyServerSync.js b/core/integration/KeyServerSync.js
+index 957e21b..151227d 100644
+--- a/core/integration/KeyServerSync.js
++++ b/core/integration/KeyServerSync.js
+@@ -35,9 +35,11 @@ const ERROR_TTL_MS = 15 * 1000;      // server lỗi/chậm: thử lại sau 15
+ const SUBMIT_RETRY_COOLDOWN_MS = 30 * 1000;
+ const ENABLED_CACHE_MS = 5 * 1000;
+ const CACHE_MAX_ENTRIES = 500;
++const LOG_ONCE_WINDOW_MS = 60 * 1000; // cùng 1 lý do cho cùng 1 bài: chỉ ghi log 1 lần/60 giây (vòng dò khóa Key lặp lại liên tục)
+ 
+ // Chỉ gửi Key lên server khi độ tin cậy từ KeyEngine (0..1) đạt ngưỡng này.
+-const MIN_SUBMIT_CONFIDENCE = 0.6;
++// 0.55 = đúng KeyEngine.MIN_CONFIDENCE (ngưỡng bộ dò tự coi là "có Key") — không khắt khe hơn chính bộ dò.
++const MIN_SUBMIT_CONFIDENCE = 0.55;
+ // Menu (SMTC) không biết độ dài bài -> coi Key này áp dụng cho TOÀN BÀI.
+ const WHOLE_SONG_END_SEC = 36000;
+ 
+@@ -119,6 +121,20 @@ class KeyServerSync {
+         this._submitFailedAt = new Map();  // songId -> thời điểm lỗi gần nhất
+         this._enabledAt = -Infinity;
+         this._enabledValue = true;
++        this._logAt = new Map();           // khóa log -> thời điểm ghi gần nhất (chống spam)
++    }
++
++    // Ghi log lý do (không bao giờ throw). Cùng 1 khóa chỉ ghi 1 lần / LOG_ONCE_WINDOW_MS,
++    // vì vòng dò khóa Key trong renderer gọi lặp lại liên tục cho cùng 1 bài.
++    _log(logKey, text) {
++        try {
++            const t = this.now();
++            const last = this._logAt.get(logKey);
++            if (last !== undefined && t - last < LOG_ONCE_WINDOW_MS) return;
++            if (this._logAt.size >= CACHE_MAX_ENTRIES) this._logAt.delete(this._logAt.keys().next().value);
++            this._logAt.set(logKey, t);
++            this.logger.log('[KeyServer] ' + text);
++        } catch (e) { /* log không bao giờ được làm hỏng luồng chính */ }
+     }
+ 
+     _enabled() {
+@@ -199,6 +215,8 @@ class KeyServerSync {
+             if (!r.ok && !(r.json && r.json.found === false)) {
+                 const val = { found: false, error: r.error || ('http-' + r.status) };
+                 this._cacheSet(ck, val, ERROR_TTL_MS);
++                this._log('lookup-err|' + ck, 'Không tra được server (' + val.error + ') -> Menu tự dò Key như cũ'
++                    + (r.status === 404 ? ' [404: server chưa có code mới /find?]' : ''));
+                 return val;
+             }
+             const j = r.json;
+@@ -207,14 +225,17 @@ class KeyServerSync {
+                 if (appKey) {
+                     const val = { found: true, key: appKey, songId: j.songId || null, title: j.title || null, source: 'server' };
+                     this._cacheSet(ck, val, HIT_TTL_MS);
++                    this._log('lookup-hit|' + ck, 'Server CÓ bài "' + String(title) + '" -> ' + appKey);
+                     return val;
+                 }
+                 const bad = { found: false, error: 'bad-key-from-server' };
+                 this._cacheSet(ck, bad, ERROR_TTL_MS);
++                this._log('lookup-badkey|' + ck, 'Server trả Key không hợp lệ (' + String(j.key) + ' / ' + String(j.mode) + ') -> bỏ qua');
+                 return bad;
+             }
+             const miss = { found: false };
+             this._cacheSet(ck, miss, MISS_TTL_MS);
++            this._log('lookup-miss|' + ck, 'Server CHƯA có bài "' + String(title) + '" -> Menu tự dò, dò xong sẽ gửi lên');
+             return miss;
+         })().finally(() => { this._lookupInflight.delete(ck); });
+ 
+@@ -229,11 +250,17 @@ class KeyServerSync {
+      *                      "cooldown" | "lookup-failed" | "info-failed" | "segment-failed" }
+      */
+     async submit({ title, artist, key, confidence, durationSec } = {}) {
+-        if (!this._enabled()) return { ok: false, reason: 'disabled' };
+-        if (normalizeTitle(title).length < 3) return { ok: false, reason: 'no-title' };
+-        if (!(Number(confidence) >= MIN_SUBMIT_CONFIDENCE)) return { ok: false, reason: 'low-confidence' };
++        const label = String(title || '');
++        const reject = (reason, text) => { this._log('reject|' + reason + '|' + this._cacheKey(title, artist), 'Không gửi Key: ' + text); return { ok: false, reason }; };
++
++        if (!this._enabled()) return reject('disabled', 'đồng bộ đang TẮT (keyServerAutoSync=false)');
++        if (normalizeTitle(title).length < 3) return reject('no-title', 'chưa biết tên bài đang phát (hoặc tên quá ngắn)');
++        if (!(Number(confidence) >= MIN_SUBMIT_CONFIDENCE)) {
++            return reject('low-confidence', 'độ tin cậy ' + (Number.isFinite(Number(confidence)) && confidence !== undefined && confidence !== null ? Math.round(Number(confidence) * 100) + '%' : 'không rõ')
++                + ' < ngưỡng ' + Math.round(MIN_SUBMIT_CONFIDENCE * 100) + '% (bài "' + label + '")');
++        }
+         const sk = appKeyToServerKey(key);
+-        if (!sk) return { ok: false, reason: 'bad-key' };
++        if (!sk) return reject('bad-key', 'Key "' + String(key) + '" không hợp lệ');
+ 
+         const songId = makeSongId(title, artist);
+         if (this._submitted.has(songId)) return { ok: true, reason: 'already-submitted' };
+@@ -245,12 +272,20 @@ class KeyServerSync {
+         }
+ 
+         const p = (async () => {
+-            const fail = (reason) => { this._submitFailedAt.set(songId, this.now()); return { ok: false, reason }; };
++            const fail = (reason, text) => {
++                this._submitFailedAt.set(songId, this.now());
++                this._log('fail|' + reason + '|' + songId, 'Gửi Key lỗi (' + reason + '): ' + text + ' -> thử lại sau ' + (SUBMIT_RETRY_COOLDOWN_MS / 1000) + ' giây');
++                return { ok: false, reason };
++            };
+ 
+             // Server đã có bài (máy khác hoặc extension đã gửi) -> không gửi trùng.
+             const existing = await this.lookup(title, artist, { force: true });
+-            if (existing.found) { this._submitted.add(songId); return { ok: true, reason: 'server-already-has' }; }
+-            if (existing.error) return fail('lookup-failed');
++            if (existing.found) {
++                this._submitted.add(songId);
++                this._log('already|' + songId, 'Không gửi Key: server ĐÃ có bài "' + label + '" (' + existing.key + ')');
++                return { ok: true, reason: 'server-already-has' };
++            }
++            if (existing.error) return fail('lookup-failed', 'không xác minh được server (' + existing.error + '), không gửi để tránh trùng');
+ 
+             const dur = Number(durationSec) > 0 ? Math.round(Number(durationSec)) : null;
+             const info = await this._request('/set-song-info', {
+@@ -263,7 +298,7 @@ class KeyServerSync {
+                     note: artist ? ('artist: ' + String(artist) + ' | nguon: AUTO_MENU_AI') : 'nguon: AUTO_MENU_AI'
+                 })
+             }, this.submitTimeoutMs);
+-            if (!info.ok || !info.json || info.json.ok !== true) return fail('info-failed');
++            if (!info.ok || !info.json || info.json.ok !== true) return fail('info-failed', 'server từ chối lưu thông tin bài (' + (info.error || ('http-' + info.status)) + ')');
+ 
+             const seg = await this._request('/add-segment', {
+                 method: 'POST',
+@@ -277,13 +312,13 @@ class KeyServerSync {
+                     weight: 1.0
+                 })
+             }, this.submitTimeoutMs);
+-            if (!seg.ok || !seg.json || seg.json.ok !== true) return fail('segment-failed');
++            if (!seg.ok || !seg.json || seg.json.ok !== true) return fail('segment-failed', 'server từ chối lưu đoạn Key (' + (seg.error || ('http-' + seg.status)) + ')');
+ 
+             this._submitted.add(songId);
+             this._submitFailedAt.delete(songId);
+             // Lần hỏi tiếp theo thấy ngay bài đã có.
+             this._cacheSet(this._cacheKey(title, artist), { found: true, key: serverKeyToAppKey(sk.key, sk.mode), songId, title: String(title), source: 'server' }, HIT_TTL_MS);
+-            try { this.logger.log('[KeyServer] Đã gửi Key lên server'); } catch (e) {}
++            this._log('sent|' + songId, 'ĐÃ GỬI Key lên server: "' + label + '" -> ' + serverKeyToAppKey(sk.key, sk.mode) + ' (id ' + songId + ')');
+             return { ok: true, reason: 'submitted' };
+         })().finally(() => { this._submitInflight.delete(songId); });
+ 
+diff --git a/tests/unit/KeyServerSyncC.verify.js b/tests/unit/KeyServerSyncC.verify.js
+index 98c5b0f..58499f8 100644
+--- a/tests/unit/KeyServerSyncC.verify.js
++++ b/tests/unit/KeyServerSyncC.verify.js
+@@ -304,7 +304,9 @@ const YT_TITLE = 'Karaoke 2 Trong 1 | QUÊN MỘT LỜI THỀ - Tone Nam';
+     {
+         const f = makeBridge(worker, makeFakeDb());
+         const c = new KeyServerSync({ fetchFn: f, now: clock(), logger: SILENT });
+-        check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'C Major', confidence: 0.3 })).reason === 'low-confidence', 'Độ tin cậy thấp (<0.6) -> không gửi');
++        check(KSS.MIN_SUBMIT_CONFIDENCE === 0.55, 'Ngưỡng gửi = 55%, khớp KeyEngine.MIN_CONFIDENCE (0.55)');
++        check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'C Major', confidence: 0.3 })).reason === 'low-confidence', 'Độ tin cậy thấp (<55%) -> không gửi');
++        check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'C Major', confidence: 0.54 })).reason === 'low-confidence', '54% -> không gửi');
+         check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'C Major' })).reason === 'low-confidence', 'Thiếu độ tin cậy -> không gửi');
+         check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'rác', confidence: 0.9 })).reason === 'bad-key', 'Key rác -> không gửi');
+         check((await c.submit({ title: '', key: 'C Major', confidence: 0.9 })).reason === 'no-title', 'Không có tên bài -> không gửi');
+@@ -359,13 +361,85 @@ const YT_TITLE = 'Karaoke 2 Trong 1 | QUÊN MỘT LỜI THỀ - Tone Nam';
+         check(/SongMatcher\.findReference\(resolved\.title, resolved\.artist\)/.test(main) && /Database Miss \(source=\$\{source\}\)/.test(main), 'Đường tra Database cục bộ cũ còn nguyên');
+         check(/keyServerSync\.lookup\(askedTitle, askedArtist\)/.test(main) && /keyServerSync\.peek\(/.test(main), 'dispatchUnifiedNowPlaying hỏi server khi Database cục bộ trượt');
+         // Tên bài gửi lên server phải do main tự biết
+-        const h = main.slice(main.indexOf('ipcMain.handle("server-submit-key"'), main.indexOf('ipcMain.handle("server-submit-key"') + 700);
++        const h = main.slice(main.indexOf('ipcMain.handle("server-submit-key"'), main.indexOf('ipcMain.handle("server-submit-key"') + 1500);
+         check(/title: cur\.title/.test(h) && !/title: d\./.test(h), 'IPC gửi Key dùng tên bài của main, không tin tên do renderer khai');
+         check(/submitDetectedKey: \(data\) => ipcRenderer\.invoke\("server-submit-key", data\)/.test(pre), 'preload.js bắc cầu submitDetectedKey');
+         check(/try \{\s*if \(keySource\.songDb && !keySource\.songDb\.active\) \{[\s\S]{0,200}submitDetectedKey[\s\S]{0,200}\} catch \(e\) \{\}/.test(rend), 'renderer chỉ gửi khi Key do AI tự dò (Database/Server chưa có bài), nằm trong try/catch');
+         check(/reportAiResult\("key", \{ key: result\.key, confidence: result\.confidence \}\);/.test(rend), 'Dòng reportAiResult cũ còn nguyên');
+     }
+ 
++    console.log('\n[11] Ngưỡng 55% và log báo rõ lý do (mỗi lý do 1 lần / 60 giây)');
++    {
++        const lines = [];
++        const LOGGER = { log: (s) => lines.push(String(s)), error() {}, warn() {} };
++        const mk = (extra = {}) => { const now = clock(); const db = makeFakeDb(); const f = makeBridge(worker, db, extra.bridge); return { now, db, f, c: new KeyServerSync({ fetchFn: f, now, logger: LOGGER }) }; };
++
++        // 55% được gửi, đúng ngưỡng
++        let t = mk();
++        const ok55 = await t.c.submit({ title: 'Bài Đúng Ngưỡng 55', artist: 'A', key: 'C Major', confidence: 0.55 });
++        check(ok55.ok === true && ok55.reason === 'submitted' && t.db._segs.length === 1, 'Độ tin cậy đúng 55% -> ĐƯỢC gửi');
++        check(lines.some((l) => /ĐÃ GỬI Key lên server/.test(l) && /C Major/.test(l) && /app_/.test(l)), 'Log "ĐÃ GỬI Key lên server" có tên bài, Key và id');
++        check(lines.every((l) => l.startsWith('[KeyServer] ')), 'Mọi dòng log đều có tiền tố [KeyServer]');
++
++        // Độ tin cậy thấp: log nêu % và ngưỡng, và chỉ 1 lần / 60 giây
++        lines.length = 0; t = mk();
++        for (let i = 0; i < 5; i++) await t.c.submit({ title: 'Bài Độ Tin Cậy Thấp', artist: 'A', key: 'C Major', confidence: 0.4 });
++        check(lines.length === 1 && /40%/.test(lines[0]) && /55%/.test(lines[0]) && /Bài Độ Tin Cậy Thấp/.test(lines[0]), 'Độ tin cậy thấp: log nêu 40% < ngưỡng 55% và tên bài');
++        check(lines.length === 1, '5 lần gọi liên tiếp -> chỉ 1 dòng log (không spam)');
++        t.now.advance(61 * 1000);
++        await t.c.submit({ title: 'Bài Độ Tin Cậy Thấp', artist: 'A', key: 'C Major', confidence: 0.4 });
++        check(lines.length === 2, 'Qua 60 giây -> ghi log lại 1 lần');
++
++        // Các lý do khác
++        lines.length = 0; t = mk();
++        await t.c.submit({ title: '', key: 'C Major', confidence: 0.9 });
++        check(lines.some((l) => /chưa biết tên bài/.test(l)), 'Không có tên bài -> log nêu rõ');
++        lines.length = 0;
++        await t.c.submit({ title: 'Bài Key Rác Nhé', key: 'rác', confidence: 0.9 });
++        check(lines.some((l) => /không hợp lệ/.test(l)), 'Key rác -> log nêu rõ');
++        lines.length = 0; t = new KeyServerSync({ fetchFn: t.f, now: clock(), isEnabled: () => false, logger: LOGGER });
++        await t.submit({ title: 'Bài Đồng Bộ Đang Tắt', key: 'C Major', confidence: 0.9 });
++        check(lines.some((l) => /đang TẮT/.test(l) && /keyServerAutoSync/.test(l)), 'Đồng bộ tắt -> log nêu rõ cách bật lại');
++
++        // Server cũ chưa có /find (404): log gợi ý đúng nguyên nhân
++        lines.length = 0;
++        const old = mk({ bridge: { failWith: async () => new Response('{"error":"not_found"}', { status: 404 }) } });
++        await old.c.lookup('Bài Cho Server Cũ Nè', 'A');
++        check(lines.length === 1 && /404/.test(lines[0]) && /chưa có code mới/.test(lines[0]), 'Server cũ (404) -> log gợi ý "server chưa có code mới /find?"');
++        lines.length = 0;
++        await old.c.submit({ title: 'Bài Cho Server Cũ Nè', artist: 'A', key: 'C Major', confidence: 0.9 });
++        check(lines.some((l) => /lookup-failed/.test(l) && /không gửi để tránh trùng/.test(l)), 'Không xác minh được server -> log nêu rõ vì sao không gửi');
++
++        // Tra server: trúng / trượt đều có log
++        lines.length = 0;
++        const dbS = makeFakeDb({ songs: [{ songId: 'v1', title: 'Xin Đừng Rời Xa Anh', updated: 1 }], segs: [{ songId: 'v1', startSec: 0, endSec: 293, key: 'D', mode: 'minor' }] });
++        const cS = new KeyServerSync({ fetchFn: makeBridge(worker, dbS), now: clock(), logger: LOGGER });
++        await cS.lookup('Xin Đừng Rời Xa Anh', 'A'); await cS.lookup('Một Bài Chưa Có Trên Server', 'A');
++        check(lines.some((l) => /Server CÓ bài/.test(l) && /D Minor/.test(l)), 'Tra trúng -> log "Server CÓ bài ... D Minor"');
++        check(lines.some((l) => /Server CHƯA có bài/.test(l)), 'Tra trượt -> log "Server CHƯA có bài"');
++
++        // Server đã có bài khi định gửi
++        lines.length = 0;
++        await cS.submit({ title: 'Xin Đừng Rời Xa Anh', artist: 'A', key: 'C Major', confidence: 0.9 });
++        check(lines.some((l) => /server ĐÃ có bài/.test(l)), 'Server đã có bài -> log nêu rõ vì sao không gửi');
++
++        // Lỗi lưu từ server: log nêu mã lỗi
++        lines.length = 0;
++        const dbF = makeFakeDb();
++        const tf = new KeyServerSync({ now: clock(), logger: LOGGER, fetchFn: makeBridge(worker, dbF, { failWith: async (u, init) => (u.pathname === '/add-segment' ? new Response('{"error":"x"}', { status: 500 }) : worker.fetch(new Request(u.toString(), init), { DB: dbF })) }) });
++        await tf.submit({ title: 'Bài Lỗi Khi Lưu Đoạn', artist: 'A', key: 'C Major', confidence: 0.9 });
++        check(lines.some((l) => /segment-failed/.test(l) && /http-500/.test(l)), 'Lỗi lưu đoạn Key -> log nêu segment-failed và mã http-500');
++
++        // Logger hỏng không được làm hỏng luồng chính
++        const tb = new KeyServerSync({ now: clock(), fetchFn: makeBridge(worker, makeFakeDb()), logger: { log() { throw new Error('logger hỏng'); } } });
++        const rb = await tb.submit({ title: 'Bài Logger Bị Hỏng', artist: 'A', key: 'C Major', confidence: 0.9 });
++        check(rb.ok === true, 'Logger ném lỗi -> việc gửi Key vẫn thành công');
++
++        // main.js có log báo "AI đã khóa Key" và "chưa biết tên bài"
++        const mainSrc = fs.readFileSync(path.join(ROOT, 'app', 'main.js'), 'utf8');
++        check(/AI đã khóa Key \$\{d\.key\}/.test(mainSrc) && /CHƯA BIẾT TÊN BÀI/.test(mainSrc), 'main.js ghi log khi nhận Key đã khóa từ AI (kể cả khi chưa biết tên bài)');
++    }
++
+     console.log('\n' + (failCount === 0 ? '✅ TẤT CẢ ĐỀU PASS' : '❌ CÓ ' + failCount + ' LỖI'));
+     process.exit(failCount === 0 ? 0 : 1);
+ })().catch((e) => { console.error('TEST CRASH:', e); process.exit(2); });
+diff --git a/worker.js b/worker.js
+index c20c11e..eddeba6 100644
+--- a/worker.js
++++ b/worker.js
+@@ -205,10 +205,86 @@ export default {
+       }, { headers: corsHeaders });
+     }
+ 
++    // ========== [8] TÌM BÀI THEO TÊN — MENU HỎI SERVER TRƯỚC KHI TỰ DÒ KEY ==========
++    // Menu chỉ biết tên bài (không biết mã video), nên tra theo tên đã chuẩn hoá.
++    // Chỉ ĐỌC dữ liệu, không ghi gì. Trả Key của đoạn đầu tiên của bài.
++    if (url.pathname === "/find") {
++      const title = url.searchParams.get("title") || "";
++      const artist = url.searchParams.get("artist") || "";
++      const q = chuanHoaTen(title);
++      if (q.length < 3) {
++        return Response.json({ found: false, error: "thieu title" }, { status: 400, headers: corsHeaders });
++      }
++
++      try {
++        const { results: songs } = await env.DB.prepare(`
++          SELECT song_id as songId, title FROM song_info ORDER BY updated_at DESC LIMIT 1000
++        `).all();
++
++        const best = timBaiKhopNhat(songs || [], q, chuanHoaTen(artist));
++        if (!best) {
++          return Response.json({ found: false }, { headers: corsHeaders });
++        }
++
++        const { results: segs } = await env.DB.prepare(`
++          SELECT key, mode, start_sec as startSec, end_sec as endSec
++          FROM song_key_segments WHERE song_id = ? ORDER BY start_sec ASC LIMIT 200
++        `).bind(best.songId).all();
++
++        if (!segs || segs.length === 0) {
++          return Response.json({ found: false }, { headers: corsHeaders });
++        }
++
++        return Response.json({
++          found: true,
++          songId: best.songId,
++          title: best.title,
++          key: segs[0].key,
++          mode: segs[0].mode,
++          startSec: segs[0].startSec,
++          endSec: segs[0].endSec,
++          tongDoan: segs.length
++        }, { headers: corsHeaders });
++      } catch (e) {
++        return Response.json({ found: false, error: e.message }, { status: 500, headers: corsHeaders });
++      }
++    }
++
+     return Response.json({ error: "not_found" }, { status: 404, headers: corsHeaders });
+   }
+ };
+ 
++// ========== CHUẨN HOÁ TÊN BÀI (bỏ dấu, chữ thường, chỉ giữ chữ/số) ==========
++// PHẢI giống hệt hàm normalizeTitle() trong core/integration/KeyServerSync.js.
++function chuanHoaTen(s) {
++  return String(s || "")
++    .toLowerCase()
++    .normalize("NFD")
++    .replace(/[̀-ͯ]/g, "")
++    .replace(/đ/g, "d")
++    .replace(/[^a-z0-9]+/g, " ")
++    .trim();
++}
++
++// ========== CHỌN BÀI KHỚP NHẤT THEO TÊN ==========
++// Khớp đúng hẳn > tên trên server chứa tên Menu gửi > tên Menu gửi chứa tên trên server.
++// Yêu cầu tối thiểu 8 ký tự cho khớp "chứa" để tránh nhầm bài khi tên quá ngắn.
++function timBaiKhopNhat(songs, q, artistNorm) {
++  let best = null;
++  let bestScore = 0;
++  for (const s of songs) {
++    const nt = chuanHoaTen(s.title);
++    if (!nt) continue;
++    let score = 0;
++    if (nt === q) score = 1000;
++    else if (q.length >= 8 && nt.includes(q)) score = 500 - Math.min(nt.length - q.length, 400);
++    else if (nt.length >= 8 && q.includes(nt)) score = 300 - Math.min(q.length - nt.length, 250);
++    if (score > 0 && artistNorm && nt.includes(artistNorm)) score += 50;
++    if (score > bestScore) { bestScore = score; best = s; }
++  }
++  return best;
++}
++
+ // ========== HÀM ĐỔI GIÂY -> 03:05 ==========
+ function giaySangPhutGiay(tongGiay) {
+   if (!tongGiay && tongGiay !== 0) return "--";

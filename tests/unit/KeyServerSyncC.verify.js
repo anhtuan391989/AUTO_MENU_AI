@@ -304,7 +304,9 @@ const YT_TITLE = 'Karaoke 2 Trong 1 | QUÊN MỘT LỜI THỀ - Tone Nam';
     {
         const f = makeBridge(worker, makeFakeDb());
         const c = new KeyServerSync({ fetchFn: f, now: clock(), logger: SILENT });
-        check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'C Major', confidence: 0.3 })).reason === 'low-confidence', 'Độ tin cậy thấp (<0.6) -> không gửi');
+        check(KSS.MIN_SUBMIT_CONFIDENCE === 0.55, 'Ngưỡng gửi = 55%, khớp KeyEngine.MIN_CONFIDENCE (0.55)');
+        check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'C Major', confidence: 0.3 })).reason === 'low-confidence', 'Độ tin cậy thấp (<55%) -> không gửi');
+        check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'C Major', confidence: 0.54 })).reason === 'low-confidence', '54% -> không gửi');
         check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'C Major' })).reason === 'low-confidence', 'Thiếu độ tin cậy -> không gửi');
         check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'rác', confidence: 0.9 })).reason === 'bad-key', 'Key rác -> không gửi');
         check((await c.submit({ title: '', key: 'C Major', confidence: 0.9 })).reason === 'no-title', 'Không có tên bài -> không gửi');
@@ -359,11 +361,83 @@ const YT_TITLE = 'Karaoke 2 Trong 1 | QUÊN MỘT LỜI THỀ - Tone Nam';
         check(/SongMatcher\.findReference\(resolved\.title, resolved\.artist\)/.test(main) && /Database Miss \(source=\$\{source\}\)/.test(main), 'Đường tra Database cục bộ cũ còn nguyên');
         check(/keyServerSync\.lookup\(askedTitle, askedArtist\)/.test(main) && /keyServerSync\.peek\(/.test(main), 'dispatchUnifiedNowPlaying hỏi server khi Database cục bộ trượt');
         // Tên bài gửi lên server phải do main tự biết
-        const h = main.slice(main.indexOf('ipcMain.handle("server-submit-key"'), main.indexOf('ipcMain.handle("server-submit-key"') + 700);
+        const h = main.slice(main.indexOf('ipcMain.handle("server-submit-key"'), main.indexOf('ipcMain.handle("server-submit-key"') + 1500);
         check(/title: cur\.title/.test(h) && !/title: d\./.test(h), 'IPC gửi Key dùng tên bài của main, không tin tên do renderer khai');
         check(/submitDetectedKey: \(data\) => ipcRenderer\.invoke\("server-submit-key", data\)/.test(pre), 'preload.js bắc cầu submitDetectedKey');
         check(/try \{\s*if \(keySource\.songDb && !keySource\.songDb\.active\) \{[\s\S]{0,200}submitDetectedKey[\s\S]{0,200}\} catch \(e\) \{\}/.test(rend), 'renderer chỉ gửi khi Key do AI tự dò (Database/Server chưa có bài), nằm trong try/catch');
         check(/reportAiResult\("key", \{ key: result\.key, confidence: result\.confidence \}\);/.test(rend), 'Dòng reportAiResult cũ còn nguyên');
+    }
+
+    console.log('\n[11] Ngưỡng 55% và log báo rõ lý do (mỗi lý do 1 lần / 60 giây)');
+    {
+        const lines = [];
+        const LOGGER = { log: (s) => lines.push(String(s)), error() {}, warn() {} };
+        const mk = (extra = {}) => { const now = clock(); const db = makeFakeDb(); const f = makeBridge(worker, db, extra.bridge); return { now, db, f, c: new KeyServerSync({ fetchFn: f, now, logger: LOGGER }) }; };
+
+        // 55% được gửi, đúng ngưỡng
+        let t = mk();
+        const ok55 = await t.c.submit({ title: 'Bài Đúng Ngưỡng 55', artist: 'A', key: 'C Major', confidence: 0.55 });
+        check(ok55.ok === true && ok55.reason === 'submitted' && t.db._segs.length === 1, 'Độ tin cậy đúng 55% -> ĐƯỢC gửi');
+        check(lines.some((l) => /ĐÃ GỬI Key lên server/.test(l) && /C Major/.test(l) && /app_/.test(l)), 'Log "ĐÃ GỬI Key lên server" có tên bài, Key và id');
+        check(lines.every((l) => l.startsWith('[KeyServer] ')), 'Mọi dòng log đều có tiền tố [KeyServer]');
+
+        // Độ tin cậy thấp: log nêu % và ngưỡng, và chỉ 1 lần / 60 giây
+        lines.length = 0; t = mk();
+        for (let i = 0; i < 5; i++) await t.c.submit({ title: 'Bài Độ Tin Cậy Thấp', artist: 'A', key: 'C Major', confidence: 0.4 });
+        check(lines.length === 1 && /40%/.test(lines[0]) && /55%/.test(lines[0]) && /Bài Độ Tin Cậy Thấp/.test(lines[0]), 'Độ tin cậy thấp: log nêu 40% < ngưỡng 55% và tên bài');
+        check(lines.length === 1, '5 lần gọi liên tiếp -> chỉ 1 dòng log (không spam)');
+        t.now.advance(61 * 1000);
+        await t.c.submit({ title: 'Bài Độ Tin Cậy Thấp', artist: 'A', key: 'C Major', confidence: 0.4 });
+        check(lines.length === 2, 'Qua 60 giây -> ghi log lại 1 lần');
+
+        // Các lý do khác
+        lines.length = 0; t = mk();
+        await t.c.submit({ title: '', key: 'C Major', confidence: 0.9 });
+        check(lines.some((l) => /chưa biết tên bài/.test(l)), 'Không có tên bài -> log nêu rõ');
+        lines.length = 0;
+        await t.c.submit({ title: 'Bài Key Rác Nhé', key: 'rác', confidence: 0.9 });
+        check(lines.some((l) => /không hợp lệ/.test(l)), 'Key rác -> log nêu rõ');
+        lines.length = 0; t = new KeyServerSync({ fetchFn: t.f, now: clock(), isEnabled: () => false, logger: LOGGER });
+        await t.submit({ title: 'Bài Đồng Bộ Đang Tắt', key: 'C Major', confidence: 0.9 });
+        check(lines.some((l) => /đang TẮT/.test(l) && /keyServerAutoSync/.test(l)), 'Đồng bộ tắt -> log nêu rõ cách bật lại');
+
+        // Server cũ chưa có /find (404): log gợi ý đúng nguyên nhân
+        lines.length = 0;
+        const old = mk({ bridge: { failWith: async () => new Response('{"error":"not_found"}', { status: 404 }) } });
+        await old.c.lookup('Bài Cho Server Cũ Nè', 'A');
+        check(lines.length === 1 && /404/.test(lines[0]) && /chưa có code mới/.test(lines[0]), 'Server cũ (404) -> log gợi ý "server chưa có code mới /find?"');
+        lines.length = 0;
+        await old.c.submit({ title: 'Bài Cho Server Cũ Nè', artist: 'A', key: 'C Major', confidence: 0.9 });
+        check(lines.some((l) => /lookup-failed/.test(l) && /không gửi để tránh trùng/.test(l)), 'Không xác minh được server -> log nêu rõ vì sao không gửi');
+
+        // Tra server: trúng / trượt đều có log
+        lines.length = 0;
+        const dbS = makeFakeDb({ songs: [{ songId: 'v1', title: 'Xin Đừng Rời Xa Anh', updated: 1 }], segs: [{ songId: 'v1', startSec: 0, endSec: 293, key: 'D', mode: 'minor' }] });
+        const cS = new KeyServerSync({ fetchFn: makeBridge(worker, dbS), now: clock(), logger: LOGGER });
+        await cS.lookup('Xin Đừng Rời Xa Anh', 'A'); await cS.lookup('Một Bài Chưa Có Trên Server', 'A');
+        check(lines.some((l) => /Server CÓ bài/.test(l) && /D Minor/.test(l)), 'Tra trúng -> log "Server CÓ bài ... D Minor"');
+        check(lines.some((l) => /Server CHƯA có bài/.test(l)), 'Tra trượt -> log "Server CHƯA có bài"');
+
+        // Server đã có bài khi định gửi
+        lines.length = 0;
+        await cS.submit({ title: 'Xin Đừng Rời Xa Anh', artist: 'A', key: 'C Major', confidence: 0.9 });
+        check(lines.some((l) => /server ĐÃ có bài/.test(l)), 'Server đã có bài -> log nêu rõ vì sao không gửi');
+
+        // Lỗi lưu từ server: log nêu mã lỗi
+        lines.length = 0;
+        const dbF = makeFakeDb();
+        const tf = new KeyServerSync({ now: clock(), logger: LOGGER, fetchFn: makeBridge(worker, dbF, { failWith: async (u, init) => (u.pathname === '/add-segment' ? new Response('{"error":"x"}', { status: 500 }) : worker.fetch(new Request(u.toString(), init), { DB: dbF })) }) });
+        await tf.submit({ title: 'Bài Lỗi Khi Lưu Đoạn', artist: 'A', key: 'C Major', confidence: 0.9 });
+        check(lines.some((l) => /segment-failed/.test(l) && /http-500/.test(l)), 'Lỗi lưu đoạn Key -> log nêu segment-failed và mã http-500');
+
+        // Logger hỏng không được làm hỏng luồng chính
+        const tb = new KeyServerSync({ now: clock(), fetchFn: makeBridge(worker, makeFakeDb()), logger: { log() { throw new Error('logger hỏng'); } } });
+        const rb = await tb.submit({ title: 'Bài Logger Bị Hỏng', artist: 'A', key: 'C Major', confidence: 0.9 });
+        check(rb.ok === true, 'Logger ném lỗi -> việc gửi Key vẫn thành công');
+
+        // main.js có log báo "AI đã khóa Key" và "chưa biết tên bài"
+        const mainSrc = fs.readFileSync(path.join(ROOT, 'app', 'main.js'), 'utf8');
+        check(/AI đã khóa Key \$\{d\.key\}/.test(mainSrc) && /CHƯA BIẾT TÊN BÀI/.test(mainSrc), 'main.js ghi log khi nhận Key đã khóa từ AI (kể cả khi chưa biết tên bài)');
     }
 
     console.log('\n' + (failCount === 0 ? '✅ TẤT CẢ ĐỀU PASS' : '❌ CÓ ' + failCount + ' LỖI'));

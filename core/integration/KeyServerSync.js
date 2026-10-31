@@ -35,9 +35,11 @@ const ERROR_TTL_MS = 15 * 1000;      // server lỗi/chậm: thử lại sau 15 
 const SUBMIT_RETRY_COOLDOWN_MS = 30 * 1000;
 const ENABLED_CACHE_MS = 5 * 1000;
 const CACHE_MAX_ENTRIES = 500;
+const LOG_ONCE_WINDOW_MS = 60 * 1000; // cùng 1 lý do cho cùng 1 bài: chỉ ghi log 1 lần/60 giây (vòng dò khóa Key lặp lại liên tục)
 
 // Chỉ gửi Key lên server khi độ tin cậy từ KeyEngine (0..1) đạt ngưỡng này.
-const MIN_SUBMIT_CONFIDENCE = 0.6;
+// 0.55 = đúng KeyEngine.MIN_CONFIDENCE (ngưỡng bộ dò tự coi là "có Key") — không khắt khe hơn chính bộ dò.
+const MIN_SUBMIT_CONFIDENCE = 0.55;
 // Menu (SMTC) không biết độ dài bài -> coi Key này áp dụng cho TOÀN BÀI.
 const WHOLE_SONG_END_SEC = 36000;
 
@@ -119,6 +121,20 @@ class KeyServerSync {
         this._submitFailedAt = new Map();  // songId -> thời điểm lỗi gần nhất
         this._enabledAt = -Infinity;
         this._enabledValue = true;
+        this._logAt = new Map();           // khóa log -> thời điểm ghi gần nhất (chống spam)
+    }
+
+    // Ghi log lý do (không bao giờ throw). Cùng 1 khóa chỉ ghi 1 lần / LOG_ONCE_WINDOW_MS,
+    // vì vòng dò khóa Key trong renderer gọi lặp lại liên tục cho cùng 1 bài.
+    _log(logKey, text) {
+        try {
+            const t = this.now();
+            const last = this._logAt.get(logKey);
+            if (last !== undefined && t - last < LOG_ONCE_WINDOW_MS) return;
+            if (this._logAt.size >= CACHE_MAX_ENTRIES) this._logAt.delete(this._logAt.keys().next().value);
+            this._logAt.set(logKey, t);
+            this.logger.log('[KeyServer] ' + text);
+        } catch (e) { /* log không bao giờ được làm hỏng luồng chính */ }
     }
 
     _enabled() {
@@ -199,6 +215,8 @@ class KeyServerSync {
             if (!r.ok && !(r.json && r.json.found === false)) {
                 const val = { found: false, error: r.error || ('http-' + r.status) };
                 this._cacheSet(ck, val, ERROR_TTL_MS);
+                this._log('lookup-err|' + ck, 'Không tra được server (' + val.error + ') -> Menu tự dò Key như cũ'
+                    + (r.status === 404 ? ' [404: server chưa có code mới /find?]' : ''));
                 return val;
             }
             const j = r.json;
@@ -207,14 +225,17 @@ class KeyServerSync {
                 if (appKey) {
                     const val = { found: true, key: appKey, songId: j.songId || null, title: j.title || null, source: 'server' };
                     this._cacheSet(ck, val, HIT_TTL_MS);
+                    this._log('lookup-hit|' + ck, 'Server CÓ bài "' + String(title) + '" -> ' + appKey);
                     return val;
                 }
                 const bad = { found: false, error: 'bad-key-from-server' };
                 this._cacheSet(ck, bad, ERROR_TTL_MS);
+                this._log('lookup-badkey|' + ck, 'Server trả Key không hợp lệ (' + String(j.key) + ' / ' + String(j.mode) + ') -> bỏ qua');
                 return bad;
             }
             const miss = { found: false };
             this._cacheSet(ck, miss, MISS_TTL_MS);
+            this._log('lookup-miss|' + ck, 'Server CHƯA có bài "' + String(title) + '" -> Menu tự dò, dò xong sẽ gửi lên');
             return miss;
         })().finally(() => { this._lookupInflight.delete(ck); });
 
@@ -229,11 +250,17 @@ class KeyServerSync {
      *                      "cooldown" | "lookup-failed" | "info-failed" | "segment-failed" }
      */
     async submit({ title, artist, key, confidence, durationSec } = {}) {
-        if (!this._enabled()) return { ok: false, reason: 'disabled' };
-        if (normalizeTitle(title).length < 3) return { ok: false, reason: 'no-title' };
-        if (!(Number(confidence) >= MIN_SUBMIT_CONFIDENCE)) return { ok: false, reason: 'low-confidence' };
+        const label = String(title || '');
+        const reject = (reason, text) => { this._log('reject|' + reason + '|' + this._cacheKey(title, artist), 'Không gửi Key: ' + text); return { ok: false, reason }; };
+
+        if (!this._enabled()) return reject('disabled', 'đồng bộ đang TẮT (keyServerAutoSync=false)');
+        if (normalizeTitle(title).length < 3) return reject('no-title', 'chưa biết tên bài đang phát (hoặc tên quá ngắn)');
+        if (!(Number(confidence) >= MIN_SUBMIT_CONFIDENCE)) {
+            return reject('low-confidence', 'độ tin cậy ' + (Number.isFinite(Number(confidence)) && confidence !== undefined && confidence !== null ? Math.round(Number(confidence) * 100) + '%' : 'không rõ')
+                + ' < ngưỡng ' + Math.round(MIN_SUBMIT_CONFIDENCE * 100) + '% (bài "' + label + '")');
+        }
         const sk = appKeyToServerKey(key);
-        if (!sk) return { ok: false, reason: 'bad-key' };
+        if (!sk) return reject('bad-key', 'Key "' + String(key) + '" không hợp lệ');
 
         const songId = makeSongId(title, artist);
         if (this._submitted.has(songId)) return { ok: true, reason: 'already-submitted' };
@@ -245,12 +272,20 @@ class KeyServerSync {
         }
 
         const p = (async () => {
-            const fail = (reason) => { this._submitFailedAt.set(songId, this.now()); return { ok: false, reason }; };
+            const fail = (reason, text) => {
+                this._submitFailedAt.set(songId, this.now());
+                this._log('fail|' + reason + '|' + songId, 'Gửi Key lỗi (' + reason + '): ' + text + ' -> thử lại sau ' + (SUBMIT_RETRY_COOLDOWN_MS / 1000) + ' giây');
+                return { ok: false, reason };
+            };
 
             // Server đã có bài (máy khác hoặc extension đã gửi) -> không gửi trùng.
             const existing = await this.lookup(title, artist, { force: true });
-            if (existing.found) { this._submitted.add(songId); return { ok: true, reason: 'server-already-has' }; }
-            if (existing.error) return fail('lookup-failed');
+            if (existing.found) {
+                this._submitted.add(songId);
+                this._log('already|' + songId, 'Không gửi Key: server ĐÃ có bài "' + label + '" (' + existing.key + ')');
+                return { ok: true, reason: 'server-already-has' };
+            }
+            if (existing.error) return fail('lookup-failed', 'không xác minh được server (' + existing.error + '), không gửi để tránh trùng');
 
             const dur = Number(durationSec) > 0 ? Math.round(Number(durationSec)) : null;
             const info = await this._request('/set-song-info', {
@@ -263,7 +298,7 @@ class KeyServerSync {
                     note: artist ? ('artist: ' + String(artist) + ' | nguon: AUTO_MENU_AI') : 'nguon: AUTO_MENU_AI'
                 })
             }, this.submitTimeoutMs);
-            if (!info.ok || !info.json || info.json.ok !== true) return fail('info-failed');
+            if (!info.ok || !info.json || info.json.ok !== true) return fail('info-failed', 'server từ chối lưu thông tin bài (' + (info.error || ('http-' + info.status)) + ')');
 
             const seg = await this._request('/add-segment', {
                 method: 'POST',
@@ -277,13 +312,13 @@ class KeyServerSync {
                     weight: 1.0
                 })
             }, this.submitTimeoutMs);
-            if (!seg.ok || !seg.json || seg.json.ok !== true) return fail('segment-failed');
+            if (!seg.ok || !seg.json || seg.json.ok !== true) return fail('segment-failed', 'server từ chối lưu đoạn Key (' + (seg.error || ('http-' + seg.status)) + ')');
 
             this._submitted.add(songId);
             this._submitFailedAt.delete(songId);
             // Lần hỏi tiếp theo thấy ngay bài đã có.
             this._cacheSet(this._cacheKey(title, artist), { found: true, key: serverKeyToAppKey(sk.key, sk.mode), songId, title: String(title), source: 'server' }, HIT_TTL_MS);
-            try { this.logger.log('[KeyServer] Đã gửi Key lên server'); } catch (e) {}
+            this._log('sent|' + songId, 'ĐÃ GỬI Key lên server: "' + label + '" -> ' + serverKeyToAppKey(sk.key, sk.mode) + ' (id ' + songId + ')');
             return { ok: true, reason: 'submitted' };
         })().finally(() => { this._submitInflight.delete(songId); });
 

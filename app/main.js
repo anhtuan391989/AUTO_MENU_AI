@@ -728,11 +728,18 @@ ipcMain.handle("get-control-source", () => ControlSource.getControlSource());
 // Task C — Renderer báo Key vừa dò xong (đã khoá); main gửi lên Key Server.
 // Tên bài/ca sĩ/độ dài lấy từ CHÍNH main process (currentNowPlayingForSync), không tin renderer.
 // Không bao giờ throw: lỗi mạng chỉ trả { ok:false, reason } để renderer bỏ qua.
+let lastServerSubmitLogAt = 0; // chống spam log: vòng dò khóa Key gọi lặp lại liên tục
 ipcMain.handle("server-submit-key", async (event, data) => {
     try {
         const cur = currentNowPlayingForSync;
-        if (!cur) return { ok: false, reason: "no-song" };
         const d = data && typeof data === "object" ? data : {};
+        const nowMs = Date.now();
+        if (nowMs - lastServerSubmitLogAt > 60000) {
+            lastServerSubmitLogAt = nowMs;
+            const pct = Number.isFinite(Number(d.confidence)) ? Math.round(Number(d.confidence) * 100) + "%" : "không rõ";
+            console.log(`[KeyServer] AI đã khóa Key ${d.key} (${pct}) — bài: ${cur ? `"${cur.title}"` : "CHƯA BIẾT TÊN BÀI"}`);
+        }
+        if (!cur) return { ok: false, reason: "no-song" };
         return await keyServerSync.submit({
             title: cur.title,
             artist: cur.artist,
