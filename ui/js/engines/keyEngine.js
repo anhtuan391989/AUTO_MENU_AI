@@ -14,13 +14,53 @@ const KeyEngine = (() => {
     const KS_MAJOR_PROFILE = [1.000, 0.065, 0.630, 0.088, 0.710, 0.568, 0.095, 0.851, 0.075, 0.688, 0.098, 0.425];
     const KS_MINOR_PROFILE = [1.000, 0.072, 0.573, 0.782, 0.082, 0.571, 0.082, 0.851, 0.608, 0.082, 0.629, 0.082];
 
+    // === TASK AI-KEY-SCORING-A-01 — CHẤM ĐIỂM 24 KEY BẰNG TƯƠNG QUAN PEARSON (thay "(cosine+1)/2") ===
+    // Vấn đề đã đo (xem báo cáo AI-KEY-SCORING-A-01): thang cũ "(cosine+1)/2 + bass(0.5) + modal(0.08)" có 3 lỗi:
+    //  (1) cosine KHÔNG trừ trung bình: mọi vector chroma dương đều "giống" mọi hồ sơ Key => 24 điểm dồn trong ~0.1 => biên top1-top2 rất nhỏ, dễ bị bass/modal lấn át;
+    //  (2) bass 0.5 + modal 0.08 CỘNG THẲNG vào điểm => điểm tối đa ~1.58 => confidence > 1 (vi phạm hợp đồng AIContext: confidence ∈ [0,1], ngoài khoảng bị TỪ CHỐI);
+    //  (3) bass chiếm 20% điểm quyết định LOCK (bassNorm trong confidenceV2) => nhạc bass nặng khoá theo gốc bass thay vì theo hòa âm.
+    // Thuật toán mới (công khai, KHÔNG phải công thức nội bộ của PDL): điểm ứng viên = trung bình CỘNG của 2 tương quan Pearson có trừ trung bình
+    //   r = 0.5·pearson(chroma, Krumhansl–Kessler[root,mode]) + 0.5·pearson(chroma, Temperley[root,mode])   (r ∈ [-1,1]; 24 ứng viên cùng 1 công thức)
+    // cộng 2 bằng chứng PHỤ nhỏ có trần cứng (bass ≤ BASS_ROOT_BOOST_WEIGHT ≤ 0.05; modal ≤ MODAL_BOOST). Hồ sơ KK/Temperley là BẢN SAO đúng giá trị của
+    // ui/js/engines/musicAnalysis.js (file đó không được nạp trong index.html nên không thể phụ thuộc; test KeyScoringPearson01 bảo đảm hai bản không lệch nhau).
+    // Tắt/hoàn nguyên: KEY_SCORING_PEARSON_ENABLED = false => thang điểm, bass, modal, confidence và MỌI ngưỡng trở về đúng như trước task này.
+    const KEY_SCORING_PEARSON_ENABLED = true;
+    // D: engine không báo lại cùng 1 Key đã báo (xem runVoteLoop). false => như cũ (mỗi vòng detectOnce của renderer báo lại Key đang khoá => ai-result trùng).
+    const DEDUP_KEY_REPORT_ENABLED = true;
+    const PEARSON_ON = KEY_SCORING_PEARSON_ENABLED;
+    const KK_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+    const KK_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+    const TEMPERLEY_MAJ = [5.0, 2.0, 3.5, 2.0, 4.5, 4.0, 2.0, 4.5, 2.0, 3.5, 1.5, 4.0];
+    const TEMPERLEY_MIN = [5.0, 2.0, 3.5, 4.5, 2.0, 4.0, 2.0, 4.5, 3.5, 2.0, 1.5, 4.0];
+    const PEARSON_W_KK = 0.5, PEARSON_W_TEMPERLEY = 0.5; // 2 hồ sơ, mỗi hồ sơ 1 phiếu bằng nhau (kiểm thử được: r = 0.5·rKK + 0.5·rT)
+    // Dữ liệu chroma không đủ thông tin => KHÔNG tạo Key (key=null, confidence=0, valid=false):
+    const MIN_ACTIVE_PITCH_CLASSES = 3;   // cần ≥ 3 cao độ có năng lượng đáng kể (1 nốt đơn/1 cao độ không đủ để nói Key)
+    const ACTIVE_PC_REL = 0.10;           // "đáng kể" = ≥ 10% cao độ mạnh nhất (sau chuẩn hoá power-law, L2)
+    const MODAL_BOOST = PEARSON_ON ? 0.02 : 0.08; // AI-KEY-SCORING-A-01: bằng chứng quãng 3 (phụ). Pearson+KK/Temperley ĐÃ mã hoá quãng 3 nên cộng thêm 0.08 là đếm đôi (xem báo cáo)
+    // Nén bổ sung TRƯỚC Pearson (chỉ trong khâu chấm điểm; bộ tích luỹ chroma KHÔNG đổi). Đo trên 126 ca (phụ lục báo cáo): hệ số 0.4–0.5 là vùng phẳng cho nhóm bass mạnh
+    // (đúng 16/16 tại 12 s và 20 s; 0.67→0.7 chỉ 9–11/16; 1.0 chỉ 5–6/16) — nén mạnh hơn làm 1 đỉnh bass/hài lớn bớt lấn át các cao độ hòa âm còn lại. Chọn 0.5 (giữa vùng phẳng).
+    const PEARSON_EXTRA_POWER = 0.5;
+    const MIN_PROFILE_SPREAD = 1e-6;      // độ lệch chuẩn tối thiểu của chroma (phẳng/hằng số => Pearson không xác định)
+    // Quy đổi MỌI ngưỡng "biên điểm" cũ sang thang Pearson. Thang mới giãn biên top1-top2 gấp nhiều lần (đo: xem báo cáo) nên ngưỡng giữ nguyên số CŨ sẽ mất ý nghĩa.
+    // MARGIN_SCALE: hệ số đổi đơn vị biên. Đo trên 110 ca: biên trung vị @12 s tăng 0.022 → 0.180 (~8 lần); chọn 5 (thận trọng, thấp hơn tỷ lệ đo) — CHỈ là đổi đơn vị.
+    // Biên tăng KHÔNG chứng minh accuracy tăng; độ đúng của các ngưỡng đã quy đổi được kiểm chứng riêng bằng benchmark (ca đúng vs ca sai).
+    const MARGIN_SCALE = PEARSON_ON ? 5 : 1;
+    // confidence (bằng chứng cho Key đứng đầu) = 0.5·fit + 0.5·separation, mỗi vế ∈ [0,1] (xem estimateKeyFromChroma):
+    //   fit        = (r1 − FIT_FLOOR)/(FIT_FULL − FIT_FLOOR), r1 = tương quan Pearson thuần của Key đứng đầu  — "chroma có giống một Key không"
+    //   separation = margin / SEPARATION_FULL, margin = điểm top1 − điểm top2                                   — "Key này hơn Key sát nhất bao nhiêu"
+    const FIT_FLOOR = 0.30, FIT_FULL = 0.85;
+    const SEPARATION_FULL = 0.10 * MARGIN_SCALE;
+
     const A4_HZ = 440.0;
     const HARMONIC_AMP = [1.0, 0.60, 0.42, 0.30, 0.20, 0.15, 0.10, 0.07];
 
     const CHROMA_SMOOTHING = 0.96;
     const CHROMA_SMOOTHING_FAST = 0.80;
 
-    const MIN_CONFIDENCE = 0.35;
+    // AI-KEY-SCORING-A-01: ngưỡng tối thiểu để một ước lượng được coi là "có Key". Thang cũ (điểm cosine+bass, có thể >1) dùng 0.35; thang mới confidence=0.5·fit+0.5·separation ∈ [0,1].
+    // Đo (126 ca, xem báo cáo): ca KHÔNG có Key (nhiễu/ù/hợp âm rỗng) có confidence tối đa 0.52 (p90 0.50); ca đúng p10=0.69. 0.35 không còn ý nghĩa (để lọt ù 60 Hz) => 0.55.
+    // ModEngine dùng chung hằng này qua KeyEngine.MIN_CONFIDENCE (không sửa modEngine.js).
+    const MIN_CONFIDENCE = KEY_SCORING_PEARSON_ENABLED ? 0.55 : 0.35;
     const STABLE_CHECKS = 4;
     const CHECK_INTERVAL_MS = 1500;
     const VOTE_WINDOW = 8;
@@ -96,7 +136,7 @@ const KeyEngine = (() => {
     const LONG_WARM_S = 1.0;          // chưa tích luỹ đủ thì không chặn (giữ hành vi cũ ở giây đầu)
     const LONG_CHANGE_TICKS = 3;      // đổi Key đã khoá: Key dài hạn mới phải dẫn đầu liên tục ≥ 3 tick (400 ms)
     const LONG_REL_FACTOR = 3;        // đổi giữa 2 Key relative (cùng bộ nốt): gấp 3 biên/thời gian
-    const LONG_CHANGE_GAP = 0.01;     // ... và hơn điểm của Key đang khoá ≥ 0.01 (cosine, thang 0..1)
+    const LONG_CHANGE_GAP = 0.01 * MARGIN_SCALE; // ... và hơn điểm của Key đang khoá ≥ 0.01 (thang CŨ cosine 0..1; thang Pearson: quy đổi bằng MARGIN_SCALE)
     const LONG_LOCK_TICKS = 10;       // khoá thẳng theo Key dài hạn khi nó dẫn đầu liên tục ≥ 10 tick (4 s) ...
     const LONG_LOCK_MIN_S = 4;        // ... và đã tích luỹ ≥ 4 s nhạc
     const SHORT_TAU_S = 1.5;          // bộ tích luỹ ngắn: đo "năng lượng ngoài thang của Key dài hạn" + làm điểm neo khi Key thật sự đổi
@@ -114,7 +154,7 @@ const KeyEngine = (() => {
     // Đo (benchmark keybench01): với 0 s, hợp âm mở đầu được giữ 2 s => khoá Tone của HỢP ÂM đó ngay tại 2,0 s (sai ở ~55% ca có hợp âm đầu ≠ tonic), sau đó mới tự sửa.
     // Đặt 0 = hành vi cũ (như trước task này). A/B đo được (27 ca nhạy cảm): 0 s → khoá đầu sai 10/27, trung vị khoá đầu 2,0 s; ≥4 s → khoá đầu sai 2/27, trung vị 8,8 s (đoạn <8 s giữ LISTENING).
     const LONG_STATIONARY_MIN_S = 4;
-    const LONG_BASS_WEIGHT = 0.05;    // trọng số bass khi xếp hạng Key dài hạn (mặc định cũ 0.5 làm lệch về gốc hợp âm thường gặp nhất — xem báo cáo AI-ALG-05)
+    const LONG_BASS_WEIGHT = PEARSON_ON ? 0.03 : 0.05;    // trọng số bass khi xếp hạng Key dài hạn/trung hạn/ngắn hạn (AI-KEY-SCORING-A-01: 0.03 ≤ 0.05; cũ 0.05)
     let chromaVectorLong = new Array(12).fill(0); // = longSum/longMass (hướng chroma dài hạn)
     let longSum = new Array(12).fill(0), longMass = 0;
     let chromaVectorShort = new Array(12).fill(0);
@@ -131,7 +171,8 @@ const KeyEngine = (() => {
     let candidateHistory = {}; // A35 — lưu lịch sử candidate để kiểm tra ổn định
 
     const BASS_VOTE_DECAY = 0.999;
-    const BASS_ROOT_BOOST_WEIGHT = 0.5;
+    // AI-KEY-SCORING-A-01: bass chỉ là bằng chứng PHỤ. Trần cứng 0.03 điểm (≤ 0.05 theo yêu cầu) áp cho MỌI đường (nhanh/chậm/dài hạn); cũ 0.5 (= lớn hơn cả biên giữa 2 Key). Cộng GIỐNG HỆT cho Major và Minor của cùng 1 gốc nên bass không tự quyết Major/Minor.
+    const BASS_ROOT_BOOST_WEIGHT = PEARSON_ON ? 0.03 : 0.5;
 
     // === TASK A35 — Stability Lock & Modulation Detector ===
     const STABILITY_REQUIRED_TICKS = 2; // candidate mới phải ổn định bao nhiêu tick trước khi đổi Key
@@ -397,6 +438,16 @@ const KeyEngine = (() => {
         return out;
     }
 
+    function powerLawNormalizeExp(vector, exp) {
+        const out = new Array(12).fill(0);
+        let norm = 0;
+        for (let i = 0; i < 12; i++) out[i] = Math.pow(Math.max(0, vector[i]), exp);
+        for (let i = 0; i < 12; i++) norm += out[i] * out[i];
+        norm = Math.sqrt(norm);
+        if (norm > 0) for (let i = 0; i < 12; i++) out[i] /= norm;
+        return out;
+    }
+
     function cosineSimilarity12(a, b) {
         let dot = 0, na = 0, nb = 0;
         for (let i = 0; i < 12; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
@@ -452,9 +503,80 @@ const KeyEngine = (() => {
         return newMargin > avgMarginHistory * MODULATION_MARGIN_GAIN;
     }
 
+    // === TASK AI-KEY-SCORING-A-01 — hồ sơ KK/Temperley đã xoay sẵn cho 24 ứng viên (tính 1 lần) ===
+    const ROT_PROFILES = (() => {
+        const out = [];
+        for (let root = 0; root < 12; root++) {
+            out.push({ root, mode: "Major", kk: rotateProfile(KK_MAJOR, root), tp: rotateProfile(TEMPERLEY_MAJ, root) });
+            out.push({ root, mode: "Minor", kk: rotateProfile(KK_MINOR, root), tp: rotateProfile(TEMPERLEY_MIN, root) });
+        }
+        return out;
+    })();
+    const PEARSON_MIN_EVIDENCE_REASON = { NOT_FINITE: "not-finite", EMPTY: "empty", FLAT: "flat", FEW_PITCH_CLASSES: "few-pitch-classes" };
+
+    // Kiểm tra vector chroma có đủ thông tin để xếp hạng Key không. Trả { ok, reason }. KHÔNG dựa vào mức âm lượng tuyệt đối (đơn vị phụ thuộc đường vào) —
+    // cổng "có nhạc không" thuộc hasMusicalContent; ở đây chỉ xét HÌNH DẠNG vector.
+    function chromaHasKeyInformation(vector, chromaNorm) {
+        if (!vector || vector.length !== 12) return { ok: false, reason: PEARSON_MIN_EVIDENCE_REASON.NOT_FINITE };
+        for (let i = 0; i < 12; i++) if (typeof vector[i] !== "number" || !Number.isFinite(vector[i])) return { ok: false, reason: PEARSON_MIN_EVIDENCE_REASON.NOT_FINITE };
+        let mx = 0, mean = 0;
+        for (let i = 0; i < 12; i++) { if (chromaNorm[i] > mx) mx = chromaNorm[i]; mean += chromaNorm[i]; }
+        if (!(mx > 0)) return { ok: false, reason: PEARSON_MIN_EVIDENCE_REASON.EMPTY };
+        mean /= 12;
+        let v = 0; for (let i = 0; i < 12; i++) v += (chromaNorm[i] - mean) * (chromaNorm[i] - mean);
+        if (Math.sqrt(v / 12) < MIN_PROFILE_SPREAD) return { ok: false, reason: PEARSON_MIN_EVIDENCE_REASON.FLAT };
+        let active = 0; for (let i = 0; i < 12; i++) if (chromaNorm[i] >= mx * ACTIVE_PC_REL) active++;
+        if (active < MIN_ACTIVE_PITCH_CLASSES) return { ok: false, reason: PEARSON_MIN_EVIDENCE_REASON.FEW_PITCH_CLASSES };
+        return { ok: true, reason: null };
+    }
+
+    function invalidKeyResult(reason, opts) {
+        return {
+            key: null, rootIndex: -1, mode: null, valid: false, invalidReason: reason, scoring: "pearson",
+            confidence: 0, confidencePercent: 0, correlation: 0, fit: 0, separation: 0, hasMusicalContent,
+            top1: null, top2: null, all: opts && opts.withAll ? [] : undefined, margin: 0, bassAgreement: 0, modalEvidence: null
+        };
+    }
+
+    // Xếp hạng 24 ứng viên bằng Pearson (KK + Temperley) + bass phụ (≤ bassW) + modal phụ (≤ MODAL_BOOST). Thuần hàm của (vector, bassRootVotes, bassW).
+    function estimateKeyPearson(vector, bassW, opts) {
+        const chromaNorm = powerLawNormalize(vector);
+        const info = chromaHasKeyInformation(vector, chromaNorm);
+        if (!info.ok) return invalidKeyResult(info.reason, opts);
+        const maxBassVotes = Math.max(...bassRootVotes, 1e-9);
+        const corrVec = powerLawNormalizeExp(chromaNorm, PEARSON_EXTRA_POWER); // vector đưa vào Pearson
+        const bw = Math.max(0, Math.min(bassW, 0.05)); // trần cứng: bass không bao giờ > 0.05 điểm dù tham số truyền vào là gì
+        const allScores = [];
+        for (const c of ROT_PROFILES) {
+            const rKK = pearsonCorrelation(corrVec, c.kk), rT = pearsonCorrelation(corrVec, c.tp);
+            const correlation = PEARSON_W_KK * rKK + PEARSON_W_TEMPERLEY * rT; // ∈ [-1,1]
+            const bassAgreement = bassRootVotes[c.root] / maxBassVotes;
+            const bassBoost = chromaNorm[c.root] >= MIN_CHROMA_EVIDENCE ? bassAgreement * bw : 0; // như A35: không có chroma ở gốc thì không được cộng bass
+            const modalEv = computeModalEvidence(chromaNorm, c.root);
+            const modalBoost = (c.mode === "Major" ? modalEv.majorStrength : modalEv.minorStrength) * MODAL_BOOST;
+            allScores.push({ score: correlation + bassBoost + modalBoost, correlation, rKK, rT, bassBoost, modalBoost, root: c.root, mode: c.mode, bassAgreement, modalEvidence: modalEv });
+        }
+        allScores.sort((a, b) => b.score - a.score || a.root - b.root || (a.mode === "Major" ? -1 : 1)); // thứ tự xác định khi hoà điểm
+        const top1 = allScores[0], top2 = allScores[1];
+        const margin = top1.score - top2.score;
+        const fit = clamp01((top1.correlation - FIT_FLOOR) / (FIT_FULL - FIT_FLOOR));
+        const separation = clamp01(margin / SEPARATION_FULL);
+        const confidence = clamp01(0.5 * fit + 0.5 * separation);
+        const gated = hasMusicalContent ? confidence : 0;
+        return {
+            key: `${NOTE_NAMES[top1.root]} ${top1.mode}`, rootIndex: top1.root, mode: top1.mode, valid: true, invalidReason: null, scoring: "pearson",
+            confidence: gated, confidencePercent: Math.round(clamp01(gated) * 100),
+            correlation: top1.correlation, fit, separation, hasMusicalContent,
+            top1, top2, all: opts && opts.withAll ? allScores : undefined, margin,
+            bassAgreement: top1.bassAgreement, modalEvidence: top1.modalEvidence
+        };
+    }
+
     function estimateKeyFromChroma(sourceVector, opts) {
         const vector = sourceVector || chromaVector;
         const bassW = opts && typeof opts.bassWeight === "number" ? opts.bassWeight : BASS_ROOT_BOOST_WEIGHT; // AI-ALG-05: mặc định = cũ
+        if (PEARSON_ON) return estimateKeyPearson(vector, bassW, opts);
+        // ---------- CHẾ ĐỘ CŨ (KEY_SCORING_PEARSON_ENABLED = false): giữ NGUYÊN VĂN logic trước AI-KEY-SCORING-A-01 ----------
         const maxBassVotes = Math.max(...bassRootVotes, 1e-9);
         const chromaNorm = powerLawNormalize(vector);
 
@@ -476,7 +598,6 @@ const KeyEngine = (() => {
             let minorScore = (cosineSimilarity12(chromaNorm, rotateProfile(KS_MINOR_PROFILE, root)) + 1) / 2 + bassBoost;
 
             // === TASK A35 — Tăng điểm theo bằng chứng 3rd phù hợp ===
-            const MODAL_BOOST = 0.08; // đủ để phân biệt, không lấn áp correlation
             majorScore += modalEv.majorStrength * MODAL_BOOST;
             minorScore += modalEv.minorStrength * MODAL_BOOST;
 
@@ -518,7 +639,7 @@ const KeyEngine = (() => {
 
     const MIN_ELAPSED_BEFORE_LOCK_MS = 15000;
     const FAST_LOCK_MIN_ELAPSED_MS = 3000;
-    const ADAPTIVE_LOCK_CONFIDENCE = 0.80;
+    const ADAPTIVE_LOCK_CONFIDENCE = PEARSON_ON ? 0.80 : 0.80; // AI-KEY-SCORING-A-01: ngưỡng trên decisionScore (confidenceV2.combined) — định nghĩa lại ở thang mới, xem hiệu chỉnh trong báo cáo
     const ADAPTIVE_LOCK_STREAK_REQUIRED = 3;
 
     const FAST_PATH_INTERVAL_MS = PROVISIONAL_INTERVAL_MS;
@@ -543,6 +664,7 @@ const KeyEngine = (() => {
     function updateLongState() {
         if (!LONG_EVIDENCE_ENABLED || longSeconds < LONG_WARM_S) { longState.key = null; longState.streak = 0; longState.result = null; return; }
         const r = estimateKeyLong();
+        if (!r || r.rootIndex < 0 || !r.mode) { longState.key = null; longState.streak = 0; longState.result = null; return; } // AI-KEY-SCORING-A-01: chroma dài hạn chưa đủ thông tin => không tạo Key giả
         const k = `${r.rootIndex}-${r.mode}`;
         { let d = 0, na = 0, nb = 0; for (let i = 0; i < 12; i++) { d += chromaVectorShort[i] * chromaVectorLong[i]; na += chromaVectorShort[i] ** 2; nb += chromaVectorLong[i] ** 2; } longState.stationary = na > 0 && nb > 0 && d / Math.sqrt(na * nb) >= LONG_STATIONARY_COS; }
         longState.streak = (k === longState.key) ? longState.streak + 1 : 1;
@@ -641,6 +763,7 @@ const KeyEngine = (() => {
     }
 
     function updateTop1StabilityTimer(top1) {
+        if (!top1) return { stableMs: lastTop1ChangedAt === null ? 0 : Date.now() - lastTop1ChangedAt, changed: false, from: null, to: null }; // AI-KEY-SCORING-A-01: vector không đủ thông tin => không có top1, không đổi bộ đếm
         const currentKey = `${top1.root}-${top1.mode}`;
         const currentLabel = candidateLabel(top1);
         const now = Date.now();
@@ -663,10 +786,26 @@ const KeyEngine = (() => {
         return Math.max(0, Math.min(1, x));
     }
 
-    const PEARSON_NORM_MAX = 1 + BASS_ROOT_BOOST_WEIGHT;
-    const MARGIN_NORM_RANGE = 0.10; // A34 — đã hiệu chỉnh bằng dữ liệu thật
+    const PEARSON_NORM_MAX = 1 + BASS_ROOT_BOOST_WEIGHT; // CHỈ dùng ở chế độ cũ (legacy)
+    const MARGIN_NORM_RANGE = 0.10 * MARGIN_SCALE; // A34 — đã hiệu chỉnh bằng dữ liệu thật (thang cũ); AI-KEY-SCORING-A-01: quy đổi sang thang Pearson
 
+    // === TASK AI-KEY-SCORING-A-01 — 3 khái niệm TÁCH BẠCH (trước đây gộp vào 1 con số "confidence" > 1) ===
+    //   (1) ĐIỂM ỨNG VIÊN  : top1.score = tương quan Pearson (KK+Temperley) + bass phụ (≤0.03) + modal phụ (≤0.02); r thuần ở result.correlation.
+    //   (2) BIÊN           : margin = top1.score − top2.score (Key đứng đầu hơn Key sát nhất bao nhiêu).
+    //   (3) CONFIDENCE     : result.confidence ∈ [0,1] = 0.5·fit + 0.5·separation (bằng chứng cho Key đứng đầu; đây là số gửi sang AIContext & hiển thị %).
+    //   (4) DECISIONSCORE  : confidenceV2.combined ∈ [0,1] = trung bình (fit, separation, stability, modal) — số DUY NHẤT quyết định LOCK (ngưỡng ADAPTIVE_LOCK_CONFIDENCE).
+    // Bass KHÔNG còn là thành phần của decisionScore (cũ: bassNorm = 20% điểm quyết định => nhạc bass nặng khoá theo gốc bass). bassNorm vẫn xuất ra để chẩn đoán.
     function buildConfidenceV2(result, stability) {
+        if (PEARSON_ON) {
+            const fit = result && result.valid !== false && typeof result.fit === "number" ? clamp01(result.fit) : 0;
+            const sep = result && result.valid !== false && typeof result.separation === "number" ? clamp01(result.separation) : 0;
+            const stabilityNorm = clamp01(stability);
+            const bassNorm = clamp01(result && typeof result.bassAgreement === "number" ? result.bassAgreement : 0);
+            const modalNorm = clamp01(result && result.modalEvidence ? result.modalEvidence.modalConfidence : 0);
+            const combined = clamp01((fit + sep + stabilityNorm + modalNorm) / 4); // 4 thành phần HARMONIC-evidence, trọng số bằng nhau; KHÔNG có bass
+            return { pearson: result ? result.correlation : 0, pearsonNorm: fit, margin: result ? result.margin : 0, marginNorm: sep, stability, stabilityNorm,
+                bassAgreement: result ? result.bassAgreement : 0, bassNorm, modalNorm, combined, ambiguity: 1 - sep };
+        }
         const pearson = result.confidence;
         const pearsonNorm = clamp01(pearson / PEARSON_NORM_MAX);
 
@@ -766,7 +905,7 @@ const KeyEngine = (() => {
             }
 
             // === A35: Modulation Check trước khi khóa Key mới ===
-            const avgMargin = marginHistory.length > 0 ? marginHistory.reduce((a, b) => a + b, 0) / marginHistory.length : 0.05;
+            const avgMargin = marginHistory.length > 0 ? marginHistory.reduce((a, b) => a + b, 0) / marginHistory.length : 0.05 * MARGIN_SCALE;
             const currentFullKey = `${result.rootIndex}-${result.mode}`;
             const isNewKey = lastLockedKey !== currentFullKey;
             const modulationOk = !isNewKey || (candidateStable && isTrueModulation(lastLockedKey, currentFullKey, result.margin, avgMargin));
@@ -779,6 +918,9 @@ const KeyEngine = (() => {
             if (!longEvidenceAllows(currentFullKey, lastLockedKey).ok) return;
 
             if (candidateKey === fastPathLastFiredKey) return;
+            // AI-KEY-SCORING-A-01 (D): Key này ĐÃ được báo và vẫn là Key đang khoá => không báo lại. (fastPathLastFiredKey chỉ sống trong 1 vòng; renderer gọi lại
+            // detectOnce() sau MỖI kết quả nên vòng mới luôn khởi tạo lại biến đó => trước đây cùng 1 Key bị báo lại sau ~1.6 s => ai-result lặp.) Key ĐỔI thật vẫn được báo.
+            if (DEDUP_KEY_REPORT_ENABLED && lastLockedKey === currentFullKey) return;
             fastPathLastFiredKey = candidateKey;
             lastLockedKey = currentFullKey; // Cập nhật Key đã khóa
 
@@ -878,8 +1020,9 @@ const KeyEngine = (() => {
 
             // TASK AI-ALG-05 — cùng cổng bằng chứng dài hạn cho đường chậm
             const longGate = longEvidenceAllows(bestKey, lastLockedKey);
-            const willLock = (willLockByVote || willLockByAdaptive) && modulationOk && longGate.ok;
-            const lockReason = !modulationOk ? "delay-stability" : !longGate.ok ? "long-evidence" : willLockByAdaptive && !willLockByVote ? "adaptive" : "vote-window";
+            const alreadyReported = DEDUP_KEY_REPORT_ENABLED && lastLockedKey === bestKey; // AI-KEY-SCORING-A-01 (D): không báo lại Key đang khoá
+            const willLock = (willLockByVote || willLockByAdaptive) && modulationOk && longGate.ok && !alreadyReported;
+            const lockReason = !modulationOk ? "delay-stability" : !longGate.ok ? "long-evidence" : alreadyReported ? "already-reported" : willLockByAdaptive && !willLockByVote ? "adaptive" : "vote-window";
 
             if (willLock && modulationOk) {
                 lastLockedKey = bestKey;
