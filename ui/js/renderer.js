@@ -1626,6 +1626,14 @@ function startAiRealtimeLoop() {
         keyEverDetected = true; // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — có kết quả THẬT từ audio
         __aiState.hasConfirmed = true; updateAiSourceStateLabel(); // TASK A74-02
         window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
+        // Task C — Key này do AI tự dò (Database/Key Server CHƯA có bài): gửi lên Key Server.
+        // main process tự kiểm tra tên bài, độ tin cậy, trùng lặp và lỗi mạng — lỗi ở đây KHÔNG được ảnh hưởng luồng AI.
+        // Điều kiện nằm TRONG try: chỉ gửi khi chắc chắn songDb tồn tại và chưa có bài; mọi lỗi đều bị nuốt.
+        try {
+            if (keySource.songDb && !keySource.songDb.active) {
+                window.electronAPI?.submitDetectedKey?.({ key: result.key, confidence: result.confidence })?.catch?.(() => {});
+            }
+        } catch (e) {}
         refreshKeySourceDisplay();
 
         if (getActiveSourceName() === "ai") {

@@ -144,6 +144,17 @@ const MpcHcSession = require("../core/integration/MpcHcSession"); // Task C — 
 const NowPlayingArbitrator = require("../core/integration/NowPlayingArbitrator"); // Task C — quyết định SMTC hay MPC-HC đang active
 const NowPlayingResolver = require("../core/reference/NowPlayingResolver");
 const SongMatcher = require("../core/reference/SongMatcher");
+// Task C — Key Server: HỎI server trước khi dò Key, và TỰ GỬI Key lên server sau khi dò xong.
+// Mặc định BẬT; tắt bằng cách đặt "keyServerAutoSync": false trong app-settings.json.
+const { KeyServerSync } = require("../core/integration/KeyServerSync");
+const keyServerSync = new KeyServerSync({
+    isEnabled: () => {
+        const s = readSettingsFile();
+        return !(s && s.keyServerAutoSync === false);
+    }
+});
+// Bài đang phát (đã chuẩn hoá) do CHÍNH main process theo dõi — renderer không được tự khai tên bài khi gửi lên server.
+let currentNowPlayingForSync = null;
 // MIDI CONTROL CORE v1.0 — wiring MỚI, độc lập hoàn toàn với AIBootstrap/EventBus ở trên.
 // KHÔNG viết lại CommandEngine/capabilityRegistry (core/command-engine-js/), chỉ nối chúng
 // vào runtime thật. Toàn bộ lỗi bên trong CommandRuntime tự bắt, không throw ra ngoài.
@@ -236,6 +247,8 @@ app.whenReady().then(async () => {
 
         if (!active) {
 
+            currentNowPlayingForSync = null;
+
             if (mainWin && !mainWin.isDestroyed()) {
                 mainWin.webContents.send("now-playing-change", null);
             }
@@ -263,8 +276,34 @@ app.whenReady().then(async () => {
 
                 console.log(`[NowPlaying] Database Miss (source=${source})`);
 
+                // Task C — Database cục bộ không có bài: dùng Key đã biết từ Key Server nếu có
+                // (nhớ theo bài đang phát, hoặc còn trong cache) — KHÔNG gọi mạng ở bước này.
+                const sameSong = currentNowPlayingForSync
+                    && currentNowPlayingForSync.title === resolved.title
+                    && currentNowPlayingForSync.artist === (resolved.artist || "");
+                const knownServerKey = (sameSong && currentNowPlayingForSync.serverKey)
+                    || (keyServerSync.peek(resolved.title, resolved.artist) || {}).key
+                    || null;
+
+                if (knownServerKey) {
+                    databaseMatch = { key: knownServerKey, bpm: null, source: "server" };
+                    console.log(`[NowPlaying] Server Match (source=${source})`);
+                }
+
             }
 
+        }
+
+        // Task C — cập nhật "bài đang phát" cho lệnh gửi Key (giữ lại Key server đã biết nếu vẫn là bài đó).
+        {
+            const prev = currentNowPlayingForSync;
+            const keep = prev && resolved.title && prev.title === resolved.title && prev.artist === (resolved.artist || "");
+            currentNowPlayingForSync = resolved.title ? {
+                title: resolved.title,
+                artist: resolved.artist || "",
+                durationSec: snapshot && snapshot.durationMs > 0 ? snapshot.durationMs / 1000 : null,
+                serverKey: databaseMatch && databaseMatch.source === "server" ? databaseMatch.key : (keep ? prev.serverKey || null : null)
+            } : null;
         }
 
         const payload = {
@@ -281,6 +320,25 @@ app.whenReady().then(async () => {
         // Key Source Manager (dispatchNowPlayingPayload, mục 7B).
         if (mainWin && !mainWin.isDestroyed()) {
             mainWin.webContents.send("now-playing-change", payload);
+        }
+
+        // Task C — chưa biết Key từ Database cục bộ lẫn cache: HỎI KEY SERVER (không chặn luồng).
+        // Có Key -> gửi lại CÙNG payload kèm databaseMatch; renderer dùng đúng đường "Song Database"
+        // sẵn có (Key từ server được ưu tiên hơn AI Detect, Manual vẫn ưu tiên cao nhất).
+        if (!databaseMatch && resolved.title) {
+            const askedTitle = resolved.title;
+            const askedArtist = resolved.artist || "";
+            keyServerSync.lookup(askedTitle, askedArtist).then((r) => {
+                if (!r || !r.found || !r.key) return;
+                const cur = currentNowPlayingForSync;
+                // Kết quả đến muộn của bài cũ -> bỏ.
+                if (!cur || cur.title !== askedTitle || cur.artist !== askedArtist) return;
+                cur.serverKey = r.key;
+                console.log(`[NowPlaying] Server Match (source=${source})`);
+                if (mainWin && !mainWin.isDestroyed()) {
+                    mainWin.webContents.send("now-playing-change", { ...payload, databaseMatch: { key: r.key, bpm: null, source: "server" } });
+                }
+            }).catch(() => { /* lookup không bao giờ throw; chặn thêm cho chắc */ });
         }
 
     }
@@ -666,6 +724,27 @@ ipcMain.handle("ping", () => "pong");
 // Cho renderer biết đang ở LEGACY_CONTROL hay AI_CONTROL — nguồn duy nhất là
 // core/shared/ControlSource.js, renderer KHÔNG tự giữ bản sao riêng.
 ipcMain.handle("get-control-source", () => ControlSource.getControlSource());
+
+// Task C — Renderer báo Key vừa dò xong (đã khoá); main gửi lên Key Server.
+// Tên bài/ca sĩ/độ dài lấy từ CHÍNH main process (currentNowPlayingForSync), không tin renderer.
+// Không bao giờ throw: lỗi mạng chỉ trả { ok:false, reason } để renderer bỏ qua.
+ipcMain.handle("server-submit-key", async (event, data) => {
+    try {
+        const cur = currentNowPlayingForSync;
+        if (!cur) return { ok: false, reason: "no-song" };
+        const d = data && typeof data === "object" ? data : {};
+        return await keyServerSync.submit({
+            title: cur.title,
+            artist: cur.artist,
+            key: d.key,
+            confidence: d.confidence,
+            durationSec: cur.durationSec
+        });
+    } catch (err) {
+        console.error("server-submit-key lỗi (không ảnh hưởng app):", err);
+        return { ok: false, reason: "error" };
+    }
+});
 
 // ================================
 // TELEMETRY (Phase 4A): CHỈ relay bản ghi từ renderer (keyEngine.js) sang TelemetryLogger

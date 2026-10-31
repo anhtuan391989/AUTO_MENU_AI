@@ -72,6 +72,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // info: { reason, message? } — xem core/integration/WindowsMediaSession.js, event "unavailable"
     onNowPlayingUnavailable: (callback) => ipcRenderer.on("now-playing-unavailable", (event, info) => callback(info)),
 
+    // ---- Key Server (Task C): báo Key vừa dò xong để main gửi lên server ----
+    // Chỉ gửi { key, confidence }; tên bài do main process tự biết. Trả { ok, reason } — luôn resolve, không throw.
+    submitDetectedKey: (data) => ipcRenderer.invoke("server-submit-key", data),
+
     // ---- Telemetry (Phase 4A): gửi 1 bản ghi JSON sang main process để ghi vào logs/*.jsonl ----
     // Fire-and-forget, không cần phản hồi — giống cơ chế reportAiResult đã có.
     sendTelemetry: (record) => ipcRenderer.send("telemetry-record", record),

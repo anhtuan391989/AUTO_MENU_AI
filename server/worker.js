@@ -205,9 +205,85 @@ export default {
       }, { headers: corsHeaders });
     }
 
+    // ========== [8] TÌM BÀI THEO TÊN — MENU HỎI SERVER TRƯỚC KHI TỰ DÒ KEY ==========
+    // Menu chỉ biết tên bài (không biết mã video), nên tra theo tên đã chuẩn hoá.
+    // Chỉ ĐỌC dữ liệu, không ghi gì. Trả Key của đoạn đầu tiên của bài.
+    if (url.pathname === "/find") {
+      const title = url.searchParams.get("title") || "";
+      const artist = url.searchParams.get("artist") || "";
+      const q = chuanHoaTen(title);
+      if (q.length < 3) {
+        return Response.json({ found: false, error: "thieu title" }, { status: 400, headers: corsHeaders });
+      }
+
+      try {
+        const { results: songs } = await env.DB.prepare(`
+          SELECT song_id as songId, title FROM song_info ORDER BY updated_at DESC LIMIT 1000
+        `).all();
+
+        const best = timBaiKhopNhat(songs || [], q, chuanHoaTen(artist));
+        if (!best) {
+          return Response.json({ found: false }, { headers: corsHeaders });
+        }
+
+        const { results: segs } = await env.DB.prepare(`
+          SELECT key, mode, start_sec as startSec, end_sec as endSec
+          FROM song_key_segments WHERE song_id = ? ORDER BY start_sec ASC LIMIT 200
+        `).bind(best.songId).all();
+
+        if (!segs || segs.length === 0) {
+          return Response.json({ found: false }, { headers: corsHeaders });
+        }
+
+        return Response.json({
+          found: true,
+          songId: best.songId,
+          title: best.title,
+          key: segs[0].key,
+          mode: segs[0].mode,
+          startSec: segs[0].startSec,
+          endSec: segs[0].endSec,
+          tongDoan: segs.length
+        }, { headers: corsHeaders });
+      } catch (e) {
+        return Response.json({ found: false, error: e.message }, { status: 500, headers: corsHeaders });
+      }
+    }
+
     return Response.json({ error: "not_found" }, { status: 404, headers: corsHeaders });
   }
 };
+
+// ========== CHUẨN HOÁ TÊN BÀI (bỏ dấu, chữ thường, chỉ giữ chữ/số) ==========
+// PHẢI giống hệt hàm normalizeTitle() trong core/integration/KeyServerSync.js.
+function chuanHoaTen(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// ========== CHỌN BÀI KHỚP NHẤT THEO TÊN ==========
+// Khớp đúng hẳn > tên trên server chứa tên Menu gửi > tên Menu gửi chứa tên trên server.
+// Yêu cầu tối thiểu 8 ký tự cho khớp "chứa" để tránh nhầm bài khi tên quá ngắn.
+function timBaiKhopNhat(songs, q, artistNorm) {
+  let best = null;
+  let bestScore = 0;
+  for (const s of songs) {
+    const nt = chuanHoaTen(s.title);
+    if (!nt) continue;
+    let score = 0;
+    if (nt === q) score = 1000;
+    else if (q.length >= 8 && nt.includes(q)) score = 500 - Math.min(nt.length - q.length, 400);
+    else if (nt.length >= 8 && q.includes(nt)) score = 300 - Math.min(q.length - nt.length, 250);
+    if (score > 0 && artistNorm && nt.includes(artistNorm)) score += 50;
+    if (score > bestScore) { bestScore = score; best = s; }
+  }
+  return best;
+}
 
 // ========== HÀM ĐỔI GIÂY -> 03:05 ==========
 function giaySangPhutGiay(tongGiay) {
