@@ -1,0 +1,281 @@
+diff --git a/tests/unit/KeyScaleCc01.verify.js b/tests/unit/KeyScaleCc01.verify.js
+new file mode 100644
+index 0000000..2e93d68
+--- /dev/null
++++ b/tests/unit/KeyScaleCc01.verify.js
+@@ -0,0 +1,81 @@
++/**
++ * KEY-SCALE-CC-01 — Scale (Major/Minor) của Key được gửi xuống Auto-Tune bằng CC RIÊNG, cùng lúc với nốt gốc.
++ * Mã THẬT: ui/js/vocalCommandRouter.js (sendKeyToAutotune) + ui/js/actionRegistry.js (executeAction) trong 1 sandbox; MIDI giả (ghi lại thứ tự).
++ * KHÔNG phải Auto-Tune thật. Chạy: node tests/unit/KeyScaleCc01.verify.js
++ */
++'use strict';
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const ROOT = process.env.AUTOMENU_ROOT || path.join(__dirname, '..', '..');
++const read = (r) => fs.readFileSync(path.join(ROOT, r), 'utf8');
++let pass = 0, fail = 0;
++const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.error('  FAIL', m, x !== undefined ? JSON.stringify(x) : ''); } };
++
++function build({ mapping = true, port = 'loopMIDI', ccFail = false, noteFail = false } = {}) {
++    const events = [];
++    const maps = mapping ? { 'Studio Pro 8': { KEY_SCALE_MAJOR: { kind: 'cc', channel: 15, number: 26, value: 0 }, KEY_SCALE_MINOR: { kind: 'cc', channel: 15, number: 26, value: 5 } } } : {};
++    const store = { selectedDAW: 'Studio Pro 8', dawMidiOutMappings: maps, midiOutputPort: port, mouseControlEnabled: true };
++    const sb = { console: { log() {}, warn() {}, error() {} }, Promise, Math, Number, JSON, Error, Array, Object, setTimeout: (f) => { f(); return 0; },
++        getSetting: (k, f) => (store[k] === undefined ? f : store[k]), setSetting() {}, getCoordinate: () => null,
++        sendMidiCC: async (n, v, ch) => { events.push(['cc', n, v, ch]); return !ccFail; },
++        sendMidiNotePulse: async (n) => { events.push(['note', n]); return !noteFail; }, electronAPI: undefined };
++    sb.window = sb; vm.createContext(sb);
++    vm.runInContext(read('ui/js/vocalCommandRouter.js') + '\nthis.sendKeyToAutotune = sendKeyToAutotune;', sb);
++    vm.runInContext(read('ui/js/actionRegistry.js'), sb);
++    return { sb, events };
++}
++
++(async () => {
++    console.log('== 1. Major / Minor -> CC riêng + nốt gốc ==');
++    { const e = build(); const r = await e.sb.sendKeyToAutotune('C Major');
++      ok(JSON.stringify(e.events) === JSON.stringify([['cc', 26, 0, 14], ['note', 0]]), 'C Major: CC26=0 (Major, kênh 15) rồi nốt C(0) — Scale gửi TRƯỚC nốt', e.events);
++      ok(r.ok && r.driverUsed === 'midi' && r.scale && r.scale.attempted && r.scale.ok && r.scale.mode === 'MAJOR', 'kết quả: ok, kèm scale {MAJOR, ok}', r.scale);
++      e.events.length = 0; await e.sb.sendKeyToAutotune('A Minor');
++      ok(JSON.stringify(e.events) === JSON.stringify([['cc', 26, 5, 14], ['note', 9]]), 'A Minor: CC26=5 rồi nốt A(9)', e.events);
++      e.events.length = 0; await e.sb.sendKeyToAutotune('C Minor');
++      ok(e.events[0][1] === 26 && e.events[0][2] === 5 && e.events[1][1] === 0, 'C Minor khác C Major dù cùng nốt gốc (CC26 giá trị 5 + nốt C)', e.events); }
++
++    console.log('== 2. Chưa cấu hình CC Scale: hành vi cũ ==');
++    { const e = build({ mapping: false }); const r = await e.sb.sendKeyToAutotune('D Minor');
++      ok(JSON.stringify(e.events) === JSON.stringify([['note', 2]]) && r.ok && r.scale.attempted === false && r.scale.reason === 'NOT_CONFIGURED', 'không có mapping -> chỉ gửi nốt D(2) như cũ, scale.attempted=false', { ev: e.events, scale: r.scale }); }
++
++    console.log('== 3. Lỗi Scale không chặn Key ==');
++    { const e = build({ ccFail: true }); const r = await e.sb.sendKeyToAutotune('E Major');
++      ok(r.ok && e.events.some((x) => x[0] === 'note' && x[1] === 4) && r.scale.attempted && r.scale.ok === false, 'CC Scale gửi lỗi -> vẫn gửi nốt E, ok=true, scale.ok=false', { ev: e.events, scale: r.scale }); }
++
++    console.log('== 4. Key giáng / không có chữ Major/Minor ==');
++    { const e = build(); await e.sb.sendKeyToAutotune('F# Minor');
++      ok(e.events[0][1] === 26 && e.events[0][2] === 5 && e.events[1][1] === 6, 'F# Minor: CC26=5 + nốt F#(6)', e.events);
++      e.events.length = 0; const r = await e.sb.sendKeyToAutotune('G');
++      ok(JSON.stringify(e.events) === JSON.stringify([['note', 7]]) && r.scale.reason === 'NO_SCALE_IN_KEY', 'tên Key không có Major/Minor -> không gửi Scale, chỉ nốt G', e.events); }
++
++    console.log('== 5. Chưa chọn cổng MIDI ==');
++    { const e = build({ port: '' }); const r = await e.sb.sendKeyToAutotune('C Major');
++      ok(!r.ok && e.events.every((x) => x[0] !== 'note'), 'không có cổng MIDI -> Key không gửi được (như cũ), không crash', r); }
++
++    console.log('== 6. Setup ==');
++    { const S = read('ui/js/setup.js');
++      ok(/action: "KEY_SCALE_MAJOR"/.test(S) && /action: "KEY_SCALE_MINOR"/.test(S), 'Setup có 2 dòng KEY_SCALE_MAJOR / KEY_SCALE_MINOR');
++      ok(/KEY_SCALE_MAJOR: Object\.freeze\(\{ kind: "cc", channel: 15, number: 26, value: 0 \}\)/.test(S) && /KEY_SCALE_MINOR: Object\.freeze\(\{ kind: "cc", channel: 15, number: 26, value: 5 \}\)/.test(S), 'bộ điền nhanh KEY SCALE: cùng CC26 kênh 15, Major=0 / Minor=5'); }
++
++    console.log('== 7. Setup cho phép CC chung (khác giá trị) cho 2 Scale, vẫn chặn trùng thật ==');
++    { const S = read('ui/js/setup.js');
++      const sb = { console, Set, Map, Number, Object, Array, Math };
++      vm.createContext(sb);
++      const pick = (n) => { const m = S.match(new RegExp('(?:const|function) ' + n + '[\\s\\S]*?\\n\\}\\n|const ' + n + ' = [^\\n]*\\n')); return m ? m[0] : ''; };
++      vm.runInContext(pick('KEY_SCALE_SHARED_SET') + pick('midiClashKey') + pick('validateDawProfileBundle') + pick('planDawProfileFill') + pick('dawQfMake')
++        + '\nthis.v=validateDawProfileBundle; this.p=planDawProfileFill;', sb);
++      const A = ['KEY_SCALE_MAJOR', 'KEY_SCALE_MINOR', 'MIC1_VOLUME', 'MUSIC_ON'];
++      const bun = { count: 2, mappings: { KEY_SCALE_MAJOR: { kind: 'cc', channel: 15, number: 26, value: 0 }, KEY_SCALE_MINOR: { kind: 'cc', channel: 15, number: 26, value: 5 } } };
++      ok(sb.v(bun, A).length === 0, 'bộ KEY SCALE (CC26: 0 và 5) hợp lệ, không báo trùng', sb.v(bun, A));
++      const same = { count: 2, mappings: { KEY_SCALE_MAJOR: { kind: 'cc', channel: 15, number: 26, value: 5 }, KEY_SCALE_MINOR: { kind: 'cc', channel: 15, number: 26, value: 5 } } };
++      ok(sb.v(same, A).length === 1, 'Major và Minor cùng CC cùng giá trị -> vẫn báo trùng', sb.v(same, A));
++      const other = { count: 2, mappings: { MIC1_VOLUME: { kind: 'cc', channel: 15, number: 26, value: 0 }, MUSIC_ON: { kind: 'cc', channel: 15, number: 26, value: 5 } } };
++      ok(sb.v(other, A).length === 1, 'action khác (không phải Scale) trùng CC -> vẫn báo trùng', sb.v(other, A));
++      const saved = { MIC1_VOLUME: { kind: 'cc', channel: 15, number: 26, value: 127 } };
++      const pl = sb.p({ bundles: { scale: bun } }, 'scale', (a) => saved[a], A);
++      ok(!pl.ok && pl.conflicts.length >= 1, 'CC26 đã dùng cho MIC1_VOLUME -> điền nhanh Scale bị chặn', pl.conflicts);
++      const pl2 = sb.p({ bundles: { scale: bun } }, 'scale', () => null, A);
++      ok(pl2.ok && pl2.writes.length === 2, 'không có xung đột -> kế hoạch ghi 2 mapping', pl2); }
++
++    console.log(`\nKẾT QUẢ: ${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})().catch((e) => { console.error('LỖI HARNESS', e); process.exit(2); });
+diff --git a/tests/unit/KnobMidiCompletion01.verify.js b/tests/unit/KnobMidiCompletion01.verify.js
+index 72506cc..6a15f68 100644
+--- a/tests/unit/KnobMidiCompletion01.verify.js
++++ b/tests/unit/KnobMidiCompletion01.verify.js
+@@ -158,7 +158,7 @@ const ccOf = (v) => Math.round(v * 127 / 100);
+         const saved = { MUSIC_ON: mk(102, 16), FX_OFF: mk(109, 16), BEAT_INPUT_VOLUME: mk(20, 1), MASTER_OUTPUT_VOLUME: mk(21, 1), MONITOR_FX: mk(22, 2) };
+         const fn = new Function('getDawMidiOutMapping', setup.slice(a, a2) + '\n' + setup.slice(b, b2) + '\n' + setup.slice(c, c2) + '\nreturn { findMidiOutMappingConflict, MIDI_CONFLICT_GUARD_SET };')((act) => saved[act] || null);
+         const { findMidiOutMappingConflict: f, MIDI_CONFLICT_GUARD_SET: G } = fn;
+-        ok(['BEAT_INPUT_VOLUME', 'MASTER_OUTPUT_VOLUME', 'RETUNE_SPEED_MIC1', 'RETUNE_SPEED_MIC2', 'MUSIC_ON', 'FX_OFF', 'MUSIC_SELECT', 'MIC1_SELECT', 'MIC2_SELECT'].every((x) => G.has(x)) && G.size === 17, 'nhóm bảo vệ = 4 Knob + 2 MIC VOLUME + 8 LIVE + 3 CHỌN TRACK (MIC-VOLUME-KNOB-01: 15→17, chủ đích; MENU-FIX-02: 12→15)');
++        ok(['BEAT_INPUT_VOLUME', 'MASTER_OUTPUT_VOLUME', 'RETUNE_SPEED_MIC1', 'RETUNE_SPEED_MIC2', 'MUSIC_ON', 'FX_OFF', 'MUSIC_SELECT', 'MIC1_SELECT', 'MIC2_SELECT'].every((x) => G.has(x)) && G.size === 19, 'nhóm bảo vệ = 4 Knob + 2 MIC VOLUME + 2 KEY SCALE (KEY-SCALE-CC-01) + 8 LIVE + 3 CHỌN TRACK (MIC-VOLUME-KNOB-01: 15→17, chủ đích; MENU-FIX-02: 12→15)');
+         ok(f('RETUNE_SPEED_MIC1', mk(102, 16)) === 'MUSIC_ON', 'Retune 1 đặt CC102 ch16 -> xung đột với MUSIC_ON (bị chặn)');
+         ok(f('MUSIC_OFF', mk(20, 1)) === 'BEAT_INPUT_VOLUME', 'LIVE đặt CC20 ch1 -> xung đột với Knob Beat');
+         ok(f('RETUNE_SPEED_MIC2', mk(21, 1)) === 'MASTER_OUTPUT_VOLUME', 'Knob trùng Knob khác -> bị chặn');
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index f5e779a..11ce0e9 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -88,6 +88,10 @@ const ACTIONS = Object.freeze({
+     // Cùng khuôn với BEAT_INPUT_VOLUME: không có mapping mặc định, người dùng lưu CC trong Setup (hoặc nút điền nhanh).
+     MIC1_VOLUME: "MIC1_VOLUME",   // fader track "Mic"
+     MIC2_VOLUME: "MIC2_VOLUME",   // fader track "Không Dây"
++    // KEY-SCALE-CC-01 — Scale của Key theo từng bài: 2 CC RIÊNG (người dùng MIDI Learn vào Auto-Tune). Gửi tự động bởi sendKeyToAutotune()
++    // (vocalCommandRouter.js) cùng lúc với nốt gốc. Không mapping mặc định ngầm.
++    KEY_SCALE_MAJOR: "KEY_SCALE_MAJOR",
++    KEY_SCALE_MINOR: "KEY_SCALE_MINOR",
+     // MIDI-DAW-CONTROL-01 — TÁM lệnh ĐẶT TRẠNG THÁI ĐÍCH (ON và OFF là hai action RIÊNG, mỗi cái một mapping riêng),
+     // thay cho lệnh toggle không xác định. MUSIC = Monitor track "Beat"; MIC1 = Monitor track "Mic"; MIC2 = Monitor
+     // track "Không Dây"; FX = Mute bus Delay/Verb ngắn/Verb dài/Com Verb (FX ON = bỏ mute, FX OFF = mute). Không có
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index 392f0d0..7f56f49 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -637,6 +637,9 @@ const DAW_MIDI_ACTIONS = [
+     // MIC-VOLUME-KNOB-01 — âm lượng track Mic / Không Dây (núm hiện khi bấm chuột phải vào nút MIC 1 / MIC 2). Trống mặc định.
+     { action: "MIC1_VOLUME", label: "MIC 1 VOLUME (fader Mic)" },
+     { action: "MIC2_VOLUME", label: "MIC 2 VOLUME (fader Không Dây)" },
++    // KEY-SCALE-CC-01 — CC chọn Scale Auto-Tune (gửi kèm mỗi lần đổi Key). Trống mặc định; điền nhanh bằng bộ "SCALE gợi ý".
++    { action: "KEY_SCALE_MAJOR", label: "KEY SCALE MAJOR (Auto-Tune)" },
++    { action: "KEY_SCALE_MINOR", label: "KEY SCALE MINOR (Auto-Tune)" },
+     // TASK B12 — mở rộng thêm 3 action mới nối ở B12 (musicBtn + Retune×2), tái dùng nguyên
+     // vẹn UI/schema đã có, không tạo cơ chế cấu hình thứ hai.
+     { action: "MONITOR_BEAT_TOGGLE", label: "MONITOR BEAT" },
+@@ -683,14 +686,15 @@ function findDawStateMappingConflict(action, mapping) {
+ // MENU-KNOB-MIDI-COMPLETION-01 — 4 Knob MIDI + 8 lệnh LIVE ON/OFF là nhóm "bảo vệ": một CC/Note (cùng kind+kênh+số) KHÔNG được dùng chung giữa
+ // một trong 12 action này và BẤT KỲ action khác đã lưu (nếu không, một cú xoay Knob có thể kích hoạt macro hoặc ngược lại).
+ // Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
+-const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2", "MIC1_VOLUME", "MIC2_VOLUME"]);
++const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2", "MIC1_VOLUME", "MIC2_VOLUME", "KEY_SCALE_MAJOR", "KEY_SCALE_MINOR"]);
+ const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
+ const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET]);
+ function findMidiOutMappingConflict(action, mapping) {
+     for (const { action: other } of DAW_MIDI_ACTIONS) {
+         if (other === action) continue;
+         const m = getDawMidiOutMapping(other);
+-        if (m && m.kind === mapping.kind && Number(m.channel) === Number(mapping.channel) && Number(m.number) === Number(mapping.number)) return other;
++        if (m && m.kind === mapping.kind && Number(m.channel) === Number(mapping.channel) && Number(m.number) === Number(mapping.number)
++            && !(typeof KEY_SCALE_SHARED_SET !== "undefined" && KEY_SCALE_SHARED_SET.has(action) && KEY_SCALE_SHARED_SET.has(other) && midiClashKey(action, mapping) !== midiClashKey(other, m))) return other;
+     }
+     return null;
+ }
+@@ -722,6 +726,13 @@ function setDawMidiOutMapping(action, mapping) {
+ const DAW_QF_S1_LIVE = Object.freeze({
+     MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109,
+ });
++// KEY-SCALE-CC-02 — Scale Auto-Tune là DANH SÁCH 29 mục điều khiển bằng 1 CC: Major/Minor dùng CHUNG CC, khác GIÁ TRỊ.
++// Chỉ 2 action này được phép trùng CC/Note (khi khác giá trị); mọi action khác vẫn phải có CC riêng.
++const KEY_SCALE_SHARED_SET = new Set(["KEY_SCALE_MAJOR", "KEY_SCALE_MINOR"]);
++function midiClashKey(action, m) {
++    const base = `${m.kind}|${Number(m.channel)}|${Number(m.number)}`;
++    return KEY_SCALE_SHARED_SET.has(action) ? `${base}|v${Number(m.kind === "note" ? m.velocity : m.value)}` : base;
++}
+ function dawQfMake(channel, value, numbers) {
+     const o = {};
+     for (const [a, n] of Object.entries(numbers)) o[a] = Object.freeze({ kind: "cc", channel, number: n, value });
+@@ -744,6 +755,12 @@ const DAW_MIDI_PROFILES = Object.freeze({
+             select: Object.freeze({ title: "CHỌN TRACK", count: 3, mappings: dawQfMake(16, 127, { MUSIC_SELECT: 110, MIC1_SELECT: 111, MIC2_SELECT: 112 }) }),
+             // MIC-VOLUME-KNOB-01 — 2 CC âm lượng Mic, kênh 15 như bộ KNOB, không trùng CC 20–23 (Knob) và 102–112 (LIVE/CHỌN TRACK).
+             micvol: Object.freeze({ title: "MIC VOLUME", count: 2, mappings: dawQfMake(15, 127, { MIC1_VOLUME: 24, MIC2_VOLUME: 25 }) }),
++            // KEY-SCALE-CC-02 — 1 CC (26, kênh 15) chọn Scale Auto-Tune theo GIÁ TRỊ: Major=0 (mục 1/29), Minor=5 (mục 2/29: 5/127×28≈1.1).
++            // Danh sách Scale của Auto-Tune Pro: 29 mục, Major đầu, Minor thứ hai, Harmonic cuối (=127). Giá trị CHƯA kiểm chứng trên máy thật.
++            scale: Object.freeze({ title: "KEY SCALE", count: 2, mappings: Object.freeze({
++                KEY_SCALE_MAJOR: Object.freeze({ kind: "cc", channel: 15, number: 26, value: 0 }),
++                KEY_SCALE_MINOR: Object.freeze({ kind: "cc", channel: 15, number: 26, value: 5 }),
++            }) }),
+         }),
+     }),
+     "cubase": Object.freeze({
+@@ -787,7 +804,7 @@ function validateDawProfileBundle(bundle, validActions) {
+         if (!Number.isInteger(ch) || ch < 1 || ch > 16) errs.push(`${a}: kênh phải 1–16.`);
+         if (!Number.isInteger(nu) || nu < 0 || nu > 127) errs.push(`${a}: số phải 0–127.`);
+         if (!Number.isInteger(v) || v < 0 || v > 127) errs.push(`${a}: giá trị phải 0–127.`);
+-        const k = `${m.kind}|${ch}|${nu}`;
++        const k = midiClashKey(a, m);
+         if (seen.has(k)) errs.push(`${a} trùng ${seen.get(k)} (cùng ${m.kind} ${nu} kênh ${ch}).`); else seen.set(k, a);
+     }
+     return errs;
+@@ -804,7 +821,8 @@ function planDawProfileFill(profile, bundleId, getMapping, allActions) {
+         for (const other of allActions) {
+             if (inBundle.has(other)) continue;
+             const o = getMapping(other);
+-            if (o && o.kind === m.kind && Number(o.channel) === Number(m.channel) && Number(o.number) === Number(m.number)) res.conflicts.push([a, other]);
++            if (o && o.kind === m.kind && Number(o.channel) === Number(m.channel) && Number(o.number) === Number(m.number)
++                && !(KEY_SCALE_SHARED_SET.has(a) && KEY_SCALE_SHARED_SET.has(other) && midiClashKey(a, m) !== midiClashKey(other, o))) res.conflicts.push([a, other]);
+         }
+         const cur = getMapping(a);
+         const same = cur && cur.kind === m.kind && Number(cur.channel) === Number(m.channel) && Number(cur.number) === Number(m.number) && Number(cur.value) === Number(m.value);
+@@ -857,7 +875,8 @@ function initDawMidiOutputMappingSection() {
+             <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ LIVE gợi ý — ${profile.name}</button>
+             <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>
+             ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}
+-            ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}`
++            ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}
++            ${profile.bundles.scale ? `<button class="setup-btn" id="btnFillScaleCc">Điền + lưu bộ KEY SCALE gợi ý — ${profile.name}</button>` : ""}`
+                 : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
+             <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
+             <span id="liveCcStatus"></span>`;
+@@ -888,6 +907,8 @@ function initDawMidiOutputMappingSection() {
+             if (selBtn) selBtn.addEventListener("click", () => runQuickFill("select"));
+             const micVolBtn = liveBox.querySelector("#btnFillMicVolCc");
+             if (micVolBtn) micVolBtn.addEventListener("click", () => runQuickFill("micvol"));
++            const scaleBtn = liveBox.querySelector("#btnFillScaleCc");
++            if (scaleBtn) scaleBtn.addEventListener("click", () => runQuickFill("scale"));
+         }
+ 
+         // Khôi phục: xoá CHỈ 8 mapping ON/OFF mới; mapping cũ (toggle MONITOR_*, Send, PLAY...) không bị đụng.
+diff --git a/ui/js/vocalCommandRouter.js b/ui/js/vocalCommandRouter.js
+index 6fcd53d..52a2696 100644
+--- a/ui/js/vocalCommandRouter.js
++++ b/ui/js/vocalCommandRouter.js
+@@ -112,13 +112,40 @@ function isMouseFallbackAllowed() {
+     return v === undefined || v === null || v === "" ? true : !!v;
+ }
+ 
++/**
++ * KEY-SCALE-CC-01 — gửi SCALE (Major/Minor) của Key xuống Auto-Tune bằng CC RIÊNG (người dùng chọn Scale theo từng bài, nốt MIDI chỉ mang nốt gốc).
++ * Dùng ActionRegistry: KEY_SCALE_MAJOR / KEY_SCALE_MINOR — mỗi cái một mapping CC do người dùng lưu ở Setup (không có mặc định ngầm).
++ * Chưa lưu mapping => KHÔNG gửi gì (attempted=false), Key vẫn gửi như cũ. Kết quả chỉ để chẩn đoán, không bao giờ làm hỏng việc gửi Key.
++ * @returns {Promise<{attempted: boolean, mode?: string, ok?: boolean, status?: string, reason?: string}>}
++ */
++async function sendKeyScaleToAutotune(keyName) {
++    const mode = /minor/i.test(keyName) ? "MINOR" : (/major/i.test(keyName) ? "MAJOR" : null);
++    if (!mode) return { attempted: false, reason: "NO_SCALE_IN_KEY" };
++    const AR = typeof window !== "undefined" ? window.ActionRegistry : null;
++    if (!AR || typeof AR.executeAction !== "function" || !AR.ACTIONS) return { attempted: false, mode, reason: "NO_ACTION_REGISTRY" };
++    try {
++        const r = await AR.executeAction(mode === "MINOR" ? AR.ACTIONS.KEY_SCALE_MINOR : AR.ACTIONS.KEY_SCALE_MAJOR, { reason: "key-scale" });
++        if (r && r.reason === "NOT_CONFIGURED") return { attempted: false, mode, reason: "NOT_CONFIGURED" };
++        return { attempted: true, mode, ok: !!(r && r.ok), status: (r && (r.status || r.reason)) || null };
++    } catch (e) {
++        return { attempted: true, mode, ok: false, status: "ERROR" };
++    }
++}
++
+ /**
+  * Đổi key hiện tại trên Auto-Tune sang keyName (vd "C Major", "A# Minor").
++ * Gửi Scale (CC riêng, nếu đã cấu hình) TRƯỚC, rồi gửi nốt gốc.
+  * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string}>}
+  */
+ async function sendKeyToAutotune(keyName) {
+     const root = keyName.match(/^[A-G]#?/)?.[0];
+     const note = NOTE_MAP[root];
++    // KEY-SCALE-CC-01 — Scale trước, nốt gốc sau; chỉ nghỉ ngắn khi Scale đã gửi thật. Lỗi/chưa cấu hình Scale KHÔNG chặn việc gửi Key.
++    let scale = { attempted: false, reason: "NOT_AVAILABLE" };
++    if (typeof sendKeyScaleToAutotune === "function") {
++        scale = await sendKeyScaleToAutotune(keyName);
++        if (scale && scale.attempted && scale.ok && typeof delay === "function") await delay(40);
++    }
+     // TASK MIDI-01 — chỉ THÊM trường chẩn đoán vào kết quả (không đổi ok/driverUsed/status/detail): midi = {attempted, sent|reason}.
+     let midi = { attempted: false, reason: getSetting("midiOutputPort") ? "NO_NOTE_FOR_KEY" : "MIDI_PORT_NOT_SELECTED" };
+ 
+@@ -128,7 +155,7 @@ async function sendKeyToAutotune(keyName) {
+         const sent = await sendMidiNotePulse(note);
+         midi = { attempted: true, sent: !!sent, port: midiPort, note };
+         // sent=true chỉ nghĩa là API Web MIDI không ném lỗi (MIDI_SENT_UNCONFIRMED) — KHÔNG xác nhận phía đích đã nhận.
+-        if (sent) return { ok: true, driverUsed: "midi", midi, confirmation: "MIDI_SENT_UNCONFIRMED" };
++        if (sent) return { ok: true, driverUsed: "midi", midi, scale, confirmation: "MIDI_SENT_UNCONFIRMED" };
+         // Nếu gửi lỗi (vd cổng MIDI đã bị rút/đổi tên) -> rơi xuống fallback bên dưới
+     }
+ 
+@@ -145,12 +172,13 @@ async function sendKeyToAutotune(keyName) {
+             };
+         }
+         const result = await window.electronAPI.clickAtPoint(point);
+-        return { ok: result.ok, driverUsed: "mouse", midi, detail: result.detail };
++        return { ok: result.ok, driverUsed: "mouse", midi, scale, detail: result.detail };
+     }
+ 
+     return {
+         ok: false,
+         midi,
++        scale,
+         detail: 'Chưa cấu hình cổng MIDI (Setup > MIDI) hoặc toạ độ "Key Auto-Tune" (Setup > Lấy tọa độ).',
+     };
+ }
