@@ -92,6 +92,7 @@ const ACTIONS = Object.freeze({
     // (vocalCommandRouter.js) cùng lúc với nốt gốc. Không mapping mặc định ngầm.
     KEY_SCALE_MAJOR: "KEY_SCALE_MAJOR",
     KEY_SCALE_MINOR: "KEY_SCALE_MINOR",
+    KEY_ROOT: "KEY_ROOT",   // KEY-ROOT-CC-01 — Key gốc Auto-Tune qua 1 CC (giá trị = nốt 0–11 → 0–127)
     // MIDI-DAW-CONTROL-01 — TÁM lệnh ĐẶT TRẠNG THÁI ĐÍCH (ON và OFF là hai action RIÊNG, mỗi cái một mapping riêng),
     // thay cho lệnh toggle không xác định. MUSIC = Monitor track "Beat"; MIC1 = Monitor track "Mic"; MIC2 = Monitor
     // track "Không Dây"; FX = Mute bus Delay/Verb ngắn/Verb dài/Com Verb (FX ON = bỏ mute, FX OFF = mute). Không có

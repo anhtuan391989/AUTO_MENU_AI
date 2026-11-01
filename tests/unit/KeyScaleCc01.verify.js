@@ -10,9 +10,10 @@ const read = (r) => fs.readFileSync(path.join(ROOT, r), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.error('  FAIL', m, x !== undefined ? JSON.stringify(x) : ''); } };
 
-function build({ mapping = true, port = 'loopMIDI', ccFail = false, noteFail = false } = {}) {
+function build({ keyRoot = false, mapping = true, port = 'loopMIDI', ccFail = false, noteFail = false } = {}) {
     const events = [];
     const maps = mapping ? { 'Studio Pro 8': { KEY_SCALE_MAJOR: { kind: 'cc', channel: 15, number: 26, value: 0 }, KEY_SCALE_MINOR: { kind: 'cc', channel: 15, number: 26, value: 5 } } } : {};
+    if (keyRoot) maps['Studio Pro 8'].KEY_ROOT = { kind: 'cc', channel: 15, number: 27, value: 0 };
     const store = { selectedDAW: 'Studio Pro 8', dawMidiOutMappings: maps, midiOutputPort: port, mouseControlEnabled: true };
     const sb = { console: { log() {}, warn() {}, error() {} }, Promise, Math, Number, JSON, Error, Array, Object, setTimeout: (f) => { f(); return 0; },
         getSetting: (k, f) => (store[k] === undefined ? f : store[k]), setSetting() {}, getCoordinate: () => null,
@@ -55,7 +56,7 @@ function build({ mapping = true, port = 'loopMIDI', ccFail = false, noteFail = f
     console.log('== 6. Setup ==');
     { const S = read('ui/js/setup.js');
       ok(/action: "KEY_SCALE_MAJOR"/.test(S) && /action: "KEY_SCALE_MINOR"/.test(S), 'Setup có 2 dòng KEY_SCALE_MAJOR / KEY_SCALE_MINOR');
-      ok(/KEY_SCALE_MAJOR: Object\.freeze\(\{ kind: "cc", channel: 15, number: 26, value: 0 \}\)/.test(S) && /KEY_SCALE_MINOR: Object\.freeze\(\{ kind: "cc", channel: 15, number: 26, value: 5 \}\)/.test(S), 'bộ điền nhanh KEY SCALE: cùng CC26 kênh 15, Major=0 / Minor=5'); }
+      ok(/KEY_SCALE_MAJOR: Object\.freeze\(\{ kind: "cc", channel: 15, number: 26, value: 0 \}\)/.test(S) && /KEY_SCALE_MINOR: Object\.freeze\(\{ kind: "cc", channel: 15, number: 26, value: 5 \}\)/.test(S), 'bộ điền nhanh KEY + SCALE: cùng CC26 kênh 15, Major=0 / Minor=5, Key CC27'); }
 
     console.log('== 7. Setup cho phép CC chung (khác giá trị) cho 2 Scale, vẫn chặn trùng thật ==');
     { const S = read('ui/js/setup.js');
@@ -76,6 +77,21 @@ function build({ mapping = true, port = 'loopMIDI', ccFail = false, noteFail = f
       ok(!pl.ok && pl.conflicts.length >= 1, 'CC26 đã dùng cho MIC1_VOLUME -> điền nhanh Scale bị chặn', pl.conflicts);
       const pl2 = sb.p({ bundles: { scale: bun } }, 'scale', () => null, A);
       ok(pl2.ok && pl2.writes.length === 2, 'không có xung đột -> kế hoạch ghi 2 mapping', pl2); }
+
+    console.log('== 8. KEY-ROOT-CC-01: Key gốc bằng CC 27 (giá trị theo nốt) ==');
+    { const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'], exp = [0,12,23,35,46,58,69,81,92,104,115,127];
+      let allOk = true; const got = [];
+      for (let i = 0; i < 12; i++) { const e = build({ keyRoot: true }); await e.sb.sendKeyToAutotune(names[i] + ' Major');
+        const kc = e.events.find((x) => x[0] === 'cc' && x[1] === 27); got.push(kc && kc[2]);
+        if (!kc || kc[2] !== exp[i] || kc[3] !== 14 || e.events.some((x) => x[0] === 'note')) allOk = false;
+        if (Math.round(exp[i] / 127 * 11) !== i) allOk = false; }
+      ok(allOk, '12 nốt -> CC27 kênh 15 giá trị 0,12,23,35,46,58,69,81,92,104,115,127; không gửi nốt; làm tròn ngược đúng nấc', got);
+      const e = build({ keyRoot: true }); const r = await e.sb.sendKeyToAutotune('A Minor');
+      ok(JSON.stringify(e.events.map((x) => x.slice(0, 3))) === JSON.stringify([['cc', 26, 5], ['cc', 27, 104]]) && r.ok && r.midi.viaCc && r.keyCc.ccValue === 104, 'A Minor: Scale CC26=5 rồi Key CC27=104', e.events);
+      const f = build({ keyRoot: true, ccFail: true }); const rf = await f.sb.sendKeyToAutotune('D Major');
+      ok(f.events.some((x) => x[0] === 'note' && x[1] === 2) && rf.ok, 'CC Key lỗi -> rơi về gửi nốt như cũ', f.events);
+      const g = build(); await g.sb.sendKeyToAutotune('E Major');
+      ok(g.events.every((x) => x[0] !== 'cc' || x[1] !== 27) && g.events.some((x) => x[0] === 'note' && x[1] === 4), 'chưa cấu hình KEY_ROOT -> hành vi cũ (nốt E)', g.events); }
 
     console.log(`\nKẾT QUẢ: ${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('LỖI HARNESS', e); process.exit(2); });

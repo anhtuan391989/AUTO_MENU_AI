@@ -640,6 +640,8 @@ const DAW_MIDI_ACTIONS = [
     // KEY-SCALE-CC-01 — CC chọn Scale Auto-Tune (gửi kèm mỗi lần đổi Key). Trống mặc định; điền nhanh bằng bộ "SCALE gợi ý".
     { action: "KEY_SCALE_MAJOR", label: "KEY SCALE MAJOR (Auto-Tune)" },
     { action: "KEY_SCALE_MINOR", label: "KEY SCALE MINOR (Auto-Tune)" },
+    // KEY-ROOT-CC-01 — CC Key gốc Auto-Tune (giá trị CC do Menu tự tính theo nốt 0–11; cột Giá trị ở đây bị bỏ qua).
+    { action: "KEY_ROOT", label: "KEY ROOT (Auto-Tune)" },
     // TASK B12 — mở rộng thêm 3 action mới nối ở B12 (musicBtn + Retune×2), tái dùng nguyên
     // vẹn UI/schema đã có, không tạo cơ chế cấu hình thứ hai.
     { action: "MONITOR_BEAT_TOGGLE", label: "MONITOR BEAT" },
@@ -686,7 +688,7 @@ function findDawStateMappingConflict(action, mapping) {
 // MENU-KNOB-MIDI-COMPLETION-01 — 4 Knob MIDI + 8 lệnh LIVE ON/OFF là nhóm "bảo vệ": một CC/Note (cùng kind+kênh+số) KHÔNG được dùng chung giữa
 // một trong 12 action này và BẤT KỲ action khác đã lưu (nếu không, một cú xoay Knob có thể kích hoạt macro hoặc ngược lại).
 // Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
-const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2", "MIC1_VOLUME", "MIC2_VOLUME", "KEY_SCALE_MAJOR", "KEY_SCALE_MINOR"]);
+const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2", "MIC1_VOLUME", "MIC2_VOLUME", "KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_ROOT"]);
 const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
 const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET]);
 function findMidiOutMappingConflict(action, mapping) {
@@ -756,10 +758,12 @@ const DAW_MIDI_PROFILES = Object.freeze({
             // MIC-VOLUME-KNOB-01 — 2 CC âm lượng Mic, kênh 15 như bộ KNOB, không trùng CC 20–23 (Knob) và 102–112 (LIVE/CHỌN TRACK).
             micvol: Object.freeze({ title: "MIC VOLUME", count: 2, mappings: dawQfMake(15, 127, { MIC1_VOLUME: 24, MIC2_VOLUME: 25 }) }),
             // KEY-SCALE-CC-02 — 1 CC (26, kênh 15) chọn Scale Auto-Tune theo GIÁ TRỊ: Major=0 (mục 1/29), Minor=5 (mục 2/29: 5/127×28≈1.1).
-            // Danh sách Scale của Auto-Tune Pro: 29 mục, Major đầu, Minor thứ hai, Harmonic cuối (=127). Giá trị CHƯA kiểm chứng trên máy thật.
-            scale: Object.freeze({ title: "KEY SCALE", count: 2, mappings: Object.freeze({
+            // KEY-ROOT-CC-01 — CC 27 (kênh 15) cho Key gốc: Menu tự tính giá trị theo nốt (C=0 … B=127); giá trị 0 ở bộ này chỉ là chỗ giữ.
+            // Danh sách Scale của Auto-Tune Pro: 29 mục, Major đầu, Minor thứ hai, Harmonic cuối (=127). Giá trị CHƯA kiểm chứng đủ trên máy thật.
+            scale: Object.freeze({ title: "KEY + SCALE", count: 3, mappings: Object.freeze({
                 KEY_SCALE_MAJOR: Object.freeze({ kind: "cc", channel: 15, number: 26, value: 0 }),
                 KEY_SCALE_MINOR: Object.freeze({ kind: "cc", channel: 15, number: 26, value: 5 }),
+                KEY_ROOT: Object.freeze({ kind: "cc", channel: 15, number: 27, value: 0 }),
             }) }),
         }),
     }),
@@ -876,7 +880,7 @@ function initDawMidiOutputMappingSection() {
             <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>
             ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}
-            ${profile.bundles.scale ? `<button class="setup-btn" id="btnFillScaleCc">Điền + lưu bộ KEY SCALE gợi ý — ${profile.name}</button>` : ""}`
+            ${profile.bundles.scale ? `<button class="setup-btn" id="btnFillScaleCc">Điền + lưu bộ KEY + SCALE gợi ý — ${profile.name}</button>` : ""}`
                 : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
             <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
             <span id="liveCcStatus"></span>`;

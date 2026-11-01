@@ -137,6 +137,21 @@ async function sendKeyScaleToAutotune(keyName) {
  * Gửi Scale (CC riêng, nếu đã cấu hình) TRƯỚC, rồi gửi nốt gốc.
  * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string}>}
  */
+// KEY-ROOT-CC-01 — Key gốc gửi bằng 1 CC (Control Link/Macro trong Studio One nối vào ô Key của Auto-Tune, danh sách 12 nấc C…B).
+// Giá trị CC = round(nấc × 127 / 11): C=0, C#=12, D=23, D#=35, E=46, F=58, F#=69, G=81, G#=92, A=104, A#=115, B=127 (mỗi giá trị làm tròn ngược đúng về nấc).
+function keyRootToCc(noteIndex) { return Math.round((Math.max(0, Math.min(11, noteIndex))) * 127 / 11); }
+async function sendKeyRootCcToAutotune(noteIndex) {
+    if (!Number.isInteger(noteIndex) || noteIndex < 0 || noteIndex > 11) return { attempted: false, reason: "NO_NOTE_FOR_KEY" };
+    const AR = typeof window !== "undefined" ? window.ActionRegistry : null;
+    if (!AR || typeof AR.executeAction !== "function" || !AR.ACTIONS || !AR.ACTIONS.KEY_ROOT) return { attempted: false, reason: "NO_ACTION_REGISTRY" };
+    const ccValue = keyRootToCc(noteIndex);
+    try {
+        const r = await AR.executeAction(AR.ACTIONS.KEY_ROOT, { reason: "key-root", value: ccValue });
+        if (r && r.reason === "NOT_CONFIGURED") return { attempted: false, reason: "NOT_CONFIGURED" };
+        return { attempted: true, ok: !!(r && r.ok), ccValue, status: (r && (r.status || r.reason)) || null };
+    } catch (e) { return { attempted: true, ok: false, ccValue, status: "ERROR" }; }
+}
+
 async function sendKeyToAutotune(keyName) {
     const root = keyName.match(/^[A-G]#?/)?.[0];
     const note = NOTE_MAP[root];
@@ -148,6 +163,12 @@ async function sendKeyToAutotune(keyName) {
     }
     // TASK MIDI-01 — chỉ THÊM trường chẩn đoán vào kết quả (không đổi ok/driverUsed/status/detail): midi = {attempted, sent|reason}.
     let midi = { attempted: false, reason: getSetting("midiOutputPort") ? "NO_NOTE_FOR_KEY" : "MIDI_PORT_NOT_SELECTED" };
+
+    // KEY-ROOT-CC-01 — nếu đã cấu hình CC KEY_ROOT (Setup > MIDI) thì Key gốc đi bằng CC; chưa cấu hình/lỗi thì dùng nốt như cũ.
+    const keyCc = typeof sendKeyRootCcToAutotune === "function" ? await sendKeyRootCcToAutotune(note) : { attempted: false, reason: "NOT_AVAILABLE" };
+    if (keyCc.attempted && keyCc.ok) {
+        return { ok: true, driverUsed: "midi", midi: { attempted: true, sent: true, port: getSetting("midiOutputPort"), viaCc: true, ccValue: keyCc.ccValue }, scale, keyCc, confirmation: "MIDI_SENT_UNCONFIRMED" };
+    }
 
     // --- 1) Ưu tiên MIDI ---
     const midiPort = getSetting("midiOutputPort");
