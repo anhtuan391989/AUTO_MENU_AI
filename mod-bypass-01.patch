@@ -1,0 +1,33 @@
+diff --git a/ui/js/vocalCommandRouter.js b/ui/js/vocalCommandRouter.js
+index b968765..136f413 100644
+--- a/ui/js/vocalCommandRouter.js
++++ b/ui/js/vocalCommandRouter.js
+@@ -40,10 +40,16 @@ const SOUNDSHIFTER_STEP_RATIO = 2; // đã xác nhận với người dùng: 1 b
+ const SOUNDSHIFTER_UP_CC = 22;     // TODO: đổi theo đúng CC thật sau khi MIDI Learn nút ▲ của SoundShifter
+ const SOUNDSHIFTER_DOWN_CC = 23;   // TODO: đổi theo đúng CC thật sau khi MIDI Learn nút ▼ của SoundShifter
+ const SOUNDSHIFTER_TOGGLE_CC = 24; // TODO: đổi theo đúng CC thật sau khi MIDI Learn nút Bypass/Power
++// MOD-BYPASS-01 — CC trên là nút BYPASS của SoundShifter (127 = BYPASS BẬT = plugin bị bỏ qua, 0 = BYPASS TẮT = plugin hoạt động).
++// Yêu cầu: MOD ON -> Bypass TẮT (SoundShifter chạy); MOD OFF -> Bypass BẬT (SoundShifter bị bỏ qua). Nên giá trị gửi là NGƯỢC với "bật/tắt".
++// Nếu nút học trong DAW là kiểu Power/Enable (127 = chạy) thì đổi hằng này thành false để quay về 127 = bật, 0 = tắt.
++const SOUNDSHIFTER_TOGGLE_IS_BYPASS = true;
+ 
+ /**
+- * Bật/tắt plugin SoundShifter (bypass on/off) qua MIDI CC.
+- * Quy ước: value 127 = bật (nhận tín hiệu), value 0 = tắt (bypass).
++ * Bật/tắt plugin SoundShifter qua MIDI CC (nút Bypass của plugin).
++ * isOn=true (MOD ON)  -> Bypass TẮT -> gửi 0   (SOUNDSHIFTER_TOGGLE_IS_BYPASS = true, mặc định).
++ * isOn=false (MOD OFF) -> Bypass BẬT -> gửi 127.
++ * Nếu SOUNDSHIFTER_TOGGLE_IS_BYPASS = false (nút kiểu Power/Enable): isOn -> 127, tắt -> 0.
+  * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string}>}
+  */
+ async function setSoundShifterPower(isOn) {
+@@ -52,7 +58,8 @@ async function setSoundShifterPower(isOn) {
+         return { ok: false, detail: 'Chưa cấu hình cổng MIDI (Setup > MIDI) — SoundShifter chỉ điều khiển được qua MIDI.' };
+     }
+ 
+-    const sent = await sendMidiCC(SOUNDSHIFTER_TOGGLE_CC, isOn ? 127 : 0);
++    const value = (isOn !== SOUNDSHIFTER_TOGGLE_IS_BYPASS) ? 127 : 0; // bypass-kiểu: ON->0, OFF->127 | power-kiểu: ON->127, OFF->0
++    const sent = await sendMidiCC(SOUNDSHIFTER_TOGGLE_CC, value);
+     return sent
+         ? { ok: true, driverUsed: "midi" }
+         : { ok: false, driverUsed: "midi", detail: "Gửi MIDI CC thất bại (cổng MIDI có thể đã bị rút/đổi tên)." };
