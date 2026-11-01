@@ -12,7 +12,7 @@ const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fa
 
 function build({ mapping = true, port = 'loopMIDI', ccFail = false, noteFail = false } = {}) {
     const events = [];
-    const maps = mapping ? { 'Studio Pro 8': { KEY_SCALE_MAJOR: { kind: 'cc', channel: 15, number: 26, value: 127 }, KEY_SCALE_MINOR: { kind: 'cc', channel: 15, number: 27, value: 127 } } } : {};
+    const maps = mapping ? { 'Studio Pro 8': { KEY_SCALE_MAJOR: { kind: 'cc', channel: 15, number: 26, value: 0 }, KEY_SCALE_MINOR: { kind: 'cc', channel: 15, number: 26, value: 5 } } } : {};
     const store = { selectedDAW: 'Studio Pro 8', dawMidiOutMappings: maps, midiOutputPort: port, mouseControlEnabled: true };
     const sb = { console: { log() {}, warn() {}, error() {} }, Promise, Math, Number, JSON, Error, Array, Object, setTimeout: (f) => { f(); return 0; },
         getSetting: (k, f) => (store[k] === undefined ? f : store[k]), setSetting() {}, getCoordinate: () => null,
@@ -27,12 +27,12 @@ function build({ mapping = true, port = 'loopMIDI', ccFail = false, noteFail = f
 (async () => {
     console.log('== 1. Major / Minor -> CC riêng + nốt gốc ==');
     { const e = build(); const r = await e.sb.sendKeyToAutotune('C Major');
-      ok(JSON.stringify(e.events) === JSON.stringify([['cc', 26, 127, 14], ['note', 0]]), 'C Major: CC26 (kênh 15) rồi nốt C(0) — Scale gửi TRƯỚC nốt', e.events);
+      ok(JSON.stringify(e.events) === JSON.stringify([['cc', 26, 0, 14], ['note', 0]]), 'C Major: CC26=0 (Major, kênh 15) rồi nốt C(0) — Scale gửi TRƯỚC nốt', e.events);
       ok(r.ok && r.driverUsed === 'midi' && r.scale && r.scale.attempted && r.scale.ok && r.scale.mode === 'MAJOR', 'kết quả: ok, kèm scale {MAJOR, ok}', r.scale);
       e.events.length = 0; await e.sb.sendKeyToAutotune('A Minor');
-      ok(JSON.stringify(e.events) === JSON.stringify([['cc', 27, 127, 14], ['note', 9]]), 'A Minor: CC27 rồi nốt A(9)', e.events);
+      ok(JSON.stringify(e.events) === JSON.stringify([['cc', 26, 5, 14], ['note', 9]]), 'A Minor: CC26=5 rồi nốt A(9)', e.events);
       e.events.length = 0; await e.sb.sendKeyToAutotune('C Minor');
-      ok(e.events[0][1] === 27 && e.events[1][1] === 0, 'C Minor khác C Major dù cùng nốt gốc (CC27 + nốt C)', e.events); }
+      ok(e.events[0][1] === 26 && e.events[0][2] === 5 && e.events[1][1] === 0, 'C Minor khác C Major dù cùng nốt gốc (CC26 giá trị 5 + nốt C)', e.events); }
 
     console.log('== 2. Chưa cấu hình CC Scale: hành vi cũ ==');
     { const e = build({ mapping: false }); const r = await e.sb.sendKeyToAutotune('D Minor');
@@ -44,7 +44,7 @@ function build({ mapping = true, port = 'loopMIDI', ccFail = false, noteFail = f
 
     console.log('== 4. Key giáng / không có chữ Major/Minor ==');
     { const e = build(); await e.sb.sendKeyToAutotune('F# Minor');
-      ok(e.events[0][1] === 27 && e.events[1][1] === 6, 'F# Minor: CC27 + nốt F#(6)', e.events);
+      ok(e.events[0][1] === 26 && e.events[0][2] === 5 && e.events[1][1] === 6, 'F# Minor: CC26=5 + nốt F#(6)', e.events);
       e.events.length = 0; const r = await e.sb.sendKeyToAutotune('G');
       ok(JSON.stringify(e.events) === JSON.stringify([['note', 7]]) && r.scale.reason === 'NO_SCALE_IN_KEY', 'tên Key không có Major/Minor -> không gửi Scale, chỉ nốt G', e.events); }
 
@@ -55,7 +55,27 @@ function build({ mapping = true, port = 'loopMIDI', ccFail = false, noteFail = f
     console.log('== 6. Setup ==');
     { const S = read('ui/js/setup.js');
       ok(/action: "KEY_SCALE_MAJOR"/.test(S) && /action: "KEY_SCALE_MINOR"/.test(S), 'Setup có 2 dòng KEY_SCALE_MAJOR / KEY_SCALE_MINOR');
-      ok(/scale: Object\.freeze\(\{ title: "KEY SCALE", count: 2, mappings: dawQfMake\(15, 127, \{ KEY_SCALE_MAJOR: 26, KEY_SCALE_MINOR: 27 \}\) \}\)/.test(S), 'bộ điền nhanh KEY SCALE: CC26/CC27 kênh 15'); }
+      ok(/KEY_SCALE_MAJOR: Object\.freeze\(\{ kind: "cc", channel: 15, number: 26, value: 0 \}\)/.test(S) && /KEY_SCALE_MINOR: Object\.freeze\(\{ kind: "cc", channel: 15, number: 26, value: 5 \}\)/.test(S), 'bộ điền nhanh KEY SCALE: cùng CC26 kênh 15, Major=0 / Minor=5'); }
+
+    console.log('== 7. Setup cho phép CC chung (khác giá trị) cho 2 Scale, vẫn chặn trùng thật ==');
+    { const S = read('ui/js/setup.js');
+      const sb = { console, Set, Map, Number, Object, Array, Math };
+      vm.createContext(sb);
+      const pick = (n) => { const m = S.match(new RegExp('(?:const|function) ' + n + '[\\s\\S]*?\\n\\}\\n|const ' + n + ' = [^\\n]*\\n')); return m ? m[0] : ''; };
+      vm.runInContext(pick('KEY_SCALE_SHARED_SET') + pick('midiClashKey') + pick('validateDawProfileBundle') + pick('planDawProfileFill') + pick('dawQfMake')
+        + '\nthis.v=validateDawProfileBundle; this.p=planDawProfileFill;', sb);
+      const A = ['KEY_SCALE_MAJOR', 'KEY_SCALE_MINOR', 'MIC1_VOLUME', 'MUSIC_ON'];
+      const bun = { count: 2, mappings: { KEY_SCALE_MAJOR: { kind: 'cc', channel: 15, number: 26, value: 0 }, KEY_SCALE_MINOR: { kind: 'cc', channel: 15, number: 26, value: 5 } } };
+      ok(sb.v(bun, A).length === 0, 'bộ KEY SCALE (CC26: 0 và 5) hợp lệ, không báo trùng', sb.v(bun, A));
+      const same = { count: 2, mappings: { KEY_SCALE_MAJOR: { kind: 'cc', channel: 15, number: 26, value: 5 }, KEY_SCALE_MINOR: { kind: 'cc', channel: 15, number: 26, value: 5 } } };
+      ok(sb.v(same, A).length === 1, 'Major và Minor cùng CC cùng giá trị -> vẫn báo trùng', sb.v(same, A));
+      const other = { count: 2, mappings: { MIC1_VOLUME: { kind: 'cc', channel: 15, number: 26, value: 0 }, MUSIC_ON: { kind: 'cc', channel: 15, number: 26, value: 5 } } };
+      ok(sb.v(other, A).length === 1, 'action khác (không phải Scale) trùng CC -> vẫn báo trùng', sb.v(other, A));
+      const saved = { MIC1_VOLUME: { kind: 'cc', channel: 15, number: 26, value: 127 } };
+      const pl = sb.p({ bundles: { scale: bun } }, 'scale', (a) => saved[a], A);
+      ok(!pl.ok && pl.conflicts.length >= 1, 'CC26 đã dùng cho MIC1_VOLUME -> điền nhanh Scale bị chặn', pl.conflicts);
+      const pl2 = sb.p({ bundles: { scale: bun } }, 'scale', () => null, A);
+      ok(pl2.ok && pl2.writes.length === 2, 'không có xung đột -> kế hoạch ghi 2 mapping', pl2); }
 
     console.log(`\nKẾT QUẢ: ${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('LỖI HARNESS', e); process.exit(2); });

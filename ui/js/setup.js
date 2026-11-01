@@ -693,7 +693,8 @@ function findMidiOutMappingConflict(action, mapping) {
     for (const { action: other } of DAW_MIDI_ACTIONS) {
         if (other === action) continue;
         const m = getDawMidiOutMapping(other);
-        if (m && m.kind === mapping.kind && Number(m.channel) === Number(mapping.channel) && Number(m.number) === Number(mapping.number)) return other;
+        if (m && m.kind === mapping.kind && Number(m.channel) === Number(mapping.channel) && Number(m.number) === Number(mapping.number)
+            && !(typeof KEY_SCALE_SHARED_SET !== "undefined" && KEY_SCALE_SHARED_SET.has(action) && KEY_SCALE_SHARED_SET.has(other) && midiClashKey(action, mapping) !== midiClashKey(other, m))) return other;
     }
     return null;
 }
@@ -725,6 +726,13 @@ function setDawMidiOutMapping(action, mapping) {
 const DAW_QF_S1_LIVE = Object.freeze({
     MUSIC_ON: 102, MUSIC_OFF: 103, MIC1_ON: 104, MIC1_OFF: 105, MIC2_ON: 106, MIC2_OFF: 107, FX_ON: 108, FX_OFF: 109,
 });
+// KEY-SCALE-CC-02 — Scale Auto-Tune là DANH SÁCH 29 mục điều khiển bằng 1 CC: Major/Minor dùng CHUNG CC, khác GIÁ TRỊ.
+// Chỉ 2 action này được phép trùng CC/Note (khi khác giá trị); mọi action khác vẫn phải có CC riêng.
+const KEY_SCALE_SHARED_SET = new Set(["KEY_SCALE_MAJOR", "KEY_SCALE_MINOR"]);
+function midiClashKey(action, m) {
+    const base = `${m.kind}|${Number(m.channel)}|${Number(m.number)}`;
+    return KEY_SCALE_SHARED_SET.has(action) ? `${base}|v${Number(m.kind === "note" ? m.velocity : m.value)}` : base;
+}
 function dawQfMake(channel, value, numbers) {
     const o = {};
     for (const [a, n] of Object.entries(numbers)) o[a] = Object.freeze({ kind: "cc", channel, number: n, value });
@@ -747,8 +755,12 @@ const DAW_MIDI_PROFILES = Object.freeze({
             select: Object.freeze({ title: "CHỌN TRACK", count: 3, mappings: dawQfMake(16, 127, { MUSIC_SELECT: 110, MIC1_SELECT: 111, MIC2_SELECT: 112 }) }),
             // MIC-VOLUME-KNOB-01 — 2 CC âm lượng Mic, kênh 15 như bộ KNOB, không trùng CC 20–23 (Knob) và 102–112 (LIVE/CHỌN TRACK).
             micvol: Object.freeze({ title: "MIC VOLUME", count: 2, mappings: dawQfMake(15, 127, { MIC1_VOLUME: 24, MIC2_VOLUME: 25 }) }),
-            // KEY-SCALE-CC-01 — 2 CC chọn Scale Auto-Tune, kênh 15, không trùng CC 20–25 và 102–112.
-            scale: Object.freeze({ title: "KEY SCALE", count: 2, mappings: dawQfMake(15, 127, { KEY_SCALE_MAJOR: 26, KEY_SCALE_MINOR: 27 }) }),
+            // KEY-SCALE-CC-02 — 1 CC (26, kênh 15) chọn Scale Auto-Tune theo GIÁ TRỊ: Major=0 (mục 1/29), Minor=5 (mục 2/29: 5/127×28≈1.1).
+            // Danh sách Scale của Auto-Tune Pro: 29 mục, Major đầu, Minor thứ hai, Harmonic cuối (=127). Giá trị CHƯA kiểm chứng trên máy thật.
+            scale: Object.freeze({ title: "KEY SCALE", count: 2, mappings: Object.freeze({
+                KEY_SCALE_MAJOR: Object.freeze({ kind: "cc", channel: 15, number: 26, value: 0 }),
+                KEY_SCALE_MINOR: Object.freeze({ kind: "cc", channel: 15, number: 26, value: 5 }),
+            }) }),
         }),
     }),
     "cubase": Object.freeze({
@@ -792,7 +804,7 @@ function validateDawProfileBundle(bundle, validActions) {
         if (!Number.isInteger(ch) || ch < 1 || ch > 16) errs.push(`${a}: kênh phải 1–16.`);
         if (!Number.isInteger(nu) || nu < 0 || nu > 127) errs.push(`${a}: số phải 0–127.`);
         if (!Number.isInteger(v) || v < 0 || v > 127) errs.push(`${a}: giá trị phải 0–127.`);
-        const k = `${m.kind}|${ch}|${nu}`;
+        const k = midiClashKey(a, m);
         if (seen.has(k)) errs.push(`${a} trùng ${seen.get(k)} (cùng ${m.kind} ${nu} kênh ${ch}).`); else seen.set(k, a);
     }
     return errs;
@@ -809,7 +821,8 @@ function planDawProfileFill(profile, bundleId, getMapping, allActions) {
         for (const other of allActions) {
             if (inBundle.has(other)) continue;
             const o = getMapping(other);
-            if (o && o.kind === m.kind && Number(o.channel) === Number(m.channel) && Number(o.number) === Number(m.number)) res.conflicts.push([a, other]);
+            if (o && o.kind === m.kind && Number(o.channel) === Number(m.channel) && Number(o.number) === Number(m.number)
+                && !(KEY_SCALE_SHARED_SET.has(a) && KEY_SCALE_SHARED_SET.has(other) && midiClashKey(a, m) !== midiClashKey(other, o))) res.conflicts.push([a, other]);
         }
         const cur = getMapping(a);
         const same = cur && cur.kind === m.kind && Number(cur.channel) === Number(m.channel) && Number(cur.number) === Number(m.number) && Number(cur.value) === Number(m.value);
