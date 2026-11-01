@@ -88,6 +88,10 @@ const ACTIONS = Object.freeze({
     // Cùng khuôn với BEAT_INPUT_VOLUME: không có mapping mặc định, người dùng lưu CC trong Setup (hoặc nút điền nhanh).
     MIC1_VOLUME: "MIC1_VOLUME",   // fader track "Mic"
     MIC2_VOLUME: "MIC2_VOLUME",   // fader track "Không Dây"
+    // KEY-SCALE-CC-01 — Scale của Key theo từng bài: 2 CC RIÊNG (người dùng MIDI Learn vào Auto-Tune). Gửi tự động bởi sendKeyToAutotune()
+    // (vocalCommandRouter.js) cùng lúc với nốt gốc. Không mapping mặc định ngầm.
+    KEY_SCALE_MAJOR: "KEY_SCALE_MAJOR",
+    KEY_SCALE_MINOR: "KEY_SCALE_MINOR",
     // MIDI-DAW-CONTROL-01 — TÁM lệnh ĐẶT TRẠNG THÁI ĐÍCH (ON và OFF là hai action RIÊNG, mỗi cái một mapping riêng),
     // thay cho lệnh toggle không xác định. MUSIC = Monitor track "Beat"; MIC1 = Monitor track "Mic"; MIC2 = Monitor
     // track "Không Dây"; FX = Mute bus Delay/Verb ngắn/Verb dài/Com Verb (FX ON = bỏ mute, FX OFF = mute). Không có

@@ -113,12 +113,39 @@ function isMouseFallbackAllowed() {
 }
 
 /**
+ * KEY-SCALE-CC-01 — gửi SCALE (Major/Minor) của Key xuống Auto-Tune bằng CC RIÊNG (người dùng chọn Scale theo từng bài, nốt MIDI chỉ mang nốt gốc).
+ * Dùng ActionRegistry: KEY_SCALE_MAJOR / KEY_SCALE_MINOR — mỗi cái một mapping CC do người dùng lưu ở Setup (không có mặc định ngầm).
+ * Chưa lưu mapping => KHÔNG gửi gì (attempted=false), Key vẫn gửi như cũ. Kết quả chỉ để chẩn đoán, không bao giờ làm hỏng việc gửi Key.
+ * @returns {Promise<{attempted: boolean, mode?: string, ok?: boolean, status?: string, reason?: string}>}
+ */
+async function sendKeyScaleToAutotune(keyName) {
+    const mode = /minor/i.test(keyName) ? "MINOR" : (/major/i.test(keyName) ? "MAJOR" : null);
+    if (!mode) return { attempted: false, reason: "NO_SCALE_IN_KEY" };
+    const AR = typeof window !== "undefined" ? window.ActionRegistry : null;
+    if (!AR || typeof AR.executeAction !== "function" || !AR.ACTIONS) return { attempted: false, mode, reason: "NO_ACTION_REGISTRY" };
+    try {
+        const r = await AR.executeAction(mode === "MINOR" ? AR.ACTIONS.KEY_SCALE_MINOR : AR.ACTIONS.KEY_SCALE_MAJOR, { reason: "key-scale" });
+        if (r && r.reason === "NOT_CONFIGURED") return { attempted: false, mode, reason: "NOT_CONFIGURED" };
+        return { attempted: true, mode, ok: !!(r && r.ok), status: (r && (r.status || r.reason)) || null };
+    } catch (e) {
+        return { attempted: true, mode, ok: false, status: "ERROR" };
+    }
+}
+
+/**
  * Đổi key hiện tại trên Auto-Tune sang keyName (vd "C Major", "A# Minor").
+ * Gửi Scale (CC riêng, nếu đã cấu hình) TRƯỚC, rồi gửi nốt gốc.
  * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string}>}
  */
 async function sendKeyToAutotune(keyName) {
     const root = keyName.match(/^[A-G]#?/)?.[0];
     const note = NOTE_MAP[root];
+    // KEY-SCALE-CC-01 — Scale trước, nốt gốc sau; chỉ nghỉ ngắn khi Scale đã gửi thật. Lỗi/chưa cấu hình Scale KHÔNG chặn việc gửi Key.
+    let scale = { attempted: false, reason: "NOT_AVAILABLE" };
+    if (typeof sendKeyScaleToAutotune === "function") {
+        scale = await sendKeyScaleToAutotune(keyName);
+        if (scale && scale.attempted && scale.ok && typeof delay === "function") await delay(40);
+    }
     // TASK MIDI-01 — chỉ THÊM trường chẩn đoán vào kết quả (không đổi ok/driverUsed/status/detail): midi = {attempted, sent|reason}.
     let midi = { attempted: false, reason: getSetting("midiOutputPort") ? "NO_NOTE_FOR_KEY" : "MIDI_PORT_NOT_SELECTED" };
 
@@ -128,7 +155,7 @@ async function sendKeyToAutotune(keyName) {
         const sent = await sendMidiNotePulse(note);
         midi = { attempted: true, sent: !!sent, port: midiPort, note };
         // sent=true chỉ nghĩa là API Web MIDI không ném lỗi (MIDI_SENT_UNCONFIRMED) — KHÔNG xác nhận phía đích đã nhận.
-        if (sent) return { ok: true, driverUsed: "midi", midi, confirmation: "MIDI_SENT_UNCONFIRMED" };
+        if (sent) return { ok: true, driverUsed: "midi", midi, scale, confirmation: "MIDI_SENT_UNCONFIRMED" };
         // Nếu gửi lỗi (vd cổng MIDI đã bị rút/đổi tên) -> rơi xuống fallback bên dưới
     }
 
@@ -145,12 +172,13 @@ async function sendKeyToAutotune(keyName) {
             };
         }
         const result = await window.electronAPI.clickAtPoint(point);
-        return { ok: result.ok, driverUsed: "mouse", midi, detail: result.detail };
+        return { ok: result.ok, driverUsed: "mouse", midi, scale, detail: result.detail };
     }
 
     return {
         ok: false,
         midi,
+        scale,
         detail: 'Chưa cấu hình cổng MIDI (Setup > MIDI) hoặc toạ độ "Key Auto-Tune" (Setup > Lấy tọa độ).',
     };
 }
