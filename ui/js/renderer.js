@@ -1892,6 +1892,8 @@ applyKeyBtn?.addEventListener("click", () => {
 
     // MANUAL-KEY-MOD-RESTORE-01: KHÔNG huỷ watcher AI nữa (bản cũ huỷ rồi không ai chạy lại -> sau Manual AI "chết"). Thay vào đó
     // đánh dấu `sending`: kết quả AI đến trong lúc lệnh Manual đang bay sẽ không được áp đè (xem startAiRealtimeLoop).
+    // SEND-HARDEN: lệnh trước còn đang bay (chưa có kết quả) -> bỏ qua cú bấm này, tránh 2 lệnh Key chạy song song làm Auto-Tune/hiển thị lệch nhau.
+    if (keySource.manual.sending) return;
     keySource.manual.sending = true;
 
     // Chỉ cập nhật hiển thị NGAY (preview, cosmetic) — KHÔNG commit keySource.manual ở đây.
@@ -1939,7 +1941,16 @@ applyKeyBtn?.addEventListener("click", () => {
             console.error("sendKeyToAutotune lỗi:", result.detail);
         }
         refreshKeySourceDisplay();
-    }, () => { keySource.manual.sending = false; });
+    }, (err) => {
+        // SEND-HARDEN: gửi ném lỗi bất ngờ (không phải kết quả {ok:false} thông thường) — xử lý TRỌN như "gửi thất bại": trả hiển thị cũ, chấm đỏ, không kẹt màu cam.
+        keySource.manual.sending = false;
+        originalKey = previousDisplayValue;
+        if (currentKeyEl) currentKeyEl.textContent = previousDisplayValue;
+        setStatus("dot-key", "offline");
+        if (keyInfoEl) keyInfoEl.textContent = "Lỗi gửi Key";
+        console.error("sendKeyToAutotune ném lỗi:", err);
+        refreshKeySourceDisplay();
+    });
 
     // AI Realtime vẫn chạy nền liên tục (startAiRealtimeLoop tự lặp lại vô điều kiện từ lúc khởi
     // động, mục 7B) — không cần khởi động lại riêng ở đây.

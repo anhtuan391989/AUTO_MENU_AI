@@ -1,0 +1,51 @@
+diff --git a/tests/unit/ManualKeyModRestore01.verify.js b/tests/unit/ManualKeyModRestore01.verify.js
+index e7a76ec..cb6e810 100644
+--- a/tests/unit/ManualKeyModRestore01.verify.js
++++ b/tests/unit/ManualKeyModRestore01.verify.js
+@@ -139,6 +139,15 @@ const sharpNote = { "C": 0, "C#": 1, "D": 2, "D#": 3, "E": 4, "F": 5, "F#": 6, "
+         // gửi thất bại
+         const f = session({ noteFail: true, port: "loopMIDI" }); f.pickKey("D Major"); await f.send();
+         check(!f.api.keySource.manual.active && f.api.keySource.manual.sending === false, "B9. SEND thất bại -> không commit Manual, sending được nhả");
++        // SEND-HARDEN: bấm liên tục khi lệnh trước còn bay -> chỉ gửi 1 lần
++        const d = session(); d.api.restoreSelectOptions(d.els.keySelector, d.api.MANUAL_KEY_VALUES); d.pickKey("G Major"); d.els.applyKeyBtn.click(); d.els.applyKeyBtn.click(); d.els.applyKeyBtn.click(); await flush();
++        check(d.log.notes.length === 1 && d.api.keySource.manual.active, "B10. bấm SEND 3 lần liên tiếp khi lệnh đầu còn bay -> chỉ gửi 1 lệnh (notes=" + d.log.notes.length + ")");
++        d.pickKey("A Major"); await d.send();
++        check(d.log.notes.length === 2 && d.els.currentKey.textContent === "A Major", "B11. sau khi gửi xong, SEND lần sau hoạt động bình thường");
++        // SEND-HARDEN: gửi ném lỗi bất ngờ -> trả hiển thị cũ, chấm đỏ, nhả cờ
++        const x = session(); x.api.restoreSelectOptions(x.els.keySelector, x.api.MANUAL_KEY_VALUES); x.sb.sendKeyToAutotune = async () => { throw new Error("boom"); };
++        x.pickKey("D Major"); x.els.applyKeyBtn.click(); await flush();
++        check(x.api.keySource.manual.sending === false && !x.api.keySource.manual.active && x.log.status.some((s) => s[0] === "dot-key" && s[1] === "offline") && x.els.currentKey.textContent !== "D Major" && x.els.keyInfo.textContent === "Lỗi gửi Key", "B12. sendKeyToAutotune ném lỗi bất ngờ -> chấm đỏ, 'Lỗi gửi Key', hiển thị trả lại (không kẹt cam / không kẹt Key chưa gửi)");
+     }
+ 
+     console.log("== C. Chuyển Auto <-> Manual ổn định ==");
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 6e4fb28..d1dfa46 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -1892,6 +1892,8 @@ applyKeyBtn?.addEventListener("click", () => {
+ 
+     // MANUAL-KEY-MOD-RESTORE-01: KHÔNG huỷ watcher AI nữa (bản cũ huỷ rồi không ai chạy lại -> sau Manual AI "chết"). Thay vào đó
+     // đánh dấu `sending`: kết quả AI đến trong lúc lệnh Manual đang bay sẽ không được áp đè (xem startAiRealtimeLoop).
++    // SEND-HARDEN: lệnh trước còn đang bay (chưa có kết quả) -> bỏ qua cú bấm này, tránh 2 lệnh Key chạy song song làm Auto-Tune/hiển thị lệch nhau.
++    if (keySource.manual.sending) return;
+     keySource.manual.sending = true;
+ 
+     // Chỉ cập nhật hiển thị NGAY (preview, cosmetic) — KHÔNG commit keySource.manual ở đây.
+@@ -1939,7 +1941,16 @@ applyKeyBtn?.addEventListener("click", () => {
+             console.error("sendKeyToAutotune lỗi:", result.detail);
+         }
+         refreshKeySourceDisplay();
+-    }, () => { keySource.manual.sending = false; });
++    }, (err) => {
++        // SEND-HARDEN: gửi ném lỗi bất ngờ (không phải kết quả {ok:false} thông thường) — xử lý TRỌN như "gửi thất bại": trả hiển thị cũ, chấm đỏ, không kẹt màu cam.
++        keySource.manual.sending = false;
++        originalKey = previousDisplayValue;
++        if (currentKeyEl) currentKeyEl.textContent = previousDisplayValue;
++        setStatus("dot-key", "offline");
++        if (keyInfoEl) keyInfoEl.textContent = "Lỗi gửi Key";
++        console.error("sendKeyToAutotune ném lỗi:", err);
++        refreshKeySourceDisplay();
++    });
+ 
+     // AI Realtime vẫn chạy nền liên tục (startAiRealtimeLoop tự lặp lại vô điều kiện từ lúc khởi
+     // động, mục 7B) — không cần khởi động lại riêng ở đây.

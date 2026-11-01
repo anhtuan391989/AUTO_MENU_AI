@@ -139,6 +139,15 @@ const sharpNote = { "C": 0, "C#": 1, "D": 2, "D#": 3, "E": 4, "F": 5, "F#": 6, "
         // gửi thất bại
         const f = session({ noteFail: true, port: "loopMIDI" }); f.pickKey("D Major"); await f.send();
         check(!f.api.keySource.manual.active && f.api.keySource.manual.sending === false, "B9. SEND thất bại -> không commit Manual, sending được nhả");
+        // SEND-HARDEN: bấm liên tục khi lệnh trước còn bay -> chỉ gửi 1 lần
+        const d = session(); d.api.restoreSelectOptions(d.els.keySelector, d.api.MANUAL_KEY_VALUES); d.pickKey("G Major"); d.els.applyKeyBtn.click(); d.els.applyKeyBtn.click(); d.els.applyKeyBtn.click(); await flush();
+        check(d.log.notes.length === 1 && d.api.keySource.manual.active, "B10. bấm SEND 3 lần liên tiếp khi lệnh đầu còn bay -> chỉ gửi 1 lệnh (notes=" + d.log.notes.length + ")");
+        d.pickKey("A Major"); await d.send();
+        check(d.log.notes.length === 2 && d.els.currentKey.textContent === "A Major", "B11. sau khi gửi xong, SEND lần sau hoạt động bình thường");
+        // SEND-HARDEN: gửi ném lỗi bất ngờ -> trả hiển thị cũ, chấm đỏ, nhả cờ
+        const x = session(); x.api.restoreSelectOptions(x.els.keySelector, x.api.MANUAL_KEY_VALUES); x.sb.sendKeyToAutotune = async () => { throw new Error("boom"); };
+        x.pickKey("D Major"); x.els.applyKeyBtn.click(); await flush();
+        check(x.api.keySource.manual.sending === false && !x.api.keySource.manual.active && x.log.status.some((s) => s[0] === "dot-key" && s[1] === "offline") && x.els.currentKey.textContent !== "D Major" && x.els.keyInfo.textContent === "Lỗi gửi Key", "B12. sendKeyToAutotune ném lỗi bất ngờ -> chấm đỏ, 'Lỗi gửi Key', hiển thị trả lại (không kẹt cam / không kẹt Key chưa gửi)");
     }
 
     console.log("== C. Chuyển Auto <-> Manual ổn định ==");
