@@ -1,0 +1,1451 @@
+diff --git a/core/integration/KeyServerSync.js b/core/integration/KeyServerSync.js
+index 151227d..9822e95 100644
+--- a/core/integration/KeyServerSync.js
++++ b/core/integration/KeyServerSync.js
+@@ -29,7 +29,7 @@ const DEFAULT_SERVER_URL = 'https://menu-key-server.matuotluuly.workers.dev';
+ 
+ const LOOKUP_TIMEOUT_MS = 2000;
+ const SUBMIT_TIMEOUT_MS = 5000;
+-const HIT_TTL_MS = 10 * 60 * 1000;   // bài đã có trên server: nhớ 10 phút
++const HIT_TTL_MS = 2 * 60 * 1000;    // bài đã có trên server: nhớ 2 phút (ngắn để Key vừa SỬA trên server sớm tới Menu)
+ const MISS_TTL_MS = 60 * 1000;       // bài chưa có: hỏi lại sau 60 giây
+ const ERROR_TTL_MS = 15 * 1000;      // server lỗi/chậm: thử lại sau 15 giây
+ const SUBMIT_RETRY_COOLDOWN_MS = 30 * 1000;
+diff --git a/server/worker.js b/server/worker.js
+index eddeba6..9edbc0f 100644
+--- a/server/worker.js
++++ b/server/worker.js
+@@ -11,7 +11,7 @@ export default {
+       "Content-Type": "application/json",
+       "Access-Control-Allow-Origin": "*",
+       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+-      "Access-Control-Allow-Headers": "Content-Type"
++      "Access-Control-Allow-Headers": "Content-Type, Authorization"
+     };
+ 
+     if (request.method === "OPTIONS") {
+@@ -185,10 +185,13 @@ export default {
+     }
+ 
+     // ========== [7] DANH SÁCH TẤT CẢ BÀI ==========
++    // Thêm trường "key" (Key của đoạn đầu tiên, vd "D minor") để hiện cạnh tên bài. Các trường cũ giữ nguyên.
+     if (url.pathname === "/list") {
+       const { results } = await env.DB.prepare(`
+         SELECT i.song_id as songId, i.title, i.total_duration_sec as tongGiay,
+-               COUNT(s.id) as soDoan, i.updated_at
++               COUNT(s.id) as soDoan, i.updated_at,
++               (SELECT s2.key FROM song_key_segments s2 WHERE s2.song_id = i.song_id ORDER BY s2.start_sec ASC LIMIT 1) as key1,
++               (SELECT s3.mode FROM song_key_segments s3 WHERE s3.song_id = i.song_id ORDER BY s3.start_sec ASC LIMIT 1) as mode1
+         FROM song_info i
+         LEFT JOIN song_key_segments s ON i.song_id = s.song_id
+         GROUP BY i.song_id ORDER BY i.updated_at DESC LIMIT 100
+@@ -200,11 +203,79 @@ export default {
+           songId: r.songId,
+           title: r.title || "Chua dat ten",
+           tongThoiLuong: r.tongGiay ? giaySangPhutGiay(r.tongGiay) : "Chua cap nhat",
+-          soDoan: r.soDoan
++          soDoan: r.soDoan,
++          key: r.key1 || null,
++          mode: r.mode1 || null,
++          keyHienThi: r.key1 ? (r.key1 + " " + (r.mode1 === "minor" ? "Minor" : "Major")) : null
+         }))
+       }, { headers: corsHeaders });
+     }
+ 
++    // ========== [9] SỬA KEY BÀI HÁT — CẦN MẬT KHẨU QUẢN TRỊ (ADMIN_TOKEN) ==========
++    // Body: { songId, key:"D", mode:"minor", startSec?, all? }
++    //  - startSec: chỉ sửa đoạn bắt đầu tại giây này.
++    //  - all:true: sửa Key của TẤT CẢ các đoạn (giữ nguyên mốc thời gian).
++    //  - Không có startSec/all: bài phải có đúng 1 đoạn (hoặc chưa có đoạn nào -> tạo 1 đoạn cho cả bài).
++    // Chưa cài ADMIN_TOKEN trên Cloudflare => TỪ CHỐI mọi lần sửa (không để ai cũng sửa được).
++    if (url.pathname === "/set-key" && request.method === "POST") {
++      const denied = kiemTraQuyenSua(request, env, corsHeaders);
++      if (denied) return denied;
++      try {
++        const body = await request.json();
++        const songId = String((body && body.songId) || "").trim();
++        const key = chuanHoaKey(body && body.key);
++        const mode = chuanHoaMode(body && body.mode);
++        if (!songId) return Response.json({ error: "thieu songId" }, { status: 400, headers: corsHeaders });
++        if (!key) return Response.json({ error: "key_khong_hop_le", message: "Key phai la C, C#, D, D#, E, F, F#, G, G#, A, A#, B (hoac ky hieu giang Db, Eb, Gb, Ab, Bb)" }, { status: 400, headers: corsHeaders });
++        if (!mode) return Response.json({ error: "mode_khong_hop_le", message: "mode phai la major hoac minor" }, { status: 400, headers: corsHeaders });
++
++        const info = await env.DB.prepare(`
++          SELECT song_id as songId, total_duration_sec as totalSec FROM song_info WHERE song_id = ?
++        `).bind(songId).first();
++        const { results: segs } = await env.DB.prepare(`
++          SELECT start_sec as startSec FROM song_key_segments WHERE song_id = ? ORDER BY start_sec ASC LIMIT 200
++        `).bind(songId).all();
++
++        if (!info && (!segs || segs.length === 0)) {
++          return Response.json({ error: "khong_co_bai", message: "Server chua co bai nay" }, { status: 404, headers: corsHeaders });
++        }
++
++        let daSua = 0;
++        if (!segs || segs.length === 0) {
++          // Bài có thông tin nhưng chưa có đoạn Key nào -> tạo 1 đoạn cho cả bài.
++          const end = (info && info.totalSec > 0) ? info.totalSec : 36000;
++          await env.DB.prepare(`
++            INSERT INTO song_key_segments (song_id, start_sec, end_sec, key, mode, weight)
++            VALUES (?, 0, ?, ?, ?, 1.0)
++          `).bind(songId, end, key, mode).run();
++          daSua = 1;
++        } else if (body.all === true) {
++          const r = await env.DB.prepare(`UPDATE song_key_segments SET key = ?, mode = ? WHERE song_id = ?`).bind(key, mode, songId).run();
++          daSua = (r && r.meta && r.meta.changes) || segs.length;
++        } else if (body.startSec !== undefined && body.startSec !== null && body.startSec !== "") {
++          const start = parseInt(body.startSec, 10);
++          if (!Number.isFinite(start)) return Response.json({ error: "startSec_khong_hop_le" }, { status: 400, headers: corsHeaders });
++          const r = await env.DB.prepare(`UPDATE song_key_segments SET key = ?, mode = ? WHERE song_id = ? AND start_sec = ?`).bind(key, mode, songId, start).run();
++          daSua = (r && r.meta && r.meta.changes) || 0;
++          if (daSua === 0) return Response.json({ error: "khong_co_doan", message: "Khong co doan nao bat dau tai giay " + start }, { status: 404, headers: corsHeaders });
++        } else if (segs.length === 1) {
++          const r = await env.DB.prepare(`UPDATE song_key_segments SET key = ?, mode = ? WHERE song_id = ?`).bind(key, mode, songId).run();
++          daSua = (r && r.meta && r.meta.changes) || 1;
++        } else {
++          return Response.json({
++            error: "nhieu_doan",
++            message: "Bai co " + segs.length + " doan. Hay chi dinh startSec (giay bat dau doan) hoac dat all:true de sua tat ca cac doan.",
++            tongDoan: segs.length
++          }, { status: 409, headers: corsHeaders });
++        }
++
++        await env.DB.prepare(`UPDATE song_info SET updated_at = strftime('%s','now') * 1000 WHERE song_id = ?`).bind(songId).run();
++        return Response.json({ ok: true, songId, daSua, key, mode, keyHienThi: key + " " + (mode === "minor" ? "Minor" : "Major") }, { headers: corsHeaders });
++      } catch (e) {
++        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
++      }
++    }
++
+     // ========== [8] TÌM BÀI THEO TÊN — MENU HỎI SERVER TRƯỚC KHI TỰ DÒ KEY ==========
+     // Menu chỉ biết tên bài (không biết mã video), nên tra theo tên đã chuẩn hoá.
+     // Chỉ ĐỌC dữ liệu, không ghi gì. Trả Key của đoạn đầu tiên của bài.
+@@ -250,10 +321,97 @@ export default {
+       }
+     }
+ 
++    // ========== [10] XÓA BÀI HÁT — CẦN MẬT KHẨU QUẢN TRỊ (ADMIN_TOKEN) ==========
++    // Body: { songId, xacNhan:true }. Xoá bài + TẤT CẢ đoạn Key của bài, KHÔNG hoàn tác được.
++    // Bắt buộc có xacNhan:true để không lỡ tay xoá khi gọi nhầm. Xoá trong 1 giao dịch (batch): hoặc xoá hết, hoặc không xoá gì.
++    if (url.pathname === "/delete-song" && request.method === "POST") {
++      const denied = kiemTraQuyenSua(request, env, corsHeaders);
++      if (denied) return denied;
++      try {
++        const body = await request.json();
++        const songId = String((body && body.songId) || "").trim();
++        if (!songId) return Response.json({ error: "thieu songId" }, { status: 400, headers: corsHeaders });
++        if (!body || body.xacNhan !== true) {
++          return Response.json({ error: "can_xac_nhan", message: "Xoa bai khong hoan tac duoc. Gui kem xacNhan:true de xac nhan." }, { status: 400, headers: corsHeaders });
++        }
++
++        const info = await env.DB.prepare(`
++          SELECT song_id as songId, title FROM song_info WHERE song_id = ?
++        `).bind(songId).first();
++        const dem = await env.DB.prepare(`
++          SELECT COUNT(*) as n FROM song_key_segments WHERE song_id = ?
++        `).bind(songId).first();
++        const soDoan = (dem && dem.n) || 0;
++
++        if (!info && soDoan === 0) {
++          return Response.json({ error: "khong_co_bai", message: "Server khong co bai nay" }, { status: 404, headers: corsHeaders });
++        }
++
++        await env.DB.batch([
++          env.DB.prepare(`DELETE FROM song_key_segments WHERE song_id = ?`).bind(songId),
++          env.DB.prepare(`DELETE FROM song_info WHERE song_id = ?`).bind(songId)
++        ]);
++
++        return Response.json({
++          ok: true,
++          songId,
++          title: (info && info.title) || null,
++          daXoaDoan: soDoan,
++          daXoaBai: info ? 1 : 0
++        }, { headers: corsHeaders });
++      } catch (e) {
++        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
++      }
++    }
++
+     return Response.json({ error: "not_found" }, { status: 404, headers: corsHeaders });
+   }
+ };
+ 
++// ========== KIỂM TRA QUYỀN SỬA (mật khẩu quản trị) ==========
++// Trả null nếu hợp lệ; ngược lại trả sẵn Response lỗi.
++// Chưa cài ADMIN_TOKEN (Cloudflare > Settings > Variables and Secrets) => từ chối hết, không để ai cũng sửa được.
++function kiemTraQuyenSua(request, env, corsHeaders) {
++  if (!env.ADMIN_TOKEN) {
++    return Response.json({
++      error: "chua_cai_ADMIN_TOKEN",
++      message: "Server chua cai mat khau quan tri. Vao Cloudflare > Settings > Variables and Secrets > Add, loai Secret, ten ADMIN_TOKEN."
++    }, { status: 403, headers: corsHeaders });
++  }
++  const auth = request.headers.get("Authorization") || "";
++  const token = auth.startsWith("Bearer ") ? auth.slice(7) : (request.headers.get("X-Admin-Token") || "");
++  if (!soSanhAnToan(token, env.ADMIN_TOKEN)) {
++    return Response.json({ error: "sai_mat_khau", message: "Mat khau quan tri khong dung" }, { status: 401, headers: corsHeaders });
++  }
++  return null;
++}
++
++// So sánh chuỗi không lộ độ dài khớp (chống dò mật khẩu theo thời gian phản hồi).
++function soSanhAnToan(a, b) {
++  a = String(a); b = String(b);
++  let diff = a.length ^ b.length;
++  const n = Math.max(a.length, b.length);
++  for (let i = 0; i < n; i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
++  return diff === 0;
++}
++
++// ========== CHUẨN HOÁ KEY / MODE (giống KeyServerSync.js phía app: ký hiệu giáng đổi sang thăng) ==========
++function chuanHoaKey(raw) {
++  const m = /^([A-Ga-g])([#b♯♭]?)$/.exec(String(raw || "").trim());
++  if (!m) return null;
++  let root = m[1].toUpperCase() + m[2].replace("♯", "#").replace("♭", "b");
++  const giangSangThang = { Db: "C#", Eb: "D#", Gb: "F#", Ab: "G#", Bb: "A#", Cb: "B", Fb: "E", "E#": "F", "B#": "C" };
++  if (giangSangThang[root]) root = giangSangThang[root];
++  return ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"].indexOf(root) >= 0 ? root : null;
++}
++
++function chuanHoaMode(raw) {
++  const s = String(raw || "").trim().toLowerCase();
++  if (/^maj/.test(s)) return "major";
++  if (/^min/.test(s)) return "minor";
++  return null;
++}
++
+ // ========== CHUẨN HOÁ TÊN BÀI (bỏ dấu, chữ thường, chỉ giữ chữ/số) ==========
+ // PHẢI giống hệt hàm normalizeTitle() trong core/integration/KeyServerSync.js.
+ function chuanHoaTen(s) {
+@@ -381,6 +539,27 @@ function taoTrangChu() {
+           <tbody id="danhSachDoan"></tbody>
+         </table>
+ 
++        <h3 style="color:#ff9800;">Sua Key Bai Hat</h3>
++        <p style="font-size:13px; color:#aaa; margin-bottom:10px;">Can mat khau quan tri (ADMIN_TOKEN). Bai chi co 1 doan: chon Key roi bam Luu. Bai nhieu doan: tick "Sua tat ca" hoac nhap giay bat dau cua doan can sua.</p>
++        <div class="search-bar" style="flex-wrap:wrap;">
++          <select id="suaKey" style="padding:12px; border-radius:8px; border:none; font-size:15px;">
++            <option>C</option><option>C#</option><option>D</option><option>D#</option><option>E</option><option>F</option>
++            <option>F#</option><option>G</option><option>G#</option><option>A</option><option>A#</option><option>B</option>
++          </select>
++          <select id="suaMode" style="padding:12px; border-radius:8px; border:none; font-size:15px;">
++            <option value="major">Truong (Major)</option><option value="minor">Phu (Minor)</option>
++          </select>
++          <input type="number" id="suaStartSec" placeholder="Giay bat dau doan (tuy chon)" style="max-width:230px;">
++          <label style="display:flex; align-items:center; gap:6px; color:#ddd; font-size:14px;"><input type="checkbox" id="suaTatCa" style="flex:none; width:auto;"> Sua tat ca cac doan</label>
++          <input type="password" id="adminToken" placeholder="Mat khau quan tri (ADMIN_TOKEN)" style="max-width:260px;">
++          <button class="btn-primary" id="btnSuaKey">Luu Key</button>
++        </div>
++        <div id="kqSua" style="margin-top:10px; padding:10px; border-radius:8px; display:none;"></div>
++
++        <h3 style="color:#f44336; margin-top:20px;">Xoa Bai Hat</h3>
++        <p style="font-size:13px; color:#aaa; margin-bottom:10px;">Xoa bai nay va TAT CA Key cua bai khoi server. Khong hoan tac duoc. Dung mat khau quan tri o o ben tren.</p>
++        <button id="btnXoaBai" style="background:#c62828; color:#fff;">Xoa bai nay</button>
++
+         <h3 style="color:#ffd700;">Diem Chuyen Tong</h3>
+         <table>
+           <thead><tr><th>Thoi diem</th><th>Tu Khoa</th><th></th><th>Sang Khoa</th></tr></thead>
+@@ -408,6 +587,13 @@ function taoTrangChu() {
+   <script>
+     var SERVER = window.location.origin;
+ 
++    // Chong chen ma: moi du lieu lay tu server (ten bai, key...) deu phai qua ham nay truoc khi dua vao innerHTML.
++    function esc(s) {
++      return String(s === null || s === undefined ? '' : s)
++        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
++        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
++    }
++
+     // Chuyen tab
+     var tabs = document.querySelectorAll('.tab');
+     for (var t = 0; t < tabs.length; t++) {
+@@ -448,9 +634,18 @@ function taoTrangChu() {
+         for (var i = 0; i < data.doans.length; i++) {
+           var d = data.doans[i];
+           var tagClass = d.mode === 'major' ? 'tag-major' : 'tag-minor';
+-          tbodyDoan.innerHTML += '<tr><td>' + d.tu + '</td><td>' + d.den + '</td>' +
+-            '<td style="font-weight:bold; font-size:16px;">' + d.khoa + '</td>' +
+-            '<td><span class="tag ' + tagClass + '">' + d.cheDo + '</span></td></tr>';
++          tbodyDoan.innerHTML += '<tr><td>' + esc(d.tu) + '</td><td>' + esc(d.den) + '</td>' +
++            '<td style="font-weight:bold; font-size:16px;">' + esc(d.khoa) + '</td>' +
++            '<td><span class="tag ' + tagClass + '">' + esc(d.cheDo) + '</span></td></tr>';
++        }
++        // Dien san Key hien tai vao o sua (doan dau tien) de chi can doi nhung gi muon sua
++        if (!window.baiDangXem || window.baiDangXem.id !== data.songId) document.getElementById('kqSua').style.display = 'none';
++        window.baiDangXem = { id: data.songId, doans: data.doans };
++        if (data.doans.length > 0) {
++          var k0 = String(data.doans[0].khoa || '');
++          var sel = document.getElementById('suaKey');
++          for (var so = 0; so < sel.options.length; so++) { if (sel.options[so].value === k0) sel.selectedIndex = so; }
++          document.getElementById('suaMode').value = data.doans[0].mode === 'minor' ? 'minor' : 'major';
+         }
+ 
+         var tbodyCT = document.getElementById('danhSachChuyenTong');
+@@ -462,10 +657,10 @@ function taoTrangChu() {
+           for (var j = 0; j < data.chuyenTong.length; j++) {
+             var ct = data.chuyenTong[j];
+             tbodyCT.innerHTML += '<tr class="transition-row">' +
+-              '<td class="transition-text">' + ct.timeFormat + '</td>' +
+-              '<td style="color:#ff6b6b; font-weight:bold;">' + ct.fromDisplay + '</td>' +
++              '<td class="transition-text">' + esc(ct.timeFormat) + '</td>' +
++              '<td style="color:#ff6b6b; font-weight:bold;">' + esc(ct.fromDisplay) + '</td>' +
+               '<td style="color:#ffd700;">-></td>' +
+-              '<td style="color:#4CAF50; font-weight:bold;">' + ct.toDisplay + '</td></tr>';
++              '<td style="color:#4CAF50; font-weight:bold;">' + esc(ct.toDisplay) + '</td></tr>';
+           }
+         }
+       } catch (err) {
+@@ -473,6 +668,81 @@ function taoTrangChu() {
+       }
+     }
+ 
++    // Sua key bai hat (can mat khau quan tri)
++    document.getElementById('btnSuaKey').addEventListener('click', suaKey);
++    try { var tkLuu = sessionStorage.getItem('menuAdminToken'); if (tkLuu) document.getElementById('adminToken').value = tkLuu; } catch (e) {}
++
++    async function suaKey() {
++      var kq = document.getElementById('kqSua');
++      function hien(ok, text) {
++        kq.style.display = 'block';
++        kq.style.background = ok ? 'rgba(76,175,80,0.25)' : 'rgba(244,67,54,0.25)';
++        kq.innerText = text;
++      }
++      var bai = window.baiDangXem;
++      if (!bai || !bai.id) { hien(false, 'Hay bam "Xem Thong Tin" cho mot bai truoc.'); return; }
++      var token = document.getElementById('adminToken').value;
++      if (!token) { hien(false, 'Chua nhap mat khau quan tri.'); return; }
++      var body = { songId: bai.id, key: document.getElementById('suaKey').value, mode: document.getElementById('suaMode').value };
++      if (document.getElementById('suaTatCa').checked) body.all = true;
++      var st = document.getElementById('suaStartSec').value;
++      if (st !== '') body.startSec = parseInt(st, 10);
++      try {
++        var res = await fetch(SERVER + '/set-key', {
++          method: 'POST',
++          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
++          body: JSON.stringify(body)
++        });
++        var data = await res.json();
++        if (data.ok) {
++          try { sessionStorage.setItem('menuAdminToken', token); } catch (e) {}
++          hien(true, 'Da sua ' + data.daSua + ' doan -> ' + data.keyHienThi);
++          timBai();
++        } else {
++          hien(false, data.message || data.error || ('Loi ' + res.status));
++        }
++      } catch (err) {
++        hien(false, 'Loi ket noi: ' + err.message);
++      }
++    }
++
++    // Xoa bai hat (can mat khau quan tri + hoi xac nhan)
++    document.getElementById('btnXoaBai').addEventListener('click', xoaBai);
++
++    async function xoaBai() {
++      var kq = document.getElementById('kqSua');
++      function hien(ok, text) {
++        kq.style.display = 'block';
++        kq.style.background = ok ? 'rgba(76,175,80,0.25)' : 'rgba(244,67,54,0.25)';
++        kq.innerText = text;
++      }
++      var bai = window.baiDangXem;
++      if (!bai || !bai.id) { hien(false, 'Hay bam "Xem Thong Tin" cho mot bai truoc.'); return; }
++      var token = document.getElementById('adminToken').value;
++      if (!token) { hien(false, 'Chua nhap mat khau quan tri.'); return; }
++      var ten = document.getElementById('tenBaiHienThi').innerText;
++      if (!confirm('XOA bai "' + ten + '" va tat ca Key cua bai khoi server? Khong hoan tac duoc.')) return;
++      try {
++        var res = await fetch(SERVER + '/delete-song', {
++          method: 'POST',
++          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
++          body: JSON.stringify({ songId: bai.id, xacNhan: true })
++        });
++        var data = await res.json();
++        if (data.ok) {
++          try { sessionStorage.setItem('menuAdminToken', token); } catch (e) {}
++          window.baiDangXem = null;
++          document.getElementById('ketQua').classList.add('hidden');
++          document.getElementById('songIdInput').value = '';
++          alert('Da xoa bai "' + ten + '" (' + data.daXoaDoan + ' doan Key).');
++        } else {
++          hien(false, data.message || data.error || ('Loi ' + res.status));
++        }
++      } catch (err) {
++        hien(false, 'Loi ket noi: ' + err.message);
++      }
++    }
++
+     // Tra khoa tai giay
+     document.getElementById('btnTra').addEventListener('click', traKhoaTaiGiay);
+ 
+@@ -485,9 +755,9 @@ function taoTrangChu() {
+       var div = document.getElementById('kqTra');
+       div.style.display = 'block';
+       if (data.found) {
+-        div.innerHTML = 'Tai <strong>' + data.thoiGian + '</strong>: ' +
+-          '<span style="font-size:20px; font-weight:bold; color:#4CAF50;">' + data.key + '</span> ' +
+-          '<span style="color:#aaa;">(' + data.modeDisplay + ' / ' + data.mode + ')</span>';
++        div.innerHTML = 'Tai <strong>' + esc(data.thoiGian) + '</strong>: ' +
++          '<span style="font-size:20px; font-weight:bold; color:#4CAF50;">' + esc(data.key) + '</span> ' +
++          '<span style="color:#aaa;">(' + esc(data.modeDisplay) + ' / ' + esc(data.mode) + ')</span>';
+       } else {
+         div.innerHTML = 'Khong tim thay khoa tai giay nay';
+       }
+@@ -505,9 +775,12 @@ function taoTrangChu() {
+       div.innerHTML = '';
+       for (var i = 0; i < data.danhSach.length; i++) {
+         var bai = data.danhSach[i];
+-        div.innerHTML += '<div class="list-item" data-songid="' + bai.songId + '">' +
+-          '<div class="list-title">' + bai.title + '</div>' +
+-          '<div class="list-desc">ID: ' + bai.songId + ' | Thoi luong: ' + bai.tongThoiLuong + ' | So doan: ' + bai.soDoan + '</div></div>';
++        var keyTag = bai.keyHienThi
++          ? ' <span class="tag ' + (bai.mode === 'minor' ? 'tag-minor' : 'tag-major') + '">' + esc(bai.keyHienThi) + '</span>'
++          : ' <span class="tag" style="background:#555; color:#ddd;">Chua co Key</span>';
++        div.innerHTML += '<div class="list-item" data-songid="' + esc(bai.songId) + '">' +
++          '<div class="list-title">' + esc(bai.title) + keyTag + '</div>' +
++          '<div class="list-desc">ID: ' + esc(bai.songId) + ' | Thoi luong: ' + esc(bai.tongThoiLuong) + ' | So doan: ' + esc(bai.soDoan) + '</div></div>';
+       }
+       var items = document.querySelectorAll('#danhSachTatCa .list-item');
+       for (var k = 0; k < items.length; k++) {
+diff --git a/tests/unit/KeyEditAndDisplayC.verify.js b/tests/unit/KeyEditAndDisplayC.verify.js
+new file mode 100644
+index 0000000..47d86c2
+--- /dev/null
++++ b/tests/unit/KeyEditAndDisplayC.verify.js
+@@ -0,0 +1,517 @@
++/**
++ * ==========================================================
++ * Auto Menu AI — Kiểm chứng "Sửa Key trên server" + "Hiện Key cạnh tên bài" (Task C)
++ * Chạy bằng: node tests/unit/KeyEditAndDisplayC.verify.js
++ *
++ * ⚠️ ĐỌC KỸ: chạy trên Linux sandbox, KHÔNG gọi Cloudflare thật, KHÔNG mở Electron.
++ *  - Server: chạy code THẬT của worker.js với D1 giả trong bộ nhớ (chỉ hỗ trợ đúng các câu SQL worker dùng).
++ *  - Menu: trích đoạn code THẬT của renderer.js (phần NOW PLAYING + hàm syncNowPlayingKeyText)
++ *    chạy trong sandbox vm với DOM giả. KHÔNG chứng minh giao diện Electron thật hiển thị đúng.
++ * ==========================================================
++ */
++'use strict';
++
++const assert = require('assert');
++const fs = require('fs');
++const path = require('path');
++const vm = require('vm');
++
++const ROOT = path.join(__dirname, '..', '..');
++const { KeyServerSync } = require(path.join(ROOT, 'core', 'integration', 'KeyServerSync.js'));
++
++let failCount = 0;
++function check(cond, msg) {
++    try { assert.ok(cond, msg); console.log('  ✅ ' + msg); }
++    catch (e) { failCount++; console.log('  ❌ ' + msg); }
++}
++
++function loadWorker(file) {
++    const src = fs.readFileSync(file, 'utf8').replace(/^export default/m, 'module.exports =')
++        + '\n;module.exports.__page = taoTrangChu;';
++    const m = { exports: {} };
++    new Function('module', 'exports', src)(m, m.exports);
++    return m.exports;
++}
++
++// ---------- D1 giả (đủ cho /find, /list, /key-at, /set-key) ----------
++function makeFakeDb(seed) {
++    const songs = ((seed && seed.songs) || []).map((s) => ({ ...s }));
++    const segs = ((seed && seed.segs) || []).map((s) => ({ ...s }));
++    let tick = 100;
++    const log = []; // lịch sử câu ghi
++    function stmt(sql) {
++        const q = sql.replace(/\s+/g, ' ').trim();
++        let args = [];
++        const api = {
++            bind(...a) { args = a; return api; },
++            async first() {
++                if (q.startsWith('SELECT song_id as songId, total_duration_sec as totalSec FROM song_info WHERE song_id = ?')) {
++                    const s = songs.find((x) => x.songId === args[0]);
++                    return s ? { songId: s.songId, totalSec: s.dur || null } : null;
++                }
++                if (q.startsWith('SELECT song_id as songId, title FROM song_info WHERE song_id = ?')) {
++                    const s = songs.find((x) => x.songId === args[0]);
++                    return s ? { songId: s.songId, title: s.title } : null;
++                }
++                if (q.startsWith('SELECT COUNT(*) as n FROM song_key_segments WHERE song_id = ?')) {
++                    return { n: segs.filter((x) => x.songId === args[0]).length };
++                }
++                throw new Error('FakeDb.first: SQL chưa hỗ trợ: ' + q.slice(0, 70));
++            },
++            async run() {
++                log.push(q.slice(0, 40));
++                if (dbObj._failOn && q.startsWith(dbObj._failOn)) throw new Error('D1 giả: lỗi cố ý ở ' + dbObj._failOn);
++                if (q.startsWith('DELETE FROM song_key_segments WHERE song_id = ?')) {
++                    let n = 0;
++                    for (let i = segs.length - 1; i >= 0; i--) if (segs[i].songId === args[0]) { segs.splice(i, 1); n++; }
++                    return { success: true, meta: { changes: n } };
++                }
++                if (q.startsWith('DELETE FROM song_info WHERE song_id = ?')) {
++                    let n = 0;
++                    for (let i = songs.length - 1; i >= 0; i--) if (songs[i].songId === args[0]) { songs.splice(i, 1); n++; }
++                    return { success: true, meta: { changes: n } };
++                }
++                if (q.startsWith('INSERT INTO song_key_segments') && q.includes('VALUES (?, 0, ?, ?, ?, 1.0)')) {
++                    const [songId, endSec, key, mode] = args;
++                    segs.push({ songId, startSec: 0, endSec, key, mode });
++                    return { success: true, meta: { changes: 1 } };
++                }
++                if (q.startsWith('INSERT INTO song_key_segments')) {
++                    const [songId, startSec, endSec, key, mode] = args;
++                    segs.push({ songId, startSec, endSec, key, mode });
++                    return { success: true, meta: { changes: 1 } };
++                }
++                if (q.startsWith('INSERT OR REPLACE INTO song_info')) {
++                    const [songId, title, dur] = args;
++                    const i = songs.findIndex((s) => s.songId === songId);
++                    const row = { songId, title, dur, updated: ++tick };
++                    if (i >= 0) songs[i] = row; else songs.push(row);
++                    return { success: true, meta: { changes: 1 } };
++                }
++                if (q.startsWith('UPDATE song_key_segments SET key = ?, mode = ? WHERE song_id = ? AND start_sec = ?')) {
++                    const [key, mode, songId, start] = args; let n = 0;
++                    segs.forEach((s) => { if (s.songId === songId && s.startSec === start) { s.key = key; s.mode = mode; n++; } });
++                    return { success: true, meta: { changes: n } };
++                }
++                if (q.startsWith('UPDATE song_key_segments SET key = ?, mode = ? WHERE song_id = ?')) {
++                    const [key, mode, songId] = args; let n = 0;
++                    segs.forEach((s) => { if (s.songId === songId) { s.key = key; s.mode = mode; n++; } });
++                    return { success: true, meta: { changes: n } };
++                }
++                if (q.startsWith('UPDATE song_info SET updated_at')) {
++                    const s = songs.find((x) => x.songId === args[0]); if (s) s.updated = ++tick;
++                    return { success: true, meta: { changes: s ? 1 : 0 } };
++                }
++                throw new Error('FakeDb.run: SQL chưa hỗ trợ: ' + q.slice(0, 70));
++            },
++            async all() {
++                if (q.includes('GROUP BY i.song_id')) {
++                    const rows = songs.slice().sort((a, b) => (b.updated || 0) - (a.updated || 0)).map((s) => {
++                        const mine = segs.filter((g) => g.songId === s.songId).sort((a, b) => a.startSec - b.startSec);
++                        return { songId: s.songId, title: s.title, tongGiay: s.dur || null, soDoan: mine.length, updated_at: s.updated,
++                            key1: mine.length ? mine[0].key : null, mode1: mine.length ? mine[0].mode : null };
++                    });
++                    return { results: rows };
++                }
++                if (q.includes('FROM song_info ORDER BY updated_at')) {
++                    return { results: songs.slice().sort((a, b) => (b.updated || 0) - (a.updated || 0)).map((s) => ({ songId: s.songId, title: s.title })) };
++                }
++                if (q.includes('FROM song_key_segments WHERE song_id = ? ORDER BY start_sec ASC LIMIT 200')) {
++                    return { results: segs.filter((s) => s.songId === args[0]).sort((a, b) => a.startSec - b.startSec).map((s) => ({ key: s.key, mode: s.mode, startSec: s.startSec, endSec: s.endSec })) };
++                }
++                if (q.includes('WHERE song_id = ? AND start_sec <= ? AND end_sec >= ?')) {
++                    const [id, g1, g2] = args;
++                    const hit = segs.filter((s) => s.songId === id && s.startSec <= g1 && s.endSec >= g2).sort((a, b) => b.startSec - a.startSec).slice(0, 1);
++                    return { results: hit.map((s) => ({ key: s.key, mode: s.mode, startSec: s.startSec, endSec: s.endSec })) };
++                }
++                throw new Error('FakeDb.all: SQL chưa hỗ trợ: ' + q.slice(0, 70));
++            }
++        };
++        return api;
++    }
++    // batch = 1 giao dịch như D1 thật: có câu lỗi thì KHÔNG câu nào có hiệu lực (khôi phục lại trạng thái trước).
++    const dbObj = {
++        prepare: stmt, _songs: songs, _segs: segs, _log: log, _failOn: null,
++        async batch(list) {
++            const s0 = songs.map((x) => ({ ...x })), g0 = segs.map((x) => ({ ...x }));
++            const out = [];
++            try { for (const s of list) out.push(await s.run()); }
++            catch (e) { songs.length = 0; s0.forEach((x) => songs.push(x)); segs.length = 0; g0.forEach((x) => segs.push(x)); throw e; }
++            return out;
++        }
++    };
++    return dbObj;
++}
++
++const TOKEN = 'mat-khau-thu-nghiem-123456';
++function seed() {
++    return makeFakeDb({
++        songs: [
++            { songId: 'one', title: 'Xin Đừng Rời Xa Anh', dur: 293, updated: 3 },
++            { songId: 'multi', title: 'Bài Đổi Giọng Nhiều Đoạn', dur: 300, updated: 2 },
++            { songId: 'empty', title: 'Viên Đá Nhỏ', dur: 200, updated: 1 }
++        ],
++        segs: [
++            { songId: 'one', startSec: 0, endSec: 293, key: 'D', mode: 'minor' },
++            { songId: 'multi', startSec: 0, endSec: 100, key: 'C', mode: 'major' },
++            { songId: 'multi', startSec: 100, endSec: 200, key: 'D', mode: 'major' },
++            { songId: 'multi', startSec: 200, endSec: 300, key: 'E', mode: 'major' }
++        ]
++    });
++}
++
++async function call(worker, db, method, p, body, headers = {}, envExtra = {}) {
++    const init = { method, headers: { 'Content-Type': 'application/json', ...headers } };
++    if (body !== undefined) init.body = JSON.stringify(body);
++    const r = await worker.fetch(new Request('https://x.test' + p, init), { DB: db, ...envExtra });
++    let json = null; try { json = await r.json(); } catch (e) {}
++    return { status: r.status, json, headers: r.headers };
++}
++const AUTH = { Authorization: 'Bearer ' + TOKEN };
++const ENV = { ADMIN_TOKEN: TOKEN };
++const snap = (db) => JSON.stringify(db._segs) + '|' + JSON.stringify(db._songs);
++
++// ---------- trích code thật từ renderer.js ----------
++function extractFn(src, name) {
++    const st = src.indexOf(`function ${name}(`);
++    if (st < 0) throw new Error('không thấy hàm ' + name);
++    let i = src.indexOf('{', st), d = 0;
++    for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}') { d--; if (d === 0) { i++; break; } } }
++    return src.slice(st, i);
++}
++function extractNowPlayingIife(src) {
++    const st = src.indexOf('(function setupNowPlaying() {');
++    if (st < 0) throw new Error('không thấy setupNowPlaying');
++    return src.slice(st, src.indexOf('\n})();', st) + 6);
++}
++
++(async () => {
++    const worker = loadWorker(path.join(ROOT, 'worker.js'));
++
++    console.log('\n[1] Hai bản worker.js giống hệt nhau');
++    check(fs.readFileSync(path.join(ROOT, 'worker.js'), 'utf8') === fs.readFileSync(path.join(ROOT, 'server', 'worker.js'), 'utf8'), 'worker.js == server/worker.js');
++
++    console.log('\n[2] /set-key — quyền sửa (mật khẩu quản trị)');
++    {
++        let db = seed(); const before = snap(db);
++        let r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, AUTH, {});
++        check(r.status === 403 && r.json.error === 'chua_cai_ADMIN_TOKEN', 'Chưa cài ADMIN_TOKEN trên server -> TỪ CHỐI (403), không ai sửa được');
++        check(snap(db) === before, 'Bị từ chối -> dữ liệu không đổi');
++
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, {}, ENV);
++        check(r.status === 401 && r.json.error === 'sai_mat_khau', 'Không gửi mật khẩu -> 401');
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { Authorization: 'Bearer sai' }, ENV);
++        check(r.status === 401, 'Sai mật khẩu -> 401');
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { Authorization: 'Bearer ' + TOKEN + 'x' }, ENV);
++        check(r.status === 401, 'Mật khẩu đúng + thừa 1 ký tự -> 401');
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { Authorization: 'Bearer ' + TOKEN.slice(0, -1) }, ENV);
++        check(r.status === 401, 'Mật khẩu đúng nhưng thiếu 1 ký tự -> 401');
++        const sameLenWrong = TOKEN.slice(0, -1) + (TOKEN.slice(-1) === 'x' ? 'y' : 'x');
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { Authorization: 'Bearer ' + sameLenWrong }, ENV);
++        check(sameLenWrong.length === TOKEN.length && r.status === 401, 'Mật khẩu SAI nhưng CÙNG độ dài (đổi 1 ký tự cuối) -> 401');
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { Authorization: 'Bearer ' + TOKEN.toUpperCase() }, ENV);
++        check(r.status === 401, 'Mật khẩu đúng nhưng khác chữ hoa/thường -> 401');
++        check(snap(db) === before, 'Sai mật khẩu -> dữ liệu không đổi');
++
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { 'X-Admin-Token': TOKEN }, ENV);
++        check(r.status === 200 && r.json.ok === true, 'Mật khẩu đúng qua header X-Admin-Token -> thành công');
++        db = seed();
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, AUTH, ENV);
++        check(r.status === 200 && r.json.ok === true, 'Mật khẩu đúng qua Authorization: Bearer -> thành công');
++
++        r = await call(worker, db, 'GET', '/set-key', undefined, AUTH, ENV);
++        check(r.status === 404, 'GET /set-key (không phải POST) -> 404, không sửa được bằng đường dẫn thường');
++
++        const pre = await worker.fetch(new Request('https://x.test/set-key', { method: 'OPTIONS' }), { DB: db });
++        check(/Authorization/.test(pre.headers.get('Access-Control-Allow-Headers') || ''), 'CORS cho phép header Authorization (trang quản lý gửi được mật khẩu)');
++    }
++
++    console.log('\n[3] /set-key — sửa đúng Key');
++    {
++        let db = seed();
++        let r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'Bb', mode: 'Minor' }, AUTH, ENV);
++        check(r.json.ok === true && r.json.daSua === 1 && r.json.key === 'A#' && r.json.mode === 'minor' && r.json.keyHienThi === 'A# Minor', 'Bài 1 đoạn: sửa Bb Minor -> lưu A# minor (giáng đổi sang thăng)');
++        check(db._segs.filter((s) => s.songId === 'one').length === 1 && db._segs.find((s) => s.songId === 'one').key === 'A#', 'D1: vẫn đúng 1 đoạn, Key đã đổi (không nhân đôi)');
++        check(db._segs.find((s) => s.songId === 'one').startSec === 0 && db._segs.find((s) => s.songId === 'one').endSec === 293, 'Mốc thời gian đoạn giữ nguyên');
++
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'multi', key: 'F', mode: 'major' }, AUTH, ENV);
++        check(r.status === 409 && r.json.error === 'nhieu_doan' && r.json.tongDoan === 3, 'Bài 3 đoạn, không chỉ định đoạn -> 409, hỏi lại (không đoán bừa)');
++        check(db._segs.filter((s) => s.songId === 'multi').map((s) => s.key).join() === 'C,D,E', '409 -> không đoạn nào bị sửa');
++
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'multi', key: 'F', mode: 'minor', startSec: 100 }, AUTH, ENV);
++        check(r.json.ok === true && r.json.daSua === 1, 'Chỉ định startSec=100 -> sửa đúng 1 đoạn');
++        check(db._segs.filter((s) => s.songId === 'multi').map((s) => s.key + ':' + s.mode).join() === 'C:major,F:minor,E:major', 'Chỉ đoạn giữa đổi sang F minor, hai đoạn còn lại giữ nguyên');
++
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'multi', key: 'G', mode: 'major', startSec: 999 }, AUTH, ENV);
++        check(r.status === 404 && r.json.error === 'khong_co_doan', 'startSec không tồn tại -> 404');
++
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'multi', key: 'G', mode: 'major', all: true }, AUTH, ENV);
++        check(r.json.ok === true && r.json.daSua === 3 && db._segs.filter((s) => s.songId === 'multi').every((s) => s.key === 'G' && s.mode === 'major'), 'all:true -> cả 3 đoạn đổi sang G major');
++        check(db._segs.filter((s) => s.songId === 'multi').map((s) => s.startSec + '-' + s.endSec).join() === '0-100,100-200,200-300', 'all:true -> mốc thời gian giữ nguyên');
++
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'empty', key: 'E', mode: 'minor' }, AUTH, ENV);
++        const emptySeg = db._segs.filter((s) => s.songId === 'empty');
++        check(r.json.ok === true && emptySeg.length === 1 && emptySeg[0].key === 'E' && emptySeg[0].mode === 'minor' && emptySeg[0].startSec === 0 && emptySeg[0].endSec === 200, 'Bài chưa có đoạn nào ("Viên Đá Nhỏ") -> tạo 1 đoạn cho cả bài theo độ dài bài (200s)');
++
++        const before = snap(db);
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'khong-co', key: 'C', mode: 'major' }, AUTH, ENV);
++        check(r.status === 404 && r.json.error === 'khong_co_bai', 'Bài không tồn tại -> 404, không tự tạo bài rác');
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'H', mode: 'major' }, AUTH, ENV);
++        check(r.status === 400 && r.json.error === 'key_khong_hop_le', 'Key "H" -> 400');
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'dorian' }, AUTH, ENV);
++        check(r.status === 400 && r.json.error === 'mode_khong_hop_le', 'Mode "dorian" -> 400');
++        r = await call(worker, db, 'POST', '/set-key', { key: 'C', mode: 'major' }, AUTH, ENV);
++        check(r.status === 400, 'Thiếu songId -> 400');
++        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: '<script>', mode: 'major' }, AUTH, ENV);
++        check(r.status === 400, 'Key chứa mã lạ -> 400');
++        check(snap(db) === before, 'Các yêu cầu sai -> dữ liệu không đổi');
++
++        let bad = await worker.fetch(new Request('https://x.test/set-key', { method: 'POST', headers: { ...AUTH }, body: '{rác' }), { DB: db, ...ENV });
++        check(bad.status === 500 || bad.status === 400, 'Body không phải JSON -> báo lỗi, không crash (' + bad.status + ')');
++    }
++
++    console.log('\n[4] Vòng khép kín: sửa trên server -> Menu tra được Key mới');
++    {
++        const db = seed();
++        const bridge = async (url, init = {}) => worker.fetch(new Request(url, init), { DB: db, ...ENV });
++        let t = 1_000_000; const now = () => t;
++        const c = new KeyServerSync({ fetchFn: bridge, now, logger: { log() {}, error() {}, warn() {} } });
++        let r = await c.lookup('Xin Đừng Rời Xa Anh', 'Lê Gia Bảo');
++        check(r.found && r.key === 'D Minor', 'Trước khi sửa: Menu tra ra D Minor');
++
++        await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'F#', mode: 'major' }, AUTH, ENV);
++        r = await c.lookup('Xin Đừng Rời Xa Anh', 'Lê Gia Bảo');
++        check(r.found && r.key === 'D Minor', 'Ngay sau khi sửa: Menu vẫn dùng bản nhớ tạm (đúng thiết kế, tránh hỏi liên tục)');
++        t += 2 * 60 * 1000 + 1000;
++        r = await c.lookup('Xin Đừng Rời Xa Anh', 'Lê Gia Bảo');
++        check(r.found && r.key === 'F# Major', 'Sau 2 phút: Menu hỏi lại và nhận Key đã sửa -> "F# Major"');
++
++        const k = await call(worker, db, 'GET', '/key-at?id=one&sec=10');
++        check(k.json.found && k.json.key === 'F#' && k.json.mode === 'major', '/key-at (extension/Auto-Tune dùng) cũng thấy Key mới');
++
++        // Menu không ghi đè Key đã sửa: bài đã có trên server -> không gửi
++        const f = await c.submit({ title: 'Xin Đừng Rời Xa Anh', artist: 'Lê Gia Bảo', key: 'C Major', confidence: 0.95 });
++        check(f.ok === true && f.reason === 'server-already-has' && db._segs.find((s) => s.songId === 'one').key === 'F#', 'Menu tự dò Key khác -> KHÔNG ghi đè Key mà bạn đã sửa trên server');
++    }
++
++    console.log('\n[5] /list — hiện Key cạnh tên bài');
++    {
++        const db = seed();
++        const r = await call(worker, db, 'GET', '/list');
++        const byId = Object.fromEntries(r.json.danhSach.map((x) => [x.songId, x]));
++        check(r.json.tongBai === 3, '/list vẫn trả đủ 3 bài');
++        check(byId.one.keyHienThi === 'D Minor' && byId.one.key === 'D' && byId.one.mode === 'minor', 'Bài 1 đoạn: keyHienThi = "D Minor"');
++        check(byId.multi.keyHienThi === 'C Major' && byId.multi.soDoan === 3, 'Bài nhiều đoạn: hiện Key của đoạn ĐẦU TIÊN (C Major), soDoan=3');
++        check(byId.empty.keyHienThi === null && byId.empty.key === null, 'Bài chưa có đoạn: keyHienThi = null');
++        check(['songId', 'title', 'tongThoiLuong', 'soDoan'].every((k) => k in byId.one), 'Các trường cũ (songId, title, tongThoiLuong, soDoan) còn nguyên -> extension yt-key không bị ảnh hưởng');
++    }
++
++    console.log('\n[6] Trang quản lý của server');
++    {
++        const html = worker.__page();
++        const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
++        let parsed = true; try { new vm.Script(script); } catch (e) { parsed = false; }
++        check(parsed, 'Script trong trang quản lý đúng cú pháp');
++        check(/id="btnSuaKey"/.test(html) && /id="suaKey"/.test(html) && /id="suaMode"/.test(html) && /id="adminToken"/.test(html) && /type="password" id="adminToken"/.test(html), 'Có khung "Sửa Key": chọn Key, chọn Trưởng/Phụ, ô mật khẩu (ẩn ký tự), nút Lưu');
++        check(/\/set-key/.test(script) && /'Authorization': 'Bearer '/.test(script), 'Nút Lưu gọi /set-key kèm mật khẩu');
++        check(/keyHienThi/.test(script) && /tag-minor/.test(script), 'Danh sách bài hiện Key cạnh tên bài');
++        // Chống chèn mã: không còn nối thẳng dữ liệu từ server vào innerHTML
++        const raw = [/\+ bai\.title \+/, /\+ bai\.songId \+/, /\+ d\.khoa \+/, /\+ d\.tu \+/, /\+ d\.den \+/, /\+ d\.cheDo \+/, /\+ ct\.fromDisplay \+/, /\+ ct\.toDisplay \+/, /\+ data\.key \+/, /\+ bai\.keyHienThi \+/];
++        check(raw.every((re) => !re.test(script)), 'Không còn nối thẳng dữ liệu server (tên bài, Key...) vào innerHTML');
++        const escSrc = extractFn(script, 'esc');
++        const sb = {}; vm.createContext(sb); vm.runInContext(escSrc + ';this.esc=esc;', sb);
++        check(sb.esc('<img src=x onerror=alert(1)>') === '&lt;img src=x onerror=alert(1)&gt;', 'esc() chặn thẻ HTML trong tên bài');
++        check(sb.esc('a"b\'c&') === 'a&quot;b&#39;c&amp;' && sb.esc(null) === '' && sb.esc(5) === '5', 'esc() xử lý nháy, &, null, số');
++        check(!/`/.test(script) && !/\$\{/.test(script), 'Script trong trang không chứa dấu ` hay ${ (không vỡ chuỗi mẫu của worker)');
++    }
++
++    console.log('\n[7] Menu: hiện Key cạnh tên bài (chạy code THẬT của renderer.js)');
++    {
++        const rend = fs.readFileSync(path.join(ROOT, 'ui', 'js', 'renderer.js'), 'utf8');
++        const iife = extractNowPlayingIife(rend);
++
++        function makeEnv() {
++            let writes = 0;
++            const copyA = { scrollWidth: 10, _t: '' };
++            Object.defineProperty(copyA, 'textContent', { get() { return this._t; }, set(v) { this._t = v; writes++; } });
++            const els = {
++                nowPlayingViewport: { clientWidth: 1000 },
++                nowPlayingTrack: { classList: { add() {}, remove() {} }, style: {} },
++                nowPlayingCopyA: copyA,
++                nowPlayingCopyB: { style: {}, textContent: '' }
++            };
++            const win = { addEventListener() {} };
++            const sb = { document: { getElementById: (id) => els[id] || null }, window: win, requestAnimationFrame: (f) => f(), ResizeObserver: undefined };
++            vm.createContext(sb);
++            vm.runInContext(iife, sb);
++            return { api: win.AutoMenuAI, text: () => copyA.textContent, writes: () => writes };
++        }
++
++        const S = (title, artist) => ({ title, artist });
++        let e = makeEnv();
++        check(e.text() === 'Unavailable', 'Mặc định: "Unavailable" (không kèm Key)');
++
++        e.api.updateNowPlaying(S('Xin Đừng Rời Xa Anh', 'Lê Gia Bảo'));
++        check(e.text() === 'Xin Đừng Rời Xa Anh - Lê Gia Bảo', 'Bài mới, chưa có Key: chỉ hiện tên bài (chưa bịa Key)');
++        e.api.setNowPlayingKey('D Minor');
++        check(e.text() === 'Xin Đừng Rời Xa Anh - Lê Gia Bảo  •  Key: D Minor', 'Có Key -> hiện "… •  Key: D Minor" cạnh tên bài');
++        const w = e.writes();
++        e.api.setNowPlayingKey('D Minor');
++        check(e.writes() === w, 'Key không đổi -> không vẽ lại (chữ chạy không bị giật)');
++        e.api.setNowPlayingKey('F# Major');
++        check(/Key: F# Major$/.test(e.text()) && !/D Minor/.test(e.text()), 'Key đổi -> cập nhật ngay, không còn Key cũ');
++
++        e.api.updateNowPlaying(S('Xin Đừng Rời Xa Anh', 'Lê Gia Bảo'));
++        check(/Key: F# Major$/.test(e.text()), 'Cùng bài gửi lại (vd. cập nhật thứ 2 kèm Key từ server) -> GIỮ Key đang hiện');
++
++        e.api.updateNowPlaying(S('Cơ Hội Cuối', 'Ca sĩ B'));
++        check(e.text() === 'Cơ Hội Cuối - Ca sĩ B', 'Đổi sang bài khác -> Key bài trước bị xoá ngay (không hiện nhầm Key)');
++        e.api.setNowPlayingKey('A Minor');
++        check(e.text() === 'Cơ Hội Cuối - Ca sĩ B  •  Key: A Minor', 'Key bài mới hiện đúng');
++
++        e.api.updateNowPlaying(S('Bài Không Ca Sĩ', ''));
++        e.api.setNowPlayingKey('C Major');
++        check(e.text() === 'Bài Không Ca Sĩ  •  Key: C Major', 'Bài không có ca sĩ vẫn hiện Key');
++
++        e.api.setNowPlayingKey('');
++        check(e.text() === 'Bài Không Ca Sĩ', 'Key rỗng (AI đang dò lại) -> ẩn Key');
++        e.api.setNowPlayingKey(null);
++        check(e.text() === 'Bài Không Ca Sĩ', 'Key null -> không lỗi, không hiện');
++
++        e.api.updateNowPlaying(null);
++        e.api.setNowPlayingKey('C Major');
++        check(e.text() === 'No media', '"No media" không bao giờ kèm Key');
++        e.api.setNowPlayingUnavailable();
++        e.api.setNowPlayingKey('C Major');
++        check(e.text() === 'Unavailable', '"Unavailable" không bao giờ kèm Key');
++        e.api.updateNowPlaying({ title: '', artist: 'Chỉ có ca sĩ' });
++        e.api.setNowPlayingKey('C Major');
++        check(e.text() === 'No media', 'Không có tên bài -> "No media", không kèm Key');
++
++        // syncNowPlayingKeyText: chọn đúng Key đang áp dụng
++        const getSrcName = extractFn(rend, 'getActiveSourceName');
++        const getKeyVal = extractFn(rend, 'getActiveKeyValue');
++        const syncFn = extractFn(rend, 'syncNowPlayingKeyText');
++        const calls = [];
++        const ctx = { window: { AutoMenuAI: { setNowPlayingKey: (k) => calls.push(k) } } };
++        vm.createContext(ctx);
++        vm.runInContext('let keyEverDetected = false; const keySource = { manual: { active: false, committedKey: null }, songDb: { active: false, value: null }, ai: { value: "C Major" } };'
++            + getSrcName + getKeyVal + syncFn, ctx);
++        const run = (js) => { calls.length = 0; vm.runInContext(js + ';syncNowPlayingKeyText();', ctx); return calls[calls.length - 1]; };
++
++        check(run('') === '', 'AI chưa chốt Key (LISTENING) -> KHÔNG hiện Key hạt giống "C Major"');
++        check(run('keyEverDetected = true; keySource.ai.value = "G# Minor"') === 'G# Minor', 'AI đã chốt Key -> hiện Key AI');
++        check(run('keySource.songDb.active = true; keySource.songDb.value = "D Minor"') === 'D Minor', 'Database/Server có bài -> hiện Key đó (ưu tiên hơn AI)');
++        check(run('keySource.manual.active = true; keySource.manual.committedKey = "A Major"') === 'A Major', 'Manual đang chọn -> hiện Key Manual (ưu tiên cao nhất)');
++        check(run('keySource.manual.active = false; keySource.songDb.active = false; keyEverDetected = false') === '', 'Quay về AI chưa chốt -> ẩn Key');
++        check(run('keySource.manual.active = true; keySource.manual.committedKey = null') === '', 'Manual chưa có Key -> không hiện "null"');
++        let threw = false; try { vm.runInContext('keySource.ai = null; keySource.manual.active = false; keyEverDetected = true; syncNowPlayingKeyText();', ctx); } catch (er) { threw = true; }
++        check(!threw, 'State hỏng -> không ném lỗi (không phá luồng Key)');
++
++        // Nối dây (kiểm tra mã nguồn)
++        const rfn = extractFn(rend, 'refreshKeySourceDisplay');
++        check(/^function refreshKeySourceDisplay\(\) \{\s*\n\s*if \(typeof syncNowPlayingKeyText === "function"\) syncNowPlayingKeyText\(\);/.test(rfn), 'refreshKeySourceDisplay() gọi syncNowPlayingKeyText() ngay đầu hàm');
++        check(/dispatchNowPlayingPayload\(payload\);[^\n]*\n\s*if \(typeof syncNowPlayingKeyText === "function"\) syncNowPlayingKeyText\(\);/.test(rend), 'Sau khi nhận bài mới (IPC), Key đang áp dụng được đẩy vào dòng tên bài');
++        check(!/syncNowPlayingKeyText[\s\S]{0,400}keySource\.\w+(\.\w+)* = /.test(syncFn), 'syncNowPlayingKeyText chỉ ĐỌC keySource, không ghi');
++    }
++
++    console.log('\n[7b] /delete-song — xoá bài hát (cần mật khẩu + xác nhận)');
++    {
++        let db = seed(); const before = snap(db);
++        const body = { songId: 'one', xacNhan: true };
++
++        let r = await call(worker, db, 'POST', '/delete-song', body, AUTH, {});
++        check(r.status === 403 && r.json.error === 'chua_cai_ADMIN_TOKEN', 'Chưa cài ADMIN_TOKEN -> TỪ CHỐI (403), không ai xoá được');
++        r = await call(worker, db, 'POST', '/delete-song', body, {}, ENV);
++        check(r.status === 401, 'Không gửi mật khẩu -> 401');
++        r = await call(worker, db, 'POST', '/delete-song', body, { Authorization: 'Bearer sai' }, ENV);
++        check(r.status === 401, 'Sai mật khẩu -> 401');
++        const sameLen = TOKEN.slice(0, -1) + (TOKEN.slice(-1) === 'x' ? 'y' : 'x');
++        r = await call(worker, db, 'POST', '/delete-song', body, { Authorization: 'Bearer ' + sameLen }, ENV);
++        check(r.status === 401, 'Mật khẩu sai nhưng CÙNG độ dài -> 401');
++        check(snap(db) === before, 'Bị từ chối -> KHÔNG xoá gì');
++
++        r = await call(worker, db, 'POST', '/delete-song', { songId: 'one' }, AUTH, ENV);
++        check(r.status === 400 && r.json.error === 'can_xac_nhan', 'Thiếu xacNhan -> 400, chưa xoá (chống lỡ tay)');
++        r = await call(worker, db, 'POST', '/delete-song', { songId: 'one', xacNhan: 'true' }, AUTH, ENV);
++        check(r.status === 400, 'xacNhan là chữ "true" (không phải true thật) -> 400');
++        r = await call(worker, db, 'POST', '/delete-song', { xacNhan: true }, AUTH, ENV);
++        check(r.status === 400, 'Thiếu songId -> 400');
++        r = await call(worker, db, 'GET', '/delete-song', undefined, AUTH, ENV);
++        check(r.status === 404, 'GET /delete-song (không phải POST) -> 404, không xoá được bằng đường dẫn thường');
++        check(snap(db) === before, 'Các yêu cầu sai -> dữ liệu không đổi');
++
++        r = await call(worker, db, 'POST', '/delete-song', { songId: 'multi', xacNhan: true }, AUTH, ENV);
++        check(r.status === 200 && r.json.ok === true && r.json.daXoaDoan === 3 && r.json.daXoaBai === 1 && r.json.title === 'Bài Đổi Giọng Nhiều Đoạn', 'Xoá bài 3 đoạn -> báo đã xoá 3 đoạn + 1 bài, kèm tên bài');
++        check(!db._songs.some((s) => s.songId === 'multi') && !db._segs.some((s) => s.songId === 'multi'), 'D1: bài và mọi đoạn Key của bài đã mất');
++        check(db._songs.length === 2 && db._segs.length === 1 && db._segs[0].songId === 'one', 'Các bài KHÁC nguyên vẹn');
++
++        let f = await call(worker, db, 'GET', '/find?title=' + encodeURIComponent('Bài Đổi Giọng Nhiều Đoạn'));
++        check(f.json.found === false, '/find không còn thấy bài đã xoá');
++        f = await call(worker, db, 'GET', '/key-at?id=multi&sec=50');
++        check(f.json.found === false, '/key-at không còn thấy bài đã xoá');
++        f = await call(worker, db, 'GET', '/list');
++        check(f.json.tongBai === 2 && !f.json.danhSach.some((x) => x.songId === 'multi'), '/list không còn bài đã xoá');
++
++        r = await call(worker, db, 'POST', '/delete-song', { songId: 'multi', xacNhan: true }, AUTH, ENV);
++        check(r.status === 404 && r.json.error === 'khong_co_bai', 'Xoá lần 2 (bài đã mất) -> 404, không lỗi');
++
++        r = await call(worker, db, 'POST', '/delete-song', { songId: 'empty', xacNhan: true }, AUTH, ENV);
++        check(r.json.ok === true && r.json.daXoaDoan === 0 && r.json.daXoaBai === 1, 'Bài có thông tin nhưng chưa có đoạn Key ("Viên Đá Nhỏ") xoá được');
++
++        db._segs.push({ songId: 'mo-coi', startSec: 0, endSec: 100, key: 'C', mode: 'major' });
++        r = await call(worker, db, 'POST', '/delete-song', { songId: 'mo-coi', xacNhan: true }, AUTH, ENV);
++        check(r.json.ok === true && r.json.daXoaDoan === 1 && r.json.daXoaBai === 0 && !db._segs.some((s) => s.songId === 'mo-coi'), 'Đoạn Key "mồ côi" (không có thông tin bài) cũng xoá được');
++
++        const before2 = snap(db);
++        r = await call(worker, db, 'POST', '/delete-song', { songId: "one' OR '1'='1", xacNhan: true }, AUTH, ENV);
++        check(r.status === 404 && snap(db) === before2, 'ID chứa ký tự SQL lạ -> 404, không xoá nhầm bài nào (truy vấn có tham số)');
++
++        // Giao dịch: lỗi giữa chừng -> không mất gì
++        const db2 = seed(); const b2 = snap(db2);
++        db2._failOn = 'DELETE FROM song_info';
++        r = await call(worker, db2, 'POST', '/delete-song', { songId: 'one', xacNhan: true }, AUTH, ENV);
++        check(r.status === 500, 'Lỗi giữa chừng khi xoá -> báo 500');
++        check(snap(db2) === b2, 'Lỗi giữa chừng -> KHÔNG mất đoạn Key nào (xoá theo giao dịch: hoặc hết hoặc không)');
++
++        // Vòng khép kín với Menu
++        const db3 = seed();
++        const bridge = async (url, init = {}) => worker.fetch(new Request(url, init), { DB: db3, ...ENV });
++        let t = 5_000_000; const now = () => t;
++        const c = new KeyServerSync({ fetchFn: bridge, now, logger: { log() {}, error() {}, warn() {} } });
++        let m = await c.lookup('Xin Đừng Rời Xa Anh', 'A');
++        check(m.found && m.key === 'D Minor', 'Trước khi xoá: Menu tra ra D Minor');
++        await call(worker, db3, 'POST', '/delete-song', { songId: 'one', xacNhan: true }, AUTH, ENV);
++        t += 2 * 60 * 1000 + 1000;
++        m = await c.lookup('Xin Đừng Rời Xa Anh', 'A');
++        check(m.found === false && !m.error, 'Sau khi xoá (hết 2 phút nhớ tạm): Menu hỏi lại -> server không còn bài, Menu tự dò Key như thường');
++        const s = await c.submit({ title: 'Xin Đừng Rời Xa Anh', artist: 'A', key: 'F Major', confidence: 0.9 });
++        check(s.ok === true && s.reason === 'submitted' && db3._segs.some((x) => x.key === 'F' && x.mode === 'major'), 'Bài đã xoá: khi AI dò xong Menu sẽ gửi lại Key MỚI (đúng thiết kế — xoá Key sai để Menu dò lại cho đúng)');
++    }
++
++    console.log('\n[7c] Trang quản lý: nút xoá bài');
++    {
++        const html = worker.__page();
++        const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
++        let parsed = true; try { new vm.Script(script); } catch (e) { parsed = false; }
++        check(parsed, 'Script trang quản lý (có nút xoá) đúng cú pháp');
++        check(/id="btnXoaBai"/.test(html) && /Xoa bai nay/.test(html), 'Có nút "Xoa bai nay"');
++        check(/\/delete-song/.test(script) && /xacNhan: true/.test(script) && /'Authorization': 'Bearer '/.test(script), 'Nút xoá gọi /delete-song, gửi xacNhan:true và mật khẩu');
++        check(/confirm\('XOA bai/.test(script), 'Có hộp hỏi xác nhận trước khi xoá (không xoá ngay khi bấm)');
++        const iConfirm = script.indexOf("confirm('XOA bai"), iFetch = script.indexOf("'/delete-song'");
++        check(iConfirm > 0 && iFetch > iConfirm, 'Hộp xác nhận nằm TRƯỚC lệnh gọi xoá');
++        check(/Chua nhap mat khau quan tri/.test(script.slice(script.indexOf('async function xoaBai'))), 'Chưa nhập mật khẩu -> báo, không gọi server');
++    }
++
++    console.log('\n[8] Phạm vi: không đụng HTML/CSS');
++    {
++        const { execFileSync } = require('child_process');
++        let changed = '';
++        try { changed = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT }).toString(); } catch (e) { changed = ''; }
++        const touched = changed.split('\n').filter((l) => /\.(html|css)$/i.test(l.trim()));
++        check(touched.length === 0, 'Không có file .html/.css nào bị sửa' + (touched.length ? ': ' + touched.join(',') : ''));
++    }
++
++    console.log('\n' + (failCount === 0 ? '✅ TẤT CẢ ĐỀU PASS' : '❌ CÓ ' + failCount + ' LỖI'));
++    process.exit(failCount === 0 ? 0 : 1);
++})().catch((e) => { console.error('TEST CRASH:', e); process.exit(2); });
+diff --git a/tests/unit/KeyServerSyncC.verify.js b/tests/unit/KeyServerSyncC.verify.js
+index 58499f8..c121d6f 100644
+--- a/tests/unit/KeyServerSyncC.verify.js
++++ b/tests/unit/KeyServerSyncC.verify.js
+@@ -187,7 +187,7 @@ const YT_TITLE = 'Karaoke 2 Trong 1 | QUÊN MỘT LỜI THỀ - Tone Nam';
+         check(f.calls.length === 1, 'Hỏi lại cùng bài -> dùng cache, KHÔNG gọi mạng');
+ 
+         now.advance(11 * 60 * 1000);
+-        check(c.peek('Quên Một Lời Thề', 'Ca sĩ A') === null, 'Hết hạn cache (10 phút) -> peek() trả null');
++        check(c.peek('Quên Một Lời Thề', 'Ca sĩ A') === null, 'Hết hạn cache (2 phút) -> peek() trả null');
+         await c.lookup('Quên Một Lời Thề', 'Ca sĩ A');
+         check(f.calls.length === 2, 'Hết hạn -> hỏi lại server');
+ 
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 8e1e90f..3dcccf3 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -286,6 +286,12 @@ updateClock();
+     const COPY_GAP_PX = 44; // PHẢI khớp padding-right của .now-playing-text-copy trong CSS (v3.0: 48->44)
+     const MIN_DURATION_SEC = 4;
+ 
++    // Key đang áp dụng, hiện CẠNH tên bài ("Tên bài - Ca sĩ  •  Key: D Minor"). Chỉ là chữ thêm vào cùng
++    // 1 phần tử có sẵn — không đổi HTML/CSS. Rỗng = chưa có Key đã chốt cho bài này (không hiện gì).
++    let keySuffix = "";
++    let lastSnapshot = "unavailable";
++    let lastSongId = null; // "title|artist" của bài đang hiển thị — đổi bài thì Key cũ bị xoá ngay
++
+     function textForSnapshot(snapshot) {
+ 
+         if (snapshot === "unavailable") return "Unavailable";
+@@ -300,6 +306,15 @@ updateClock();
+ 
+     }
+ 
++    // Chữ hiển thị đầy đủ = tên bài (+ Key nếu đã có). "Unavailable"/"No media" không bao giờ kèm Key.
++    function displayText(snapshot) {
++
++        const base = textForSnapshot(snapshot);
++        const isRealSong = snapshot && snapshot !== "unavailable" && base !== "No media";
++        return isRealSong && keySuffix ? `${base}  •  Key: ${keySuffix}` : base;
++
++    }
++
+     function stopMarquee() {
+ 
+         track.classList.remove("marquee");
+@@ -341,7 +356,19 @@ updateClock();
+ 
+     function render(snapshot) {
+ 
+-        copyA.textContent = textForSnapshot(snapshot);
++        lastSnapshot = snapshot;
++
++        // Đổi bài -> xoá Key của bài trước (Key bài mới sẽ được đẩy vào sau qua setNowPlayingKey).
++        // Cùng bài (vd. cập nhật lần 2 kèm Key từ server) -> giữ nguyên Key đang hiện.
++        const songId = snapshot && snapshot !== "unavailable"
++            ? `${String(snapshot.title || "").trim()}|${String(snapshot.artist || "").trim()}`
++            : null;
++        if (songId !== lastSongId) {
++            keySuffix = "";
++            lastSongId = songId;
++        }
++
++        copyA.textContent = displayText(snapshot);
+         stopMarquee();
+ 
+         // Đợi layout ổn định (2 frame) rồi mới đo chiều rộng thật, tránh đo nhầm
+@@ -378,6 +405,17 @@ updateClock();
+     window.AutoMenuAI.updateNowPlaying = render;
+     window.AutoMenuAI.setNowPlayingUnavailable = () => render("unavailable");
+ 
++    // Đẩy Key đang áp dụng vào dòng tên bài. Không đổi gì nếu Key không đổi (tránh khởi động lại chữ chạy).
++    window.AutoMenuAI.setNowPlayingKey = (keyText) => {
++
++        const next = typeof keyText === "string" ? keyText.trim() : "";
++        if (next === keySuffix) return;
++
++        keySuffix = next;
++        if (lastSnapshot && lastSnapshot !== "unavailable") render(lastSnapshot);
++
++    };
++
+ })();
+ 
+ /* ==========================================================
+@@ -417,6 +455,7 @@ if (window.electronAPI?.onNowPlayingChange) {
+     window.electronAPI.onNowPlayingChange((payload) => {
+         window.AutoMenuAI?.updateNowPlaying(payload);
+         dispatchNowPlayingPayload(payload); // mục 7B — Song Database/Manual/AI priority
++        if (typeof syncNowPlayingKeyText === "function") syncNowPlayingKeyText(); // bài mới: hiện Key đang áp dụng (hoặc xoá nếu chưa có)
+     });
+ 
+ }
+@@ -1276,6 +1315,20 @@ function resolveActiveKey() {
+     return { source: getActiveSourceName(), key: getActiveKeyValue() };
+ }
+ 
++// Key hiện CẠNH tên bài (header NOW PLAYING). CHỈ ĐỌC state Key Source — không ghi gì vào keySource.
++//  - Manual / Database(Server) đang hiệu lực: hiện Key đó.
++//  - AI: chỉ hiện khi AI đã CHỐT Key cho bài này (keyEverDetected); đang "LISTENING"/"đang dò..." thì không hiện,
++//    để không hiện Key hạt giống nội bộ hay Key tạm chưa đáng tin.
++function syncNowPlayingKeyText() {
++    try {
++        const source = getActiveSourceName();
++        let key = null;
++        if (source === "manual" || source === "songDb") key = getActiveKeyValue();
++        else if (keyEverDetected) key = keySource.ai.value;
++        window.AutoMenuAI?.setNowPlayingKey?.(typeof key === "string" ? key : "");
++    } catch (e) { /* hiển thị phụ — không bao giờ được làm hỏng luồng Key */ }
++}
++
+ function formatCountdownMMSS(ms) {
+     const totalSec = Math.max(0, Math.ceil(ms / 1000));
+     const m = Math.floor(totalSec / 60);
+@@ -1287,6 +1340,8 @@ function formatCountdownMMSS(ms) {
+ // set textContent lệch nhau. KHÔNG đụng #keyInfo (giữ nguyên hành vi/text hiện có).
+ function refreshKeySourceDisplay() {
+ 
++    if (typeof syncNowPlayingKeyText === "function") syncNowPlayingKeyText(); // Key cạnh tên bài luôn theo Key đang áp dụng
++
+     // UI Final v3.0 — Mục XII (ACTIVE SOURCE): 1 dòng badge duy nhất, đọc lại
+     // getActiveSourceName() đã có sẵn (KHÔNG đổi hàm đó/logic chọn nguồn).
+     // #keyInfo và #manualOverrideStatus vẫn được JS cập nhật như cũ bên dưới,
+diff --git a/worker.js b/worker.js
+index eddeba6..9edbc0f 100644
+--- a/worker.js
++++ b/worker.js
+@@ -11,7 +11,7 @@ export default {
+       "Content-Type": "application/json",
+       "Access-Control-Allow-Origin": "*",
+       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+-      "Access-Control-Allow-Headers": "Content-Type"
++      "Access-Control-Allow-Headers": "Content-Type, Authorization"
+     };
+ 
+     if (request.method === "OPTIONS") {
+@@ -185,10 +185,13 @@ export default {
+     }
+ 
+     // ========== [7] DANH SÁCH TẤT CẢ BÀI ==========
++    // Thêm trường "key" (Key của đoạn đầu tiên, vd "D minor") để hiện cạnh tên bài. Các trường cũ giữ nguyên.
+     if (url.pathname === "/list") {
+       const { results } = await env.DB.prepare(`
+         SELECT i.song_id as songId, i.title, i.total_duration_sec as tongGiay,
+-               COUNT(s.id) as soDoan, i.updated_at
++               COUNT(s.id) as soDoan, i.updated_at,
++               (SELECT s2.key FROM song_key_segments s2 WHERE s2.song_id = i.song_id ORDER BY s2.start_sec ASC LIMIT 1) as key1,
++               (SELECT s3.mode FROM song_key_segments s3 WHERE s3.song_id = i.song_id ORDER BY s3.start_sec ASC LIMIT 1) as mode1
+         FROM song_info i
+         LEFT JOIN song_key_segments s ON i.song_id = s.song_id
+         GROUP BY i.song_id ORDER BY i.updated_at DESC LIMIT 100
+@@ -200,11 +203,79 @@ export default {
+           songId: r.songId,
+           title: r.title || "Chua dat ten",
+           tongThoiLuong: r.tongGiay ? giaySangPhutGiay(r.tongGiay) : "Chua cap nhat",
+-          soDoan: r.soDoan
++          soDoan: r.soDoan,
++          key: r.key1 || null,
++          mode: r.mode1 || null,
++          keyHienThi: r.key1 ? (r.key1 + " " + (r.mode1 === "minor" ? "Minor" : "Major")) : null
+         }))
+       }, { headers: corsHeaders });
+     }
+ 
++    // ========== [9] SỬA KEY BÀI HÁT — CẦN MẬT KHẨU QUẢN TRỊ (ADMIN_TOKEN) ==========
++    // Body: { songId, key:"D", mode:"minor", startSec?, all? }
++    //  - startSec: chỉ sửa đoạn bắt đầu tại giây này.
++    //  - all:true: sửa Key của TẤT CẢ các đoạn (giữ nguyên mốc thời gian).
++    //  - Không có startSec/all: bài phải có đúng 1 đoạn (hoặc chưa có đoạn nào -> tạo 1 đoạn cho cả bài).
++    // Chưa cài ADMIN_TOKEN trên Cloudflare => TỪ CHỐI mọi lần sửa (không để ai cũng sửa được).
++    if (url.pathname === "/set-key" && request.method === "POST") {
++      const denied = kiemTraQuyenSua(request, env, corsHeaders);
++      if (denied) return denied;
++      try {
++        const body = await request.json();
++        const songId = String((body && body.songId) || "").trim();
++        const key = chuanHoaKey(body && body.key);
++        const mode = chuanHoaMode(body && body.mode);
++        if (!songId) return Response.json({ error: "thieu songId" }, { status: 400, headers: corsHeaders });
++        if (!key) return Response.json({ error: "key_khong_hop_le", message: "Key phai la C, C#, D, D#, E, F, F#, G, G#, A, A#, B (hoac ky hieu giang Db, Eb, Gb, Ab, Bb)" }, { status: 400, headers: corsHeaders });
++        if (!mode) return Response.json({ error: "mode_khong_hop_le", message: "mode phai la major hoac minor" }, { status: 400, headers: corsHeaders });
++
++        const info = await env.DB.prepare(`
++          SELECT song_id as songId, total_duration_sec as totalSec FROM song_info WHERE song_id = ?
++        `).bind(songId).first();
++        const { results: segs } = await env.DB.prepare(`
++          SELECT start_sec as startSec FROM song_key_segments WHERE song_id = ? ORDER BY start_sec ASC LIMIT 200
++        `).bind(songId).all();
++
++        if (!info && (!segs || segs.length === 0)) {
++          return Response.json({ error: "khong_co_bai", message: "Server chua co bai nay" }, { status: 404, headers: corsHeaders });
++        }
++
++        let daSua = 0;
++        if (!segs || segs.length === 0) {
++          // Bài có thông tin nhưng chưa có đoạn Key nào -> tạo 1 đoạn cho cả bài.
++          const end = (info && info.totalSec > 0) ? info.totalSec : 36000;
++          await env.DB.prepare(`
++            INSERT INTO song_key_segments (song_id, start_sec, end_sec, key, mode, weight)
++            VALUES (?, 0, ?, ?, ?, 1.0)
++          `).bind(songId, end, key, mode).run();
++          daSua = 1;
++        } else if (body.all === true) {
++          const r = await env.DB.prepare(`UPDATE song_key_segments SET key = ?, mode = ? WHERE song_id = ?`).bind(key, mode, songId).run();
++          daSua = (r && r.meta && r.meta.changes) || segs.length;
++        } else if (body.startSec !== undefined && body.startSec !== null && body.startSec !== "") {
++          const start = parseInt(body.startSec, 10);
++          if (!Number.isFinite(start)) return Response.json({ error: "startSec_khong_hop_le" }, { status: 400, headers: corsHeaders });
++          const r = await env.DB.prepare(`UPDATE song_key_segments SET key = ?, mode = ? WHERE song_id = ? AND start_sec = ?`).bind(key, mode, songId, start).run();
++          daSua = (r && r.meta && r.meta.changes) || 0;
++          if (daSua === 0) return Response.json({ error: "khong_co_doan", message: "Khong co doan nao bat dau tai giay " + start }, { status: 404, headers: corsHeaders });
++        } else if (segs.length === 1) {
++          const r = await env.DB.prepare(`UPDATE song_key_segments SET key = ?, mode = ? WHERE song_id = ?`).bind(key, mode, songId).run();
++          daSua = (r && r.meta && r.meta.changes) || 1;
++        } else {
++          return Response.json({
++            error: "nhieu_doan",
++            message: "Bai co " + segs.length + " doan. Hay chi dinh startSec (giay bat dau doan) hoac dat all:true de sua tat ca cac doan.",
++            tongDoan: segs.length
++          }, { status: 409, headers: corsHeaders });
++        }
++
++        await env.DB.prepare(`UPDATE song_info SET updated_at = strftime('%s','now') * 1000 WHERE song_id = ?`).bind(songId).run();
++        return Response.json({ ok: true, songId, daSua, key, mode, keyHienThi: key + " " + (mode === "minor" ? "Minor" : "Major") }, { headers: corsHeaders });
++      } catch (e) {
++        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
++      }
++    }
++
+     // ========== [8] TÌM BÀI THEO TÊN — MENU HỎI SERVER TRƯỚC KHI TỰ DÒ KEY ==========
+     // Menu chỉ biết tên bài (không biết mã video), nên tra theo tên đã chuẩn hoá.
+     // Chỉ ĐỌC dữ liệu, không ghi gì. Trả Key của đoạn đầu tiên của bài.
+@@ -250,10 +321,97 @@ export default {
+       }
+     }
+ 
++    // ========== [10] XÓA BÀI HÁT — CẦN MẬT KHẨU QUẢN TRỊ (ADMIN_TOKEN) ==========
++    // Body: { songId, xacNhan:true }. Xoá bài + TẤT CẢ đoạn Key của bài, KHÔNG hoàn tác được.
++    // Bắt buộc có xacNhan:true để không lỡ tay xoá khi gọi nhầm. Xoá trong 1 giao dịch (batch): hoặc xoá hết, hoặc không xoá gì.
++    if (url.pathname === "/delete-song" && request.method === "POST") {
++      const denied = kiemTraQuyenSua(request, env, corsHeaders);
++      if (denied) return denied;
++      try {
++        const body = await request.json();
++        const songId = String((body && body.songId) || "").trim();
++        if (!songId) return Response.json({ error: "thieu songId" }, { status: 400, headers: corsHeaders });
++        if (!body || body.xacNhan !== true) {
++          return Response.json({ error: "can_xac_nhan", message: "Xoa bai khong hoan tac duoc. Gui kem xacNhan:true de xac nhan." }, { status: 400, headers: corsHeaders });
++        }
++
++        const info = await env.DB.prepare(`
++          SELECT song_id as songId, title FROM song_info WHERE song_id = ?
++        `).bind(songId).first();
++        const dem = await env.DB.prepare(`
++          SELECT COUNT(*) as n FROM song_key_segments WHERE song_id = ?
++        `).bind(songId).first();
++        const soDoan = (dem && dem.n) || 0;
++
++        if (!info && soDoan === 0) {
++          return Response.json({ error: "khong_co_bai", message: "Server khong co bai nay" }, { status: 404, headers: corsHeaders });
++        }
++
++        await env.DB.batch([
++          env.DB.prepare(`DELETE FROM song_key_segments WHERE song_id = ?`).bind(songId),
++          env.DB.prepare(`DELETE FROM song_info WHERE song_id = ?`).bind(songId)
++        ]);
++
++        return Response.json({
++          ok: true,
++          songId,
++          title: (info && info.title) || null,
++          daXoaDoan: soDoan,
++          daXoaBai: info ? 1 : 0
++        }, { headers: corsHeaders });
++      } catch (e) {
++        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
++      }
++    }
++
+     return Response.json({ error: "not_found" }, { status: 404, headers: corsHeaders });
+   }
+ };
+ 
++// ========== KIỂM TRA QUYỀN SỬA (mật khẩu quản trị) ==========
++// Trả null nếu hợp lệ; ngược lại trả sẵn Response lỗi.
++// Chưa cài ADMIN_TOKEN (Cloudflare > Settings > Variables and Secrets) => từ chối hết, không để ai cũng sửa được.
++function kiemTraQuyenSua(request, env, corsHeaders) {
++  if (!env.ADMIN_TOKEN) {
++    return Response.json({
++      error: "chua_cai_ADMIN_TOKEN",
++      message: "Server chua cai mat khau quan tri. Vao Cloudflare > Settings > Variables and Secrets > Add, loai Secret, ten ADMIN_TOKEN."
++    }, { status: 403, headers: corsHeaders });
++  }
++  const auth = request.headers.get("Authorization") || "";
++  const token = auth.startsWith("Bearer ") ? auth.slice(7) : (request.headers.get("X-Admin-Token") || "");
++  if (!soSanhAnToan(token, env.ADMIN_TOKEN)) {
++    return Response.json({ error: "sai_mat_khau", message: "Mat khau quan tri khong dung" }, { status: 401, headers: corsHeaders });
++  }
++  return null;
++}
++
++// So sánh chuỗi không lộ độ dài khớp (chống dò mật khẩu theo thời gian phản hồi).
++function soSanhAnToan(a, b) {
++  a = String(a); b = String(b);
++  let diff = a.length ^ b.length;
++  const n = Math.max(a.length, b.length);
++  for (let i = 0; i < n; i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
++  return diff === 0;
++}
++
++// ========== CHUẨN HOÁ KEY / MODE (giống KeyServerSync.js phía app: ký hiệu giáng đổi sang thăng) ==========
++function chuanHoaKey(raw) {
++  const m = /^([A-Ga-g])([#b♯♭]?)$/.exec(String(raw || "").trim());
++  if (!m) return null;
++  let root = m[1].toUpperCase() + m[2].replace("♯", "#").replace("♭", "b");
++  const giangSangThang = { Db: "C#", Eb: "D#", Gb: "F#", Ab: "G#", Bb: "A#", Cb: "B", Fb: "E", "E#": "F", "B#": "C" };
++  if (giangSangThang[root]) root = giangSangThang[root];
++  return ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"].indexOf(root) >= 0 ? root : null;
++}
++
++function chuanHoaMode(raw) {
++  const s = String(raw || "").trim().toLowerCase();
++  if (/^maj/.test(s)) return "major";
++  if (/^min/.test(s)) return "minor";
++  return null;
++}
++
+ // ========== CHUẨN HOÁ TÊN BÀI (bỏ dấu, chữ thường, chỉ giữ chữ/số) ==========
+ // PHẢI giống hệt hàm normalizeTitle() trong core/integration/KeyServerSync.js.
+ function chuanHoaTen(s) {
+@@ -381,6 +539,27 @@ function taoTrangChu() {
+           <tbody id="danhSachDoan"></tbody>
+         </table>
+ 
++        <h3 style="color:#ff9800;">Sua Key Bai Hat</h3>
++        <p style="font-size:13px; color:#aaa; margin-bottom:10px;">Can mat khau quan tri (ADMIN_TOKEN). Bai chi co 1 doan: chon Key roi bam Luu. Bai nhieu doan: tick "Sua tat ca" hoac nhap giay bat dau cua doan can sua.</p>
++        <div class="search-bar" style="flex-wrap:wrap;">
++          <select id="suaKey" style="padding:12px; border-radius:8px; border:none; font-size:15px;">
++            <option>C</option><option>C#</option><option>D</option><option>D#</option><option>E</option><option>F</option>
++            <option>F#</option><option>G</option><option>G#</option><option>A</option><option>A#</option><option>B</option>
++          </select>
++          <select id="suaMode" style="padding:12px; border-radius:8px; border:none; font-size:15px;">
++            <option value="major">Truong (Major)</option><option value="minor">Phu (Minor)</option>
++          </select>
++          <input type="number" id="suaStartSec" placeholder="Giay bat dau doan (tuy chon)" style="max-width:230px;">
++          <label style="display:flex; align-items:center; gap:6px; color:#ddd; font-size:14px;"><input type="checkbox" id="suaTatCa" style="flex:none; width:auto;"> Sua tat ca cac doan</label>
++          <input type="password" id="adminToken" placeholder="Mat khau quan tri (ADMIN_TOKEN)" style="max-width:260px;">
++          <button class="btn-primary" id="btnSuaKey">Luu Key</button>
++        </div>
++        <div id="kqSua" style="margin-top:10px; padding:10px; border-radius:8px; display:none;"></div>
++
++        <h3 style="color:#f44336; margin-top:20px;">Xoa Bai Hat</h3>
++        <p style="font-size:13px; color:#aaa; margin-bottom:10px;">Xoa bai nay va TAT CA Key cua bai khoi server. Khong hoan tac duoc. Dung mat khau quan tri o o ben tren.</p>
++        <button id="btnXoaBai" style="background:#c62828; color:#fff;">Xoa bai nay</button>
++
+         <h3 style="color:#ffd700;">Diem Chuyen Tong</h3>
+         <table>
+           <thead><tr><th>Thoi diem</th><th>Tu Khoa</th><th></th><th>Sang Khoa</th></tr></thead>
+@@ -408,6 +587,13 @@ function taoTrangChu() {
+   <script>
+     var SERVER = window.location.origin;
+ 
++    // Chong chen ma: moi du lieu lay tu server (ten bai, key...) deu phai qua ham nay truoc khi dua vao innerHTML.
++    function esc(s) {
++      return String(s === null || s === undefined ? '' : s)
++        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
++        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
++    }
++
+     // Chuyen tab
+     var tabs = document.querySelectorAll('.tab');
+     for (var t = 0; t < tabs.length; t++) {
+@@ -448,9 +634,18 @@ function taoTrangChu() {
+         for (var i = 0; i < data.doans.length; i++) {
+           var d = data.doans[i];
+           var tagClass = d.mode === 'major' ? 'tag-major' : 'tag-minor';
+-          tbodyDoan.innerHTML += '<tr><td>' + d.tu + '</td><td>' + d.den + '</td>' +
+-            '<td style="font-weight:bold; font-size:16px;">' + d.khoa + '</td>' +
+-            '<td><span class="tag ' + tagClass + '">' + d.cheDo + '</span></td></tr>';
++          tbodyDoan.innerHTML += '<tr><td>' + esc(d.tu) + '</td><td>' + esc(d.den) + '</td>' +
++            '<td style="font-weight:bold; font-size:16px;">' + esc(d.khoa) + '</td>' +
++            '<td><span class="tag ' + tagClass + '">' + esc(d.cheDo) + '</span></td></tr>';
++        }
++        // Dien san Key hien tai vao o sua (doan dau tien) de chi can doi nhung gi muon sua
++        if (!window.baiDangXem || window.baiDangXem.id !== data.songId) document.getElementById('kqSua').style.display = 'none';
++        window.baiDangXem = { id: data.songId, doans: data.doans };
++        if (data.doans.length > 0) {
++          var k0 = String(data.doans[0].khoa || '');
++          var sel = document.getElementById('suaKey');
++          for (var so = 0; so < sel.options.length; so++) { if (sel.options[so].value === k0) sel.selectedIndex = so; }
++          document.getElementById('suaMode').value = data.doans[0].mode === 'minor' ? 'minor' : 'major';
+         }
+ 
+         var tbodyCT = document.getElementById('danhSachChuyenTong');
+@@ -462,10 +657,10 @@ function taoTrangChu() {
+           for (var j = 0; j < data.chuyenTong.length; j++) {
+             var ct = data.chuyenTong[j];
+             tbodyCT.innerHTML += '<tr class="transition-row">' +
+-              '<td class="transition-text">' + ct.timeFormat + '</td>' +
+-              '<td style="color:#ff6b6b; font-weight:bold;">' + ct.fromDisplay + '</td>' +
++              '<td class="transition-text">' + esc(ct.timeFormat) + '</td>' +
++              '<td style="color:#ff6b6b; font-weight:bold;">' + esc(ct.fromDisplay) + '</td>' +
+               '<td style="color:#ffd700;">-></td>' +
+-              '<td style="color:#4CAF50; font-weight:bold;">' + ct.toDisplay + '</td></tr>';
++              '<td style="color:#4CAF50; font-weight:bold;">' + esc(ct.toDisplay) + '</td></tr>';
+           }
+         }
+       } catch (err) {
+@@ -473,6 +668,81 @@ function taoTrangChu() {
+       }
+     }
+ 
++    // Sua key bai hat (can mat khau quan tri)
++    document.getElementById('btnSuaKey').addEventListener('click', suaKey);
++    try { var tkLuu = sessionStorage.getItem('menuAdminToken'); if (tkLuu) document.getElementById('adminToken').value = tkLuu; } catch (e) {}
++
++    async function suaKey() {
++      var kq = document.getElementById('kqSua');
++      function hien(ok, text) {
++        kq.style.display = 'block';
++        kq.style.background = ok ? 'rgba(76,175,80,0.25)' : 'rgba(244,67,54,0.25)';
++        kq.innerText = text;
++      }
++      var bai = window.baiDangXem;
++      if (!bai || !bai.id) { hien(false, 'Hay bam "Xem Thong Tin" cho mot bai truoc.'); return; }
++      var token = document.getElementById('adminToken').value;
++      if (!token) { hien(false, 'Chua nhap mat khau quan tri.'); return; }
++      var body = { songId: bai.id, key: document.getElementById('suaKey').value, mode: document.getElementById('suaMode').value };
++      if (document.getElementById('suaTatCa').checked) body.all = true;
++      var st = document.getElementById('suaStartSec').value;
++      if (st !== '') body.startSec = parseInt(st, 10);
++      try {
++        var res = await fetch(SERVER + '/set-key', {
++          method: 'POST',
++          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
++          body: JSON.stringify(body)
++        });
++        var data = await res.json();
++        if (data.ok) {
++          try { sessionStorage.setItem('menuAdminToken', token); } catch (e) {}
++          hien(true, 'Da sua ' + data.daSua + ' doan -> ' + data.keyHienThi);
++          timBai();
++        } else {
++          hien(false, data.message || data.error || ('Loi ' + res.status));
++        }
++      } catch (err) {
++        hien(false, 'Loi ket noi: ' + err.message);
++      }
++    }
++
++    // Xoa bai hat (can mat khau quan tri + hoi xac nhan)
++    document.getElementById('btnXoaBai').addEventListener('click', xoaBai);
++
++    async function xoaBai() {
++      var kq = document.getElementById('kqSua');
++      function hien(ok, text) {
++        kq.style.display = 'block';
++        kq.style.background = ok ? 'rgba(76,175,80,0.25)' : 'rgba(244,67,54,0.25)';
++        kq.innerText = text;
++      }
++      var bai = window.baiDangXem;
++      if (!bai || !bai.id) { hien(false, 'Hay bam "Xem Thong Tin" cho mot bai truoc.'); return; }
++      var token = document.getElementById('adminToken').value;
++      if (!token) { hien(false, 'Chua nhap mat khau quan tri.'); return; }
++      var ten = document.getElementById('tenBaiHienThi').innerText;
++      if (!confirm('XOA bai "' + ten + '" va tat ca Key cua bai khoi server? Khong hoan tac duoc.')) return;
++      try {
++        var res = await fetch(SERVER + '/delete-song', {
++          method: 'POST',
++          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
++          body: JSON.stringify({ songId: bai.id, xacNhan: true })
++        });
++        var data = await res.json();
++        if (data.ok) {
++          try { sessionStorage.setItem('menuAdminToken', token); } catch (e) {}
++          window.baiDangXem = null;
++          document.getElementById('ketQua').classList.add('hidden');
++          document.getElementById('songIdInput').value = '';
++          alert('Da xoa bai "' + ten + '" (' + data.daXoaDoan + ' doan Key).');
++        } else {
++          hien(false, data.message || data.error || ('Loi ' + res.status));
++        }
++      } catch (err) {
++        hien(false, 'Loi ket noi: ' + err.message);
++      }
++    }
++
+     // Tra khoa tai giay
+     document.getElementById('btnTra').addEventListener('click', traKhoaTaiGiay);
+ 
+@@ -485,9 +755,9 @@ function taoTrangChu() {
+       var div = document.getElementById('kqTra');
+       div.style.display = 'block';
+       if (data.found) {
+-        div.innerHTML = 'Tai <strong>' + data.thoiGian + '</strong>: ' +
+-          '<span style="font-size:20px; font-weight:bold; color:#4CAF50;">' + data.key + '</span> ' +
+-          '<span style="color:#aaa;">(' + data.modeDisplay + ' / ' + data.mode + ')</span>';
++        div.innerHTML = 'Tai <strong>' + esc(data.thoiGian) + '</strong>: ' +
++          '<span style="font-size:20px; font-weight:bold; color:#4CAF50;">' + esc(data.key) + '</span> ' +
++          '<span style="color:#aaa;">(' + esc(data.modeDisplay) + ' / ' + esc(data.mode) + ')</span>';
+       } else {
+         div.innerHTML = 'Khong tim thay khoa tai giay nay';
+       }
+@@ -505,9 +775,12 @@ function taoTrangChu() {
+       div.innerHTML = '';
+       for (var i = 0; i < data.danhSach.length; i++) {
+         var bai = data.danhSach[i];
+-        div.innerHTML += '<div class="list-item" data-songid="' + bai.songId + '">' +
+-          '<div class="list-title">' + bai.title + '</div>' +
+-          '<div class="list-desc">ID: ' + bai.songId + ' | Thoi luong: ' + bai.tongThoiLuong + ' | So doan: ' + bai.soDoan + '</div></div>';
++        var keyTag = bai.keyHienThi
++          ? ' <span class="tag ' + (bai.mode === 'minor' ? 'tag-minor' : 'tag-major') + '">' + esc(bai.keyHienThi) + '</span>'
++          : ' <span class="tag" style="background:#555; color:#ddd;">Chua co Key</span>';
++        div.innerHTML += '<div class="list-item" data-songid="' + esc(bai.songId) + '">' +
++          '<div class="list-title">' + esc(bai.title) + keyTag + '</div>' +
++          '<div class="list-desc">ID: ' + esc(bai.songId) + ' | Thoi luong: ' + esc(bai.tongThoiLuong) + ' | So doan: ' + esc(bai.soDoan) + '</div></div>';
+       }
+       var items = document.querySelectorAll('#danhSachTatCa .list-item');
+       for (var k = 0; k < items.length; k++) {

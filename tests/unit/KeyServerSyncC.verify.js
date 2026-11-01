@@ -187,7 +187,7 @@ const YT_TITLE = 'Karaoke 2 Trong 1 | QUÊN MỘT LỜI THỀ - Tone Nam';
         check(f.calls.length === 1, 'Hỏi lại cùng bài -> dùng cache, KHÔNG gọi mạng');
 
         now.advance(11 * 60 * 1000);
-        check(c.peek('Quên Một Lời Thề', 'Ca sĩ A') === null, 'Hết hạn cache (10 phút) -> peek() trả null');
+        check(c.peek('Quên Một Lời Thề', 'Ca sĩ A') === null, 'Hết hạn cache (2 phút) -> peek() trả null');
         await c.lookup('Quên Một Lời Thề', 'Ca sĩ A');
         check(f.calls.length === 2, 'Hết hạn -> hỏi lại server');
 

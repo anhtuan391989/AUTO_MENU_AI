@@ -286,6 +286,12 @@ updateClock();
     const COPY_GAP_PX = 44; // PHẢI khớp padding-right của .now-playing-text-copy trong CSS (v3.0: 48->44)
     const MIN_DURATION_SEC = 4;
 
+    // Key đang áp dụng, hiện CẠNH tên bài ("Tên bài - Ca sĩ  •  Key: D Minor"). Chỉ là chữ thêm vào cùng
+    // 1 phần tử có sẵn — không đổi HTML/CSS. Rỗng = chưa có Key đã chốt cho bài này (không hiện gì).
+    let keySuffix = "";
+    let lastSnapshot = "unavailable";
+    let lastSongId = null; // "title|artist" của bài đang hiển thị — đổi bài thì Key cũ bị xoá ngay
+
     function textForSnapshot(snapshot) {
 
         if (snapshot === "unavailable") return "Unavailable";
@@ -297,6 +303,15 @@ updateClock();
         if (!title) return "No media"; // không có title coi như chưa xác định được gì đáng tin
 
         return artist ? `${title} - ${artist}` : title;
+
+    }
+
+    // Chữ hiển thị đầy đủ = tên bài (+ Key nếu đã có). "Unavailable"/"No media" không bao giờ kèm Key.
+    function displayText(snapshot) {
+
+        const base = textForSnapshot(snapshot);
+        const isRealSong = snapshot && snapshot !== "unavailable" && base !== "No media";
+        return isRealSong && keySuffix ? `${base}  •  Key: ${keySuffix}` : base;
 
     }
 
@@ -341,7 +356,19 @@ updateClock();
 
     function render(snapshot) {
 
-        copyA.textContent = textForSnapshot(snapshot);
+        lastSnapshot = snapshot;
+
+        // Đổi bài -> xoá Key của bài trước (Key bài mới sẽ được đẩy vào sau qua setNowPlayingKey).
+        // Cùng bài (vd. cập nhật lần 2 kèm Key từ server) -> giữ nguyên Key đang hiện.
+        const songId = snapshot && snapshot !== "unavailable"
+            ? `${String(snapshot.title || "").trim()}|${String(snapshot.artist || "").trim()}`
+            : null;
+        if (songId !== lastSongId) {
+            keySuffix = "";
+            lastSongId = songId;
+        }
+
+        copyA.textContent = displayText(snapshot);
         stopMarquee();
 
         // Đợi layout ổn định (2 frame) rồi mới đo chiều rộng thật, tránh đo nhầm
@@ -377,6 +404,17 @@ updateClock();
     window.AutoMenuAI = window.AutoMenuAI || {};
     window.AutoMenuAI.updateNowPlaying = render;
     window.AutoMenuAI.setNowPlayingUnavailable = () => render("unavailable");
+
+    // Đẩy Key đang áp dụng vào dòng tên bài. Không đổi gì nếu Key không đổi (tránh khởi động lại chữ chạy).
+    window.AutoMenuAI.setNowPlayingKey = (keyText) => {
+
+        const next = typeof keyText === "string" ? keyText.trim() : "";
+        if (next === keySuffix) return;
+
+        keySuffix = next;
+        if (lastSnapshot && lastSnapshot !== "unavailable") render(lastSnapshot);
+
+    };
 
 })();
 
@@ -417,6 +455,7 @@ if (window.electronAPI?.onNowPlayingChange) {
     window.electronAPI.onNowPlayingChange((payload) => {
         window.AutoMenuAI?.updateNowPlaying(payload);
         dispatchNowPlayingPayload(payload); // mục 7B — Song Database/Manual/AI priority
+        if (typeof syncNowPlayingKeyText === "function") syncNowPlayingKeyText(); // bài mới: hiện Key đang áp dụng (hoặc xoá nếu chưa có)
     });
 
 }
@@ -1276,6 +1315,20 @@ function resolveActiveKey() {
     return { source: getActiveSourceName(), key: getActiveKeyValue() };
 }
 
+// Key hiện CẠNH tên bài (header NOW PLAYING). CHỈ ĐỌC state Key Source — không ghi gì vào keySource.
+//  - Manual / Database(Server) đang hiệu lực: hiện Key đó.
+//  - AI: chỉ hiện khi AI đã CHỐT Key cho bài này (keyEverDetected); đang "LISTENING"/"đang dò..." thì không hiện,
+//    để không hiện Key hạt giống nội bộ hay Key tạm chưa đáng tin.
+function syncNowPlayingKeyText() {
+    try {
+        const source = getActiveSourceName();
+        let key = null;
+        if (source === "manual" || source === "songDb") key = getActiveKeyValue();
+        else if (keyEverDetected) key = keySource.ai.value;
+        window.AutoMenuAI?.setNowPlayingKey?.(typeof key === "string" ? key : "");
+    } catch (e) { /* hiển thị phụ — không bao giờ được làm hỏng luồng Key */ }
+}
+
 function formatCountdownMMSS(ms) {
     const totalSec = Math.max(0, Math.ceil(ms / 1000));
     const m = Math.floor(totalSec / 60);
@@ -1286,6 +1339,8 @@ function formatCountdownMMSS(ms) {
 // 1 hàm DUY NHẤT vẽ lại 2 dòng hiển thị mới trong card Key — tránh nhiều nơi tự
 // set textContent lệch nhau. KHÔNG đụng #keyInfo (giữ nguyên hành vi/text hiện có).
 function refreshKeySourceDisplay() {
+
+    if (typeof syncNowPlayingKeyText === "function") syncNowPlayingKeyText(); // Key cạnh tên bài luôn theo Key đang áp dụng
 
     // UI Final v3.0 — Mục XII (ACTIVE SOURCE): 1 dòng badge duy nhất, đọc lại
     // getActiveSourceName() đã có sẵn (KHÔNG đổi hàm đó/logic chọn nguồn).

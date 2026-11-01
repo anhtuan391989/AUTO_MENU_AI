@@ -29,7 +29,7 @@ const DEFAULT_SERVER_URL = 'https://menu-key-server.matuotluuly.workers.dev';
 
 const LOOKUP_TIMEOUT_MS = 2000;
 const SUBMIT_TIMEOUT_MS = 5000;
-const HIT_TTL_MS = 10 * 60 * 1000;   // bài đã có trên server: nhớ 10 phút
+const HIT_TTL_MS = 2 * 60 * 1000;    // bài đã có trên server: nhớ 2 phút (ngắn để Key vừa SỬA trên server sớm tới Menu)
 const MISS_TTL_MS = 60 * 1000;       // bài chưa có: hỏi lại sau 60 giây
 const ERROR_TTL_MS = 15 * 1000;      // server lỗi/chậm: thử lại sau 15 giây
 const SUBMIT_RETRY_COOLDOWN_MS = 30 * 1000;
