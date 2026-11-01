@@ -1,0 +1,332 @@
+diff --git a/tests/unit/FSP8MusicCalib02.verify.js b/tests/unit/FSP8MusicCalib02.verify.js
+index 0d7c93a..b0fa984 100644
+--- a/tests/unit/FSP8MusicCalib02.verify.js
++++ b/tests/unit/FSP8MusicCalib02.verify.js
+@@ -75,6 +75,6 @@ const OLD = (v) => Math.round(Math.max(0, Math.min(100, v)) * 127 / 100);
+   const li = ren.indexOf('function loadData()'); ok(!/executeAction|dispatchKnobVolume|sendMidi/.test(ren.slice(li, ren.indexOf('\n}\n', li))), '[khởi tạo] loadData() vẫn không gửi MIDI');
+   // chỉ MUSIC trên Studio Pro 8 có neo
+   const anchors = vm.runInContext('KNOB_CC_ANCHORS', e.sb);
+-  ok(Object.keys(anchors).join() === 'Studio Pro 8' && Object.keys(anchors['Studio Pro 8']).join() === 'BEAT_INPUT_VOLUME', '[phạm vi] chỉ có neo cho Studio Pro 8 / BEAT_INPUT_VOLUME');
++  ok(Object.keys(anchors).join() === 'Studio Pro 8' && Object.keys(anchors['Studio Pro 8']).join() === 'BEAT_INPUT_VOLUME,MIC1_VOLUME,MIC2_VOLUME', '[phạm vi] neo chỉ cho Studio Pro 8 / BEAT_INPUT_VOLUME (+ MIC1_VOLUME, MIC2_VOLUME dùng cùng đường cong — MIC-VOLUME-KNOB-01)');
+   console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
+ })();
+diff --git a/tests/unit/KnobDawIntegration02.verify.js b/tests/unit/KnobDawIntegration02.verify.js
+index 493b91f..fdc0580 100644
+--- a/tests/unit/KnobDawIntegration02.verify.js
++++ b/tests/unit/KnobDawIntegration02.verify.js
+@@ -41,7 +41,8 @@ function env(init = {}, { portOk = true } = {}) {
+   {
+     const m = /const KNOB_ID_TO_ACTION = \{([\s\S]*?)\};/.exec(ren)[1].replace(/\/\/.*$/gm, '');
+     const pairs = [...m.matchAll(/(\w+):\s*"(\w+)"/g)].map((x) => [x[1], x[2]]);
+-    ok(pairs.length === 4 && pairs.every(([k, a]) => KNOBS[a] === k), '[1] renderer: đúng 4 Knob MIDI -> 4 Action (musicKnob, masterKnob, retune1, retune2)', pairs);
++    const micPairs = pairs.filter(([k]) => k === 'mic1VolKnob' || k === 'mic2VolKnob'); // MIC-VOLUME-KNOB-01: thêm 2 núm mic (tạo bằng JS, chuột phải MIC 1/2)
++    ok(pairs.length === 6 && micPairs.length === 2 && pairs.filter((p) => !micPairs.includes(p)).every(([k, a]) => KNOBS[a] === k), '[1] renderer: 4 Knob MIDI gốc -> 4 Action (musicKnob, masterKnob, retune1, retune2) + 2 núm mic -> MIC1_VOLUME/MIC2_VOLUME', pairs);
+     ok(!/clapKnob|laughKnob/.test(m) && /clapKnob: "CLAP"/.test(ren) && /laughKnob: "LAUGH"/.test(ren), '[8] clapKnob/laughKnob KHÔNG nằm trong map MIDI; vẫn ở KNOB_ID_TO_SOUND_EFFECT (SoundEffectEngine nội bộ)');
+     const knobBundles = setup.slice(setup.indexOf('const DAW_QF_S1_LIVE'), setup.indexOf('// S8 — 3 hàng PLAY/STOP/RECORD'));
+     ok(!/CLAP|LAUGH|clapKnob|laughKnob/.test(knobBundles.replace(/dawQfMake/g, '')), '[8] bộ điền nhanh không chứa CLAP/LAUGH');
+diff --git a/tests/unit/KnobMidiCompletion01.verify.js b/tests/unit/KnobMidiCompletion01.verify.js
+index d1c9577..72506cc 100644
+--- a/tests/unit/KnobMidiCompletion01.verify.js
++++ b/tests/unit/KnobMidiCompletion01.verify.js
+@@ -158,7 +158,7 @@ const ccOf = (v) => Math.round(v * 127 / 100);
+         const saved = { MUSIC_ON: mk(102, 16), FX_OFF: mk(109, 16), BEAT_INPUT_VOLUME: mk(20, 1), MASTER_OUTPUT_VOLUME: mk(21, 1), MONITOR_FX: mk(22, 2) };
+         const fn = new Function('getDawMidiOutMapping', setup.slice(a, a2) + '\n' + setup.slice(b, b2) + '\n' + setup.slice(c, c2) + '\nreturn { findMidiOutMappingConflict, MIDI_CONFLICT_GUARD_SET };')((act) => saved[act] || null);
+         const { findMidiOutMappingConflict: f, MIDI_CONFLICT_GUARD_SET: G } = fn;
+-        ok(['BEAT_INPUT_VOLUME', 'MASTER_OUTPUT_VOLUME', 'RETUNE_SPEED_MIC1', 'RETUNE_SPEED_MIC2', 'MUSIC_ON', 'FX_OFF', 'MUSIC_SELECT', 'MIC1_SELECT', 'MIC2_SELECT'].every((x) => G.has(x)) && G.size === 15, 'nhóm bảo vệ = 4 Knob + 8 LIVE + 3 CHỌN TRACK (MENU-FIX-02: 12→15, chủ đích)');
++        ok(['BEAT_INPUT_VOLUME', 'MASTER_OUTPUT_VOLUME', 'RETUNE_SPEED_MIC1', 'RETUNE_SPEED_MIC2', 'MUSIC_ON', 'FX_OFF', 'MUSIC_SELECT', 'MIC1_SELECT', 'MIC2_SELECT'].every((x) => G.has(x)) && G.size === 17, 'nhóm bảo vệ = 4 Knob + 2 MIC VOLUME + 8 LIVE + 3 CHỌN TRACK (MIC-VOLUME-KNOB-01: 15→17, chủ đích; MENU-FIX-02: 12→15)');
+         ok(f('RETUNE_SPEED_MIC1', mk(102, 16)) === 'MUSIC_ON', 'Retune 1 đặt CC102 ch16 -> xung đột với MUSIC_ON (bị chặn)');
+         ok(f('MUSIC_OFF', mk(20, 1)) === 'BEAT_INPUT_VOLUME', 'LIVE đặt CC20 ch1 -> xung đột với Knob Beat');
+         ok(f('RETUNE_SPEED_MIC2', mk(21, 1)) === 'MASTER_OUTPUT_VOLUME', 'Knob trùng Knob khác -> bị chặn');
+diff --git a/tests/unit/MicVolumeKnob01.verify.js b/tests/unit/MicVolumeKnob01.verify.js
+new file mode 100644
+index 0000000..8f1cfbe
+--- /dev/null
++++ b/tests/unit/MicVolumeKnob01.verify.js
+@@ -0,0 +1,103 @@
++/**
++ * MIC-VOLUME-KNOB-01 — chuột phải MIC 1 / MIC 2 hiện núm âm lượng của đúng mic; xoay núm gửi CC đúng mapping.
++ * Mã THẬT: ui/js/actionRegistry.js (executeAction/knobToCc), initMicVolumePopups + khối Knob trích từ renderer.js, bảng/bộ CC trích từ setup.js.
++ * GIẢ: DOM, MIDI (sendMidiCC ghi lại). KHÔNG phải Studio Pro 8 thật.
++ * Chạy: node tests/unit/MicVolumeKnob01.verify.js
++ */
++'use strict';
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const ROOT = process.env.AUTOMENU_ROOT || path.join(__dirname, '..', '..');
++const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
++let pass = 0, fail = 0;
++const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.error('  FAIL', m, x !== undefined ? JSON.stringify(x) : ''); } };
++const REN = read('ui/js/renderer.js');
++function braceEnd(src, open) { let d = 0; for (let i = open; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) return i + 1; } throw new Error('unbalanced'); }
++const fnSrc = (name) => { const a = REN.indexOf('function ' + name + '('); if (a < 0) throw new Error(name); return REN.slice(a, braceEnd(REN, REN.indexOf('{', a))); };
++const popupConst = REN.slice(REN.indexOf('const MIC_VOLUME_POPUPS'), REN.indexOf('function initMicVolumePopups'));
++const kStart = REN.indexOf('let activeKnob = null;'), kEnd = REN.indexOf('document.addEventListener("mouseup"');
++const knobBlock = REN.slice(kStart, kEnd);
++const knobDataSrc = REN.slice(REN.indexOf('const knobData = ['), REN.indexOf('];', REN.indexOf('const knobData = [')) + 2);
++
++class El { constructor(id) { this.id = id; this.h = {}; const st = {}; Object.defineProperty(st, 'cssText', { set(v) { String(v).split(';').forEach((d) => { const i = d.indexOf(':'); if (i > 0) st[d.slice(0, i).trim()] = d.slice(i + 1).trim(); }); }, enumerable: false }); this.style = st; this.children = []; this.textContent = ''; this.className = '';
++    this._ih = ''; this.rect = { left: 300, top: 400, width: 100, bottom: 440 }; }
++    addEventListener(e, f) { (this.h[e] = this.h[e] || []).push(f); }
++    fire(e, p) { (this.h[e] || []).forEach((f) => f(p)); }
++    getBoundingClientRect() { return this.rect; }
++    contains(t) { return t === this; }
++    set innerHTML(v) { this._ih = v; } get innerHTML() { return this._ih; } }
++
++function build({ mapping = true, saved } = {}) {
++    const els = { mic1Btn: new El('mic1Btn'), mic2Btn: new El('mic2Btn') };
++    const sent = []; const docH = {}; const created = []; const store = { selectedDAW: 'Studio Pro 8', dawMidiOutMappings: { 'Studio Pro 8': mapping ? { MIC1_VOLUME: { kind: 'cc', channel: 15, number: 24, value: 127 }, MIC2_VOLUME: { kind: 'cc', channel: 15, number: 25, value: 127 } } : {} } };
++    const doc = { getElementById: (id) => els[id] || null,
++        createElement: () => { const e = new El(''); const real = e; created.push(e); // id được gán khi innerHTML có id=...
++            Object.defineProperty(e, 'innerHTML', { set(v) { e._ih = v; for (const m of v.matchAll(/id="([^"]+)"/g)) { const c = new El(m[1]); els[m[1]] = c; } }, get() { return e._ih; } }); return real; },
++        body: { style: {}, appendChild() {} }, addEventListener: (e, f) => { (docH[e] = docH[e] || []).push(f); } };
++    const sb = { console: { log() {}, warn() {}, error() {} }, setTimeout, clearTimeout, Date, Math, Promise, Number,
++        getSetting: (k, f) => (store[k] === undefined ? f : store[k]), setSetting() {},
++        sendMidiCC: async (n, v, ch) => { sent.push({ n, v, ch }); return true; }, sendMidiNotePulse: async () => true,
++        document: doc, innerWidth: 800, saveData() {}, electronAPI: {}, KNOB_ID_TO_SOUND_EFFECT: {}, SoundEffectEngine: { setVolume() {} },
++        updateKnob(k) { const v = els[k.valueId]; if (v) v.textContent = k.value; } };
++    sb.window = sb; vm.createContext(sb);
++    vm.runInContext(read('ui/js/actionRegistry.js'), sb);
++    vm.runInContext(knobDataSrc + '\n' + popupConst + '\n' + fnSrc('initMicVolumePopups') + '\nthis.knobData = knobData; this.initMicVolumePopups = initMicVolumePopups;', sb);
++    if (saved) { sb.knobData.find((k) => k.id === 'mic1VolKnob').value = saved; }
++    sb.initMicVolumePopups();
++    vm.runInContext(knobBlock + '\nthis.__dispatch = dispatchKnobVolume;', sb);
++    // đăng ký handler Knob giống DOMContentLoaded (chỉ phần forEach trong knobBlock đã chạy cho các knob có sẵn trong els lúc đó)
++    const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
++    return { sb, els, sent, docH, created, flush, kd: (id) => sb.knobData.find((k) => k.id === id) };
++}
++
++(async () => {
++    console.log('== 1. Núm mic có trong dữ liệu + HTML không bị đổi ==');
++    { const e = build();
++      ok(e.kd('mic1VolKnob') && e.kd('mic2VolKnob') && e.kd('mic1VolKnob').value === 90 && e.kd('mic2VolKnob').defaultValue === 90, 'knobData có mic1VolKnob/mic2VolKnob mặc định 90');
++      const html = read('ui/index.html'); ok(!/mic1VolKnob|mic2VolKnob/.test(html), 'index.html KHÔNG chứa núm mic (tạo bằng JS)'); }
++
++    console.log('== 2. Chuột phải MIC 1 / MIC 2 ==');
++    { const e = build(); const p1 = e.els.mic1VolKnob, p2 = e.els.mic2VolKnob;
++      ok(!!p1 && !!p2, 'tạo 2 thẻ núm (mic1VolKnob, mic2VolKnob)');
++      const card1 = e.created.find((x) => /mic1Vol/.test(x._ih)); const card2 = e.created.find((x) => /mic2Vol/.test(x._ih));
++      ok(card1 && card1.style.display === 'none' && card2.style.display === 'none', 'ban đầu cả 2 thẻ ẩn');
++      let prevented = false; e.els.mic1Btn.fire('contextmenu', { preventDefault() { prevented = true; } });
++      ok(prevented && card1.style.display === 'flex' && card2.style.display === 'none', 'chuột phải MIC 1 -> chỉ hiện núm MIC 1');
++      ok(card1.style.top === '298px' && card1.style.left === '255px', 'thẻ hiện phía trên nút, căn giữa (top/left = ' + card1.style.top + '/' + card1.style.left + ')');
++      e.els.mic2Btn.fire('contextmenu', { preventDefault() {} });
++      ok(card1.style.display === 'none' && card2.style.display === 'flex', 'chuột phải MIC 2 -> đóng MIC 1, hiện MIC 2');
++      e.els.mic2Btn.fire('contextmenu', { preventDefault() {} }); ok(card2.style.display === 'none', 'chuột phải lần nữa -> đóng');
++      e.els.mic1Btn.fire('contextmenu', { preventDefault() {} });
++      e.docH.mousedown.forEach((f) => f({ target: card1 })); ok(card1.style.display === 'flex', 'bấm TRONG thẻ không đóng');
++      e.docH.mousedown.forEach((f) => f({ target: new El('x') })); ok(card1.style.display === 'none', 'bấm ra ngoài -> đóng');
++      e.els.mic1Btn.fire('contextmenu', { preventDefault() {} }); e.docH.keydown.forEach((f) => f({ key: 'Escape' })); ok(card1.style.display === 'none', 'Esc -> đóng');
++      e.els.mic1Btn.rect = { left: 300, top: 20, width: 100, bottom: 60 }; e.els.mic1Btn.fire('contextmenu', { preventDefault() {} });
++      ok(card1.style.top === '66px', 'không đủ chỗ phía trên -> hiện bên dưới nút (top=' + card1.style.top + ')'); }
++
++    console.log('== 3. Xoay núm -> CC đúng mapping (MIC 1 = CC24, MIC 2 = CC25, kênh 15) ==');
++    { const e = build();
++      const exp = { 50: 64, 90: 97, 100: 127 };
++      for (const [ui, cc] of Object.entries(exp)) { e.sent.length = 0; vm.runInContext('window.__knobLastCc = {}', e.sb);
++        await e.sb.__dispatch('mic1VolKnob', +ui); await e.flush();
++        ok(e.sent.length === 1 && e.sent[0].n === 24 && e.sent[0].ch === 14 && e.sent[0].v === cc, `MIC1 núm ${ui} -> CC24 giá trị ${cc}`, e.sent); }
++      e.sent.length = 0; await e.sb.__dispatch('mic2Btn' === 0 ? '' : 'mic2VolKnob', 90); await e.flush();
++      ok(e.sent.length === 1 && e.sent[0].n === 25 && e.sent[0].v === 97, 'MIC2 núm 90 -> CC25 giá trị 97 (0 dB)', e.sent);
++      e.sent.length = 0; await e.sb.__dispatch('mic1VolKnob', 70); await e.flush(); await e.sb.__dispatch('mic1VolKnob', 70); await e.flush();
++      ok(e.sent.length === 1, 'cùng giá trị gửi lặp -> chỉ gửi 1 lần (chống trùng)');
++      e.sent.length = 0; await e.sb.__dispatch('mic2VolKnob', 60); await e.flush(); ok(e.sent.every((m) => m.n === 25) && !e.sent.some((m) => m.n === 24), 'xoay MIC 2 không đụng CC của MIC 1');
++      e.sent.length = 0; await e.sb.__dispatch('musicKnob', 90); await e.flush(); ok(e.sent.length === 0, 'MUSIC chưa gán mapping nên không gửi (mic không lẫn với MUSIC)'); }
++
++    console.log('== 4. Chưa gán mapping ==');
++    { const e = build({ mapping: false }); await e.sb.__dispatch('mic1VolKnob', 80); await e.flush(); ok(e.sent.length === 0, 'chưa lưu CC trong Setup -> không gửi gì, không lỗi'); }
++
++    console.log('== 5. Khôi phục giá trị đã lưu ==');
++    { const e = build({ saved: 63 }); ok(e.els.mic1VolValue.textContent === 63, 'giá trị đã lưu 63 được vẽ lên núm MIC 1', e.els.mic1VolValue.textContent); }
++
++    console.log('== 6. Setup: bảng mapping + bộ điền nhanh ==');
++    { const SET = read('ui/js/setup.js');
++      ok(/action: "MIC1_VOLUME"/.test(SET) && /action: "MIC2_VOLUME"/.test(SET), 'Setup có 2 dòng MIC1_VOLUME / MIC2_VOLUME');
++      ok(/micvol: Object\.freeze\(\{ title: "MIC VOLUME", count: 2, mappings: dawQfMake\(15, 127, \{ MIC1_VOLUME: 24, MIC2_VOLUME: 25 \}\) \}\)/.test(SET), 'bộ điền nhanh MIC VOLUME: CC24/CC25 kênh 15');
++      const used = [...SET.matchAll(/dawQfMake\((\d+), 127, \{([^}]*)\}/g)].filter((m) => m[1] === '15' && !/MIC1_VOLUME/.test(m[2])).flatMap((m) => [...m[2].matchAll(/:\s*(\d+)/g)].map((x) => +x[1]));
++      ok(![24, 25].some((n) => used.includes(n) && false) && !used.includes(24) && !used.includes(25), 'CC24/25 không trùng CC nào của bộ KNOB (kênh 15): ' + used.join(',')); }
++
++    console.log(`\nKẾT QUẢ: ${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})().catch((e) => { console.error('LỖI HARNESS', e); process.exit(2); });
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index aea7e3d..f5e779a 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -84,6 +84,10 @@ const ACTIONS = Object.freeze({
+     // (bảng DAW_MIDI_ACTIONS đã mở rộng, xem ui/js/setup.js), giống hệt cơ chế Button.
+     BEAT_INPUT_VOLUME: "BEAT_INPUT_VOLUME",
+     MASTER_OUTPUT_VOLUME: "MASTER_OUTPUT_VOLUME",
++    // MIC-VOLUME-KNOB-01 — âm lượng (fader) track Mic / Không Dây. Núm hiện khi bấm CHUỘT PHẢI vào nút MIC 1 / MIC 2 (renderer.js).
++    // Cùng khuôn với BEAT_INPUT_VOLUME: không có mapping mặc định, người dùng lưu CC trong Setup (hoặc nút điền nhanh).
++    MIC1_VOLUME: "MIC1_VOLUME",   // fader track "Mic"
++    MIC2_VOLUME: "MIC2_VOLUME",   // fader track "Không Dây"
+     // MIDI-DAW-CONTROL-01 — TÁM lệnh ĐẶT TRẠNG THÁI ĐÍCH (ON và OFF là hai action RIÊNG, mỗi cái một mapping riêng),
+     // thay cho lệnh toggle không xác định. MUSIC = Monitor track "Beat"; MIC1 = Monitor track "Mic"; MIC2 = Monitor
+     // track "Không Dây"; FX = Mute bus Delay/Verb ngắn/Verb dài/Com Verb (FX ON = bỏ mute, FX OFF = mute). Không có
+@@ -151,11 +155,14 @@ const SUPPORTED_DAWS = Object.freeze([
+ // vẫn kết thúc đúng MUSIC 100 → CC127. dB tương ứng ở các neo là DỰ ĐOÁN theo công thức tuyến tính-dB nói trên, CHƯA đo.
+ // Dưới 50: giữ nguyên công thức cũ round(v×127/100) (liên tục tại 50). Giữa các neo: nội suy tuyến tính theo CC — đây chỉ là XẤP XỈ
+ // theo Menu, KHÔNG phải đường cong thật của FSP8. Các action/DAW khác: công thức cũ, không đổi.
+-const KNOB_CC_ANCHORS = Object.freeze({
+-    "Studio Pro 8": Object.freeze({
+-        BEAT_INPUT_VOLUME: Object.freeze([[50, 64], [90, 97], [91, 98], [92, 100], [93, 101], [94, 104], [95, 107], [96, 110], [97, 113], [98, 118], [99, 122], [100, 127]]),
+-    }),
+-});
++const KNOB_CC_ANCHORS = (() => {
++    // MIC-VOLUME-KNOB-01 — fader track Mic/Không Dây dùng CÙNG đường cong CC→dB của fader Beat (cùng loại fader Studio Pro 8: 90 = 0 dB).
++    // CHƯA đo riêng trên fader Mic — xem báo cáo.
++    const faderCurve = Object.freeze([[50, 64], [90, 97], [91, 98], [92, 100], [93, 101], [94, 104], [95, 107], [96, 110], [97, 113], [98, 118], [99, 122], [100, 127]]);
++    return Object.freeze({
++        "Studio Pro 8": Object.freeze({ BEAT_INPUT_VOLUME: faderCurve, MIC1_VOLUME: faderCurve, MIC2_VOLUME: faderCurve }),
++    });
++})();
+ 
+ function knobToCc(action, value, daw) {
+     const v = Math.max(0, Math.min(100, Number(value)));
+@@ -263,6 +270,7 @@ async function executeAction(action, context = {}) {
+             // Lần gửi lỗi thì xoá bộ nhớ đệm để lần sau gửi lại. Không gửi gì lúc khởi động/khôi phục giá trị đã lưu (chỉ handler Knob gọi hàm này).
+             const isKnobCc = midiMap.kind === "cc" && dynamicValue !== undefined && context.reason === "knob"
+                 && (action === ACTIONS.BEAT_INPUT_VOLUME || action === ACTIONS.MASTER_OUTPUT_VOLUME
++                    || action === ACTIONS.MIC1_VOLUME || action === ACTIONS.MIC2_VOLUME
+                     || action === ACTIONS.RETUNE_SPEED_MIC1 || action === ACTIONS.RETUNE_SPEED_MIC2);
+             if (isKnobCc && typeof sendMidiCC === "function") {
+                 const ccValue = knobToCc(action, dynamicValue);
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 3dcccf3..6e4fb28 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -678,6 +678,55 @@ document.getElementById("musicBtn")?.addEventListener("click", (e) => {
+ 
+ const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2", fxBtn: "MONITOR_FX" };
+ const MONITOR_BTN_TO_CONTROL = { mic1Btn: "MIC1", mic2Btn: "MIC2", fxBtn: "FX" }; // MIDI-DAW-CONTROL-01
++// ==========================================================
++// MIC-VOLUME-KNOB-01 — Bấm CHUỘT PHẢI vào MIC 1 / MIC 2 -> hiện núm âm lượng của đúng mic đó (thẻ nổi tạo bằng JS, KHÔNG sửa HTML).
++// Núm dùng lại NGUYÊN cơ chế Knob có sẵn (cuộn chuột / kéo lên-xuống / nhấp đúp = về mặc định -> dispatchKnobVolume -> ActionRegistry
++// MIC1_VOLUME / MIC2_VOLUME -> CC theo mapping Setup). Đóng bằng: bấm ra ngoài, phím Esc, hoặc chuột phải lần nữa. Bấm trái MIC 1/MIC 2
++// vẫn là bật/tắt Monitor như cũ (không đổi).
++// ==========================================================
++const MIC_VOLUME_POPUPS = [
++    { btnId: "mic1Btn", knobId: "mic1VolKnob", valueId: "mic1VolValue", label: "MIC 1 VOLUME" },
++    { btnId: "mic2Btn", knobId: "mic2VolKnob", valueId: "mic2VolValue", label: "MIC 2 VOLUME" },
++];
++function initMicVolumePopups() {
++    const cards = [];
++    const hideAll = () => cards.forEach((c) => { c.style.display = "none"; });
++    MIC_VOLUME_POPUPS.forEach((cfg) => {
++        const btn = document.getElementById(cfg.btnId);
++        if (!btn || document.getElementById(cfg.knobId)) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
++        const card = document.createElement("div");
++        card.className = "knob-card mic-volume-popup";
++        card.style.cssText = "position:fixed;display:none;width:190px;height:96px;z-index:3000;background:#081523;"; // nền đặc (CSS .knob-card dùng nền mờ)
++        card.innerHTML = `<div class="knob-label">${cfg.label}</div><div id="${cfg.valueId}" class="knob-number">90</div>`
++            + `<div class="knob" id="${cfg.knobId}"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>`;
++        document.body.appendChild(card);
++        const k = knobData.find((x) => x.id === cfg.knobId);
++        if (k) updateKnob(k); // vẽ giá trị đã khôi phục từ lần dùng trước (loadData chạy trước hàm này)
++        btn.addEventListener("contextmenu", (e) => {
++            e.preventDefault();
++            const wasOpen = card.style.display !== "none";
++            hideAll();
++            if (wasOpen) return;
++            const r = btn.getBoundingClientRect();
++            const left = Math.max(4, Math.min(window.innerWidth - 194, r.left + r.width / 2 - 95));
++            let top = r.top - 96 - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
++            if (top < 4) top = r.bottom + 6;
++            card.style.left = left + "px";
++            card.style.top = top + "px";
++            card.style.display = "flex";
++        });
++        cards.push(card);
++    });
++    if (!cards.length) return;
++    document.addEventListener("mousedown", (e) => {
++        const t = e.target;
++        if (cards.some((c) => c.contains && c.contains(t))) return; // đang thao tác ngay trên núm
++        if (t && t.closest && t.closest("#mic1Btn, #mic2Btn")) return; // chuột phải mở/đóng do handler contextmenu lo
++        hideAll();
++    });
++    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideAll(); });
++}
++
+ ["mic1Btn", "mic2Btn", "fxBtn"].forEach(id => {
+     document.getElementById(id)?.addEventListener("click", (e) => {
+         e.target.classList.toggle("active");
+@@ -1002,7 +1051,11 @@ const knobData = [
+     { id: "clapKnob", valueId: "clapValue", value: 40, defaultValue: 40 },
+     { id: "laughKnob", valueId: "laughValue", value: 40, defaultValue: 40 },
+     // Knob "Hiệu Ứng" (index.html: #fxSoundVolKnob) = âm lượng CHUNG của cả Bảng Hiệu Ứng độc lập.
+-    { id: "fxSoundVolKnob", valueId: "fxSoundVolValue", value: 50, defaultValue: 50 }
++    { id: "fxSoundVolKnob", valueId: "fxSoundVolValue", value: 50, defaultValue: 50 },
++    // MIC-VOLUME-KNOB-01 — âm lượng track Mic / Không Dây. Núm KHÔNG có sẵn trong index.html: được tạo bằng JS (initMicVolumePopups)
++    // và chỉ hiện khi bấm CHUỘT PHẢI vào nút MIC 1 / MIC 2. Mặc định 90 = 0 dB (cùng đường cong fader Beat).
++    { id: "mic1VolKnob", valueId: "mic1VolValue", value: 90, defaultValue: 90 },
++    { id: "mic2VolKnob", valueId: "mic2VolValue", value: 90, defaultValue: 90 }
+ ];
+ 
+ // TASK A20 — clapKnob/laughKnob đi tới Internal Audio Backend (SoundEffectEngine), KHÔNG
+@@ -2998,6 +3051,7 @@ document.addEventListener("DOMContentLoaded", () => {
+     checkAllSystems();
+     applyAudioOutputSetting(); // TASK B72 — áp dụng thiết bị đầu ra đã lưu (nếu có) lúc khởi động
+     loadData();
++    if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
+ 
+     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây
+     // (updateNextModTime() dùng modTimeline giả + updateModInfo("02:15","G# Minor",...) dùng
+@@ -3020,6 +3074,8 @@ document.addEventListener("DOMContentLoaded", () => {
+         retune2: "RETUNE_SPEED_MIC2",
+         musicKnob: "BEAT_INPUT_VOLUME",
+         masterKnob: "MASTER_OUTPUT_VOLUME",
++        mic1VolKnob: "MIC1_VOLUME", // MIC-VOLUME-KNOB-01 (fader track Mic)
++        mic2VolKnob: "MIC2_VOLUME", // MIC-VOLUME-KNOB-01 (fader track Không Dây)
+         // TASK B12 — clapKnob/laughKnob CỐ TÌNH KHÔNG có trong map này: bằng chứng (xlsx
+         // tham chiếu "Âm lượng ... trên Menu, file đi kèm trong menu") chỉ ra target là
+         // audio engine NỘI BỘ (phát file mẫu bundled), KHÔNG phải MIDI/DAW — nối vào dispatch
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index 018de2d..392f0d0 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -634,6 +634,9 @@ const DAW_MIDI_ACTIONS = [
+     // hai mapping độc lập". Không tự đặt CC — trống mặc định như mọi action khác ở đây.
+     { action: "BEAT_INPUT_VOLUME", label: "BEAT INPUT VOLUME" },
+     { action: "MASTER_OUTPUT_VOLUME", label: "MASTER OUTPUT VOLUME" },
++    // MIC-VOLUME-KNOB-01 — âm lượng track Mic / Không Dây (núm hiện khi bấm chuột phải vào nút MIC 1 / MIC 2). Trống mặc định.
++    { action: "MIC1_VOLUME", label: "MIC 1 VOLUME (fader Mic)" },
++    { action: "MIC2_VOLUME", label: "MIC 2 VOLUME (fader Không Dây)" },
+     // TASK B12 — mở rộng thêm 3 action mới nối ở B12 (musicBtn + Retune×2), tái dùng nguyên
+     // vẹn UI/schema đã có, không tạo cơ chế cấu hình thứ hai.
+     { action: "MONITOR_BEAT_TOGGLE", label: "MONITOR BEAT" },
+@@ -680,7 +683,7 @@ function findDawStateMappingConflict(action, mapping) {
+ // MENU-KNOB-MIDI-COMPLETION-01 — 4 Knob MIDI + 8 lệnh LIVE ON/OFF là nhóm "bảo vệ": một CC/Note (cùng kind+kênh+số) KHÔNG được dùng chung giữa
+ // một trong 12 action này và BẤT KỲ action khác đã lưu (nếu không, một cú xoay Knob có thể kích hoạt macro hoặc ngược lại).
+ // Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
+-const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2"]);
++const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2", "MIC1_VOLUME", "MIC2_VOLUME"]);
+ const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
+ const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET]);
+ function findMidiOutMappingConflict(action, mapping) {
+@@ -739,6 +742,8 @@ const DAW_MIDI_PROFILES = Object.freeze({
+             live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, DAW_QF_S1_LIVE) }),
+             knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_MIC1: 22, RETUNE_SPEED_MIC2: 23 }) }),
+             select: Object.freeze({ title: "CHỌN TRACK", count: 3, mappings: dawQfMake(16, 127, { MUSIC_SELECT: 110, MIC1_SELECT: 111, MIC2_SELECT: 112 }) }),
++            // MIC-VOLUME-KNOB-01 — 2 CC âm lượng Mic, kênh 15 như bộ KNOB, không trùng CC 20–23 (Knob) và 102–112 (LIVE/CHỌN TRACK).
++            micvol: Object.freeze({ title: "MIC VOLUME", count: 2, mappings: dawQfMake(15, 127, { MIC1_VOLUME: 24, MIC2_VOLUME: 25 }) }),
+         }),
+     }),
+     "cubase": Object.freeze({
+@@ -851,7 +856,8 @@ function initDawMidiOutputMappingSection() {
+             <br>${profile ? `<span id="quickFillProfile">Bộ gợi ý: <b>${profile.name}</b>${verStatus ? ` — ${verStatus}` : ""}. ${profile.origin} Điền ở đây chỉ LƯU mapping của Menu — DAW chưa được điều khiển cho đến khi bạn gán trong DAW.</span>
+             <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ LIVE gợi ý — ${profile.name}</button>
+             <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>
+-            ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}`
++            ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}
++            ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}`
+                 : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
+             <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
+             <span id="liveCcStatus"></span>`;
+@@ -880,6 +886,8 @@ function initDawMidiOutputMappingSection() {
+             liveBox.querySelector("#btnFillKnobCc").addEventListener("click", () => runQuickFill("knob"));
+             const selBtn = liveBox.querySelector("#btnFillSelectCc");
+             if (selBtn) selBtn.addEventListener("click", () => runQuickFill("select"));
++            const micVolBtn = liveBox.querySelector("#btnFillMicVolCc");
++            if (micVolBtn) micVolBtn.addEventListener("click", () => runQuickFill("micvol"));
+         }
+ 
+         // Khôi phục: xoá CHỈ 8 mapping ON/OFF mới; mapping cũ (toggle MONITOR_*, Send, PLAY...) không bị đụng.

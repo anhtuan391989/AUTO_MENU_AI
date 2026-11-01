@@ -634,6 +634,9 @@ const DAW_MIDI_ACTIONS = [
     // hai mapping độc lập". Không tự đặt CC — trống mặc định như mọi action khác ở đây.
     { action: "BEAT_INPUT_VOLUME", label: "BEAT INPUT VOLUME" },
     { action: "MASTER_OUTPUT_VOLUME", label: "MASTER OUTPUT VOLUME" },
+    // MIC-VOLUME-KNOB-01 — âm lượng track Mic / Không Dây (núm hiện khi bấm chuột phải vào nút MIC 1 / MIC 2). Trống mặc định.
+    { action: "MIC1_VOLUME", label: "MIC 1 VOLUME (fader Mic)" },
+    { action: "MIC2_VOLUME", label: "MIC 2 VOLUME (fader Không Dây)" },
     // TASK B12 — mở rộng thêm 3 action mới nối ở B12 (musicBtn + Retune×2), tái dùng nguyên
     // vẹn UI/schema đã có, không tạo cơ chế cấu hình thứ hai.
     { action: "MONITOR_BEAT_TOGGLE", label: "MONITOR BEAT" },
@@ -680,7 +683,7 @@ function findDawStateMappingConflict(action, mapping) {
 // MENU-KNOB-MIDI-COMPLETION-01 — 4 Knob MIDI + 8 lệnh LIVE ON/OFF là nhóm "bảo vệ": một CC/Note (cùng kind+kênh+số) KHÔNG được dùng chung giữa
 // một trong 12 action này và BẤT KỲ action khác đã lưu (nếu không, một cú xoay Knob có thể kích hoạt macro hoặc ngược lại).
 // Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
-const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2"]);
+const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2", "MIC1_VOLUME", "MIC2_VOLUME"]);
 const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
 const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET]);
 function findMidiOutMappingConflict(action, mapping) {
@@ -739,6 +742,8 @@ const DAW_MIDI_PROFILES = Object.freeze({
             live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, DAW_QF_S1_LIVE) }),
             knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_MIC1: 22, RETUNE_SPEED_MIC2: 23 }) }),
             select: Object.freeze({ title: "CHỌN TRACK", count: 3, mappings: dawQfMake(16, 127, { MUSIC_SELECT: 110, MIC1_SELECT: 111, MIC2_SELECT: 112 }) }),
+            // MIC-VOLUME-KNOB-01 — 2 CC âm lượng Mic, kênh 15 như bộ KNOB, không trùng CC 20–23 (Knob) và 102–112 (LIVE/CHỌN TRACK).
+            micvol: Object.freeze({ title: "MIC VOLUME", count: 2, mappings: dawQfMake(15, 127, { MIC1_VOLUME: 24, MIC2_VOLUME: 25 }) }),
         }),
     }),
     "cubase": Object.freeze({
@@ -851,7 +856,8 @@ function initDawMidiOutputMappingSection() {
             <br>${profile ? `<span id="quickFillProfile">Bộ gợi ý: <b>${profile.name}</b>${verStatus ? ` — ${verStatus}` : ""}. ${profile.origin} Điền ở đây chỉ LƯU mapping của Menu — DAW chưa được điều khiển cho đến khi bạn gán trong DAW.</span>
             <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ LIVE gợi ý — ${profile.name}</button>
             <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>
-            ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}`
+            ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}
+            ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}`
                 : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
             <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
             <span id="liveCcStatus"></span>`;
@@ -880,6 +886,8 @@ function initDawMidiOutputMappingSection() {
             liveBox.querySelector("#btnFillKnobCc").addEventListener("click", () => runQuickFill("knob"));
             const selBtn = liveBox.querySelector("#btnFillSelectCc");
             if (selBtn) selBtn.addEventListener("click", () => runQuickFill("select"));
+            const micVolBtn = liveBox.querySelector("#btnFillMicVolCc");
+            if (micVolBtn) micVolBtn.addEventListener("click", () => runQuickFill("micvol"));
         }
 
         // Khôi phục: xoá CHỈ 8 mapping ON/OFF mới; mapping cũ (toggle MONITOR_*, Send, PLAY...) không bị đụng.

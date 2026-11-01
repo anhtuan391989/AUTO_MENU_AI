@@ -75,6 +75,6 @@ const OLD = (v) => Math.round(Math.max(0, Math.min(100, v)) * 127 / 100);
   const li = ren.indexOf('function loadData()'); ok(!/executeAction|dispatchKnobVolume|sendMidi/.test(ren.slice(li, ren.indexOf('\n}\n', li))), '[khởi tạo] loadData() vẫn không gửi MIDI');
   // chỉ MUSIC trên Studio Pro 8 có neo
   const anchors = vm.runInContext('KNOB_CC_ANCHORS', e.sb);
-  ok(Object.keys(anchors).join() === 'Studio Pro 8' && Object.keys(anchors['Studio Pro 8']).join() === 'BEAT_INPUT_VOLUME', '[phạm vi] chỉ có neo cho Studio Pro 8 / BEAT_INPUT_VOLUME');
+  ok(Object.keys(anchors).join() === 'Studio Pro 8' && Object.keys(anchors['Studio Pro 8']).join() === 'BEAT_INPUT_VOLUME,MIC1_VOLUME,MIC2_VOLUME', '[phạm vi] neo chỉ cho Studio Pro 8 / BEAT_INPUT_VOLUME (+ MIC1_VOLUME, MIC2_VOLUME dùng cùng đường cong — MIC-VOLUME-KNOB-01)');
   console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })();

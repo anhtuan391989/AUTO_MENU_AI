@@ -84,6 +84,10 @@ const ACTIONS = Object.freeze({
     // (bảng DAW_MIDI_ACTIONS đã mở rộng, xem ui/js/setup.js), giống hệt cơ chế Button.
     BEAT_INPUT_VOLUME: "BEAT_INPUT_VOLUME",
     MASTER_OUTPUT_VOLUME: "MASTER_OUTPUT_VOLUME",
+    // MIC-VOLUME-KNOB-01 — âm lượng (fader) track Mic / Không Dây. Núm hiện khi bấm CHUỘT PHẢI vào nút MIC 1 / MIC 2 (renderer.js).
+    // Cùng khuôn với BEAT_INPUT_VOLUME: không có mapping mặc định, người dùng lưu CC trong Setup (hoặc nút điền nhanh).
+    MIC1_VOLUME: "MIC1_VOLUME",   // fader track "Mic"
+    MIC2_VOLUME: "MIC2_VOLUME",   // fader track "Không Dây"
     // MIDI-DAW-CONTROL-01 — TÁM lệnh ĐẶT TRẠNG THÁI ĐÍCH (ON và OFF là hai action RIÊNG, mỗi cái một mapping riêng),
     // thay cho lệnh toggle không xác định. MUSIC = Monitor track "Beat"; MIC1 = Monitor track "Mic"; MIC2 = Monitor
     // track "Không Dây"; FX = Mute bus Delay/Verb ngắn/Verb dài/Com Verb (FX ON = bỏ mute, FX OFF = mute). Không có
@@ -151,11 +155,14 @@ const SUPPORTED_DAWS = Object.freeze([
 // vẫn kết thúc đúng MUSIC 100 → CC127. dB tương ứng ở các neo là DỰ ĐOÁN theo công thức tuyến tính-dB nói trên, CHƯA đo.
 // Dưới 50: giữ nguyên công thức cũ round(v×127/100) (liên tục tại 50). Giữa các neo: nội suy tuyến tính theo CC — đây chỉ là XẤP XỈ
 // theo Menu, KHÔNG phải đường cong thật của FSP8. Các action/DAW khác: công thức cũ, không đổi.
-const KNOB_CC_ANCHORS = Object.freeze({
-    "Studio Pro 8": Object.freeze({
-        BEAT_INPUT_VOLUME: Object.freeze([[50, 64], [90, 97], [91, 98], [92, 100], [93, 101], [94, 104], [95, 107], [96, 110], [97, 113], [98, 118], [99, 122], [100, 127]]),
-    }),
-});
+const KNOB_CC_ANCHORS = (() => {
+    // MIC-VOLUME-KNOB-01 — fader track Mic/Không Dây dùng CÙNG đường cong CC→dB của fader Beat (cùng loại fader Studio Pro 8: 90 = 0 dB).
+    // CHƯA đo riêng trên fader Mic — xem báo cáo.
+    const faderCurve = Object.freeze([[50, 64], [90, 97], [91, 98], [92, 100], [93, 101], [94, 104], [95, 107], [96, 110], [97, 113], [98, 118], [99, 122], [100, 127]]);
+    return Object.freeze({
+        "Studio Pro 8": Object.freeze({ BEAT_INPUT_VOLUME: faderCurve, MIC1_VOLUME: faderCurve, MIC2_VOLUME: faderCurve }),
+    });
+})();
 
 function knobToCc(action, value, daw) {
     const v = Math.max(0, Math.min(100, Number(value)));
@@ -263,6 +270,7 @@ async function executeAction(action, context = {}) {
             // Lần gửi lỗi thì xoá bộ nhớ đệm để lần sau gửi lại. Không gửi gì lúc khởi động/khôi phục giá trị đã lưu (chỉ handler Knob gọi hàm này).
             const isKnobCc = midiMap.kind === "cc" && dynamicValue !== undefined && context.reason === "knob"
                 && (action === ACTIONS.BEAT_INPUT_VOLUME || action === ACTIONS.MASTER_OUTPUT_VOLUME
+                    || action === ACTIONS.MIC1_VOLUME || action === ACTIONS.MIC2_VOLUME
                     || action === ACTIONS.RETUNE_SPEED_MIC1 || action === ACTIONS.RETUNE_SPEED_MIC2);
             if (isKnobCc && typeof sendMidiCC === "function") {
                 const ccValue = knobToCc(action, dynamicValue);

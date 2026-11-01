@@ -678,6 +678,55 @@ document.getElementById("musicBtn")?.addEventListener("click", (e) => {
 
 const MONITOR_BTN_TO_ACTION = { mic1Btn: "MONITOR_MIC1", mic2Btn: "MONITOR_MIC2", fxBtn: "MONITOR_FX" };
 const MONITOR_BTN_TO_CONTROL = { mic1Btn: "MIC1", mic2Btn: "MIC2", fxBtn: "FX" }; // MIDI-DAW-CONTROL-01
+// ==========================================================
+// MIC-VOLUME-KNOB-01 — Bấm CHUỘT PHẢI vào MIC 1 / MIC 2 -> hiện núm âm lượng của đúng mic đó (thẻ nổi tạo bằng JS, KHÔNG sửa HTML).
+// Núm dùng lại NGUYÊN cơ chế Knob có sẵn (cuộn chuột / kéo lên-xuống / nhấp đúp = về mặc định -> dispatchKnobVolume -> ActionRegistry
+// MIC1_VOLUME / MIC2_VOLUME -> CC theo mapping Setup). Đóng bằng: bấm ra ngoài, phím Esc, hoặc chuột phải lần nữa. Bấm trái MIC 1/MIC 2
+// vẫn là bật/tắt Monitor như cũ (không đổi).
+// ==========================================================
+const MIC_VOLUME_POPUPS = [
+    { btnId: "mic1Btn", knobId: "mic1VolKnob", valueId: "mic1VolValue", label: "MIC 1 VOLUME" },
+    { btnId: "mic2Btn", knobId: "mic2VolKnob", valueId: "mic2VolValue", label: "MIC 2 VOLUME" },
+];
+function initMicVolumePopups() {
+    const cards = [];
+    const hideAll = () => cards.forEach((c) => { c.style.display = "none"; });
+    MIC_VOLUME_POPUPS.forEach((cfg) => {
+        const btn = document.getElementById(cfg.btnId);
+        if (!btn || document.getElementById(cfg.knobId)) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
+        const card = document.createElement("div");
+        card.className = "knob-card mic-volume-popup";
+        card.style.cssText = "position:fixed;display:none;width:190px;height:96px;z-index:3000;background:#081523;"; // nền đặc (CSS .knob-card dùng nền mờ)
+        card.innerHTML = `<div class="knob-label">${cfg.label}</div><div id="${cfg.valueId}" class="knob-number">90</div>`
+            + `<div class="knob" id="${cfg.knobId}"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>`;
+        document.body.appendChild(card);
+        const k = knobData.find((x) => x.id === cfg.knobId);
+        if (k) updateKnob(k); // vẽ giá trị đã khôi phục từ lần dùng trước (loadData chạy trước hàm này)
+        btn.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            const wasOpen = card.style.display !== "none";
+            hideAll();
+            if (wasOpen) return;
+            const r = btn.getBoundingClientRect();
+            const left = Math.max(4, Math.min(window.innerWidth - 194, r.left + r.width / 2 - 95));
+            let top = r.top - 96 - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
+            if (top < 4) top = r.bottom + 6;
+            card.style.left = left + "px";
+            card.style.top = top + "px";
+            card.style.display = "flex";
+        });
+        cards.push(card);
+    });
+    if (!cards.length) return;
+    document.addEventListener("mousedown", (e) => {
+        const t = e.target;
+        if (cards.some((c) => c.contains && c.contains(t))) return; // đang thao tác ngay trên núm
+        if (t && t.closest && t.closest("#mic1Btn, #mic2Btn")) return; // chuột phải mở/đóng do handler contextmenu lo
+        hideAll();
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideAll(); });
+}
+
 ["mic1Btn", "mic2Btn", "fxBtn"].forEach(id => {
     document.getElementById(id)?.addEventListener("click", (e) => {
         e.target.classList.toggle("active");
@@ -1002,7 +1051,11 @@ const knobData = [
     { id: "clapKnob", valueId: "clapValue", value: 40, defaultValue: 40 },
     { id: "laughKnob", valueId: "laughValue", value: 40, defaultValue: 40 },
     // Knob "Hiệu Ứng" (index.html: #fxSoundVolKnob) = âm lượng CHUNG của cả Bảng Hiệu Ứng độc lập.
-    { id: "fxSoundVolKnob", valueId: "fxSoundVolValue", value: 50, defaultValue: 50 }
+    { id: "fxSoundVolKnob", valueId: "fxSoundVolValue", value: 50, defaultValue: 50 },
+    // MIC-VOLUME-KNOB-01 — âm lượng track Mic / Không Dây. Núm KHÔNG có sẵn trong index.html: được tạo bằng JS (initMicVolumePopups)
+    // và chỉ hiện khi bấm CHUỘT PHẢI vào nút MIC 1 / MIC 2. Mặc định 90 = 0 dB (cùng đường cong fader Beat).
+    { id: "mic1VolKnob", valueId: "mic1VolValue", value: 90, defaultValue: 90 },
+    { id: "mic2VolKnob", valueId: "mic2VolValue", value: 90, defaultValue: 90 }
 ];
 
 // TASK A20 — clapKnob/laughKnob đi tới Internal Audio Backend (SoundEffectEngine), KHÔNG
@@ -2998,6 +3051,7 @@ document.addEventListener("DOMContentLoaded", () => {
     checkAllSystems();
     applyAudioOutputSetting(); // TASK B72 — áp dụng thiết bị đầu ra đã lưu (nếu có) lúc khởi động
     loadData();
+    if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
 
     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây
     // (updateNextModTime() dùng modTimeline giả + updateModInfo("02:15","G# Minor",...) dùng
@@ -3020,6 +3074,8 @@ document.addEventListener("DOMContentLoaded", () => {
         retune2: "RETUNE_SPEED_MIC2",
         musicKnob: "BEAT_INPUT_VOLUME",
         masterKnob: "MASTER_OUTPUT_VOLUME",
+        mic1VolKnob: "MIC1_VOLUME", // MIC-VOLUME-KNOB-01 (fader track Mic)
+        mic2VolKnob: "MIC2_VOLUME", // MIC-VOLUME-KNOB-01 (fader track Không Dây)
         // TASK B12 — clapKnob/laughKnob CỐ TÌNH KHÔNG có trong map này: bằng chứng (xlsx
         // tham chiếu "Âm lượng ... trên Menu, file đi kèm trong menu") chỉ ra target là
         // audio engine NỘI BỘ (phát file mẫu bundled), KHÔNG phải MIDI/DAW — nối vào dispatch
