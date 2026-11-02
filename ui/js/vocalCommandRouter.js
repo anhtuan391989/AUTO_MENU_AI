@@ -36,20 +36,46 @@ const CLICK_STEP_DELAY_MS = 90; // khoảng nghỉ giữa các click liên tiế
    - CC number dưới đây là VÍ DỤ, PHẢI vào SoundShifter bấm "MIDI Learn" trên chính 2 nút
      ▲/▼ và nút Bypass/Power của nó rồi đối chiếu lại đúng số CC thật, đổi lại ở đây.
    ========================================================== */
-const SOUNDSHIFTER_STEP_RATIO = 2; // đã xác nhận với người dùng: 1 bán cung (menu) = 2 đơn vị SoundShifter
-const SOUNDSHIFTER_UP_CC = 22;     // TODO: đổi theo đúng CC thật sau khi MIDI Learn nút ▲ của SoundShifter
-const SOUNDSHIFTER_DOWN_CC = 23;   // TODO: đổi theo đúng CC thật sau khi MIDI Learn nút ▼ của SoundShifter
-const SOUNDSHIFTER_TOGGLE_CC = 24; // TODO: đổi theo đúng CC thật sau khi MIDI Learn nút Bypass/Power
+// MOD-TONE-ABS-01 — CC 22 trong Studio One được học vào NÚM "Semitones" của SoundShifter (giá trị TUYỆT ĐỐI, 0..127 = -12..+12 bán cung),
+// không phải nút bấm ▲. Gửi 127 lặp lại (kiểu bấm nút) làm plugin nhảy +12. Nay Menu gửi MỘT giá trị tuyệt đối cho từng mức tone.
+// 1 bán cung của Menu = SOUNDSHIFTER_SEMITONES_PER_MENU_SEMITONE bán cung của SoundShifter (1:1; đổi số này nếu nghe thấy lệch).
+const SOUNDSHIFTER_STEP_RATIO = 2; // CHỈ còn dùng cho kiểu nút ▲/▼ cũ (không còn dùng trong nhánh núm tuyệt đối)
+const SOUNDSHIFTER_SEMITONES_PER_MENU_SEMITONE = 1;
+const SOUNDSHIFTER_RANGE = 12;     // núm Semitones của SoundShifter: -12..+12
+const SOUNDSHIFTER_UP_CC = 22;     // CC của núm Semitones (đã học trong Studio One: Control1 = CC 22)
+const SOUNDSHIFTER_SEMITONE_CC = SOUNDSHIFTER_UP_CC;
+const SOUNDSHIFTER_DOWN_CC = 23;   // không còn dùng (núm tuyệt đối không cần nút ▼)
+const SOUNDSHIFTER_TOGGLE_CC = 24; // CC của nút Bypass đã học trong Studio One
 // MOD-BYPASS-01 — CC trên là nút BYPASS của SoundShifter (127 = BYPASS BẬT = plugin bị bỏ qua, 0 = BYPASS TẮT = plugin hoạt động).
 // Yêu cầu: MOD ON -> Bypass TẮT (SoundShifter chạy); MOD OFF -> Bypass BẬT (SoundShifter bị bỏ qua). Nên giá trị gửi là NGƯỢC với "bật/tắt".
 // Nếu nút học trong DAW là kiểu Power/Enable (127 = chạy) thì đổi hằng này thành false để quay về 127 = bật, 0 = tắt.
 const SOUNDSHIFTER_TOGGLE_IS_BYPASS = true;
+
+// Mức Semitones SoundShifter mà Menu ĐÃ gửi (ước lượng nội bộ; Menu không đọc lại được plugin). Mặc định 0 = chưa dịch.
+const soundShifterState = { semitones: 0 };
+function soundShifterSemitoneToCC(semitones) {
+    const s = Math.max(-SOUNDSHIFTER_RANGE, Math.min(SOUNDSHIFTER_RANGE, Math.round(semitones)));
+    return Math.round(((s + SOUNDSHIFTER_RANGE) / (2 * SOUNDSHIFTER_RANGE)) * 127);
+}
+async function _sendSoundShifterAbsolute(semitones) {
+    const midiPort = getSetting("midiOutputPort");
+    if (!midiPort) {
+        return { ok: false, detail: 'Chưa cấu hình cổng MIDI (Setup > MIDI) — SoundShifter chỉ điều khiển được qua MIDI.' };
+    }
+    const target = Math.max(-SOUNDSHIFTER_RANGE, Math.min(SOUNDSHIFTER_RANGE, Math.round(semitones)));
+    let sent = false;
+    try { sent = await sendMidiCC(SOUNDSHIFTER_SEMITONE_CC, soundShifterSemitoneToCC(target)); } catch (e) { sent = false; }
+    if (!sent) return { ok: false, driverUsed: "midi", detail: "Gửi MIDI CC thất bại giữa chừng (SoundShifter)." };
+    soundShifterState.semitones = target;
+    return { ok: true, driverUsed: "midi", semitones: target, clamped: target !== Math.round(semitones) };
+}
 
 /**
  * Bật/tắt plugin SoundShifter qua MIDI CC (nút Bypass của plugin).
  * isOn=true (MOD ON)  -> Bypass TẮT -> gửi 0   (SOUNDSHIFTER_TOGGLE_IS_BYPASS = true, mặc định).
  * isOn=false (MOD OFF) -> Bypass BẬT -> gửi 127.
  * Nếu SOUNDSHIFTER_TOGGLE_IS_BYPASS = false (nút kiểu Power/Enable): isOn -> 127, tắt -> 0.
+ * MOD-TONE-ABS-01: khi BẬT, đồng thời đưa núm Semitones về 0 (đồng bộ với Menu bắt đầu từ 0, kể cả khi plugin đang kẹt ở mức cũ).
  * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string}>}
  */
 async function setSoundShifterPower(isOn) {
@@ -60,9 +86,12 @@ async function setSoundShifterPower(isOn) {
 
     const value = (isOn !== SOUNDSHIFTER_TOGGLE_IS_BYPASS) ? 127 : 0; // bypass-kiểu: ON->0, OFF->127 | power-kiểu: ON->127, OFF->0
     const sent = await sendMidiCC(SOUNDSHIFTER_TOGGLE_CC, value);
-    return sent
-        ? { ok: true, driverUsed: "midi" }
-        : { ok: false, driverUsed: "midi", detail: "Gửi MIDI CC thất bại (cổng MIDI có thể đã bị rút/đổi tên)." };
+    if (!sent) return { ok: false, driverUsed: "midi", detail: "Gửi MIDI CC thất bại (cổng MIDI có thể đã bị rút/đổi tên)." };
+    if (isOn) {
+        const zero = await _sendSoundShifterAbsolute(0);
+        if (!zero.ok) return { ok: false, driverUsed: "midi", detail: zero.detail };
+    }
+    return { ok: true, driverUsed: "midi" };
 }
 
 /**
@@ -72,25 +101,9 @@ async function setSoundShifterPower(isOn) {
  */
 async function sendToneStepToSoundShifter(semitoneDelta) {
     if (!semitoneDelta) return { ok: true, driverUsed: "none" };
-
-    const midiPort = getSetting("midiOutputPort");
-    if (!midiPort) {
-        return { ok: false, detail: 'Chưa cấu hình cổng MIDI (Setup > MIDI) — SoundShifter chỉ điều khiển được qua MIDI.' };
-    }
-
-    const steps = Math.abs(semitoneDelta) * SOUNDSHIFTER_STEP_RATIO;
-    const goingUp = semitoneDelta > 0;
-    const ccNumber = goingUp ? SOUNDSHIFTER_UP_CC : SOUNDSHIFTER_DOWN_CC;
-
-    for (let i = 0; i < steps; i++) {
-        const sent = await sendMidiCC(ccNumber, 127);
-        if (!sent) {
-            return { ok: false, driverUsed: "midi", detail: "Gửi MIDI CC thất bại giữa chừng (SoundShifter)." };
-        }
-        await delay(CLICK_STEP_DELAY_MS);
-    }
-
-    return { ok: true, driverUsed: "midi" };
+    // MOD-TONE-ABS-01: tone mới = tone SoundShifter đang giữ + độ lệch (đổi sang đơn vị SoundShifter), gửi MỘT CC tuyệt đối.
+    const target = soundShifterState.semitones + semitoneDelta * SOUNDSHIFTER_SEMITONES_PER_MENU_SEMITONE;
+    return _sendSoundShifterAbsolute(target);
 }
 
 function delay(ms) {

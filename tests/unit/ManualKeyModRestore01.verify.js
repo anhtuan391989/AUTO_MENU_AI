@@ -22,7 +22,7 @@ const PIECES = [
     between("const notes = [", "};"), // notes + flatToSharp (flatToSharp kết thúc bằng "};")
     between("const MANUAL_TONE_VALUES", "let manualToneChain = Promise.resolve();"),
     between("const keySource = {", "};"),
-    fn("transposeKey"), fn("normalizeKeyForSend"), fn("displayKeyText"), fn("renderManualToneDisplay"), fn("restoreSelectOptions"),
+    fn("transposeKey"), fn("normalizeKeyForSend"), fn("getKnownBaseKeyForTone"), fn("sendShiftedKeyToAutotune"), fn("sendManualToneToAutotune"), fn("displayKeyText"), fn("renderManualToneDisplay"), fn("restoreSelectOptions"),
     handler('document.getElementById("applyToneBtn")?.addEventListener("click"'),
     fn("getActiveSourceName"), fn("getActiveKeyValue"), fn("applyActiveKeyToPlugin"), fn("cancelManualOverride"), fn("startManualOverrideCountdown"),
     fn("triggerAiKeyDetect"),
@@ -48,14 +48,14 @@ function session(o = {}) {
     ["currentKey", "keyInfo", "keySelector", "applyKeyBtn", "modPowerBtn", "toneSelector", "applyToneBtn", "modTime", "modStatus", "modTimeline", "manualOverrideStatus"].forEach(get);
     els.keySelector.options = [{ value: "AI Key Detect" }, { value: "C Major" }, { value: "A Minor" }]; els.keySelector._v = "AI Key Detect";
     els.toneSelector.options = [{ value: "0" }, { value: "+1" }, { value: "-1" }]; els.toneSelector._v = "0"; els.toneSelector.disabled = true; els.applyToneBtn.disabled = true; // trạng thái khởi tạo do renderer.js đặt (MOD OFF)
-    const log = { notes: [], cc: [], ccCount: {}, tone: 0, shifter: 0, now: 1000, intervals: [], timers: [], status: [], aiStarts: 0 };
+    const log = { ccVals22: [], notes: [], cc: [], ccCount: {}, tone: 0, shifter: 0, now: 1000, intervals: [], timers: [], status: [], aiStarts: 0 };
     const sb = {
         console: { log() {}, warn() {}, error() {} }, Promise, Array, Math, Number, JSON, parseInt, Error, Set, Date: { now: () => log.now },
         setTimeout: (f, ms) => { if (ms >= 1000) { log.timers.push({ f, ms }); return log.timers.length; } f(); return 0; }, clearTimeout: () => {},
         setInterval: (f) => { log.intervals.push(f); return log.intervals.length; }, clearInterval: () => { log.intervals.length = 0; },
         getSetting: (k) => (k === "midiOutputPort" ? (o.port === undefined ? "loopMIDI" : o.port) : k === "mouseControlEnabled" ? true : undefined),
         getCoordinate: () => null,
-        sendMidiCC: async (cc) => { log.cc.push(cc); log.ccCount[cc] = (log.ccCount[cc] || 0) + 1; if (cc === 20) log.tone++; if (cc === 21) log.tone--; if (cc === 22) log.shifter++; if (cc === 23) log.shifter--; return o.ccFail ? o.ccFail(cc) === false ? false : true : true; },
+        sendMidiCC: async (cc, val) => { log.cc.push(cc); log.ccCount[cc] = (log.ccCount[cc] || 0) + 1; if (cc === 20) log.tone++; if (cc === 21) log.tone--; if (cc === 22) { log.shifter = Math.round((val / 127) * 24) - 12; log.ccVals22.push(val); } return o.ccFail ? o.ccFail(cc) === false ? false : true : true; },
         sendMidiNotePulse: async (n) => { log.notes.push(n); return o.noteFail ? false : true; },
         document: { getElementById: (id) => get(id) },
         Option: function (t, v) { this.text = t; this.value = v; },
@@ -181,19 +181,19 @@ const sharpNote = { "C": 0, "C#": 1, "D": 2, "D#": 3, "E": 4, "F": 5, "F#": 6, "
         for (const t of [1, 2, 3, 4]) {
             const b = { tone: s.log.tone, sh: s.log.shifter };
             await s.setTone(t > 0 ? "+" + t : "0");
-            steps.push({ t, dTone: s.log.tone - b.tone, dSh: s.log.shifter - b.sh });
+            steps.push({ t, dTone: s.log.tone - b.tone, dSh: s.log.shifter - b.sh, note: s.log.notes[s.log.notes.length - 1] });
         }
-        check(steps.every((x) => x.dTone === 1 && x.dSh === 2), "D2. NÂNG liên tiếp +1→+4: mỗi lần SET Auto-Tune đúng +1 bán cung, SoundShifter +2 đơn vị (tỉ lệ 2) [" + JSON.stringify(steps) + "]");
-        check(s.log.tone === 4 && s.log.shifter === 8 && s.api.manualToneOffset === 4, "D3. Tổng thực: Auto-Tune +4, SoundShifter +8, trạng thái nội bộ = +4");
+        check(steps.every((x) => x.dTone === 0 && x.dSh === 1 && x.note === x.t), "D2. NÂNG liên tiếp +1→+4 (MOD-TONE-ABS-01): mỗi lần SET gửi Key dịch (nốt C+t) xuống Auto-Tune, SoundShifter tăng đúng +1 semitone (núm tuyệt đối, tỉ lệ 1:1) [" + JSON.stringify(steps) + "]");
+        check(s.log.tone === 0 && s.log.shifter === 4 && s.api.manualToneOffset === 4, "D3. Tổng thực: SoundShifter = +4 (không dùng bước ▲▼ CC20/21), trạng thái nội bộ = +4");
         check(s.els.modTimeline.textContent === "+4 SEMITONES" && s.els.currentKey.textContent === "E Major" && s.els.modStatus.textContent === "E Major", "D4. MOD hiển thị đúng: '+4 SEMITONES', Key sau dịch 'E Major' (Key gốc C Major không đổi: " + s.api.keySource.manual.committedKey + ")");
         const dn = [];
         for (const t of ["+3", "+2", "+1", "0", "-1", "-2"]) { const b = { tone: s.log.tone, sh: s.log.shifter }; await s.setTone(t); dn.push({ t, dTone: s.log.tone - b.tone, dSh: s.log.shifter - b.sh }); }
-        check(dn.every((x) => x.dTone === -1 && x.dSh === -2), "D5. HẠ liên tiếp +3→-2: mỗi lần SET đúng -1 bán cung (Auto-Tune), -2 đơn vị (SoundShifter) [" + dn.map((x) => x.t + ":" + x.dTone).join(",") + "]");
-        check(s.log.tone === -2 && s.log.shifter === -4 && s.els.modTimeline.textContent === "-2 SEMITONES" && s.els.currentKey.textContent === "A# Major", "D6. Tổng thực -2, hiển thị '-2 SEMITONES', Key sau dịch 'A# Major'");
+        check(dn.every((x) => x.dTone === 0 && x.dSh === -1), "D5. HẠ liên tiếp +3→-2: mỗi lần SET SoundShifter đúng -1 semitone, không gửi bước ▲▼ [" + dn.map((x) => x.t + ":" + x.dSh).join(",") + "]");
+        check(s.log.notes[s.log.notes.length - 1] === 10 && s.log.shifter === -2 && s.els.modTimeline.textContent === "-2 SEMITONES" && s.els.currentKey.textContent === "A# Major", "D6. Tổng thực -2, hiển thị '-2 SEMITONES', Key sau dịch 'A# Major'");
         const b = s.log.cc.length; await s.setTone("-2");
         check(s.log.cc.length === b, "D7. SET lại cùng giá trị: không gửi thêm lệnh nào (idempotent)");
-        await s.setTone("+10"); check(s.log.tone === 10 && s.log.shifter === 20, "D8. nhảy +10: tổng đúng +10 (Auto-Tune) / +20 (SoundShifter), không dư không thiếu");
-        await s.setTone("-10"); check(s.log.tone === -10 && s.log.shifter === -20, "D9. nhảy -10: tổng đúng -10 / -20");
+        await s.setTone("+10"); check(s.log.notes[s.log.notes.length - 1] === 10 && s.log.shifter === 10, "D8. nhảy +10: Key gửi nốt A# (10) và SoundShifter = +10, không dư không thiếu");
+        await s.setTone("-10"); check(s.log.notes[s.log.notes.length - 1] === 2 && s.log.shifter === -10, "D9. nhảy -10: Key gửi nốt D (2) và SoundShifter = -10");
     }
 
     console.log("== E. Biên B→C và C→B ==");
@@ -224,13 +224,13 @@ const sharpNote = { "C": 0, "C#": 1, "D": 2, "D#": 3, "E": 4, "F": 5, "F#": 6, "
         check(s.els.modTimeline.textContent === "+3 SEMITONES" && s.els.toneSelector.value === "+3" && s.api.manualToneOffset === 3, "F3. AUTO DETECT (reset hiển thị AI): Tone tay +3 giữ nguyên (selector, trạng thái, MOD hiển thị)");
         s.aiKey("D Major"); await flush();
         check(s.els.currentKey.textContent === "F Major" && s.els.toneSelector.value === "+3" && s.api.manualToneOffset === 3, "F4. AI dò ra Key mới 'D Major': Key hiển thị = D Major +3 = 'F Major', Tone tay vẫn +3");
-        check(s.log.tone === 3, "F5. Tone thực trên Auto-Tune vẫn +3 (AI không chạm)");
+        check(s.log.tone === 0 && s.log.notes[s.log.notes.length - 1] === 5 && s.log.shifter === 3, "F5. AI dò Key mới D Major khi đang +3: Auto-Tune nhận Key đã dịch F (nốt 5), SoundShifter vẫn +3");
         await s.modOff();
         check(s.els.toneSelector.value === "0" && s.els.toneSelector.disabled && s.api.manualToneOffset === 0 && s.api.manualToneSet === false, "F6. MOD OFF: dropdown về 0 + khoá, trạng thái tay xoá");
-        check(s.log.shifter === 0 && s.log.cc[s.log.cc.length - 1] !== undefined, "F7. MOD OFF: SoundShifter được đưa về 0 trước khi tắt (tổng thực = " + s.log.shifter + "), Auto-Tune trả về offset AI (" + s.log.tone + " = aiSemitoneOffset " + s.api.aiSemitoneOffset + ")");
-        check(s.log.tone === 5, "F8. Auto-Tune trả đúng offset AI đã hoãn (5), không ép về 0");
+        check(s.log.shifter === 0 && s.log.cc[s.log.cc.length - 1] !== undefined, "F7. MOD OFF: SoundShifter được đưa về 0 trước khi tắt (tổng thực = " + s.log.shifter + ")");
+        check(s.log.notes[s.log.notes.length - 1] === 7, "F8. Auto-Tune trả đúng offset AI đã hoãn: D Major +5 = G (nốt 7), không ép về Key gốc");
         s.log.cc.length = 0; await s.modOn(); await s.setTone("+1");
-        check(s.log.ccCount[22] >= 2 && s.log.shifter === 2, "F9. MOD ON lại: bắt đầu từ 0 sạch; SET +1 -> SoundShifter đúng +2 (không mang tone cũ)");
+        check(s.log.ccCount[22] >= 2 && s.log.shifter === 1, "F9. MOD ON lại: bắt đầu từ 0 sạch; SET +1 -> SoundShifter đúng +1 (không mang tone cũ)");
     }
 
     console.log("== G. Không phá phần ngoài phạm vi ==");

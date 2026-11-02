@@ -24,7 +24,7 @@ function build({ port = 'loopMIDI', ccFail = false, src } = {}) {
     console.log('== 1. Mặc định: nút Bypass ==');
     { const e = build();
       let r = await e.sb.setSoundShifterPower(true);
-      ok(r.ok && e.sent.length === 1 && e.sent[0][0] === e.sb.TOGGLE_CC && e.sent[0][1] === 0, 'MOD ON -> gửi CC Bypass = 0 (Bypass TẮT, plugin chạy)', e.sent);
+      ok(r.ok && e.sent[0][0] === e.sb.TOGGLE_CC && e.sent[0][1] === 0, 'MOD ON -> gửi CC Bypass = 0 (Bypass TẮT, plugin chạy)', e.sent);
       e.sent.length = 0; r = await e.sb.setSoundShifterPower(false);
       ok(r.ok && e.sent.length === 1 && e.sent[0][1] === 127, 'MOD OFF -> gửi CC Bypass = 127 (Bypass BẬT, plugin bị bỏ qua)', e.sent);
       ok(e.sb.TOGGLE_CC === 24, 'vẫn dùng đúng CC 24 như cũ (không đổi số CC)'); }
@@ -39,7 +39,7 @@ function build({ port = 'loopMIDI', ccFail = false, src } = {}) {
     { const src = read('ui/js/vocalCommandRouter.js').replace('const SOUNDSHIFTER_TOGGLE_IS_BYPASS = true;', 'const SOUNDSHIFTER_TOGGLE_IS_BYPASS = false;');
       ok(src !== read('ui/js/vocalCommandRouter.js'), 'có hằng SOUNDSHIFTER_TOGGLE_IS_BYPASS để đảo');
       const e = build({ src }); await e.sb.setSoundShifterPower(true); await e.sb.setSoundShifterPower(false);
-      ok(e.sent[0][1] === 127 && e.sent[1][1] === 0, 'đặt false -> quay về ON=127, OFF=0', e.sent); }
+      const tg = e.sent.filter((x) => x[0] === e.sb.TOGGLE_CC); ok(tg[0][1] === 127 && tg[1][1] === 0, 'đặt false -> quay về ON=127, OFF=0', e.sent); }
 
     console.log('== 4. Nối dây trong renderer.js (không đổi) ==');
     { const R = read('ui/js/renderer.js');
