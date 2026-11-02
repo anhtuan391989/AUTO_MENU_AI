@@ -54,7 +54,8 @@ ok(['bassEnergy', 'localAvg', 'maxByte', 'rms', 'dbfs', 'peak', 'vuPercent'].eve
 L = runBpm(makeSignal('noise', -76), { noFloat: true }); ok(L.dbfsFloat === L.dbfs, '4b. Analyser không có getFloatTimeDomainData → dbfsFloat = dbfs (fallback an toàn, không crash)');
 
 // ---- Bộ điều khiển thật + đồng hồ ảo, nạp bằng 2 thước đo ----
-const win = { performance: { now: () => 0 } }; vm.createContext(win); win.window = win; vm.runInContext(asSrc, win); const AS = win.AudioSource;
+const win = { performance: { now: () => 0 } }; vm.createContext(win); win.window = win; vm.runInContext(asSrc, win); win.AudioSource.createFxAutoController = ((o) => (d) => o(Object.assign({}, d, { params: Object.assign({ confirmSilenceMs: 1000 }, d.params || {}) })))(win.AudioSource.createFxAutoController); // FX-AUTO-10S: các test cơ chế này GHIM ngưỡng tắt = 1 s; ngưỡng mặc định 10 s được kiểm ở FxAuto10s01.verify.js
+const AS = win.AudioSource;
 function rig(metric, extra = {}) { // metric(frameKind) -> dBFS nạp cho controller
     const clock = { t: 0 }; const calls = []; let fx = false; let diag = [];
     const ctl = AS.createFxAutoController({ now: () => clock.t, getFxState: () => fx, applyFx: async (t) => { calls.push({ t: clock.t, target: t }); fx = t; return { ok: true }; }, onDiag: (i) => diag.push(i), params: extra.params });

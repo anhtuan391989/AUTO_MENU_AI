@@ -61,7 +61,7 @@ function env(init = {}, { portOk = true } = {}) {
   // T04/T05: MASTER độc lập
   e.sent.length = 0;
   await e.turn(A.MASTER_OUTPUT_VOLUME, 50); await e.turn(A.BEAT_INPUT_VOLUME, 40); await e.turn(A.MASTER_OUTPUT_VOLUME, 55);
-  ok(e.sent.map(s => s.n).join() === '21,20,21' && e.sent[1].v === 51 && e.sent[0].v === 64 && e.sent[2].v === 70, '[T04][T05] MASTER=CC21, MUSIC=CC20, không lẫn nhau, bộ nhớ chống trùng tách theo action', e.sent);
+  ok(e.sent.map(s => s.n).join() === '21,20,21' && e.sent[1].v === 51 && e.sent[0].v === 64 && e.sent[2].v === 68, '[T04][T05] (MASTER dùng đường cong fader từ MASTER-CURVE-01: 55→68, trước đó 70) MASTER=CC21, MUSIC=CC20, không lẫn nhau, bộ nhớ chống trùng tách theo action', e.sent);
   const m = e.st.dawMidiOutMappings[D];
   ok(m.BEAT_INPUT_VOLUME.number !== m.MASTER_OUTPUT_VOLUME.number, '[T04] 2 mapping khác số CC');
   // chống trùng + T08: 200 bước liên tục, thứ tự đúng, không mất bước

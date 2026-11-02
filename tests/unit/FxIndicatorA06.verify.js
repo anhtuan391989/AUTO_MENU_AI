@@ -15,7 +15,7 @@ function build(opts = {}) {
     const cfg = new Set(opts.configured || []); let failExec = !!opts.failExec; const intervals = [];
     const win = { performance: { now: () => 0 }, electronAPI: { sendTelemetry: (r) => telemetry.push(r) } }; win.window = win;
     win.Date = { now: () => clock.t };
-    vm.createContext(win); vm.runInContext(asSrc, win);
+    vm.createContext(win); vm.runInContext(asSrc, win); win.AudioSource.createFxAutoController = ((o) => (d) => o(Object.assign({}, d, { params: Object.assign({ confirmSilenceMs: 1000 }, d.params || {}) })))(win.AudioSource.createFxAutoController); // FX-AUTO-10S: các test cơ chế này GHIM ngưỡng tắt = 1 s; ngưỡng mặc định 10 s được kiểm ở FxAuto10s01.verify.js
     Object.assign(win, {
         document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) }, getSetting: (k, f) => (k === 'fxAutoMidiMode' ? 'toggle' : f), saveData: () => {}, console: { log() {}, warn() {}, error() {} },
         setInterval: (fn, ms) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,

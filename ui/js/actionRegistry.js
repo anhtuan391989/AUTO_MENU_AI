@@ -72,6 +72,11 @@ const ACTIONS = Object.freeze({
     // khuôn Beat/Master (B6): sẵn sàng dispatch, KHÔNG tự đặt CC, chờ user cấu hình qua Setup.
     RETUNE_SPEED_MIC1: "RETUNE_SPEED_MIC1",
     RETUNE_SPEED_MIC2: "RETUNE_SPEED_MIC2",
+    // FX-BUS-KNOB-01 — Knob FX điều khiển volume (fader) của 4 bus hiệu ứng: Delay / Verb ngắn / Verb dài / Com Verb. 1 CC riêng cho mỗi bus.
+    FX_BUS_DELAY_VOLUME: "FX_BUS_DELAY_VOLUME",
+    FX_BUS_VERB_SHORT_VOLUME: "FX_BUS_VERB_SHORT_VOLUME",
+    FX_BUS_VERB_LONG_VOLUME: "FX_BUS_VERB_LONG_VOLUME",
+    FX_BUS_COM_VERB_VOLUME: "FX_BUS_COM_VERB_VOLUME",
     // TASK AI-FX-01 — FX = các Send (track giọng hát -> bus Reverb / Delay) trên DAW. Khai báo theo khuôn
     // "trước, KHÔNG mapping mặc định": repo KHÔNG chứa bất kỳ CC/Note nào của Send, nên KHÔNG tự đặt —
     // user cấu hình trong Setup (MIDI Output Mapping). MONITOR_FX cũ vẫn giữ làm mapping Send đơn (tương thích).
@@ -173,15 +178,38 @@ const KNOB_CC_ANCHORS = (() => {
     // Menu 0/5/10/20/30/50/70/100 -> Auto-Tune 400/331/266/181/119/49/18/0. Mục tiêu: Menu v (0-100) -> Auto-Tune ≈ v (Menu 20 -> 20, Menu 100 -> 100).
     // Điểm neo [Menu, CC] suy ra bằng cách nghịch đảo số đo: AT0->CC127, AT18->CC89, AT49->CC64, AT100->CC45 (nội suy giữa CC64=49 và CC38=119; XẤP XỈ, cần đo lại).
     const retuneCurve = Object.freeze([[0, 127], [18, 89], [49, 64], [100, 45]]);
+    // MASTER-CURVE-01 — fader Main dùng CÙNG đường cong CC→dB với fader Beat (người dùng đo: MASTER 90 theo công thức cũ = CC114 = +5,7 dB, đúng bằng Beat trước FAST-02).
+    // Mục tiêu: MASTER 90 → CC97 ≈ 0 dB.
     return Object.freeze({
-        "Studio Pro 8": Object.freeze({ BEAT_INPUT_VOLUME: faderCurve, MIC1_VOLUME: faderCurve, MIC2_VOLUME: faderCurve, RETUNE_SPEED_MIC1: retuneCurve, RETUNE_SPEED_MIC2: retuneCurve }),
+        "Studio Pro 8": Object.freeze({ BEAT_INPUT_VOLUME: faderCurve, MIC1_VOLUME: faderCurve, MIC2_VOLUME: faderCurve, MASTER_OUTPUT_VOLUME: faderCurve, RETUNE_SPEED_MIC1: retuneCurve, RETUNE_SPEED_MIC2: retuneCurve }),
     });
 })();
+
+// FX-BUS-KNOB-01 — Knob FX (mặc định 50) chỉnh ĐỒNG THỜI volume 4 bus theo kiểu CỘNG/TRỪ so với mức gốc của từng bus:
+// 50 = giữ mức gốc · 0 = trừ FX_BUS_RANGE_DB dB · 100 = cộng FX_BUS_RANGE_DB dB (không vượt +10 dB là mức tối đa của fader).
+// BẢN ĐẦU (PROVISIONAL): mức gốc lấy theo Mixer của người dùng (Delay −22 · Verb ngắn −12 · Verb dài −16 · Com Verb −30 dB);
+// đường cong CC→dB: đoạn CC ≥ 64 lấy từ số đo thật của fader Beat; đoạn CC < 64 là ƯỚC LƯỢNG (chưa đo) — cần đo lại rồi chỉnh bảng FX_BUS_TAPER.
+const FX_BUS_RANGE_DB = 12;
+const FX_BUS_BASE_DB = Object.freeze({
+    FX_BUS_DELAY_VOLUME: -22, FX_BUS_VERB_SHORT_VOLUME: -12, FX_BUS_VERB_LONG_VOLUME: -16, FX_BUS_COM_VERB_VOLUME: -30
+});
+const FX_BUS_TAPER = Object.freeze([[0, -90], [16, -60], [32, -40], [48, -24], [64, -11.3], [81, -5.1], [95, -0.5], [97, 0.2], [98, 0.5], [99, 0.8], [114, 5.7], [127, 10]]);
+function fxBusKnobToCc(action, v) {
+    const target = Math.min(10, FX_BUS_BASE_DB[action] + (v - 50) / 50 * FX_BUS_RANGE_DB);
+    const t = FX_BUS_TAPER;
+    if (target <= t[0][1]) return t[0][0];
+    for (let i = 0; i < t.length - 1; i++) {
+        const [c0, d0] = t[i], [c1, d1] = t[i + 1];
+        if (target >= d0 && target <= d1) return Math.max(0, Math.min(127, Math.round(c0 + (c1 - c0) * (target - d0) / (d1 - d0))));
+    }
+    return 127;
+}
 
 function knobToCc(action, value, daw) {
     const v = Math.max(0, Math.min(100, Number(value)));
     const linear = Math.round(v * 127 / 100);
     const dawName = daw === undefined ? getSelectedDaw() : daw;
+    if (FX_BUS_BASE_DB[action] !== undefined && dawName === "Studio Pro 8") return fxBusKnobToCc(action, v);
     const anchors = (KNOB_CC_ANCHORS[dawName] || {})[action];
     if (!anchors || v < anchors[0][0]) return linear;
     let cc = anchors[anchors.length - 1][1];
@@ -294,7 +322,8 @@ async function executeAction(action, context = {}) {
             const isKnobCc = midiMap.kind === "cc" && dynamicValue !== undefined && context.reason === "knob"
                 && (action === ACTIONS.BEAT_INPUT_VOLUME || action === ACTIONS.MASTER_OUTPUT_VOLUME
                     || action === ACTIONS.MIC1_VOLUME || action === ACTIONS.MIC2_VOLUME
-                    || action === ACTIONS.RETUNE_SPEED_MIC1 || action === ACTIONS.RETUNE_SPEED_MIC2);
+                    || action === ACTIONS.RETUNE_SPEED_MIC1 || action === ACTIONS.RETUNE_SPEED_MIC2
+                    || FX_BUS_BASE_DB[action] !== undefined);
             if (isKnobCc && typeof sendMidiCC === "function") {
                 const ccValue = knobToCc(action, dynamicValue);
                 const sig = `${midiMap.kind}|${midiMap.channel || 1}|${midiMap.number}`;

@@ -7,7 +7,7 @@ const src = fs.readFileSync(path.resolve(__dirname, '../../ui/js/audioSource.js'
 const ren = fs.readFileSync(path.resolve(__dirname, '../../ui/js/renderer.js'), 'utf8');
 let fail = 0; const ok = (c, m) => { console.log(`  ${c ? '✅' : '❌'} ${m}`); if (!c) fail++; };
 const win = { performance: { now: () => 0 } }; vm.createContext(win); win.window = win;
-vm.runInContext(src, win);
+vm.runInContext(src, win); win.AudioSource.createFxAutoController = ((o) => (d) => o(Object.assign({}, d, { params: Object.assign({ confirmSilenceMs: 1000 }, d.params || {}) })))(win.AudioSource.createFxAutoController); // FX-AUTO-10S: các test cơ chế này GHIM ngưỡng tắt = 1 s; ngưỡng mặc định 10 s được kiểm ở FxAuto10s01.verify.js
 const AS = win.AudioSource;
 
 function rig(opts = {}) {

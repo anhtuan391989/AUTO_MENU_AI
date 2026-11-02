@@ -1,0 +1,111 @@
+diff --git a/tests/unit/FxAuto10s01.verify.js b/tests/unit/FxAuto10s01.verify.js
+new file mode 100644
+index 0000000..886f6af
+--- /dev/null
++++ b/tests/unit/FxAuto10s01.verify.js
+@@ -0,0 +1,26 @@
++// FX-AUTO-10S — Nút FX: có nhạc -> tự BẬT (≤ ~1 s); im lặng liên tục 10 s -> tự TẮT. Dùng audioSource.js THẬT, đồng hồ ảo, KHÔNG ghim tham số (kiểm ngưỡng mặc định).
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const win = { performance: { now: () => 0 } }; vm.createContext(win); win.window = win;
++vm.runInContext(fs.readFileSync(path.resolve(__dirname, '../../ui/js/audioSource.js'), 'utf8'), win);
++const AS = win.AudioSource;
++let pass = 0, fail = 0; const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m, x === undefined ? '' : JSON.stringify(x)); } };
++const clock = { t: 100000 }; let fx = false; const calls = [];
++const ctl = AS.createFxAutoController({ now: () => clock.t, getFxState: () => fx, applyFx: async (t) => { calls.push({ t: clock.t, target: t }); fx = t; return { ok: true }; } });
++ctl.setSourceState(true);
++const SIL = -80, MUS = -25;
++async function run(sec, db) { const end = clock.t + sec * 1000; while (clock.t < end) { clock.t += 16; ctl.feedLevel(db, clock.t); if (Math.round(clock.t / 16) % 6 === 0) ctl.tick(clock.t); await Promise.resolve(); } await Promise.resolve(); }
++(async () => {
++  ok(AS.FX_AUTO_DEFAULTS.confirmSilenceMs === 10000, 'ngưỡng tắt mặc định = 10000 ms');
++  ok(AS.FX_AUTO_DEFAULTS.confirmMusicMs <= 1000, 'ngưỡng bật vẫn nhanh (≤ 1 s)', AS.FX_AUTO_DEFAULTS.confirmMusicMs);
++  await run(12, SIL); ok(calls.length === 0 && fx === false, 'mở app im lặng: FX không bật');
++  const t0 = clock.t; await run(3, MUS); ok(fx === true && calls.length === 1 && calls[0].t - t0 <= 1000, `có nhạc -> FX BẬT sau ${calls[0] && calls[0].t - t0} ms (≤ 1000)`);
++  await run(5, SIL); ok(fx === true && calls.length === 1, 'im lặng 5 s -> FX vẫn BẬT');
++  await run(3.5, SIL); ok(fx === true && calls.length === 1, 'im lặng 8,5 s -> FX vẫn BẬT');
++  await run(3, MUS); ok(fx === true && calls.length === 1, 'nhạc quay lại sau 8 s lặng -> không tắt, không gửi thừa');
++  const t1 = clock.t; await run(12, SIL); const off = calls[1];
++  ok(fx === false && calls.length === 2 && off.target === false, 'im lặng liên tục -> FX TẮT đúng 1 lần', calls.length);
++  ok(off && off.t - t1 >= 9500 && off.t - t1 <= 11200, `TẮT sau ${off && off.t - t1} ms im lặng (đích ≈ 10000)`);
++  await run(30, SIL); ok(calls.length === 2, 'im lặng tiếp: không gửi lặp');
++  const t2 = clock.t; await run(3, MUS); ok(fx === true && calls.length === 3 && calls[2].t - t2 <= 1000, `nhạc lại -> BẬT sau ${calls[2] && calls[2].t - t2} ms`);
++  console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})();
+diff --git a/tests/unit/FxAutoA01.verify.js b/tests/unit/FxAutoA01.verify.js
+index 7e4bf25..63e4192 100644
+--- a/tests/unit/FxAutoA01.verify.js
++++ b/tests/unit/FxAutoA01.verify.js
+@@ -7,7 +7,7 @@ const src = fs.readFileSync(path.resolve(__dirname, '../../ui/js/audioSource.js'
+ const ren = fs.readFileSync(path.resolve(__dirname, '../../ui/js/renderer.js'), 'utf8');
+ let fail = 0; const ok = (c, m) => { console.log(`  ${c ? '✅' : '❌'} ${m}`); if (!c) fail++; };
+ const win = { performance: { now: () => 0 } }; vm.createContext(win); win.window = win;
+-vm.runInContext(src, win);
++vm.runInContext(src, win); win.AudioSource.createFxAutoController = ((o) => (d) => o(Object.assign({}, d, { params: Object.assign({ confirmSilenceMs: 1000 }, d.params || {}) })))(win.AudioSource.createFxAutoController); // FX-AUTO-10S: các test cơ chế này GHIM ngưỡng tắt = 1 s; ngưỡng mặc định 10 s được kiểm ở FxAuto10s01.verify.js
+ const AS = win.AudioSource;
+ 
+ function rig(opts = {}) {
+diff --git a/tests/unit/FxAutoBusFix01.verify.js b/tests/unit/FxAutoBusFix01.verify.js
+index 71517fd..4287967 100644
+--- a/tests/unit/FxAutoBusFix01.verify.js
++++ b/tests/unit/FxAutoBusFix01.verify.js
+@@ -31,7 +31,7 @@ function build({ mappings = full(), sendMode = 'ok', saved = false } = {}) {
+     vm.createContext(win);
+     win.setTimeout = (fn, ms) => { timers.push({ at: clock.t + ms, fn }); return timers.length; };
+     win.clearTimeout = (h) => { if (timers[h - 1]) timers[h - 1].fn = null; };
+-    vm.runInContext(asSrc, win);
++    vm.runInContext(asSrc, win); win.AudioSource.createFxAutoController = ((o) => (d) => o(Object.assign({}, d, { params: Object.assign({ confirmSilenceMs: 1000 }, d.params || {}) })))(win.AudioSource.createFxAutoController); // FX-AUTO-10S: các test cơ chế này GHIM ngưỡng tắt = 1 s; ngưỡng mặc định 10 s được kiểm ở FxAuto10s01.verify.js
+     Object.assign(win, {
+         document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) },
+         getSetting: (k, f) => (store[k] === undefined || store[k] === '' ? f : store[k]), setSetting: (k, v) => { store[k] = v; }, saveData() {},
+diff --git a/tests/unit/FxIndicatorA06.verify.js b/tests/unit/FxIndicatorA06.verify.js
+index 0503405..d6d3b0f 100644
+--- a/tests/unit/FxIndicatorA06.verify.js
++++ b/tests/unit/FxIndicatorA06.verify.js
+@@ -15,7 +15,7 @@ function build(opts = {}) {
+     const cfg = new Set(opts.configured || []); let failExec = !!opts.failExec; const intervals = [];
+     const win = { performance: { now: () => 0 }, electronAPI: { sendTelemetry: (r) => telemetry.push(r) } }; win.window = win;
+     win.Date = { now: () => clock.t };
+-    vm.createContext(win); vm.runInContext(asSrc, win);
++    vm.createContext(win); vm.runInContext(asSrc, win); win.AudioSource.createFxAutoController = ((o) => (d) => o(Object.assign({}, d, { params: Object.assign({ confirmSilenceMs: 1000 }, d.params || {}) })))(win.AudioSource.createFxAutoController); // FX-AUTO-10S: các test cơ chế này GHIM ngưỡng tắt = 1 s; ngưỡng mặc định 10 s được kiểm ở FxAuto10s01.verify.js
+     Object.assign(win, {
+         document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) }, getSetting: (k, f) => (k === 'fxAutoMidiMode' ? 'toggle' : f), saveData: () => {}, console: { log() {}, warn() {}, error() {} },
+         setInterval: (fn, ms) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,
+diff --git a/tests/unit/MenuFxAutoOff.verify.js b/tests/unit/MenuFxAutoOff.verify.js
+index 7975cb5..0bdbfd4 100644
+--- a/tests/unit/MenuFxAutoOff.verify.js
++++ b/tests/unit/MenuFxAutoOff.verify.js
+@@ -54,7 +54,8 @@ ok(['bassEnergy', 'localAvg', 'maxByte', 'rms', 'dbfs', 'peak', 'vuPercent'].eve
+ L = runBpm(makeSignal('noise', -76), { noFloat: true }); ok(L.dbfsFloat === L.dbfs, '4b. Analyser không có getFloatTimeDomainData → dbfsFloat = dbfs (fallback an toàn, không crash)');
+ 
+ // ---- Bộ điều khiển thật + đồng hồ ảo, nạp bằng 2 thước đo ----
+-const win = { performance: { now: () => 0 } }; vm.createContext(win); win.window = win; vm.runInContext(asSrc, win); const AS = win.AudioSource;
++const win = { performance: { now: () => 0 } }; vm.createContext(win); win.window = win; vm.runInContext(asSrc, win); win.AudioSource.createFxAutoController = ((o) => (d) => o(Object.assign({}, d, { params: Object.assign({ confirmSilenceMs: 1000 }, d.params || {}) })))(win.AudioSource.createFxAutoController); // FX-AUTO-10S: các test cơ chế này GHIM ngưỡng tắt = 1 s; ngưỡng mặc định 10 s được kiểm ở FxAuto10s01.verify.js
++const AS = win.AudioSource;
+ function rig(metric, extra = {}) { // metric(frameKind) -> dBFS nạp cho controller
+     const clock = { t: 0 }; const calls = []; let fx = false; let diag = [];
+     const ctl = AS.createFxAutoController({ now: () => clock.t, getFxState: () => fx, applyFx: async (t) => { calls.push({ t: clock.t, target: t }); fx = t; return { ok: true }; }, onDiag: (i) => diag.push(i), params: extra.params });
+diff --git a/tests/unit/MenuFxFix.verify.js b/tests/unit/MenuFxFix.verify.js
+index b184373..6c7abb9 100644
+--- a/tests/unit/MenuFxFix.verify.js
++++ b/tests/unit/MenuFxFix.verify.js
+@@ -22,7 +22,7 @@ function build(opts = {}) {
+     const win = { performance: { now: () => 0 }, electronAPI: { sendTelemetry: (r) => telemetry.push(r) } }; win.window = win;
+     win.Date = { now: () => clock.t };
+     vm.createContext(win); win.setTimeout = (fn, ms) => { timers.push({ at: clock.t + ms, fn }); return timers.length; }; win.clearTimeout = (h) => { if (timers[h - 1]) timers[h - 1].fn = null; };
+-    vm.runInContext(asSrc, win);
++    vm.runInContext(asSrc, win); win.AudioSource.createFxAutoController = ((o) => (d) => o(Object.assign({}, d, { params: Object.assign({ confirmSilenceMs: 1000 }, d.params || {}) })))(win.AudioSource.createFxAutoController); // FX-AUTO-10S: các test cơ chế này GHIM ngưỡng tắt = 1 s; ngưỡng mặc định 10 s được kiểm ở FxAuto10s01.verify.js
+     Object.assign(win, {
+         document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) }, getSetting: (k, f) => (k === 'fxAutoMidiMode' ? 'toggle' : f), saveData: () => {}, console: { log() {}, warn() {}, error() {} },
+         setInterval: (fn) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,
+diff --git a/ui/js/audioSource.js b/ui/js/audioSource.js
+index 490eaa6..988cf59 100644
+--- a/ui/js/audioSource.js
++++ b/ui/js/audioSource.js
+@@ -411,7 +411,7 @@
+         // Bật: cửa sổ 500 ms + chu kỳ tick 100 ms (renderer) => tối đa ≈ 0,5–0,7 s. Tắt: cửa sổ 1000 ms => ≈ 1,0–1,15 s.
+         confirmMusicMs: 500,    // cần tín hiệu liên tục gần như đủ trong khoảng này mới coi là có nhạc
+         confirmMusicRatio: 0.8, // tỷ lệ khung phải vượt onDbfs trong cửa sổ xác nhận có nhạc
+-        confirmSilenceMs: 1000, // im lặng liên tục thế này thì tắt (HỆ QUẢ: khoảng lặng/chuyển bài > 1 s sẽ tắt rồi bật lại FX)
++        confirmSilenceMs: 10000, // FX-AUTO-10S: im lặng liên tục 10 s thì TẮT FX (trước đây 1 s). Có nhạc lại thì BẬT trong ≤ 1 s như cũ (confirmMusicMs). HỆ QUẢ: khoảng lặng/chuyển bài < 10 s KHÔNG tắt FX.
+         diagMs: 30000,          // MENU-FX-AUTO-OFF: chu kỳ ghi log chẩn đoán mức dBFS (chỉ để quan sát, không ảnh hưởng quyết định)
+         manualHoldMs: 60000,    // MENU-FX-FIX: người dùng bấm tay => Auto KHÔNG ghi đè trong khoảng này, hết hạn thì tiếp quản theo trạng thái nhạc HIỆN TẠI
+         silenceMaxAboveRatio: 0.02, // tối đa 2% khung vượt offDbfs trong cửa sổ im lặng (chịu xung nhiễu lẻ)

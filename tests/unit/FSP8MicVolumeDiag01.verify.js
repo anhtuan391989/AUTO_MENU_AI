@@ -70,7 +70,7 @@ function env(init = {}, { portOk = true } = {}) {
     ok(e.sent.length === 1 && e.sent[0].n === 20 && e.sent[0].ch === 14 && e.sent[0].v === 72, '[2] sau khi bấm MIC1/MIC2/MUSIC: MUSIC 60 vẫn → CC20 = 72 kênh 15 (knob không bị ảnh hưởng)', e.sent);
     e.sent.length = 0;
     await e.turn(AR.ACTIONS.MASTER_OUTPUT_VOLUME, 90);
-    ok(e.sent.length === 1 && e.sent[0].n === 21 && e.sent[0].v === 114, '[2] MASTER 90 → CC21 = 114 (không đổi, công thức cũ)', e.sent);
+    ok(e.sent.length === 1 && e.sent[0].n === 21 && e.sent[0].v === 97, '[2] MASTER 90 → CC21 = 97 (MASTER-CURVE-01: đường cong fader như Beat; trước đó 114 = +5,7 dB)', e.sent);
   }
   // [3] Điểm duy nhất của Menu có thể "nuốt" lệnh: chống trùng theo giá trị CC (không theo trạng thái DAW) — ghi nhận, KHÔNG đổi
   {

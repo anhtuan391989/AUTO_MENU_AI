@@ -1072,6 +1072,8 @@ const knobData = [
     { id: "fxSoundVolKnob", valueId: "fxSoundVolValue", value: 50, defaultValue: 50 },
     // MIC-VOLUME-KNOB-01 — âm lượng track Mic / Không Dây. Núm KHÔNG có sẵn trong index.html: được tạo bằng JS (initMicVolumePopups)
     // và chỉ hiện khi bấm CHUỘT PHẢI vào nút MIC 1 / MIC 2. Mặc định 90 = 0 dB (cùng đường cong fader Beat).
+    // FX-BUS-KNOB-01 — Knob "FX" (index.html: #fxMasterKnob) = cộng/trừ volume 4 bus hiệu ứng trong DAW. 50 = giữ mức gốc.
+    { id: "fxMasterKnob", valueId: "fxMasterValue", value: 50, defaultValue: 50 },
     { id: "mic1VolKnob", valueId: "mic1VolValue", value: 90, defaultValue: 90 },
     { id: "mic2VolKnob", valueId: "mic2VolValue", value: 90, defaultValue: 90 }
 ];
@@ -3117,7 +3119,17 @@ document.addEventListener("DOMContentLoaded", () => {
         // MIDI ở đây sẽ SAI theo đúng bằng chứng đã có (xem TASK_B6_REPORT.md/B5). Audio
         // engine nội bộ chưa tồn tại trong repo — BLOCKED, không tự bịa hướng khác.
     };
+    // FX-BUS-KNOB-01 — 1 Knob -> NHIỀU action (bus Delay/Verb ngắn/Verb dài/Com Verb). Tách map riêng để không đổi KNOB_ID_TO_ACTION (1-1).
+    const KNOB_ID_TO_ACTION_GROUP = {
+        fxMasterKnob: ["FX_BUS_DELAY_VOLUME", "FX_BUS_VERB_SHORT_VOLUME", "FX_BUS_VERB_LONG_VOLUME", "FX_BUS_COM_VERB_VOLUME"]
+    };
     function dispatchKnobVolume(knobId, value) {
+        const group = KNOB_ID_TO_ACTION_GROUP[knobId];
+        if (group && window.ActionRegistry?.executeAction) {
+            group.forEach((name) => window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[name], { reason: "knob", value })
+                .catch((err) => console.error(`[KnobControl] ${name} lỗi:`, err)));
+            return;
+        }
         // TASK A20 — clapKnob/laughKnob: set volume THẲNG vào SoundEffectEngine (Internal
         // Audio Backend), độc lập hoàn toàn với nhánh MIDI bên dưới (mục 6/7). Guard bằng
         // typeof (không phải !window...) vì KNOB_ID_TO_SOUND_EFFECT/SoundEffectEngine là

@@ -31,7 +31,7 @@ function build({ mappings = full(), sendMode = 'ok', saved = false } = {}) {
     vm.createContext(win);
     win.setTimeout = (fn, ms) => { timers.push({ at: clock.t + ms, fn }); return timers.length; };
     win.clearTimeout = (h) => { if (timers[h - 1]) timers[h - 1].fn = null; };
-    vm.runInContext(asSrc, win);
+    vm.runInContext(asSrc, win); win.AudioSource.createFxAutoController = ((o) => (d) => o(Object.assign({}, d, { params: Object.assign({ confirmSilenceMs: 1000 }, d.params || {}) })))(win.AudioSource.createFxAutoController); // FX-AUTO-10S: các test cơ chế này GHIM ngưỡng tắt = 1 s; ngưỡng mặc định 10 s được kiểm ở FxAuto10s01.verify.js
     Object.assign(win, {
         document: { getElementById: (id) => (id === 'fxBtn' ? btn : null) },
         getSetting: (k, f) => (store[k] === undefined || store[k] === '' ? f : store[k]), setSetting: (k, v) => { store[k] = v; }, saveData() {},

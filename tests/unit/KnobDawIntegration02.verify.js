@@ -64,7 +64,7 @@ function env(init = {}, { portOk = true } = {}) {
     for (const [a, num] of Object.entries(FAMILY(d))) {
       e.sent.length = 0;
       // FSP8-MIDI-SYNC-FAST-02 (THAY ĐỔI SPEC CÓ CHỦ ĐÍCH): riêng MUSIC trên Studio Pro 8 dùng neo 50→64, 90→97, 100→127 => 75→85 (không còn 95). Mọi Knob/DAW khác giữ nguyên.
-      const calib = d === 'Studio Pro 8' && a === 'BEAT_INPUT_VOLUME';
+      const calib = d === 'Studio Pro 8' && (a === 'BEAT_INPUT_VOLUME' || a === 'MASTER_OUTPUT_VOLUME'); // MASTER-CURVE-01: Master dùng cùng đường cong fader
       const retuneFsp8 = d === 'Studio Pro 8' && (a === 'RETUNE_SPEED_MIC1' || a === 'RETUNE_SPEED_MIC2'); // RETUNE-SPEED-CURVE-01: đường cong riêng (đảo chiều)
       const RT = { 0: 127, 25: 83, 50: 64, 75: 54, 100: 45 };
       for (const [v, cc0] of [[0, 0], [25, 32], [50, 64], [75, calib ? 85 : 95], [100, 127], [50, 64], [0, 0]]) {
