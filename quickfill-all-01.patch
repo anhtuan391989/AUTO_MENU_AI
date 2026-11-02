@@ -1,0 +1,173 @@
+diff --git a/tests/unit/DawQuickFill01.verify.js b/tests/unit/DawQuickFill01.verify.js
+index 523f58b..6b0b4ac 100644
+--- a/tests/unit/DawQuickFill01.verify.js
++++ b/tests/unit/DawQuickFill01.verify.js
+@@ -134,7 +134,7 @@ const KNOB_S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_
+ {
+   const e = env({});
+   ok(e.click('live').blocked === 'no-daw' && e.click('knob').blocked === 'no-daw' && e.st.dawMidiOutMappings === undefined, '[7] chưa chọn DAW -> không điền được, không ghi gì');
+-  ok(/btnFillLiveCcOff" disabled/.test(setup) && /btnFillKnobCcOff" disabled/.test(setup) && /Cần chọn DAW trước khi điền bộ CC gợi ý/.test(setup), '[7] static: nút bị vô hiệu hoá + thông báo cần chọn DAW');
++  ok(/btnFillAllCcOff" disabled/.test(setup) && /Cần chọn DAW trước khi điền bộ CC gợi ý/.test(setup), '[7] static: nút bị vô hiệu hoá + thông báo cần chọn DAW');
+   ok(/const dawNow = getSetting\("selectedDAW"\);\s*if \(!dawNow\) \{ alert\("Cần chọn DAW/.test(setup), '[7] static: handler đọc DAW tại lúc bấm và chặn khi không có DAW');
+ }
+ // 8 DAW chưa có profile
+diff --git a/tests/unit/DawQuickFillAll01.verify.js b/tests/unit/DawQuickFillAll01.verify.js
+new file mode 100644
+index 0000000..dadc0f9
+--- /dev/null
++++ b/tests/unit/DawQuickFillAll01.verify.js
+@@ -0,0 +1,56 @@
++// QUICKFILL-ALL-01 — MỘT nút "Fender Studio Pro 8 MIDI" gộp LIVE + KNOB + CHỌN TRACK + MIC VOLUME + KEY/SCALE (logic thật từ ui/js/setup.js, mô phỏng phần mềm).
++const fs = require('fs'), path = require('path');
++const setup = fs.readFileSync(path.join(__dirname, '../../ui/js/setup.js'), 'utf8');
++let pass = 0, fail = 0;
++const ok = (c, n, d) => { if (c) { pass++; console.log('  OK  ', n); } else { fail++; console.log('  FAIL', n, d ? JSON.stringify(d) : ''); } };
++const a1 = setup.indexOf('const DAW_MIDI_ACTIONS = ['), a2 = setup.indexOf('function isMouseControlEnabledLocal');
++const b1 = setup.indexOf('function getDawMidiOutMapping'), b2 = setup.indexOf('// S8 — 3 hàng PLAY/STOP/RECORD');
++const code = setup.slice(a1, a2) + '\n' + setup.slice(b1, b2) + '\nreturn {DAW_MIDI_ACTIONS, DAW_MIDI_PROFILES, DAW_QF_ALL, resolveDawProfile, dawProfileAllInOne, planDawProfileFill, applyDawProfileFill, getDawMidiOutMapping};';
++function env(initial) {
++  const st = JSON.parse(JSON.stringify(initial || {}));
++  const api = new Function('getSetting', 'setSetting', code)((k) => st[k], (k, v) => { st[k] = JSON.parse(JSON.stringify(v)); });
++  const A = api.DAW_MIDI_ACTIONS.map((x) => x.action);
++  const click = () => { // giống runQuickFill(DAW_QF_ALL)
++    const base = api.resolveDawProfile(st.selectedDAW); if (!base) return { blocked: 'no-profile' };
++    const plan = api.planDawProfileFill(api.dawProfileAllInOne(base), api.DAW_QF_ALL, api.getDawMidiOutMapping, A);
++    if (plan.errors.length) return { blocked: 'errors', plan }; if (plan.conflicts.length) return { blocked: 'conflict', plan };
++    api.applyDawProfileFill(st.selectedDAW, plan, () => st.dawMidiOutMappings, (all) => { st.dawMidiOutMappings = JSON.parse(JSON.stringify(all)); });
++    return { done: true, plan };
++  };
++  return { st, api, A, click };
++}
++console.log('== 1. Một lần bấm lưu đủ cả 5 bộ ==');
++{
++  const e = env({ selectedDAW: 'Studio Pro 8' }); const r = e.click(); const m = e.st.dawMidiOutMappings['Studio Pro 8'] || {};
++  const base = e.api.resolveDawProfile('Studio Pro 8');
++  const expect = Object.values(base.bundles).reduce((n, b) => n + Object.keys(b.mappings).length, 0);
++  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 2 + 3, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 2 MIC VOLUME + 3 KEY/SCALE)', Object.keys(m).length);
++  ok(m.MUSIC_ON && m.BEAT_INPUT_VOLUME && m.MUSIC_SELECT && m.MIC1_VOLUME && m.KEY_SCALE_MINOR && m.KEY_ROOT, 'có mặt đủ đại diện từng bộ');
++  ok(Object.values(m).every((x) => x.source === 'USER_DEFINED'), 'đều đánh dấu USER_DEFINED');
++  ok(base.quickFillLabel === 'Fender Studio Pro 8 MIDI', 'tên nút = "Fender Studio Pro 8 MIDI"');
++}
++console.log('== 2. Studio One 7 cũng dùng cùng bộ; Cubase chỉ LIVE+KNOB; DAW lạ bị chặn ==');
++{
++  ok(env({ selectedDAW: 'Studio One 7' }).click().done === true, 'Studio One 7 -> lưu được');
++  const c = env({ selectedDAW: 'Cubase 13' }); const r = c.click();
++  ok(r.done && Object.keys(c.st.dawMidiOutMappings['Cubase 13']).length === 12, 'Cubase -> 12 mapping (8 LIVE + 4 KNOB)');
++  ok(env({ selectedDAW: 'Logic' }).click().blocked === 'no-profile', 'DAW không có bộ -> chặn');
++}
++console.log('== 3. All-or-nothing, không đụng mapping khác, idempotent ==');
++{
++  const e = env({ selectedDAW: 'Studio Pro 8', dawMidiOutMappings: { 'Studio Pro 8': { DAW_PLAY: { kind: 'cc', channel: 1, number: 90, value: 127 } }, 'Cubase 13': { DAW_PLAY: { kind: 'cc', channel: 1, number: 5, value: 1 } } } });
++  e.click();
++  ok(e.st.dawMidiOutMappings['Studio Pro 8'].DAW_PLAY.number === 90 && e.st.dawMidiOutMappings['Cubase 13'].DAW_PLAY.number === 5, 'PLAY của DAW này và mapping DAW khác giữ nguyên');
++  const before = JSON.stringify(e.st.dawMidiOutMappings); e.click();
++  ok(JSON.stringify(e.st.dawMidiOutMappings) === before, 'bấm lần 2: kết quả y hệt');
++  const f = env({ selectedDAW: 'Studio Pro 8', dawMidiOutMappings: { 'Studio Pro 8': { DAW_PLAY: { kind: 'cc', channel: 16, number: 102, value: 127 } } } });
++  const r = f.click();
++  ok(r.blocked === 'conflict' && !(f.st.dawMidiOutMappings['Studio Pro 8'].MUSIC_ON), 'PLAY đang dùng CC102 ch16 -> chặn toàn bộ, không lưu mapping nào');
++}
++console.log('== 4. Giao diện: chỉ còn 1 nút gộp (JS, không sửa HTML) ==');
++{
++  ok(/id="btnFillAllCc"/.test(setup) && !/id="btnFill(Live|Knob|Select|MicVol|Scale)Cc"/.test(setup), 'chỉ còn btnFillAllCc, 5 nút cũ đã bỏ');
++  ok(/id="btnClearLiveCc"/.test(setup), 'nút "Xoá 8 mapping ON/OFF" giữ nguyên');
++  ok(!/sendMidi|midi-send/.test(/function runQuickFill[\s\S]*?\n        }\n/.exec(setup)[0]), 'điền nhanh vẫn chỉ LƯU mapping, không gửi MIDI');
++}
++console.log(`\nKẾT QUẢ: ${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
+diff --git a/tests/unit/MidiDawControl01.verify.js b/tests/unit/MidiDawControl01.verify.js
+index 56b331a..ae09e6f 100644
+--- a/tests/unit/MidiDawControl01.verify.js
++++ b/tests/unit/MidiDawControl01.verify.js
+@@ -304,7 +304,7 @@ function fakeBtn(initial = []) {
+         const suggested = m ? new Function('return ' + m[1])() : null;
+         check('Bộ CC gợi ý trong Setup khớp bảng 8 lệnh của task (102–109), kênh 16, value 127',
+             suggested && JSON.stringify(suggested) === JSON.stringify(TABLE) && /DAW_STATE_SUGGESTED_CHANNEL = 16/.test(setupSrc) && /DAW_STATE_SUGGESTED_VALUE = 127/.test(setupSrc), suggested);
+-        check('Bộ gợi ý CHỈ áp dụng khi người dùng bấm nút + xác nhận (confirm), không tự lưu lúc mở', /confirm\(msg\)/.test(setupSrc) && /btnFillLiveCc"\)\.addEventListener\("click"/.test(setupSrc));
++        check('Bộ gợi ý CHỈ áp dụng khi người dùng bấm nút + xác nhận (confirm), không tự lưu lúc mở', /confirm\(msg\)/.test(setupSrc) && /btnFillAllCc"\)\.addEventListener\("click"/.test(setupSrc));
+         check('Có nút khôi phục: xoá CHỈ 8 mapping ON/OFF (setDawMidiOutMapping(a, null)) sau confirm', /btnClearLiveCc/.test(setupSrc) && /DAW_STATE_ACTION_SET\.forEach\(\(a\) => setDawMidiOutMapping\(a, null\)\)/.test(setupSrc));
+         // chặn trùng
+         const a = setupSrc.indexOf('const DAW_STATE_ACTION_SET'); const b = setupSrc.indexOf('// Hai action ON/OFF');
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index d0af283..045e4fc 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -744,6 +744,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
+     "studio-one": Object.freeze({
+         id: "studio-one",
+         name: "Studio One / Fender Studio Pro",
++        quickFillLabel: "Fender Studio Pro 8 MIDI", // QUICKFILL-ALL-01: tên MỘT nút gộp cả 5 bộ (LIVE + KNOB + CHỌN TRACK + MIC VOLUME + KEY/SCALE)
+         match: /^(studio one|studio pro|fender)/i,
+         origin: "Bộ CC gợi ý của AUTO_MENU_AI (LIVE-MIDI-FSP8-02 / MENU-KNOB-MIDI-COMPLETION-01). Cần gán CC vào macro/fader trong Control Surface (MIDI Learn).",
+         versionStatus: Object.freeze({
+@@ -770,6 +771,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
+     "cubase": Object.freeze({
+         id: "cubase",
+         name: "Cubase",
++        quickFillLabel: "Cubase MIDI",
+         match: /^cubase/i,
+         origin: "Quy ước CC gợi ý của AUTO_MENU_AI — KHÔNG phải mặc định của Cubase (tránh CC 7/10/12/13/23/24/64 đã thấy trong Generic Remote/MIDI Remote). Cubase không tự nhận: phải gán trong MIDI Remote hoặc Generic Remote.",
+         versionStatus: Object.freeze({ "cubase 13": "CHỈ CÓ BẰNG CHỨNG FILE, CHƯA CHẠY THẬT" }),
+@@ -792,6 +794,14 @@ function dawProfileVersionStatus(profile, dawLabel) {
+     if (!profile) return "";
+     return (profile.versionStatus && profile.versionStatus[String(dawLabel || "").trim().toLowerCase()]) || profile.defaultStatus || "";
+ }
++// QUICKFILL-ALL-01 — gộp mọi bộ của 1 profile thành MỘT bộ ảo để điền/lưu một lần (all-or-nothing, kiểm trùng CC xuyên các bộ).
++const DAW_QF_ALL = "all";
++function dawProfileAllInOne(profile) {
++    const mappings = {};
++    let count = 0;
++    for (const b of Object.values(profile.bundles || {})) for (const [a, m] of Object.entries(b.mappings)) { mappings[a] = m; count++; }
++    return { ...profile, bundles: Object.freeze({ [DAW_QF_ALL]: Object.freeze({ title: profile.quickFillLabel || profile.name, count, mappings: Object.freeze(mappings) }) }) };
++}
+ // Kiểm TOÀN BỘ bundle trước khi lưu. Trả về mảng lỗi (rỗng = hợp lệ).
+ function validateDawProfileBundle(bundle, validActions) {
+     const errs = [];
+@@ -861,7 +871,7 @@ function initDawMidiOutputMappingSection() {
+         }
+         if (!daw) {
+             container.innerHTML = '<p class="hint-text">Chưa chọn DAW ở tab "Chọn DAW" — chưa thể cấu hình MIDI Output.</p>'
+-                + '<p class="hint-text"><button class="setup-btn" id="btnFillLiveCcOff" disabled>Điền + lưu bộ LIVE gợi ý</button> <button class="setup-btn" id="btnFillKnobCcOff" disabled>Điền + lưu bộ KNOB gợi ý</button> Cần chọn DAW trước khi điền bộ CC gợi ý.</p>';
++                + '<p class="hint-text"><button class="setup-btn" id="btnFillAllCcOff" disabled>Điền + lưu bộ gợi ý</button> Cần chọn DAW trước khi điền bộ CC gợi ý.</p>';
+             return;
+         }
+ 
+@@ -876,11 +886,7 @@ function initDawMidiOutputMappingSection() {
+             <b>8 lệnh ON/OFF điều khiển DAW (MUSIC / MIC 1 / MIC 2 / FX):</b> ở cuối danh sách. Mỗi nút Menu gửi lệnh theo <b>trạng thái đích sau cú bấm</b>.
+             Menu chỉ <b>gửi</b> lệnh — <b>không đọc được trạng thái thật</b> của DAW, nên lúc mở app hoặc khi bạn đổi trực tiếp trong DAW, nút Menu có thể lệch DAW.
+             <br>${profile ? `<span id="quickFillProfile">Bộ gợi ý: <b>${profile.name}</b>${verStatus ? ` — ${verStatus}` : ""}. ${profile.origin} Điền ở đây chỉ LƯU mapping của Menu — DAW chưa được điều khiển cho đến khi bạn gán trong DAW.</span>
+-            <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ LIVE gợi ý — ${profile.name}</button>
+-            <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>
+-            ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}
+-            ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}
+-            ${profile.bundles.scale ? `<button class="setup-btn" id="btnFillScaleCc">Điền + lưu bộ KEY + SCALE gợi ý — ${profile.name}</button>` : ""}`
++            <br><button class="setup-btn" id="btnFillAllCc">Điền + lưu bộ ${profile.quickFillLabel || profile.name} gợi ý</button>`
+                 : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
+             <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
+             <span id="liveCcStatus"></span>`;
+@@ -889,8 +895,9 @@ function initDawMidiOutputMappingSection() {
+         function runQuickFill(bundleId) {
+             const dawNow = getSetting("selectedDAW");
+             if (!dawNow) { alert("Cần chọn DAW trước khi điền bộ CC gợi ý."); return; }
+-            const prof = resolveDawProfile(dawNow);
+-            if (!prof) { alert("Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công."); return; }
++            const baseProf = resolveDawProfile(dawNow);
++            if (!baseProf) { alert("Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công."); return; }
++            const prof = bundleId === DAW_QF_ALL ? dawProfileAllInOne(baseProf) : baseProf;
+             const plan = planDawProfileFill(prof, bundleId, getDawMidiOutMapping, DAW_MIDI_ACTIONS.map((x) => x.action));
+             if (plan.errors.length) { alert("Không lưu bộ gợi ý (bộ CC lỗi): " + plan.errors.join("; ")); return; }
+             const liveClash = plan.conflicts;
+@@ -905,14 +912,7 @@ function initDawMidiOutputMappingSection() {
+             renderMappingOverview();
+         }
+         if (profile) {
+-            liveBox.querySelector("#btnFillLiveCc").addEventListener("click", () => runQuickFill("live"));
+-            liveBox.querySelector("#btnFillKnobCc").addEventListener("click", () => runQuickFill("knob"));
+-            const selBtn = liveBox.querySelector("#btnFillSelectCc");
+-            if (selBtn) selBtn.addEventListener("click", () => runQuickFill("select"));
+-            const micVolBtn = liveBox.querySelector("#btnFillMicVolCc");
+-            if (micVolBtn) micVolBtn.addEventListener("click", () => runQuickFill("micvol"));
+-            const scaleBtn = liveBox.querySelector("#btnFillScaleCc");
+-            if (scaleBtn) scaleBtn.addEventListener("click", () => runQuickFill("scale"));
++            liveBox.querySelector("#btnFillAllCc").addEventListener("click", () => runQuickFill(DAW_QF_ALL));
+         }
+ 
+         // Khôi phục: xoá CHỈ 8 mapping ON/OFF mới; mapping cũ (toggle MONITOR_*, Send, PLAY...) không bị đụng.

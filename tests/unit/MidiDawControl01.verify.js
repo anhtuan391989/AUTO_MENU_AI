@@ -304,7 +304,7 @@ function fakeBtn(initial = []) {
         const suggested = m ? new Function('return ' + m[1])() : null;
         check('Bộ CC gợi ý trong Setup khớp bảng 8 lệnh của task (102–109), kênh 16, value 127',
             suggested && JSON.stringify(suggested) === JSON.stringify(TABLE) && /DAW_STATE_SUGGESTED_CHANNEL = 16/.test(setupSrc) && /DAW_STATE_SUGGESTED_VALUE = 127/.test(setupSrc), suggested);
-        check('Bộ gợi ý CHỈ áp dụng khi người dùng bấm nút + xác nhận (confirm), không tự lưu lúc mở', /confirm\(msg\)/.test(setupSrc) && /btnFillLiveCc"\)\.addEventListener\("click"/.test(setupSrc));
+        check('Bộ gợi ý CHỈ áp dụng khi người dùng bấm nút + xác nhận (confirm), không tự lưu lúc mở', /confirm\(msg\)/.test(setupSrc) && /btnFillAllCc"\)\.addEventListener\("click"/.test(setupSrc));
         check('Có nút khôi phục: xoá CHỈ 8 mapping ON/OFF (setDawMidiOutMapping(a, null)) sau confirm', /btnClearLiveCc/.test(setupSrc) && /DAW_STATE_ACTION_SET\.forEach\(\(a\) => setDawMidiOutMapping\(a, null\)\)/.test(setupSrc));
         // chặn trùng
         const a = setupSrc.indexOf('const DAW_STATE_ACTION_SET'); const b = setupSrc.indexOf('// Hai action ON/OFF');

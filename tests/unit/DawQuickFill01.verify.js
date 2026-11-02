@@ -134,7 +134,7 @@ const KNOB_S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_
 {
   const e = env({});
   ok(e.click('live').blocked === 'no-daw' && e.click('knob').blocked === 'no-daw' && e.st.dawMidiOutMappings === undefined, '[7] chưa chọn DAW -> không điền được, không ghi gì');
-  ok(/btnFillLiveCcOff" disabled/.test(setup) && /btnFillKnobCcOff" disabled/.test(setup) && /Cần chọn DAW trước khi điền bộ CC gợi ý/.test(setup), '[7] static: nút bị vô hiệu hoá + thông báo cần chọn DAW');
+  ok(/btnFillAllCcOff" disabled/.test(setup) && /Cần chọn DAW trước khi điền bộ CC gợi ý/.test(setup), '[7] static: nút bị vô hiệu hoá + thông báo cần chọn DAW');
   ok(/const dawNow = getSetting\("selectedDAW"\);\s*if \(!dawNow\) \{ alert\("Cần chọn DAW/.test(setup), '[7] static: handler đọc DAW tại lúc bấm và chặn khi không có DAW');
 }
 // 8 DAW chưa có profile
