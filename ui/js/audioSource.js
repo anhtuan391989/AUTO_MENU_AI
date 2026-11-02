@@ -121,6 +121,7 @@
        DAW_MASTER KHÔNG dùng factory này (xem createDawMasterSource riêng, không
        có capture thật trong B58).
        --------------------------------------------------------- */
+    const LOOPBACK_DEVICE_ID = "loopback:system"; // TASK A78 — id đặc biệt, chỉ SYSTEM_AUDIO dùng
     function createMediaDeviceSource(sourceType, resolveDeviceId, options = {}) {
         let state = AudioSourceState.NO_DEVICE;
         let stream = null;
@@ -222,7 +223,15 @@
                 const constraints = deviceId
                     ? { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
                     : { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
-                stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+                if (options.allowLoopback && deviceId === LOOPBACK_DEVICE_ID) {
+                    // TASK A78 — Speaker01 (loopback): lấy audio phát ra của Windows, bỏ track video.
+                    const ds = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                    ds.getVideoTracks().forEach((t) => { try { t.stop(); } catch (e) {} ds.removeTrack(t); });
+                    if (!ds.getAudioTracks().length) throw new Error("LOOPBACK_NO_AUDIO_TRACK");
+                    stream = ds;
+                } else {
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+                }
 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 if (audioContext.state !== "running") await audioContext.resume();
@@ -377,6 +386,7 @@
         return createMediaDeviceSource(AudioSourceType.SYSTEM_AUDIO, getSystemAudioDeviceId, {
             fftSize: 2048,
             requireExplicitDevice: true,
+            allowLoopback: true, // TASK A78 — CHỈ SYSTEM_AUDIO; MIC không bao giờ dùng loopback
             exposeRawNodeForAdapter: true, // DUY NHẤT SYSTEM_AUDIO được phép — xem ghi chú ở trên
             autoReconnect: true, // TASK C62 — CHỈ SYSTEM_AUDIO tự reconnect (đúng phạm vi bug đã audit
                                   // ở C61: Key/BPM/Mod không được treo vĩnh viễn sau khi mất thiết bị).
@@ -616,7 +626,7 @@
         createSystemAudioSource,
         createDawMasterSource,
         createFxAutoController, // TASK AI-FX-01
-        createFxSendGroup,
+        createFxSendGroup, LOOPBACK_DEVICE_ID,
         FxMusicState, FxActionState, FX_AUTO_DEFAULTS,
         getSystemAudioDeviceId, // export để renderer.js dùng lại đúng 1 nguồn sự thật
         setSystemAudioDeviceId, // TASK A65 — cấu hình thủ công (DevTools) cho tới khi có Setup UI riêng

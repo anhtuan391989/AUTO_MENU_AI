@@ -1,6 +1,6 @@
 const { MenuKeyClient } = require('./menu-api-client.js');
 const keyServer = new MenuKeyClient("https://menu-key-server.matuotluuly.workers.dev");
-const { app, BrowserWindow, ipcMain, dialog, session, shell, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, session, shell, screen, desktopCapturer } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { execFile } = require("child_process");
@@ -164,7 +164,7 @@ app.whenReady().then(async () => {
     // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
     // App này cần quyền mic để liệt kê tên soundcard, và quyền midi để gửi MIDI sang DAW.
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-        if (permission === "media" || permission === "midi" || permission === "midiSysex") {
+        if (permission === "media" || permission === "display-capture" || permission === "midi" || permission === "midiSysex") {
             callback(true);
             return;
         }
@@ -172,7 +172,17 @@ app.whenReady().then(async () => {
     });
 
     session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
-        return permission === "media" || permission === "midi" || permission === "midiSysex";
+        return permission === "media" || permission === "display-capture" || permission === "midi" || permission === "midiSysex";
+    });
+
+    // TASK A78 — SYSTEM_AUDIO = "Speaker01 (loopback)": đọc đúng đường âm thanh PHÁT RA của Windows
+    // (thiết bị phát mặc định = Speaker01 / Mix01 của DAW) qua WASAPI loopback. Chỉ trả audio loopback,
+    // không đụng MIC. Video bị renderer bỏ ngay (audioSource.js).
+    session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+        desktopCapturer.getSources({ types: ["screen"] }).then((sources) => {
+            if (!sources || !sources.length) { callback({}); return; }
+            callback({ video: sources[0], audio: "loopback" });
+        }).catch(() => callback({}));
     });
 
     createMainWindow();

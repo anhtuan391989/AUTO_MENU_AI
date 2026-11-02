@@ -65,7 +65,7 @@ assert(!/saveSetting/.test(updateBadgeFnBody), 'updateSystemAudioStatusBadge() K
 console.log('\n== A71.5 — Tái dùng populateSoundcardOptions() với placeholder riêng (không tạo hàm trùng lặp) ==');
 assert(/populateSoundcardOptions\(selectEl, selectedValue, placeholderText = /.test(setupSrc),
     'populateSoundcardOptions() có tham số placeholderText tuỳ chọn (mở rộng ngược tương thích, không đổi lời gọi cũ)');
-assert(/populateSoundcardOptions\(select, savedId, "— None \/ Chưa chọn thiết bị —"\)/.test(initSysAudioFnBody),
+assert(/populateSoundcardOptions\(select, savedId, "— None \/ Chưa chọn thiết bị —"(, "audioinput", true)?\)/.test(initSysAudioFnBody),
     'initSystemAudioSection() tái dùng đúng populateSoundcardOptions() với placeholder "None" riêng cho SYSTEM_AUDIO');
 
 console.log('\n== A71.6 — IPC 2 chiều trạng thái RUNTIME ==');

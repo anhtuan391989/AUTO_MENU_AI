@@ -1196,7 +1196,7 @@ function initProjectSection() {
 // hàm này dùng lại được cho SYSTEM_AUDIO select (mục 4 bên dưới) mà không đổi hành vi/lời gọi cũ.
 // TASK A76-FIX — tham số thứ 4 `kind` (mặc định "audioinput" = hành vi cũ, các nơi gọi cũ không đổi).
 // Truyền "audiooutput" cho Audio Output: liệt kê RIÊNG loa/tai nghe, KHÔNG lẫn với danh sách input.
-async function populateSoundcardOptions(selectEl, selectedValue, placeholderText = "Chọn Soundcard...", kind = "audioinput") {
+async function populateSoundcardOptions(selectEl, selectedValue, placeholderText = "Chọn Soundcard...", kind = "audioinput", withLoopback = false) {
     if (!navigator.mediaDevices?.enumerateDevices) {
         return { foundInRealList: false };
     }
@@ -1223,10 +1223,19 @@ async function populateSoundcardOptions(selectEl, selectedValue, placeholderText
             selectEl.appendChild(opt);
         });
 
+        // TASK A78 — chỉ SYSTEM_AUDIO: thêm lựa chọn loopback "Speaker01" (đường âm thanh phát ra của DAW).
+        // Thêm bằng JS (không đổi HTML). Id đặc biệt "loopback:system" — khớp LOOPBACK_DEVICE_ID ở audioSource.js.
+        if (withLoopback) {
+            const lb = document.createElement("option");
+            lb.value = "loopback:system";
+            lb.textContent = "Speaker01 (loopback – đường âm thanh DAW)";
+            selectEl.insertBefore(lb, selectEl.options[1] || null);
+        }
+
         // S2 mục 9 — phải phân biệt được: selectedValue có thật sự nằm trong danh sách device
         // THẬT vừa liệt kê hay không (khác với việc UI có 1 <option> hiển thị cho nó hay không —
         // option fallback bên dưới KHÔNG tính là "tồn tại thật").
-        const foundInRealList = !selectedValue ? false : inputs.some((d) => d.deviceId === selectedValue);
+        const foundInRealList = !selectedValue ? false : (withLoopback && selectedValue === "loopback:system") || inputs.some((d) => d.deviceId === selectedValue);
 
         if (selectedValue) {
             const match = [...selectEl.options].find(o => o.value === selectedValue);
@@ -1526,7 +1535,7 @@ function initSystemAudioSection() {
     if (!select) return;
 
     const savedId = getSetting("selectedSystemAudioDeviceId");
-    populateSoundcardOptions(select, savedId, "— None / Chưa chọn thiết bị —").then(({ foundInRealList }) => {
+    populateSoundcardOptions(select, savedId, "— None / Chưa chọn thiết bị —", "audioinput", true).then(({ foundInRealList }) => {
         updateSystemAudioStatusBadge(foundInRealList);
         // TASK A76-FIX-R1 (R1-05) — báo cho readiness biết thiết bị đã lưu còn thật hay không.
         if (savedId && typeof setSystemAudioAvailabilityHint === "function") setSystemAudioAvailabilityHint(foundInRealList);
@@ -1537,7 +1546,7 @@ function initSystemAudioSection() {
         // select.value === "" hợp lệ ở đây (chính là None) — KHÔNG chặn như soundcard cũ, vì
         // "chọn None" là 1 hành động hợp lệ tường minh của SYSTEM_AUDIO (mục A đề bài A71).
         saveSetting("selectedSystemAudioDeviceId", select.value || "");
-        populateSoundcardOptions(select, select.value, "— None / Chưa chọn thiết bị —").then(({ foundInRealList }) => {
+        populateSoundcardOptions(select, select.value, "— None / Chưa chọn thiết bị —", "audioinput", true).then(({ foundInRealList }) => {
             updateSystemAudioStatusBadge(foundInRealList);
             if (typeof setSystemAudioAvailabilityHint === "function") setSystemAudioAvailabilityHint(select.value ? foundInRealList : null); // A76-FIX-R1
             if (typeof updateSetupProgress === "function") updateSetupProgress(); // A76-FIX-R1: Setup X/10 cập nhật ngay sau khi chọn
