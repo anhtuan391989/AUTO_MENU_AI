@@ -13,7 +13,7 @@ let fails = 0;
 const check = (c, m) => { if (c) console.log('  ✅ ' + m); else { fails++; console.log('  ❌ ' + m); } };
 
 function loadWorker(file) {
-    const src = fs.readFileSync(file, 'utf8').replace(/^export default/m, 'module.exports =');
+    const src = fs.readFileSync(file, 'utf8').replace(/^export default/m, 'module.exports =') + '\n;module.exports.__tim = timBaiKhopNhat; module.exports.__ct = chuanHoaTen;';
     const m = { exports: {} }; new Function('module', 'exports', src)(m, m.exports); return m.exports;
 }
 function makeDb(seed) {
@@ -102,6 +102,20 @@ const J = async (r) => ({ status: r.status, j: await r.json() });
         check(/can_mat_khau_admin/.test(pj) && /hienOMatKhau\(\)/.test(pj) && /id = "khoiMatKhau"/.test(pj) && /id="matKhauAdmin"/.test(pj), 'ô nhập mật khẩu tạo bằng JS, tự hiện khi server báo bài đã biết');
         check(!/khoiMatKhau|matKhauAdmin/.test(ph), 'popup.html KHÔNG bị sửa (không đổi HTML)');
         check(mf.permissions.includes('storage'), 'manifest có quyền storage (nhớ mật khẩu tới khi đóng trình duyệt)');
+    }
+    console.log('\n== 4. Menu tra bài theo TÊN: tên YouTube có chữ chen thêm vẫn khớp (ca thật: "Karaoke") ==');
+    {
+        const songs = [
+            { songId: 'tB1abwou1Aw', title: 'Thương Ly Biệt Karaoke Tone Nữ Nhạc Trẻ Rumba 2025 Mới Nhất' },
+            { songId: 'app_9a3d', title: 'Em Thua Cô Ta (R&B Synth-Pop Version) - QuanFM x MiAn x KAi | Nhạc Hot Tiktok' },
+            { songId: 'other', title: 'Thương Em Karaoke Tone Nam' }
+        ];
+        const menu = w.__ct('Thương Ly Biệt Tone Nữ Nhạc Trẻ Rumba 2025 Mới Nhất');
+        const hit = w.__tim(songs, menu, w.__ct('SONG NHIEN'));
+        check(hit && hit.songId === 'tB1abwou1Aw', 'Menu "Thương Ly Biệt Tone Nữ…" khớp bài "Thương Ly Biệt Karaoke Tone Nữ…" (trước đây trượt)');
+        check(!w.__tim(songs, w.__ct('Thương Em Quá Nhiều Rồi'), ''), 'bài khác tên (chỉ trùng 1–2 từ) KHÔNG bị khớp nhầm');
+        const exact = w.__tim([{ songId: 'a', title: 'Thương Ly Biệt Karaoke Tone Nữ Nhạc Trẻ Rumba 2025 Mới Nhất' }, { songId: 'b', title: 'Thương Ly Biệt Tone Nữ Nhạc Trẻ Rumba 2025 Mới Nhất' }], menu, '');
+        check(exact && exact.songId === 'b', 'khớp đúng hẳn vẫn thắng khớp mờ');
     }
     console.log(fails ? `\n❌ ${fails} LỖI` : '\n✅ TẤT CẢ ĐẠT');
     process.exit(fails ? 1 : 0);

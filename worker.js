@@ -534,6 +534,15 @@ function timBaiKhopNhat(songs, q, artistNorm) {
     if (nt === q) score = 1000;
     else if (q.length >= 8 && nt.includes(q)) score = 500 - Math.min(nt.length - q.length, 400);
     else if (nt.length >= 8 && q.includes(nt)) score = 300 - Math.min(q.length - nt.length, 250);
+    // [A83c] Khớp mờ theo TỪ: tên YouTube của extension hay chen thêm chữ ("Karaoke", "Beat"...) hoặc khác phần đuôi so với tên Menu đọc được,
+    // nên "chứa nguyên chuỗi" trượt dù là CÙNG bài. Chấp nhận khi >= 80% số từ của tên NGẮN HƠN có trong tên kia và trùng ít nhất 3 từ.
+    if (score === 0) {
+      const ta = new Set(q.split(" ").filter(Boolean)), tb = new Set(nt.split(" ").filter(Boolean));
+      let chung = 0;
+      for (const t of ta) if (tb.has(t)) chung++;
+      const nhoHon = Math.min(ta.size, tb.size);
+      if (chung >= 3 && nhoHon > 0 && chung / nhoHon >= 0.8) score = 100 + Math.round(100 * chung / (ta.size + tb.size - chung));
+    }
     if (score > 0 && artistNorm && nt.includes(artistNorm)) score += 50;
     if (score > bestScore) { bestScore = score; best = s; }
   }
