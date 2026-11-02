@@ -46,7 +46,19 @@ function makeFakeDb(seed) {
         let args = [];
         const api = {
             bind(...a) { args = a; return api; },
+            async first() { // A83: trạng thái bài (bài mới/bài đã biết)
+                if (q.startsWith('SELECT COUNT(*) as n, MIN(created_at) as dauTien FROM song_key_segments WHERE song_id = ?')) {
+                    const mine = segs.filter((s) => s.songId === args[0]);
+                    const ts = mine.map((s) => s.createdAt).filter((x) => Number.isFinite(x));
+                    return { n: mine.length, dauTien: ts.length ? Math.min(...ts) : null };
+                }
+                throw new Error('FakeDb.first: SQL chưa hỗ trợ: ' + q.slice(0, 60));
+            },
             async run() {
+                if (q.startsWith('DELETE FROM song_key_segments WHERE song_id = ? AND start_sec = ?')) { // A83
+                    for (let i = segs.length - 1; i >= 0; i--) if (segs[i].songId === args[0] && segs[i].startSec === args[1]) segs.splice(i, 1);
+                    return { success: true };
+                }
                 if (q.startsWith('INSERT OR REPLACE INTO song_info')) {
                     const [songId, title, dur, note] = args;
                     const i = songs.findIndex((s) => s.songId === songId);
@@ -55,8 +67,8 @@ function makeFakeDb(seed) {
                     return { success: true };
                 }
                 if (q.startsWith('INSERT INTO song_key_segments')) {
-                    const [songId, startSec, endSec, key, mode, weight] = args;
-                    segs.push({ songId, startSec, endSec, key, mode, weight });
+                    const [songId, startSec, endSec, key, mode, weight, createdAt] = args;
+                    segs.push({ songId, startSec, endSec, key, mode, weight, createdAt });
                     return { success: true };
                 }
                 throw new Error('FakeDb.run: SQL chưa hỗ trợ: ' + q.slice(0, 60));

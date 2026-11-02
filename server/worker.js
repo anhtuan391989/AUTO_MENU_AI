@@ -70,6 +70,13 @@ export default {
           return Response.json({ error: "thieu songId" }, { status: 400, headers: corsHeaders });
         }
 
+        // [A83] Bài ĐÃ BIẾT (đã có đoạn Key từ trước) -> sửa thông tin bài bằng tay cần mật khẩu quản trị.
+        const trangThai = await trangThaiBai(env, songId);
+        if (trangThai.khoa) {
+          const tuChoi = yeuCauMatKhauBaiDaBiet(request, env, corsHeaders);
+          if (tuChoi) return tuChoi;
+        }
+
         await env.DB.prepare(`
           INSERT OR REPLACE INTO song_info
           (song_id, title, total_duration_sec, note, updated_at)
@@ -82,27 +89,72 @@ export default {
       }
     }
 
-    // ========== [4] THÊM 1 ĐOẠN KHÓA — MENU GỬI LÊN ==========
+    // ========== [4] THÊM 1 ĐOẠN KHÓA — MENU / EXTENSION GỬI LÊN ==========
+    // [A83] Quy tắc:
+    //  - Bài MỚI (chưa có đoạn Key nào): lưu NGAY, KHÔNG cần mật khẩu. Server cập nhật luôn, Menu tra thấy ngay.
+    //  - Bài ĐÃ BIẾT (đã có đoạn Key từ trước, quá ${CUA_SO_BAI_MOI_PHUT} phút): thêm/sửa bằng tay CẦN mật khẩu quản trị (ADMIN_TOKEN),
+    //    gửi trong header Authorization: Bearer <mật khẩu> (hoặc X-Admin-Token).
+    //  - Trong ${CUA_SO_BAI_MOI_PHUT} phút đầu sau khi bài được tạo, vẫn thêm được các đoạn tiếp theo của CHÍNH bài đó không cần mật khẩu
+    //    (để nhập nhiều đoạn liên tiếp cho bài mới).
+    //  - Key nhập tự do ("Am", "Ebm", "F#", "Bb minor"...) được chuẩn hoá về dạng server dùng (C..B, dấu thăng) + major/minor;
+    //    không hiểu được thì báo lỗi rõ ràng thay vì lưu sai.
+    //  - Cùng songId + cùng startSec: thay đoạn cũ (không nhân đôi khi bấm lưu lại).
     if (url.pathname === "/add-segment" && request.method === "POST") {
       try {
-        const { songId, startSec, endSec, key, mode = "major", weight = 1.0 } = await request.json();
-        if (!songId || startSec === undefined || !endSec || !key) {
+        const body = await request.json();
+        const songId = String((body && body.songId) || "").trim();
+        const startSec = body ? body.startSec : undefined;
+        const endSec = body ? body.endSec : undefined;
+        const weight = (body && body.weight !== undefined) ? body.weight : 1.0;
+        if (!songId || startSec === undefined || !endSec || !body.key) {
           return Response.json({ error: "thieu thong tin: songId, startSec, endSec, key" }, { status: 400, headers: corsHeaders });
         }
         if (startSec >= endSec) {
           return Response.json({ error: "startSec phai nho hon endSec" }, { status: 400, headers: corsHeaders });
         }
+        const kq = phanTichKeyNhap(body.key, body.mode);
+        if (!kq) {
+          return Response.json({ error: "key_khong_hop_le", message: "Khong hieu Key \"" + body.key + "\". Dung C, C#, D, Eb, F#, Am, Bb minor... (hoac chon Truong/Phu)" }, { status: 400, headers: corsHeaders });
+        }
 
+        const trangThai = await trangThaiBai(env, songId);
+        if (trangThai.khoa) {
+          const tuChoi = yeuCauMatKhauBaiDaBiet(request, env, corsHeaders);
+          if (tuChoi) return tuChoi;
+        }
+
+        // Cùng startSec -> thay đoạn cũ (xoá rồi chèn), không nhân đôi.
+        await env.DB.prepare(`DELETE FROM song_key_segments WHERE song_id = ? AND start_sec = ?`).bind(songId, startSec).run();
         await env.DB.prepare(`
           INSERT INTO song_key_segments
-          (song_id, start_sec, end_sec, key, mode, weight)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).bind(songId, startSec, endSec, key, mode, weight).run();
+          (song_id, start_sec, end_sec, key, mode, weight, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).bind(songId, startSec, endSec, kq.key, kq.mode, weight, trangThai.dauTien).run();
+        // created_at = thời điểm đoạn đầu tiên của bài (KHÔNG làm mới khi sửa) -> bài đã biết không bị "mở khoá" lại sau mỗi lần sửa.
+
+        // [A83] Extension gửi kèm tên bài: nếu bài chưa có thông tin (người dùng chưa bấm "Lưu Thông Tin Bài") thì tạo luôn.
+        // Menu tra bài theo TÊN (/find chỉ đọc bảng thông tin bài) -> thiếu dòng thông tin thì Menu không bao giờ thấy Key vừa thêm.
+        let taoThongTin = false;
+        const tenBai = body && typeof body.title === "string" ? body.title.trim() : "";
+        if (tenBai) {
+          const coInfo = await env.DB.prepare(`SELECT song_id as songId, title FROM song_info WHERE song_id = ?`).bind(songId).first();
+          if (!coInfo) {
+            const dur = parseInt(body.totalDurationSec, 10);
+            await env.DB.prepare(`
+              INSERT OR REPLACE INTO song_info
+              (song_id, title, total_duration_sec, note, updated_at)
+              VALUES (?, ?, ?, ?, strftime('%s','now') * 1000)
+            `).bind(songId, tenBai, Number.isFinite(dur) && dur > 0 ? dur : null, "nguon: extension").run();
+            taoThongTin = true;
+          }
+        }
 
         return Response.json({
           ok: true,
-          message: "da them doan",
-          segment: { songId, startSec, endSec, key, mode }
+          message: trangThai.khoa ? "da cap nhat bai da biet (mat khau quan tri hop le)" : "da them doan",
+          baiDaBiet: trangThai.biet,
+          taoThongTinBai: taoThongTin,
+          segment: { songId, startSec, endSec, key: kq.key, mode: kq.mode }
         }, { headers: corsHeaders });
       } catch (e) {
         return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
@@ -393,6 +445,51 @@ function soSanhAnToan(a, b) {
   const n = Math.max(a.length, b.length);
   for (let i = 0; i < n; i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
   return diff === 0;
+}
+
+// ========== [A83] BÀI MỚI / BÀI ĐÃ BIẾT ==========
+// Bài "đã biết" = đã có đoạn Key. "Khoá" (cần mật khẩu) = đã biết VÀ đoạn Key đầu tiên được tạo cách đây quá CUA_SO_BAI_MOI_PHUT phút
+// (đoạn cũ không có created_at cũng coi là cũ). Bài mới tạo trong cửa sổ này vẫn nhập tiếp được các đoạn sau không cần mật khẩu.
+const CUA_SO_BAI_MOI_PHUT = 30;
+async function trangThaiBai(env, songId) {
+  const r = await env.DB.prepare(`
+    SELECT COUNT(*) as n, MIN(created_at) as dauTien FROM song_key_segments WHERE song_id = ?
+  `).bind(songId).first();
+  const n = (r && r.n) || 0;
+  if (n === 0) return { biet: false, khoa: false, dauTien: Date.now() };
+  const dau = Number(r.dauTien);
+  const cu = !Number.isFinite(dau) || dau <= 0 || (Date.now() - dau) > CUA_SO_BAI_MOI_PHUT * 60 * 1000;
+  return { biet: true, khoa: cu, dauTien: (Number.isFinite(dau) && dau > 0) ? dau : 1 };
+}
+
+// Bài đã biết -> bắt buộc có mật khẩu quản trị. Trả null nếu hợp lệ, ngược lại trả sẵn Response lỗi.
+function yeuCauMatKhauBaiDaBiet(request, env, corsHeaders) {
+  const auth = request.headers.get("Authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : (request.headers.get("X-Admin-Token") || "");
+  if (!token && env.ADMIN_TOKEN) {
+    return Response.json({
+      error: "can_mat_khau_admin",
+      message: "Bai nay da co tren server. Them/sua Key bang tay can mat khau quan tri (ADMIN_TOKEN)."
+    }, { status: 401, headers: corsHeaders });
+  }
+  return kiemTraQuyenSua(request, env, corsHeaders);
+}
+
+// Nhận Key nhập tự do: "D", "Eb", "Am", "F#m", "Bb minor", "C major"... (+ mode riêng nếu có). Trả { key, mode } hoặc null.
+// Hậu tố trong chính ô Key (m / min / minor / maj / major) thắng mode truyền riêng.
+function phanTichKeyNhap(rawKey, rawMode) {
+  const t = String(rawKey || "").trim();
+  const m = /^([A-Ga-g][#b♯♭]?)\s*(m|min|minor|maj|major|M)?$/.exec(t);
+  if (!m) return null;
+  const key = chuanHoaKey(m[1]);
+  if (!key) return null;
+  let mode = chuanHoaMode(rawMode);
+  const suf = m[2];
+  if (suf) {
+    if (suf === "m" || /^min/i.test(suf)) mode = "minor";
+    else mode = "major"; // "M", "maj", "major"
+  }
+  return { key, mode: mode || "major" };
 }
 
 // ========== CHUẨN HOÁ KEY / MODE (giống KeyServerSync.js phía app: ký hiệu giáng đổi sang thăng) ==========

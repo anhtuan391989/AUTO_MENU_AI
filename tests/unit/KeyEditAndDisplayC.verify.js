@@ -53,6 +53,11 @@ function makeFakeDb(seed) {
                     const s = songs.find((x) => x.songId === args[0]);
                     return s ? { songId: s.songId, title: s.title } : null;
                 }
+                if (q.startsWith('SELECT COUNT(*) as n, MIN(created_at) as dauTien FROM song_key_segments WHERE song_id = ?')) { // A83
+                    const mine = segs.filter((x) => x.songId === args[0]);
+                    const ts = mine.map((s) => s.createdAt).filter((x) => Number.isFinite(x));
+                    return { n: mine.length, dauTien: ts.length ? Math.min(...ts) : null };
+                }
                 if (q.startsWith('SELECT COUNT(*) as n FROM song_key_segments WHERE song_id = ?')) {
                     return { n: segs.filter((x) => x.songId === args[0]).length };
                 }
@@ -61,6 +66,11 @@ function makeFakeDb(seed) {
             async run() {
                 log.push(q.slice(0, 40));
                 if (dbObj._failOn && q.startsWith(dbObj._failOn)) throw new Error('D1 giả: lỗi cố ý ở ' + dbObj._failOn);
+                if (q.startsWith('DELETE FROM song_key_segments WHERE song_id = ? AND start_sec = ?')) { // A83
+                    let n = 0;
+                    for (let i = segs.length - 1; i >= 0; i--) if (segs[i].songId === args[0] && segs[i].startSec === args[1]) { segs.splice(i, 1); n++; }
+                    return { success: true, meta: { changes: n } };
+                }
                 if (q.startsWith('DELETE FROM song_key_segments WHERE song_id = ?')) {
                     let n = 0;
                     for (let i = segs.length - 1; i >= 0; i--) if (segs[i].songId === args[0]) { segs.splice(i, 1); n++; }
@@ -77,8 +87,8 @@ function makeFakeDb(seed) {
                     return { success: true, meta: { changes: 1 } };
                 }
                 if (q.startsWith('INSERT INTO song_key_segments')) {
-                    const [songId, startSec, endSec, key, mode] = args;
-                    segs.push({ songId, startSec, endSec, key, mode });
+                    const [songId, startSec, endSec, key, mode, , createdAt] = args;
+                    segs.push({ songId, startSec, endSec, key, mode, createdAt });
                     return { success: true, meta: { changes: 1 } };
                 }
                 if (q.startsWith('INSERT OR REPLACE INTO song_info')) {

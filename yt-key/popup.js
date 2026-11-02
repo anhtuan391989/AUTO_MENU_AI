@@ -14,6 +14,43 @@ const SERVER = "https://menu-key-server.matuotluuly.workers.dev";
 const BACKEND_URL = "";
 // ─────────────────────────────────────────────────────────────
 
+/* ── A83: gọi server, tự kèm mật khẩu quản trị nếu có; bài đã biết mà thiếu/sai mật khẩu thì hiện ô nhập ── */
+async function docMatKhau() {
+  try { const o = await chrome.storage.session.get("matKhauAdmin"); return o.matKhauAdmin || ""; } catch (e) { return ""; }
+}
+// Ô mật khẩu tạo bằng JS (KHÔNG sửa popup.html), chỉ hiện khi server báo bài đã biết.
+function hienOMatKhau() {
+  let khoi = document.getElementById("khoiMatKhau");
+  if (!khoi) {
+    khoi = document.createElement("div");
+    khoi.className = "khoi";
+    khoi.id = "khoiMatKhau";
+    khoi.innerHTML = '<h4>🔒 Bài này đã có trên server</h4><label>Mật khẩu quản trị (ADMIN_TOKEN):</label>'
+      + '<input type="password" id="matKhauAdmin" placeholder="Nhập rồi bấm lưu lại" autocomplete="off">'
+      + '<div class="nho">Bài mới thì lưu luôn, không cần mật khẩu. Mật khẩu chỉ nhớ đến khi đóng trình duyệt.</div>';
+    const kq = document.getElementById("kq");
+    kq.parentNode.insertBefore(khoi, kq);
+  }
+  khoi.style.display = "block";
+}
+async function guiServer(duongDan, body) {
+  const inputMk = document.getElementById("matKhauAdmin");
+  const mk = (inputMk && inputMk.value.trim()) || await docMatKhau();
+  const headers = { "Content-Type": "application/json" };
+  if (mk) headers["Authorization"] = "Bearer " + mk;
+  const res = await fetch(`${SERVER}${duongDan}`, { method: "POST", headers, body: JSON.stringify(body) });
+  let data = {};
+  try { data = await res.json(); } catch (e) { data = { error: "Server trả dữ liệu lạ (HTTP " + res.status + ")" }; }
+  if (mk && res.ok && data.ok) { try { await chrome.storage.session.set({ matKhauAdmin: mk }); } catch (e) {} }
+  if (res.status === 401 || res.status === 403) {
+    hienOMatKhau();
+    if (data.error === "can_mat_khau_admin") data.error = "Bài này đã có trên server — nhập mật khẩu quản trị ở khung bên dưới rồi bấm lưu lại.";
+    else if (data.error === "sai_mat_khau") data.error = "Sai mật khẩu quản trị.";
+    else if (data.error === "chua_cai_ADMIN_TOKEN") data.error = "Server chưa cài mật khẩu quản trị (ADMIN_TOKEN) nên không sửa được bài đã có.";
+  }
+  return data;
+}
+
 function layId(link) {
   const kq = link.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
   return kq ? kq[1] : null;
@@ -144,16 +181,11 @@ document.getElementById("btnLuuThongTin").onclick = async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const id = layId(tab.url);
   if (!id) return hienThongBao("❌ Chưa mở YouTube!", true);
-  const res = await fetch(`${SERVER}/set-song-info`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      songId: id,
-      title: document.getElementById("tenBai").value.trim() || null,
-      totalDurationSec: parseInt(document.getElementById("tongThoiLuong").value) || null
-    })
+  const data = await guiServer("/set-song-info", {
+    songId: id,
+    title: document.getElementById("tenBai").value.trim() || null,
+    totalDurationSec: parseInt(document.getElementById("tongThoiLuong").value) || null
   });
-  const data = await res.json();
   hienThongBao(data.ok ? "✅ Đã lưu thông tin bài hát!" : `❌ Lỗi: ${data.error}`, data.ok ? false : true);
 };
 
@@ -168,14 +200,16 @@ document.getElementById("btnThemDoan").onclick = async () => {
   const cheDo = document.getElementById("cheDo").value;
   if (!khoa) return hienThongBao("❌ Chưa nhập khóa!", true);
   if (isNaN(start) || isNaN(end) || start >= end) return hienThongBao("❌ Giây kết thúc phải lớn hơn bắt đầu!", true);
-  const res = await fetch(`${SERVER}/add-segment`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ songId: id, startSec: start, endSec: end, key: khoa, mode: cheDo, weight: 1.0 })
+  const data = await guiServer("/add-segment", {
+    songId: id, startSec: start, endSec: end, key: khoa, mode: cheDo, weight: 1.0,
+    // Kèm tên + thời lượng: nếu chưa bấm "Lưu Thông Tin Bài", server tự tạo thông tin bài để Menu tra được theo tên.
+    title: document.getElementById("tenBai").value.trim() || null,
+    totalDurationSec: parseInt(document.getElementById("tongThoiLuong").value) || null
   });
-  const data = await res.json();
   if (data.ok) {
-    hienThongBao(`✅ Đã lưu!\n${start} → ${end} giây\nKhóa: ${khoa} ${cheDo === "major" ? "Trưởng" : "Phụ"}`, false);
+    const sv = data.segment || {};
+    const hienKey = sv.key ? `${sv.key} ${sv.mode === "minor" ? "Phụ" : "Trưởng"}` : `${khoa} ${cheDo === "major" ? "Trưởng" : "Phụ"}`;
+    hienThongBao(`✅ Đã lưu${data.baiDaBiet ? " (bài đã biết — cập nhật)" : ""}!\n${start} → ${end} giây\nKhóa: ${hienKey}`, false);
     document.getElementById("batDau").value = end + 1;
     document.getElementById("ketThuc").value = "";
     document.getElementById("khoa").value = "";

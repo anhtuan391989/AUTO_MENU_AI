@@ -52,7 +52,15 @@ Trả về HTML trang quản lý (tìm bài, xem tất cả bài, tra khóa tạ
 - `mode`: `"major"` hoặc `"minor"` (bắt buộc tiếng Anh)
 - `weight`: tùy chọn, mặc định 1.0
 
-**Response:** `{ "ok": true, "message": "da them doan", "segment": {...} }`
+**Response:** `{ "ok": true, "message": "da them doan", "baiDaBiet": false, "segment": {...} }`
+
+**Quy tắc (A83):**
+- Bài **mới** (chưa có đoạn Key): lưu ngay, không cần mật khẩu.
+- Bài **đã biết** (đã có đoạn Key quá 30 phút): thêm/sửa bằng tay cần mật khẩu quản trị — header `Authorization: Bearer <ADMIN_TOKEN>`. Thiếu → `401 can_mat_khau_admin`; sai → `401 sai_mat_khau`; server chưa cài ADMIN_TOKEN → `403`.
+- Trong 30 phút đầu sau khi bài được tạo vẫn nhập tiếp các đoạn sau không cần mật khẩu.
+- `key` nhập tự do (`Am`, `Eb`, `F#m`, `Bb minor`...) được chuẩn hoá về `C..B` (dấu thăng) + `major`/`minor`; không hiểu → `400 key_khong_hop_le`.
+- Cùng `songId` + `startSec`: thay đoạn cũ, không nhân đôi.
+- `/set-song-info` cũng cần mật khẩu với bài đã biết.
 
 ---
 
