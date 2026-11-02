@@ -640,9 +640,18 @@ const PRESET_NAME_TO_ACTION = {
     REMIX: "PRESET_REMIX",
     "TUNE OFF": "PRESET_TUNE_OFF",
 };
+// TASK A79 — TUNE OFF KHÔNG thuộc nhóm chọn-một của Preset: nó là công tắc bypass Auto-Tune (2 mic) chạy ĐỘC LẬP.
+// Bấm TUNE OFF không đổi NORM/LOFI/RAP/REMIX; bấm preset không đổi TUNE OFF.
+const isTuneOffBtn = (b) => b.textContent.trim() === "TUNE OFF";
 document.querySelectorAll(".preset-btn").forEach(btn => {
     btn.addEventListener("click", (e) => {
-        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+        if (isTuneOffBtn(e.target)) {
+            e.target.classList.toggle("active");
+            const bypassOn = e.target.classList.contains("active");
+            reportDawStateResult(e.target, "TUNE", window.ActionRegistry?.setDawControlState?.("TUNE", bypassOn, { reason: "menu-button" }));
+            return;
+        }
+        document.querySelectorAll(".preset-btn").forEach(b => { if (!isTuneOffBtn(b)) b.classList.remove("active"); });
         e.target.classList.add("active");
         saveData();
         const actionName = PRESET_NAME_TO_ACTION[e.target.textContent.trim()];
@@ -1190,29 +1199,6 @@ function displayKeyText(value, source) {
     return value;
 }
 
-// MOD-TONE-ABS-01 — Auto-Tune KHÔNG có nút "lên/xuống 1 nấc" trong Studio One (chỉ có Key/Scale đã học) nên Tone tay được gửi bằng cách
-// gửi lại KEY ĐÃ DỊCH (Key gốc + số bán cung) đúng như nút SEND Key. Trả null nếu chưa có Key thật (AI chưa dò xong / không phải "X Major|Minor").
-function getKnownBaseKeyForTone() {
-    try {
-        if (getActiveSourceName() === "ai" && !keyEverDetected) return null;
-        const v = getActiveKeyValue();
-        return (typeof v === "string" && /^[A-G](?:#|b)?\s+(?:Major|Minor)$/i.test(v.trim())) ? v.trim() : null;
-    } catch (e) { return null; }
-}
-// Gửi Key đã dịch `offset` bán cung xuống Auto-Tune (cùng đường sendKeyToAutotune với nút SEND/AI). Không ném lỗi.
-async function sendShiftedKeyToAutotune(baseKey, offset) {
-    const target = normalizeKeyForSend(transposeKey(baseKey, offset));
-    let r;
-    try { r = await sendKeyToAutotune(target); } catch (e) { return { ok: false, detail: "sendKeyToAutotune ném lỗi: " + (e && e.message) }; }
-    if (r && r.ok) lastPluginKey = target; // để AI/Manual Key không gửi trùng đúng Key đang có trong plugin
-    return r || { ok: false, detail: "sendKeyToAutotune không trả kết quả" };
-}
-async function sendManualToneToAutotune(toneVal) {
-    const base = getKnownBaseKeyForTone();
-    if (!base) return { ok: false, detail: "Chưa có Key gốc (AI chưa dò xong hoặc chưa chọn Key) — chưa dịch được Auto-Tune." };
-    return sendShiftedKeyToAutotune(base, toneVal);
-}
-
 // Vẽ lại 3 ô MOD + ô Key theo Tone thủ công hiện hành (không gửi lệnh nào).
 function renderManualToneDisplay(statusOverride) {
     const keyText = displayKeyText(getActiveKeyValue(), getActiveSourceName());
@@ -1242,7 +1228,7 @@ document.getElementById("applyToneBtn")?.addEventListener("click", () => {
     setStatus("dot-mod", "pending"); // cam: đang gửi, chờ kết quả thực thi
 
     const run = () => Promise.all([
-        sendManualToneToAutotune(toneVal), // MOD-TONE-ABS-01: gửi Key đã dịch (không còn gửi "nấc" CC 20/21)
+        sendToneTarget(toneVal),
         (async () => {
             const r = await sendToneStepToSoundShifter(toneVal - soundShifterApplied);
             if (r && r.ok) soundShifterApplied = toneVal;
@@ -1472,11 +1458,7 @@ function applyActiveKeyToPlugin(sourceLabel) {
     // -> hiển thị LISTENING, KHÔNG hiện giá trị hạt giống nội bộ (vd "G# Minor"). `value` vẫn
     // giữ nguyên (không đổi) cho các dòng bên dưới (sendKeyToAutotune/dedupe/originalKey) — CHỈ
     // chữ hiển thị bị thay, không có rủi ro gửi "LISTENING" xuống Plugin.
-    // MOD-TONE-ABS-01: đang MOD ON và đã SET tone tay -> Key gửi xuống Auto-Tune phải là Key gốc + tone (không để AI/Key mới ghi đè mất tone).
-    const toneShiftActive = typeof manualToneSet !== "undefined" && manualToneSet && manualToneOffset !== 0 && isManualOverrideActive() && /^[A-G]/.test(String(value));
-    const sendValue = toneShiftActive
-        ? normalizeKeyForSend(transposeKey(value, manualToneOffset))
-        : (typeof normalizeKeyForSend === "function" ? normalizeKeyForSend(value) : value); // tên giáng -> thăng cho sendKeyToAutotune (nhãn hiển thị giữ nguyên)
+    const sendValue = typeof normalizeKeyForSend === "function" ? normalizeKeyForSend(value) : value; // tên giáng -> thăng cho sendKeyToAutotune (nhãn hiển thị giữ nguyên)
     if (currentKeyEl) currentKeyEl.textContent = typeof displayKeyText === "function" ? displayKeyText(value, source) : ((source === "ai" && !keyEverDetected) ? "LISTENING" : value);
     // ===== QUY TẮC KIẾN TRÚC VĨNH VIỄN (đọc kỹ trước khi sửa vùng này) =====
     // AI Key và Manual Key là 2 nguồn điều khiển tách biệt hoàn toàn.
@@ -1495,7 +1477,7 @@ function applyActiveKeyToPlugin(sourceLabel) {
     logKeySource(sourceLabel);
     refreshKeySourceDisplay();
 
-    if (toneShiftActive) { if (sendValue === lastPluginKey) return; } else if (value === lastPluginKey) return; // giá trị không đổi thật -> khỏi gửi lại, tránh spam Plugin (đang lệch tone: so với Key đã dịch)
+    if (value === lastPluginKey) return; // giá trị không đổi thật -> khỏi gửi lại, tránh spam Plugin
     if (sendValue === lastPluginKey) return; // cùng Key nhưng khác cách viết (Db = C#): lastPluginKey lưu dạng đã chuẩn hoá
 
     if (source === "ai" && isAiControlActive()) {
@@ -2093,7 +2075,11 @@ function saveData() {
         currentKey: document.getElementById("currentKey")?.textContent,
         tone: document.getElementById("toneSelector")?.value,
         modEnabled: document.getElementById("modPowerBtn")?.classList.contains("active"),
-        preset: document.querySelector(".preset-btn.active")?.textContent.trim(),
+        preset: (() => { // A79: TUNE OFF là công tắc bypass, không phải preset -> không lưu làm preset
+            const a = document.querySelector(".preset-btn.active");
+            if (a && a.textContent.trim() !== "TUNE OFF") return a.textContent.trim();
+            return [...document.querySelectorAll(".preset-btn.active")].find(b => b.textContent.trim() !== "TUNE OFF")?.textContent.trim();
+        })(),
         knobs: knobData.map(k => ({ id: k.id, value: k.value }))
     };
 
@@ -2140,6 +2126,7 @@ function loadData() {
 
     if (data.preset) {
         document.querySelectorAll(".preset-btn").forEach(btn => {
+            if (btn.textContent.trim() === "TUNE OFF") return; // A79: bypass không khôi phục (không có phản hồi từ DAW)
             btn.classList.remove("active");
             if (btn.textContent.trim() === data.preset) {
                 btn.classList.add("active");
@@ -2196,14 +2183,10 @@ function turnManualOverrideOff() {
     // này (aiSemitoneOffset, mục 12) — KHÔNG ép cứng về 0.
     // MANUAL-KEY-MOD-RESTORE-01: trả SoundShifter về 0 (đúng phần đã dịch tay) TRƯỚC khi tắt nguồn, để lần bật MOD sau không mang theo tone cũ.
     const shifterBack = -soundShifterApplied;
-    const hadManualShift = manualToneSet; // MOD-TONE-ABS-01: có dịch tay thật thì mới phải trả Key về
-    const baseKeyForRestore = hadManualShift ? getKnownBaseKeyForTone() : null;
     manualToneOffset = 0; manualToneSet = false; soundShifterApplied = 0;
     Promise.all([
         sendToneStepToSoundShifter(shifterBack).then((back) => setSoundShifterPower(false).then((off) => (back && back.ok === false ? back : off))),
-        (hadManualShift
-            ? (baseKeyForRestore ? sendShiftedKeyToAutotune(baseKeyForRestore, aiSemitoneOffset) : Promise.resolve({ ok: true, driverUsed: "none" }))
-            : sendToneTarget(aiSemitoneOffset)), // TASK AI-ALG-04 (D8): aiSemitoneOffset là TUYỆT ĐỐI so với Key gốc -> đưa Auto-Tune về đúng offset, không gửi tương đối sai
+        sendToneTarget(aiSemitoneOffset), // TASK AI-ALG-04 (D8): aiSemitoneOffset là TUYỆT ĐỐI so với Key gốc -> đưa Auto-Tune về đúng offset, không gửi tương đối sai
     ]).then(([shifterResult, autotuneResult]) => {
         const newKey = transposeKey(originalKey, aiSemitoneOffset);
         const currentKeyElLocal = document.getElementById("currentKey");

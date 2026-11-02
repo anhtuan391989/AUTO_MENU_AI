@@ -660,6 +660,9 @@ const DAW_MIDI_ACTIONS = [
     { action: "MIC2_OFF", label: "MIC 2 OFF (Monitor Không Dây tắt)" },
     { action: "FX_ON", label: "FX ON (bỏ Mute 4 bus)" },
     { action: "FX_OFF", label: "FX OFF (Mute 4 bus)" },
+    // TASK A79 — nút TUNE OFF: bypass Auto-Tune cả 2 mic (ON = bypass bật, OFF = bypass tắt). Trống mặc định, tự MIDI Learn.
+    { action: "TUNE_BYPASS_ON", label: "TUNE OFF — BYPASS Auto-Tune 2 mic BẬT" },
+    { action: "TUNE_BYPASS_OFF", label: "TUNE OFF — BYPASS Auto-Tune 2 mic TẮT" },
     // MENU-FIX-02 — TUỲ CHỌN: lệnh CHỌN TRACK (macro chỉ "Find Track") gửi TRƯỚC lệnh ON/OFF tương ứng để Monitor không đảo nhầm track cũ.
     { action: "MUSIC_SELECT", label: "MUSIC CHỌN TRACK (Find Track Beat — gửi trước ON/OFF)" },
     { action: "MIC1_SELECT", label: "MIC 1 CHỌN TRACK (Find Track Mic — gửi trước ON/OFF)" },
@@ -744,7 +747,6 @@ const DAW_MIDI_PROFILES = Object.freeze({
     "studio-one": Object.freeze({
         id: "studio-one",
         name: "Studio One / Fender Studio Pro",
-        quickFillLabel: "Fender Studio Pro 8 MIDI", // QUICKFILL-ALL-01: tên MỘT nút gộp cả 5 bộ (LIVE + KNOB + CHỌN TRACK + MIC VOLUME + KEY/SCALE)
         match: /^(studio one|studio pro|fender)/i,
         origin: "Bộ CC gợi ý của AUTO_MENU_AI (LIVE-MIDI-FSP8-02 / MENU-KNOB-MIDI-COMPLETION-01). Cần gán CC vào macro/fader trong Control Surface (MIDI Learn).",
         versionStatus: Object.freeze({
@@ -771,7 +773,6 @@ const DAW_MIDI_PROFILES = Object.freeze({
     "cubase": Object.freeze({
         id: "cubase",
         name: "Cubase",
-        quickFillLabel: "Cubase MIDI",
         match: /^cubase/i,
         origin: "Quy ước CC gợi ý của AUTO_MENU_AI — KHÔNG phải mặc định của Cubase (tránh CC 7/10/12/13/23/24/64 đã thấy trong Generic Remote/MIDI Remote). Cubase không tự nhận: phải gán trong MIDI Remote hoặc Generic Remote.",
         versionStatus: Object.freeze({ "cubase 13": "CHỈ CÓ BẰNG CHỨNG FILE, CHƯA CHẠY THẬT" }),
@@ -793,14 +794,6 @@ function resolveDawProfile(dawLabel, profiles) {
 function dawProfileVersionStatus(profile, dawLabel) {
     if (!profile) return "";
     return (profile.versionStatus && profile.versionStatus[String(dawLabel || "").trim().toLowerCase()]) || profile.defaultStatus || "";
-}
-// QUICKFILL-ALL-01 — gộp mọi bộ của 1 profile thành MỘT bộ ảo để điền/lưu một lần (all-or-nothing, kiểm trùng CC xuyên các bộ).
-const DAW_QF_ALL = "all";
-function dawProfileAllInOne(profile) {
-    const mappings = {};
-    let count = 0;
-    for (const b of Object.values(profile.bundles || {})) for (const [a, m] of Object.entries(b.mappings)) { mappings[a] = m; count++; }
-    return { ...profile, bundles: Object.freeze({ [DAW_QF_ALL]: Object.freeze({ title: profile.quickFillLabel || profile.name, count, mappings: Object.freeze(mappings) }) }) };
 }
 // Kiểm TOÀN BỘ bundle trước khi lưu. Trả về mảng lỗi (rỗng = hợp lệ).
 function validateDawProfileBundle(bundle, validActions) {
@@ -871,7 +864,7 @@ function initDawMidiOutputMappingSection() {
         }
         if (!daw) {
             container.innerHTML = '<p class="hint-text">Chưa chọn DAW ở tab "Chọn DAW" — chưa thể cấu hình MIDI Output.</p>'
-                + '<p class="hint-text"><button class="setup-btn" id="btnFillAllCcOff" disabled>Điền + lưu bộ gợi ý</button> Cần chọn DAW trước khi điền bộ CC gợi ý.</p>';
+                + '<p class="hint-text"><button class="setup-btn" id="btnFillLiveCcOff" disabled>Điền + lưu bộ LIVE gợi ý</button> <button class="setup-btn" id="btnFillKnobCcOff" disabled>Điền + lưu bộ KNOB gợi ý</button> Cần chọn DAW trước khi điền bộ CC gợi ý.</p>';
             return;
         }
 
@@ -886,7 +879,11 @@ function initDawMidiOutputMappingSection() {
             <b>8 lệnh ON/OFF điều khiển DAW (MUSIC / MIC 1 / MIC 2 / FX):</b> ở cuối danh sách. Mỗi nút Menu gửi lệnh theo <b>trạng thái đích sau cú bấm</b>.
             Menu chỉ <b>gửi</b> lệnh — <b>không đọc được trạng thái thật</b> của DAW, nên lúc mở app hoặc khi bạn đổi trực tiếp trong DAW, nút Menu có thể lệch DAW.
             <br>${profile ? `<span id="quickFillProfile">Bộ gợi ý: <b>${profile.name}</b>${verStatus ? ` — ${verStatus}` : ""}. ${profile.origin} Điền ở đây chỉ LƯU mapping của Menu — DAW chưa được điều khiển cho đến khi bạn gán trong DAW.</span>
-            <br><button class="setup-btn" id="btnFillAllCc">Điền + lưu bộ ${profile.quickFillLabel || profile.name} gợi ý</button>`
+            <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ LIVE gợi ý — ${profile.name}</button>
+            <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>
+            ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}
+            ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}
+            ${profile.bundles.scale ? `<button class="setup-btn" id="btnFillScaleCc">Điền + lưu bộ KEY + SCALE gợi ý — ${profile.name}</button>` : ""}`
                 : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
             <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
             <span id="liveCcStatus"></span>`;
@@ -895,9 +892,8 @@ function initDawMidiOutputMappingSection() {
         function runQuickFill(bundleId) {
             const dawNow = getSetting("selectedDAW");
             if (!dawNow) { alert("Cần chọn DAW trước khi điền bộ CC gợi ý."); return; }
-            const baseProf = resolveDawProfile(dawNow);
-            if (!baseProf) { alert("Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công."); return; }
-            const prof = bundleId === DAW_QF_ALL ? dawProfileAllInOne(baseProf) : baseProf;
+            const prof = resolveDawProfile(dawNow);
+            if (!prof) { alert("Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công."); return; }
             const plan = planDawProfileFill(prof, bundleId, getDawMidiOutMapping, DAW_MIDI_ACTIONS.map((x) => x.action));
             if (plan.errors.length) { alert("Không lưu bộ gợi ý (bộ CC lỗi): " + plan.errors.join("; ")); return; }
             const liveClash = plan.conflicts;
@@ -912,7 +908,14 @@ function initDawMidiOutputMappingSection() {
             renderMappingOverview();
         }
         if (profile) {
-            liveBox.querySelector("#btnFillAllCc").addEventListener("click", () => runQuickFill(DAW_QF_ALL));
+            liveBox.querySelector("#btnFillLiveCc").addEventListener("click", () => runQuickFill("live"));
+            liveBox.querySelector("#btnFillKnobCc").addEventListener("click", () => runQuickFill("knob"));
+            const selBtn = liveBox.querySelector("#btnFillSelectCc");
+            if (selBtn) selBtn.addEventListener("click", () => runQuickFill("select"));
+            const micVolBtn = liveBox.querySelector("#btnFillMicVolCc");
+            if (micVolBtn) micVolBtn.addEventListener("click", () => runQuickFill("micvol"));
+            const scaleBtn = liveBox.querySelector("#btnFillScaleCc");
+            if (scaleBtn) scaleBtn.addEventListener("click", () => runQuickFill("scale"));
         }
 
         // Khôi phục: xoá CHỈ 8 mapping ON/OFF mới; mapping cũ (toggle MONITOR_*, Send, PLAY...) không bị đụng.

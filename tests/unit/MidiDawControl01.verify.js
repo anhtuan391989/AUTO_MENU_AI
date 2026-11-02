@@ -62,7 +62,7 @@ function fakeBtn(initial = []) {
         check('ACTIONS có đủ 8 tên, giá trị khác nhau từng đôi', names.every((n) => AR.ACTIONS[n] === n) && new Set(names.map((n) => AR.ACTIONS[n])).size === 8);
         const defs = AR.DAW_STATE_CONTROLS;
         check('4 nút -> 4 cặp (on/off) riêng, không trùng nhau và không trùng action toggle cũ',
-            Object.keys(defs).join() === 'MUSIC,MIC1,MIC2,FX' && new Set(Object.values(defs).flatMap((d) => [d.on, d.off, d.legacy])).size === 12);
+            Object.keys(defs).join() === 'MUSIC,MIC1,MIC2,FX,TUNE' && new Set(Object.values(defs).flatMap((d) => [d.on, d.off, d.legacy])).size === 15); // A79: thêm TUNE (bypass Auto-Tune)
         check('Action cũ còn nguyên: MONITOR_BEAT_TOGGLE/MIC1/MIC2/FX', ['MONITOR_BEAT_TOGGLE', 'MONITOR_MIC1', 'MONITOR_MIC2', 'MONITOR_FX'].every((n) => AR.ACTIONS[n] === n));
     }
 
@@ -304,7 +304,7 @@ function fakeBtn(initial = []) {
         const suggested = m ? new Function('return ' + m[1])() : null;
         check('Bộ CC gợi ý trong Setup khớp bảng 8 lệnh của task (102–109), kênh 16, value 127',
             suggested && JSON.stringify(suggested) === JSON.stringify(TABLE) && /DAW_STATE_SUGGESTED_CHANNEL = 16/.test(setupSrc) && /DAW_STATE_SUGGESTED_VALUE = 127/.test(setupSrc), suggested);
-        check('Bộ gợi ý CHỈ áp dụng khi người dùng bấm nút + xác nhận (confirm), không tự lưu lúc mở', /confirm\(msg\)/.test(setupSrc) && /btnFillAllCc"\)\.addEventListener\("click"/.test(setupSrc));
+        check('Bộ gợi ý CHỈ áp dụng khi người dùng bấm nút + xác nhận (confirm), không tự lưu lúc mở', /confirm\(msg\)/.test(setupSrc) && /btnFillLiveCc"\)\.addEventListener\("click"/.test(setupSrc));
         check('Có nút khôi phục: xoá CHỈ 8 mapping ON/OFF (setDawMidiOutMapping(a, null)) sau confirm', /btnClearLiveCc/.test(setupSrc) && /DAW_STATE_ACTION_SET\.forEach\(\(a\) => setDawMidiOutMapping\(a, null\)\)/.test(setupSrc));
         // chặn trùng
         const a = setupSrc.indexOf('const DAW_STATE_ACTION_SET'); const b = setupSrc.indexOf('// Hai action ON/OFF');

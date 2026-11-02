@@ -110,7 +110,12 @@ const ACTIONS = Object.freeze({
     // rồi mới gửi ON/OFF. Chưa lưu => hành vi cũ (một lệnh/cú bấm).
     MUSIC_SELECT: "MUSIC_SELECT",
     MIC1_SELECT: "MIC1_SELECT",
-    MIC2_SELECT: "MIC2_SELECT"
+    MIC2_SELECT: "MIC2_SELECT",
+    // TASK A79 — nút TUNE OFF (khu Preset) = BYPASS Auto-Tune CẢ 2 MIC, hoạt động ĐỘC LẬP với NORM/LOFI/RAP/REMIX.
+    // ON = bypass BẬT (Auto-Tune bị bỏ qua), OFF = bypass TẮT (Auto-Tune chạy lại). Hai lệnh RIÊNG, không mapping mặc định
+    // (người dùng tự MIDI Learn trong Setup). Chưa cấu hình ON/OFF thì rơi về PRESET_TUNE_OFF cũ (tương thích ngược).
+    TUNE_BYPASS_ON: "TUNE_BYPASS_ON",
+    TUNE_BYPASS_OFF: "TUNE_BYPASS_OFF"
 });
 
 // MIDI-DAW-CONTROL-01 — nút Menu -> cặp action ON/OFF + action toggle CŨ (dùng khi người dùng CHƯA cấu hình ON/OFF).
@@ -118,7 +123,8 @@ const DAW_STATE_CONTROLS = Object.freeze({
     MUSIC: Object.freeze({ on: "MUSIC_ON", off: "MUSIC_OFF", legacy: "MONITOR_BEAT_TOGGLE", select: "MUSIC_SELECT", label: "MUSIC (Monitor Beat)" }),
     MIC1: Object.freeze({ on: "MIC1_ON", off: "MIC1_OFF", legacy: "MONITOR_MIC1", select: "MIC1_SELECT", label: "MIC 1 (Monitor Mic)" }),
     MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", select: "MIC2_SELECT", label: "MIC 2 (Monitor Không Dây)" }),
-    FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" })
+    FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" }),
+    TUNE: Object.freeze({ on: "TUNE_BYPASS_ON", off: "TUNE_BYPASS_OFF", legacy: "PRESET_TUNE_OFF", label: "TUNE OFF (Bypass Auto-Tune 2 mic)" }) // TASK A79
 });
 
 // Action nào đã có Mouse Coordinate key tương ứng (Mục 8, ưu tiên DAW Play/Stop/Record —
