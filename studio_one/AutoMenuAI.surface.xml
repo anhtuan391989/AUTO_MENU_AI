@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AutoMenuAI - Studio One Control Surface (tao boi setup_all_midi.bat)
+  Cong MIDI: AUTO MENU AI (loopMIDI). Bo CC dong bo voi Menu (Setup > MIDI > Studio One).
+  CH16 = status #BF (CC 102-113: LIVE ON/OFF, chon track, TUNE). CH15 = status #BE (CC 20-31: Knob, Mic vol, Scale/Key, FX bus).
+-->
+<ControlSurface name="AutoMenuAI" manufacturer="AutoMenuAI" model="AutoMenuAI" protocol="MIDI" version="1.0">
+  <Controls>
+    <!-- CC 102 -->
+    <Control name="musicOn" title="Music ON" type="button" options="receive public">
+      <MidiMessage status="#BF" address="102"/>
+    </Control>
+    <!-- CC 103 -->
+    <Control name="musicOff" title="Music OFF" type="button" options="receive public">
+      <MidiMessage status="#BF" address="103"/>
+    </Control>
+    <!-- CC 104 -->
+    <Control name="mic1On" title="Mic1 ON" type="button" options="receive public">
+      <MidiMessage status="#BF" address="104"/>
+    </Control>
+    <!-- CC 105 -->
+    <Control name="mic1Off" title="Mic1 OFF" type="button" options="receive public">
+      <MidiMessage status="#BF" address="105"/>
+    </Control>
+    <!-- CC 106 -->
+    <Control name="mic2On" title="Mic2 ON" type="button" options="receive public">
+      <MidiMessage status="#BF" address="106"/>
+    </Control>
+    <!-- CC 107 -->
+    <Control name="mic2Off" title="Mic2 OFF" type="button" options="receive public">
+      <MidiMessage status="#BF" address="107"/>
+    </Control>
+    <!-- CC 108 -->
+    <Control name="fxOn" title="FX ON" type="button" options="receive public">
+      <MidiMessage status="#BF" address="108"/>
+    </Control>
+    <!-- CC 109 -->
+    <Control name="fxOff" title="FX OFF" type="button" options="receive public">
+      <MidiMessage status="#BF" address="109"/>
+    </Control>
+    <!-- CC 110 -->
+    <Control name="selMusic" title="Chon Track Music" type="button" options="receive public">
+      <MidiMessage status="#BF" address="110"/>
+    </Control>
+    <!-- CC 111 -->
+    <Control name="selMic1" title="Chon Track Mic1" type="button" options="receive public">
+      <MidiMessage status="#BF" address="111"/>
+    </Control>
+    <!-- CC 112 -->
+    <Control name="selMic2" title="Chon Track Mic2" type="button" options="receive public">
+      <MidiMessage status="#BF" address="112"/>
+    </Control>
+    <!-- CC 113 -->
+    <Control name="tuneBypass" title="TUNE Bypass (127=bat, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BF" address="113"/>
+    </Control>
+    <!-- CC 20 -->
+    <Control name="beatVol" title="Beat Input Volume" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="20"/>
+    </Control>
+    <!-- CC 21 -->
+    <Control name="masterVol" title="Master Output Volume" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="21"/>
+    </Control>
+    <!-- CC 22 -->
+    <Control name="retune1" title="Retune Speed Mic1" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="22"/>
+    </Control>
+    <!-- CC 23 -->
+    <Control name="retune2" title="Retune Speed Mic2" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="23"/>
+    </Control>
+    <!-- CC 24 -->
+    <Control name="mic1Vol" title="Mic1 Volume" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="24"/>
+    </Control>
+    <!-- CC 25 -->
+    <Control name="mic2Vol" title="Mic2 Volume" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="25"/>
+    </Control>
+    <!-- CC 26 -->
+    <Control name="scale" title="Key Scale (Major=0, Minor=5)" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="26"/>
+    </Control>
+    <!-- CC 27 -->
+    <Control name="keyRoot" title="Key Root (C=0..B=127)" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="27"/>
+    </Control>
+    <!-- CC 28 -->
+    <Control name="fxDelay" title="FX Bus Delay" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="28"/>
+    </Control>
+    <!-- CC 29 -->
+    <Control name="fxVerbShort" title="FX Bus Verb ngan" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="29"/>
+    </Control>
+    <!-- CC 30 -->
+    <Control name="fxVerbLong" title="FX Bus Verb dai" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="30"/>
+    </Control>
+    <!-- CC 31 -->
+    <Control name="fxComVerb" title="FX Bus Com Verb" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="31"/>
+    </Control>
+  </Controls>
+</ControlSurface>
