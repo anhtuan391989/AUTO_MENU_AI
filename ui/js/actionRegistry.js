@@ -124,7 +124,7 @@ const DAW_STATE_CONTROLS = Object.freeze({
     MIC1: Object.freeze({ on: "MIC1_ON", off: "MIC1_OFF", legacy: "MONITOR_MIC1", select: "MIC1_SELECT", label: "MIC 1 (Monitor Mic)" }),
     MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", select: "MIC2_SELECT", label: "MIC 2 (Monitor Không Dây)" }),
     FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" }),
-    TUNE: Object.freeze({ on: "TUNE_BYPASS_ON", off: "TUNE_BYPASS_OFF", legacy: "PRESET_TUNE_OFF", label: "TUNE OFF (Bypass Auto-Tune 2 mic)" }) // TASK A79
+    TUNE: Object.freeze({ on: "TUNE_BYPASS_ON", off: "TUNE_BYPASS_OFF", legacy: "PRESET_TUNE_OFF", label: "TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — Auto-Tune 2 mic)" }) // TASK A79
 });
 
 // Action nào đã có Mouse Coordinate key tương ứng (Mục 8, ưu tiên DAW Play/Stop/Record —
@@ -196,11 +196,20 @@ function getSelectedDaw() {
 // Mục 9 — MIDI OUTPUT mapping đi theo Logical Action, KHÔNG theo DAW cứng trong code.
 // Mục 23 — phân biệt DEFAULT (không có, vì không tự bịa CC/note — Mục 8) và USER_DEFINED
 // (chỉ tồn tại khi người dùng tự lưu qua UI Setup). Không ghi đè nếu đã có giá trị.
+// TASK A81 — MIDI PRESET MẶC ĐỊNH cho nút TUNE (bypass Auto-Tune): có sẵn, KHÔNG cần bấm điền nhanh trong Setup.
+// Chỉ dùng khi người dùng CHƯA lưu mapping riêng cho action đó (mapping đã lưu luôn thắng, không bị ghi đè).
+// PHẢI khớp bộ "tune" trong DAW_MIDI_PROFILES (ui/js/setup.js): Studio One/Studio Pro = kênh 16 CC 113/114; Cubase = CC 118/119.
 function getMidiOutMapping(action) {
     const daw = getSelectedDaw();
     if (!daw) return null;
     const all = (typeof getSetting === "function" ? getSetting("dawMidiOutMappings") : {}) || {};
-    return (all[daw] && all[daw][action]) || null;
+    if (all[daw] && all[daw][action]) return all[daw][action];
+    // TASK A81 — preset mặc định cho nút TUNE (tự chứa trong hàm này để các test cắt hàm vẫn chạy). Mapping đã lưu luôn thắng (dòng trên).
+    if (action === "TUNE_BYPASS_ON" || action === "TUNE_BYPASS_OFF") {
+        const cubase = /^cubase/i.test(String(daw).trim());
+        return { kind: "cc", channel: 16, number: action === "TUNE_BYPASS_ON" ? (cubase ? 118 : 113) : (cubase ? 119 : 114), value: 127, source: "DEFAULT_PRESET" };
+    }
+    return null;
 }
 
 function setMidiOutMapping(action, mapping) {

@@ -640,14 +640,23 @@ const PRESET_NAME_TO_ACTION = {
     REMIX: "PRESET_REMIX",
     "TUNE OFF": "PRESET_TUNE_OFF",
 };
-// TASK A79 — TUNE OFF KHÔNG thuộc nhóm chọn-một của Preset: nó là công tắc bypass Auto-Tune (2 mic) chạy ĐỘC LẬP.
-// Bấm TUNE OFF không đổi NORM/LOFI/RAP/REMIX; bấm preset không đổi TUNE OFF.
-const isTuneOffBtn = (b) => b.textContent.trim() === "TUNE OFF";
+// TASK A79/A80 — nút TUNE KHÔNG thuộc nhóm chọn-một của Preset: nó là công tắc bypass Auto-Tune (2 mic) chạy ĐỘC LẬP.
+// Mặc định (mở app): nút SÁNG, chữ "TUNE ON" = Auto-Tune chạy, Bypass TẮT.
+// Bấm: nút TẮT SÁNG, chữ "TUNE OFF" = Bypass BẬT (Auto-Tune bị bỏ qua, cả 2 mic). Bấm lần nữa: về TUNE ON.
+// HTML giữ nguyên (nút vẫn khai báo "TUNE OFF", không có class active) — JS nhận diện nút theo chữ MỘT LẦN rồi gắn data-tune-btn.
+document.querySelectorAll(".preset-btn").forEach((b) => { if (b.textContent.trim() === "TUNE OFF") b.dataset.tuneBtn = "1"; });
+const isTuneOffBtn = (b) => !!(b && b.dataset && b.dataset.tuneBtn === "1");
+function renderTuneBtn(btn, tuneOn) {
+    btn.classList.toggle("active", tuneOn);
+    btn.textContent = tuneOn ? "TUNE ON" : "TUNE OFF";
+}
+document.querySelectorAll(".preset-btn").forEach((b) => { if (isTuneOffBtn(b)) renderTuneBtn(b, true); }); // mặc định TUNE ON (bypass tắt)
 document.querySelectorAll(".preset-btn").forEach(btn => {
     btn.addEventListener("click", (e) => {
         if (isTuneOffBtn(e.target)) {
-            e.target.classList.toggle("active");
-            const bypassOn = e.target.classList.contains("active");
+            const tuneOnNow = !e.target.classList.contains("active"); // trạng thái ĐÍCH sau cú bấm
+            renderTuneBtn(e.target, tuneOnNow);
+            const bypassOn = !tuneOnNow; // TUNE OFF = Bypass BẬT
             reportDawStateResult(e.target, "TUNE", window.ActionRegistry?.setDawControlState?.("TUNE", bypassOn, { reason: "menu-button" }));
             return;
         }
@@ -2075,10 +2084,11 @@ function saveData() {
         currentKey: document.getElementById("currentKey")?.textContent,
         tone: document.getElementById("toneSelector")?.value,
         modEnabled: document.getElementById("modPowerBtn")?.classList.contains("active"),
-        preset: (() => { // A79: TUNE OFF là công tắc bypass, không phải preset -> không lưu làm preset
+        preset: (() => { // A79: nút TUNE là công tắc bypass, không phải preset -> không lưu làm preset
+            const isTune = (b) => !!(b && b.dataset && b.dataset.tuneBtn === "1");
             const a = document.querySelector(".preset-btn.active");
-            if (a && a.textContent.trim() !== "TUNE OFF") return a.textContent.trim();
-            return [...document.querySelectorAll(".preset-btn.active")].find(b => b.textContent.trim() !== "TUNE OFF")?.textContent.trim();
+            if (a && !isTune(a)) return a.textContent.trim();
+            return [...document.querySelectorAll(".preset-btn.active")].find(b => !isTune(b))?.textContent.trim();
         })(),
         knobs: knobData.map(k => ({ id: k.id, value: k.value }))
     };
@@ -2126,7 +2136,7 @@ function loadData() {
 
     if (data.preset) {
         document.querySelectorAll(".preset-btn").forEach(btn => {
-            if (btn.textContent.trim() === "TUNE OFF") return; // A79: bypass không khôi phục (không có phản hồi từ DAW)
+            if (btn.dataset && btn.dataset.tuneBtn === "1") return; // A79: bypass không khôi phục (không có phản hồi từ DAW) — luôn mở ở TUNE ON
             btn.classList.remove("active");
             if (btn.textContent.trim() === data.preset) {
                 btn.classList.add("active");
