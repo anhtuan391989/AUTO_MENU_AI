@@ -111,11 +111,10 @@ const ACTIONS = Object.freeze({
     MUSIC_SELECT: "MUSIC_SELECT",
     MIC1_SELECT: "MIC1_SELECT",
     MIC2_SELECT: "MIC2_SELECT",
-    // TASK A79 — nút TUNE OFF (khu Preset) = BYPASS Auto-Tune CẢ 2 MIC, hoạt động ĐỘC LẬP với NORM/LOFI/RAP/REMIX.
-    // ON = bypass BẬT (Auto-Tune bị bỏ qua), OFF = bypass TẮT (Auto-Tune chạy lại). Hai lệnh RIÊNG, không mapping mặc định
-    // (người dùng tự MIDI Learn trong Setup). Chưa cấu hình ON/OFF thì rơi về PRESET_TUNE_OFF cũ (tương thích ngược).
-    TUNE_BYPASS_ON: "TUNE_BYPASS_ON",
-    TUNE_BYPASS_OFF: "TUNE_BYPASS_OFF"
+    // TASK A79/A82 — nút TUNE (khu Preset) = BYPASS Auto-Tune CẢ 2 MIC, hoạt động ĐỘC LẬP với NORM/LOFI/RAP/REMIX.
+    // MỘT CC DUY NHẤT: giá trị 127 = bypass BẬT (nút thành TUNE OFF), 0 = bypass TẮT (nút về TUNE ON) — giống nút Bypass SoundShifter.
+    // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_TUNE_OFF cũ (tương thích ngược).
+    TUNE_BYPASS: "TUNE_BYPASS"
 });
 
 // MIDI-DAW-CONTROL-01 — nút Menu -> cặp action ON/OFF + action toggle CŨ (dùng khi người dùng CHƯA cấu hình ON/OFF).
@@ -124,7 +123,7 @@ const DAW_STATE_CONTROLS = Object.freeze({
     MIC1: Object.freeze({ on: "MIC1_ON", off: "MIC1_OFF", legacy: "MONITOR_MIC1", select: "MIC1_SELECT", label: "MIC 1 (Monitor Mic)" }),
     MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", select: "MIC2_SELECT", label: "MIC 2 (Monitor Không Dây)" }),
     FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" }),
-    TUNE: Object.freeze({ on: "TUNE_BYPASS_ON", off: "TUNE_BYPASS_OFF", legacy: "PRESET_TUNE_OFF", label: "TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — Auto-Tune 2 mic)" }) // TASK A79
+    TUNE: Object.freeze({ on: "TUNE_BYPASS", off: "TUNE_BYPASS", values: Object.freeze({ on: 127, off: 0 }), legacy: "PRESET_TUNE_OFF", label: "TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — Auto-Tune 2 mic)" }) // TASK A79
 });
 
 // Action nào đã có Mouse Coordinate key tương ứng (Mục 8, ưu tiên DAW Play/Stop/Record —
@@ -204,10 +203,10 @@ function getMidiOutMapping(action) {
     if (!daw) return null;
     const all = (typeof getSetting === "function" ? getSetting("dawMidiOutMappings") : {}) || {};
     if (all[daw] && all[daw][action]) return all[daw][action];
-    // TASK A81 — preset mặc định cho nút TUNE (tự chứa trong hàm này để các test cắt hàm vẫn chạy). Mapping đã lưu luôn thắng (dòng trên).
-    if (action === "TUNE_BYPASS_ON" || action === "TUNE_BYPASS_OFF") {
+    // TASK A81 — preset mặc định cho nút TUNE (tự chứa trong hàm này để các test cắt hàm vẫn chạy). Studio One/Studio Pro: kênh 16 CC 113; Cubase: CC 118. Giá trị gửi do nút quyết định (127 bypass bật / 0 tắt).. Mapping đã lưu luôn thắng (dòng trên).
+    if (action === "TUNE_BYPASS") {
         const cubase = /^cubase/i.test(String(daw).trim());
-        return { kind: "cc", channel: 16, number: action === "TUNE_BYPASS_ON" ? (cubase ? 118 : 113) : (cubase ? 119 : 114), value: 127, source: "DEFAULT_PRESET" };
+        return { kind: "cc", channel: 16, number: cubase ? 118 : 113, value: 127, source: "DEFAULT_PRESET" };
     }
     return null;
 }
@@ -414,6 +413,7 @@ async function setDawControlState(control, targetOn, context = {}) {
     let action;
     if (mode === "explicit") {
         action = targetOn ? def.on : def.off;
+        const valueCtx = def.values ? { value: targetOn ? def.values.on : def.values.off } : {}; // A82: 1 CC, giá trị theo trạng thái đích
         if (!isMidiMappingConfigured(action)) {
             res = { ok: false, status: ACTION_STATUS.NOT_CONFIGURED, reason: "NOT_CONFIGURED" };
         } else if (def.select && isMidiMappingConfigured(def.select)) {
@@ -423,11 +423,11 @@ async function setDawControlState(control, targetOn, context = {}) {
                 if (!sel || !sel.ok) return { ...(sel || {}), ok: false, selectFailed: true };
                 const wait = getDawSelectSettleMs();
                 if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-                const r2 = await executeAction(action, { reason });
+                const r2 = await executeAction(action, { reason, ...valueCtx });
                 return { ...r2, selectUsed: def.select, selectWaitMs: wait };
             });
         } else {
-            res = await executeAction(action, { reason });
+            res = await executeAction(action, { reason, ...valueCtx });
         }
     } else {
         action = def.legacy;

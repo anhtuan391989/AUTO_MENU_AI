@@ -62,7 +62,7 @@ function fakeBtn(initial = []) {
         check('ACTIONS có đủ 8 tên, giá trị khác nhau từng đôi', names.every((n) => AR.ACTIONS[n] === n) && new Set(names.map((n) => AR.ACTIONS[n])).size === 8);
         const defs = AR.DAW_STATE_CONTROLS;
         check('4 nút -> 4 cặp (on/off) riêng, không trùng nhau và không trùng action toggle cũ',
-            Object.keys(defs).join() === 'MUSIC,MIC1,MIC2,FX,TUNE' && new Set(Object.values(defs).flatMap((d) => [d.on, d.off, d.legacy])).size === 15); // A79: thêm TUNE (bypass Auto-Tune)
+            Object.keys(defs).join() === 'MUSIC,MIC1,MIC2,FX,TUNE' && new Set(Object.values(defs).flatMap((d) => [d.on, d.off, d.legacy])).size === 14); // A82: thêm TUNE (1 CC bypass Auto-Tune, on=off cùng action)
         check('Action cũ còn nguyên: MONITOR_BEAT_TOGGLE/MIC1/MIC2/FX', ['MONITOR_BEAT_TOGGLE', 'MONITOR_MIC1', 'MONITOR_MIC2', 'MONITOR_FX'].every((n) => AR.ACTIONS[n] === n));
     }
 

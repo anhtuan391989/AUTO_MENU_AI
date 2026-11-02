@@ -18,32 +18,43 @@ function makeAR(mappings) {
 }
 {
     const { AR } = makeAR();
-    ok(AR.ACTIONS.TUNE_BYPASS_ON === 'TUNE_BYPASS_ON' && AR.ACTIONS.TUNE_BYPASS_OFF === 'TUNE_BYPASS_OFF', 'ACTIONS có TUNE_BYPASS_ON/OFF');
+    ok(AR.ACTIONS.TUNE_BYPASS === 'TUNE_BYPASS', 'ACTIONS có TUNE_BYPASS (1 CC duy nhất)');
     const d = AR.DAW_STATE_CONTROLS.TUNE;
-    ok(d && d.on === 'TUNE_BYPASS_ON' && d.off === 'TUNE_BYPASS_OFF' && d.legacy === 'PRESET_TUNE_OFF', 'DAW_STATE_CONTROLS.TUNE: on/off riêng, legacy = PRESET_TUNE_OFF');
+    ok(d && d.on === 'TUNE_BYPASS' && d.off === 'TUNE_BYPASS' && d.values.on === 127 && d.values.off === 0 && d.legacy === 'PRESET_TUNE_OFF', 'DAW_STATE_CONTROLS.TUNE: cùng 1 action, giá trị 127/0, legacy = PRESET_TUNE_OFF');
     ok(AR.getDawStateMode('TUNE') === 'legacy', 'chưa cấu hình ON/OFF -> mode legacy (tương thích ngược)');
 }
 
-// --- 1b. Preset MIDI mặc định (A81): không cần Setup, mapping đã lưu thắng ---
+// --- 1b. Preset MIDI mặc định + 1 CC duy nhất (A82): không cần Setup, mapping đã lưu thắng ---
 function makeAR2(daw, saved) {
+    const sent = [];
     const win = { appSettings: {}, getLastMidiSendResult: () => null };
     const sb = { window: win, console, setTimeout, clearTimeout, Promise,
-        getSetting: (k) => (k === 'selectedDAW' ? daw : k === 'dawMidiOutMappings' ? (saved || {}) : undefined), saveSetting: () => {} };
+        getSetting: (k) => (k === 'selectedDAW' ? daw : k === 'dawMidiOutMappings' ? (saved || {}) : undefined), saveSetting: () => {},
+        sendMidiCC: async (n, v, ch) => { sent.push({ n, v, ch }); return true; } };
     vm.createContext(sb);
     vm.runInContext(rd('ui/js/actionRegistry.js'), sb, { filename: 'actionRegistry.js' });
+    win.__sent = sent;
     return win.ActionRegistry;
 }
-{
+(async () => {
     const a = makeAR2('Studio One 7', {});
-    const on = a.getMidiOutMapping('TUNE_BYPASS_ON'), off = a.getMidiOutMapping('TUNE_BYPASS_OFF');
-    ok(on && on.kind === 'cc' && on.channel === 16 && on.number === 113 && on.value === 127, 'Studio One: TUNE_BYPASS_ON mặc định = CC113 kênh16 (không cần Setup)');
-    ok(off && off.number === 114, 'Studio One: TUNE_BYPASS_OFF mặc định = CC114');
+    const m = a.getMidiOutMapping('TUNE_BYPASS');
+    ok(m && m.kind === 'cc' && m.channel === 16 && m.number === 113 && m.value === 127, 'Studio One: TUNE_BYPASS mặc định = CC113 kênh16 (không cần Setup)');
     ok(a.getDawStateMode('TUNE') === 'explicit', 'mode = explicit ngay khi chưa lưu gì (đã có preset)');
-    ok(makeAR2('Cubase 13', {}).getMidiOutMapping('TUNE_BYPASS_ON').number === 118, 'Cubase: CC118');
-    const own = { 'Studio One 7': { TUNE_BYPASS_ON: { kind: 'cc', channel: 1, number: 7, value: 100 } } };
-    ok(makeAR2('Studio One 7', own).getMidiOutMapping('TUNE_BYPASS_ON').number === 7, 'mapping người dùng đã lưu thắng preset mặc định');
-    ok(makeAR2('Studio One 7', {}).getMidiOutMapping('PLAY') === null || makeAR2('Studio One 7', {}).getMidiOutMapping('DAW_PLAY') === null, 'action khác không bị gán mặc định');
-}
+    ok(makeAR2('Cubase 13', {}).getMidiOutMapping('TUNE_BYPASS').number === 118, 'Cubase: CC118');
+    const own = { 'Studio One 7': { TUNE_BYPASS: { kind: 'cc', channel: 1, number: 7, value: 100 } } };
+    ok(makeAR2('Studio One 7', own).getMidiOutMapping('TUNE_BYPASS').number === 7, 'mapping người dùng đã lưu thắng preset mặc định');
+    ok(makeAR2('Studio One 7', {}).getMidiOutMapping('DAW_PLAY') === null, 'action khác không bị gán mặc định');
+    // gửi thật: bypass BẬT -> CC113 giá trị 127 ; bypass TẮT -> cùng CC113 giá trị 0 (1 CC duy nhất)
+    const win = {}; const b = (() => { const sent = []; const w = { appSettings: {}, getLastMidiSendResult: () => null };
+        const sb = { window: w, console, setTimeout, clearTimeout, Promise, getSetting: (k) => (k === 'selectedDAW' ? 'Studio One 7' : k === 'dawMidiOutMappings' ? {} : undefined), saveSetting: () => {},
+            sendMidiCC: async (n, v, ch) => { sent.push([n, v, ch]); return true; } };
+        vm.createContext(sb); vm.runInContext(rd('ui/js/actionRegistry.js'), sb); return { AR: w.ActionRegistry, sent }; })();
+    await b.AR.setDawControlState('TUNE', true, { reason: 't' });
+    await b.AR.setDawControlState('TUNE', false, { reason: 't' });
+    ok(JSON.stringify(b.sent) === JSON.stringify([[113, 127, 15], [113, 0, 15]]), 'bypass BẬT gửi CC113=127, bypass TẮT gửi CC113=0 (cùng 1 CC, kênh 16) — thực tế: ' + JSON.stringify(b.sent));
+    finish();
+})();
 
 // --- 2. renderer: TUNE OFF độc lập khỏi nhóm Preset (kiểm tĩnh) ---
 const r = rd('ui/js/renderer.js');
@@ -57,11 +68,11 @@ ok(/MIC1.{0,40}MIC2|2 mic/i.test(rd('ui/js/actionRegistry.js')), 'label ghi rõ 
 
 // --- 3. Setup có 2 dòng mapping mới ---
 const s = rd('ui/js/setup.js');
-ok(/action: "TUNE_BYPASS_ON"/.test(s) && /action: "TUNE_BYPASS_OFF"/.test(s), 'Setup có dòng mapping TUNE_BYPASS_ON/OFF');
+ok(/action: "TUNE_BYPASS"/.test(s), 'Setup có 1 dòng mapping TUNE_BYPASS');
 
-ok(/tune: Object\.freeze\(\{ title: "TUNE BYPASS", count: 2, mappings: dawQfMake\(16, 127, \{ TUNE_BYPASS_ON: 113, TUNE_BYPASS_OFF: 114/.test(s), 'bộ CC gợi ý Studio One: TUNE_BYPASS_ON=113, OFF=114 (kênh 16)');
-ok(/TUNE_BYPASS_ON: 118, TUNE_BYPASS_OFF: 119/.test(s) && /btnFillTuneCc/.test(s), 'bộ CC Cubase + nút điền nhanh btnFillTuneCc');
+ok(/tune: Object\.freeze\(\{ title: "TUNE BYPASS", count: 1, mappings: dawQfMake\(16, 127, \{ TUNE_BYPASS: 113 \}/.test(s), 'bộ CC gợi ý Studio One: TUNE_BYPASS=113 (kênh 16)');
+ok(/TUNE_BYPASS: 118/.test(s) && /btnFillTuneCc/.test(s), 'bộ CC Cubase + nút điền nhanh btnFillTuneCc');
 
 // --- 4. HTML không đổi ---
 ok(/<button class="preset-btn">TUNE OFF<\/button>/.test(rd('ui/index.html')), 'index.html giữ nguyên nút TUNE OFF');
-console.log(`\n${pass} pass, ${fail} fail`); process.exit(fail ? 1 : 0);
+function finish() { console.log(`\n${pass} pass, ${fail} fail`); process.exit(fail ? 1 : 0); }
