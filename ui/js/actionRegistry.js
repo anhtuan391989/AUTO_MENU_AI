@@ -169,8 +169,12 @@ const KNOB_CC_ANCHORS = (() => {
     // MIC-VOLUME-KNOB-01 — fader track Mic/Không Dây dùng CÙNG đường cong CC→dB của fader Beat (cùng loại fader Studio Pro 8: 90 = 0 dB).
     // CHƯA đo riêng trên fader Mic — xem báo cáo.
     const faderCurve = Object.freeze([[50, 64], [90, 97], [91, 98], [92, 100], [93, 101], [94, 104], [95, 107], [96, 110], [97, 113], [98, 118], [99, 122], [100, 127]]);
+    // RETUNE-SPEED-CURVE-01 — Retune Speed (Auto-Tune Pro) bị ĐẢO CHIỀU + đường cong phi tuyến: số đo thật của người dùng (CC tuyến tính cũ):
+    // Menu 0/5/10/20/30/50/70/100 -> Auto-Tune 400/331/266/181/119/49/18/0. Mục tiêu: Menu v (0-100) -> Auto-Tune ≈ v (Menu 20 -> 20, Menu 100 -> 100).
+    // Điểm neo [Menu, CC] suy ra bằng cách nghịch đảo số đo: AT0->CC127, AT18->CC89, AT49->CC64, AT100->CC45 (nội suy giữa CC64=49 và CC38=119; XẤP XỈ, cần đo lại).
+    const retuneCurve = Object.freeze([[0, 127], [18, 89], [49, 64], [100, 45]]);
     return Object.freeze({
-        "Studio Pro 8": Object.freeze({ BEAT_INPUT_VOLUME: faderCurve, MIC1_VOLUME: faderCurve, MIC2_VOLUME: faderCurve }),
+        "Studio Pro 8": Object.freeze({ BEAT_INPUT_VOLUME: faderCurve, MIC1_VOLUME: faderCurve, MIC2_VOLUME: faderCurve, RETUNE_SPEED_MIC1: retuneCurve, RETUNE_SPEED_MIC2: retuneCurve }),
     });
 })();
 

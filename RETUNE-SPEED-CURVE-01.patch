@@ -1,0 +1,57 @@
+diff --git a/tests/unit/FSP8MusicCalib02.verify.js b/tests/unit/FSP8MusicCalib02.verify.js
+index b0fa984..0b60925 100644
+--- a/tests/unit/FSP8MusicCalib02.verify.js
++++ b/tests/unit/FSP8MusicCalib02.verify.js
+@@ -61,8 +61,8 @@ const OLD = (v) => Math.round(Math.max(0, Math.min(100, v)) * 127 / 100);
+   ok(maxStep <= 1.7, `[FAST-03] bước dB lớn nhất mỗi 1 MUSIC trong 90–100 ≤ 1,7 dB (thực tế ${maxStep.toFixed(2)})`, maxStep);
+   ok(Math.abs(dB(cs[90])) < 0.3 && cs[90] === 97, '[FAST-03] MUSIC 90 vẫn = CC97 (đo +0,2 dB)');
+   // MASTER và Retune: công thức cũ trên FSP8
+-  let same = true; for (const a of ['MASTER_OUTPUT_VOLUME', 'RETUNE_SPEED_MIC1', 'RETUNE_SPEED_MIC2']) for (let v = 0; v <= 100; v++) { const r = await cc(a, v); if (r.v !== OLD(v) || r.n !== MAPS[a].number) same = false; }
+-  ok(same, '[MASTER] MASTER CC21 + RETUNE CC22/23 vẫn dùng round(v×127/100) trên Studio Pro 8');
++  let same = true; for (const a of ['MASTER_OUTPUT_VOLUME']) for (let v = 0; v <= 100; v++) { const r = await cc(a, v); if (r.v !== OLD(v) || r.n !== MAPS[a].number) same = false; }
++  ok(same, '[MASTER] MASTER CC21 vẫn dùng round(v×127/100) trên Studio Pro 8 (RETUNE dùng đường cong riêng — RETUNE-SPEED-CURVE-01)');
+   // DAW khác: MUSIC giữ công thức cũ
+   for (const d of ['Studio One 7', 'Cubase 13', 'Studio One 5', '']) {
+     const f = env(d || 'x', MAPS); if (!d) f.sb.getSetting = () => undefined;
+@@ -75,6 +75,6 @@ const OLD = (v) => Math.round(Math.max(0, Math.min(100, v)) * 127 / 100);
+   const li = ren.indexOf('function loadData()'); ok(!/executeAction|dispatchKnobVolume|sendMidi/.test(ren.slice(li, ren.indexOf('\n}\n', li))), '[khởi tạo] loadData() vẫn không gửi MIDI');
+   // chỉ MUSIC trên Studio Pro 8 có neo
+   const anchors = vm.runInContext('KNOB_CC_ANCHORS', e.sb);
+-  ok(Object.keys(anchors).join() === 'Studio Pro 8' && Object.keys(anchors['Studio Pro 8']).join() === 'BEAT_INPUT_VOLUME,MIC1_VOLUME,MIC2_VOLUME', '[phạm vi] neo chỉ cho Studio Pro 8 / BEAT_INPUT_VOLUME (+ MIC1_VOLUME, MIC2_VOLUME dùng cùng đường cong — MIC-VOLUME-KNOB-01)');
++  ok(Object.keys(anchors).join() === 'Studio Pro 8' && Object.keys(anchors['Studio Pro 8']).join() === 'BEAT_INPUT_VOLUME,MIC1_VOLUME,MIC2_VOLUME,RETUNE_SPEED_MIC1,RETUNE_SPEED_MIC2', '[phạm vi] neo chỉ cho Studio Pro 8 / BEAT_INPUT_VOLUME (+ MIC1_VOLUME, MIC2_VOLUME dùng cùng đường cong — MIC-VOLUME-KNOB-01)');
+   console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
+ })();
+diff --git a/tests/unit/KnobDawIntegration02.verify.js b/tests/unit/KnobDawIntegration02.verify.js
+index fdc0580..f11555f 100644
+--- a/tests/unit/KnobDawIntegration02.verify.js
++++ b/tests/unit/KnobDawIntegration02.verify.js
+@@ -65,7 +65,10 @@ function env(init = {}, { portOk = true } = {}) {
+       e.sent.length = 0;
+       // FSP8-MIDI-SYNC-FAST-02 (THAY ĐỔI SPEC CÓ CHỦ ĐÍCH): riêng MUSIC trên Studio Pro 8 dùng neo 50→64, 90→97, 100→127 => 75→85 (không còn 95). Mọi Knob/DAW khác giữ nguyên.
+       const calib = d === 'Studio Pro 8' && a === 'BEAT_INPUT_VOLUME';
+-      for (const [v, cc] of [[0, 0], [25, 32], [50, 64], [75, calib ? 85 : 95], [100, 127], [50, 64], [0, 0]]) {
++      const retuneFsp8 = d === 'Studio Pro 8' && (a === 'RETUNE_SPEED_MIC1' || a === 'RETUNE_SPEED_MIC2'); // RETUNE-SPEED-CURVE-01: đường cong riêng (đảo chiều)
++      const RT = { 0: 127, 25: 83, 50: 64, 75: 54, 100: 45 };
++      for (const [v, cc0] of [[0, 0], [25, 32], [50, 64], [75, calib ? 85 : 95], [100, 127], [50, 64], [0, 0]]) {
++        const cc = retuneFsp8 ? RT[v] : cc0;
+         const r = await e.turn(e.AR.ACTIONS[a], v); const last = e.sent[e.sent.length - 1];
+         if (!r.ok || !last || last.n !== num || last.v !== cc || last.ch !== 14) { allOk = false; rows.push([a, v, cc, last, r]); }
+       }
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index 563f5f5..f5f3ef0 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -169,8 +169,12 @@ const KNOB_CC_ANCHORS = (() => {
+     // MIC-VOLUME-KNOB-01 — fader track Mic/Không Dây dùng CÙNG đường cong CC→dB của fader Beat (cùng loại fader Studio Pro 8: 90 = 0 dB).
+     // CHƯA đo riêng trên fader Mic — xem báo cáo.
+     const faderCurve = Object.freeze([[50, 64], [90, 97], [91, 98], [92, 100], [93, 101], [94, 104], [95, 107], [96, 110], [97, 113], [98, 118], [99, 122], [100, 127]]);
++    // RETUNE-SPEED-CURVE-01 — Retune Speed (Auto-Tune Pro) bị ĐẢO CHIỀU + đường cong phi tuyến: số đo thật của người dùng (CC tuyến tính cũ):
++    // Menu 0/5/10/20/30/50/70/100 -> Auto-Tune 400/331/266/181/119/49/18/0. Mục tiêu: Menu v (0-100) -> Auto-Tune ≈ v (Menu 20 -> 20, Menu 100 -> 100).
++    // Điểm neo [Menu, CC] suy ra bằng cách nghịch đảo số đo: AT0->CC127, AT18->CC89, AT49->CC64, AT100->CC45 (nội suy giữa CC64=49 và CC38=119; XẤP XỈ, cần đo lại).
++    const retuneCurve = Object.freeze([[0, 127], [18, 89], [49, 64], [100, 45]]);
+     return Object.freeze({
+-        "Studio Pro 8": Object.freeze({ BEAT_INPUT_VOLUME: faderCurve, MIC1_VOLUME: faderCurve, MIC2_VOLUME: faderCurve }),
++        "Studio Pro 8": Object.freeze({ BEAT_INPUT_VOLUME: faderCurve, MIC1_VOLUME: faderCurve, MIC2_VOLUME: faderCurve, RETUNE_SPEED_MIC1: retuneCurve, RETUNE_SPEED_MIC2: retuneCurve }),
+     });
+ })();
+ 

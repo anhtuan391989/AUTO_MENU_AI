@@ -61,8 +61,8 @@ const OLD = (v) => Math.round(Math.max(0, Math.min(100, v)) * 127 / 100);
   ok(maxStep <= 1.7, `[FAST-03] bước dB lớn nhất mỗi 1 MUSIC trong 90–100 ≤ 1,7 dB (thực tế ${maxStep.toFixed(2)})`, maxStep);
   ok(Math.abs(dB(cs[90])) < 0.3 && cs[90] === 97, '[FAST-03] MUSIC 90 vẫn = CC97 (đo +0,2 dB)');
   // MASTER và Retune: công thức cũ trên FSP8
-  let same = true; for (const a of ['MASTER_OUTPUT_VOLUME', 'RETUNE_SPEED_MIC1', 'RETUNE_SPEED_MIC2']) for (let v = 0; v <= 100; v++) { const r = await cc(a, v); if (r.v !== OLD(v) || r.n !== MAPS[a].number) same = false; }
-  ok(same, '[MASTER] MASTER CC21 + RETUNE CC22/23 vẫn dùng round(v×127/100) trên Studio Pro 8');
+  let same = true; for (const a of ['MASTER_OUTPUT_VOLUME']) for (let v = 0; v <= 100; v++) { const r = await cc(a, v); if (r.v !== OLD(v) || r.n !== MAPS[a].number) same = false; }
+  ok(same, '[MASTER] MASTER CC21 vẫn dùng round(v×127/100) trên Studio Pro 8 (RETUNE dùng đường cong riêng — RETUNE-SPEED-CURVE-01)');
   // DAW khác: MUSIC giữ công thức cũ
   for (const d of ['Studio One 7', 'Cubase 13', 'Studio One 5', '']) {
     const f = env(d || 'x', MAPS); if (!d) f.sb.getSetting = () => undefined;
@@ -75,6 +75,6 @@ const OLD = (v) => Math.round(Math.max(0, Math.min(100, v)) * 127 / 100);
   const li = ren.indexOf('function loadData()'); ok(!/executeAction|dispatchKnobVolume|sendMidi/.test(ren.slice(li, ren.indexOf('\n}\n', li))), '[khởi tạo] loadData() vẫn không gửi MIDI');
   // chỉ MUSIC trên Studio Pro 8 có neo
   const anchors = vm.runInContext('KNOB_CC_ANCHORS', e.sb);
-  ok(Object.keys(anchors).join() === 'Studio Pro 8' && Object.keys(anchors['Studio Pro 8']).join() === 'BEAT_INPUT_VOLUME,MIC1_VOLUME,MIC2_VOLUME', '[phạm vi] neo chỉ cho Studio Pro 8 / BEAT_INPUT_VOLUME (+ MIC1_VOLUME, MIC2_VOLUME dùng cùng đường cong — MIC-VOLUME-KNOB-01)');
+  ok(Object.keys(anchors).join() === 'Studio Pro 8' && Object.keys(anchors['Studio Pro 8']).join() === 'BEAT_INPUT_VOLUME,MIC1_VOLUME,MIC2_VOLUME,RETUNE_SPEED_MIC1,RETUNE_SPEED_MIC2', '[phạm vi] neo chỉ cho Studio Pro 8 / BEAT_INPUT_VOLUME (+ MIC1_VOLUME, MIC2_VOLUME dùng cùng đường cong — MIC-VOLUME-KNOB-01)');
   console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })();
