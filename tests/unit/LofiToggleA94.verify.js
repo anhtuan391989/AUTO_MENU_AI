@@ -20,9 +20,9 @@ function makeAR(daw, saved) {
     const d = AR.DAW_STATE_CONTROLS.LOFI;
     ok(AR.ACTIONS.LOFI_STATE === 'LOFI_STATE' && d && d.on === 'LOFI_STATE' && d.off === 'LOFI_STATE' && d.values.on === 127 && d.values.off === 0 && d.legacy === 'PRESET_LOFI', 'control LOFI: 1 action, giá trị 127/0, legacy PRESET_LOFI');
     let r = await AR.setDawControlState('LOFI', true, {});
-    ok(r.ok && JSON.stringify(AR.__sent[0]) === JSON.stringify([114, 127, 15]), 'LOFI BẬT -> CC114 = 127 kênh 16 (index 15), không cần Setup');
+    ok(r.ok && JSON.stringify(AR.__sent[0]) === JSON.stringify([118, 127, 15]), 'LOFI BẬT -> CC118 (không trùng PRESET NORM CC114) = 127 kênh 16 (index 15), không cần Setup');
     r = await AR.setDawControlState('LOFI', false, {});
-    ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([114, 0, 15]), 'LOFI TẮT -> CC114 = 0');
+    ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([118, 0, 15]), 'LOFI TẮT -> CC118 = 0');
     AR = makeAR('Cubase 14'); await AR.setDawControlState('LOFI', true, {});
     ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([119, 127, 15]), 'Cubase: CC119');
     AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { LOFI_STATE: { kind: 'cc', channel: 16, number: 90, value: 127 } } }); await AR.setDawControlState('LOFI', true, {});
@@ -56,8 +56,8 @@ function makeAR(daw, saved) {
 
     console.log('== 3. Setup/Surface ==');
     const setup = rd('ui/js/setup.js');
-    ok(/action: "LOFI_STATE"/.test(setup) && /"TUNE_BYPASS", "LOFI_STATE"\]/.test(setup) && /LOFI_STATE: 114/.test(setup) && /LOFI_STATE: 119/.test(setup), 'Setup: có dòng LOFI_STATE, nhóm bảo vệ trùng CC, bộ gợi ý Studio One 114 / Cubase 119');
-    ok(/name="lofiOnOff"[\s\S]{0,160}address="114"/.test(rd('studio_one/AutoMenuAI.surface.xml')), 'surface AutoMenuAI có control LOFI CC114');
+    ok(/action: "LOFI_STATE"/.test(setup) && /"TUNE_BYPASS", "LOFI_STATE"\]/.test(setup) && /LOFI_STATE: 118/.test(setup) && /LOFI_STATE: 119/.test(setup), 'Setup: có dòng LOFI_STATE, nhóm bảo vệ trùng CC, bộ gợi ý Studio One 118 / Cubase 119');
+    ok(/name="lofiOnOff"[\s\S]{0,160}address="118"/.test(rd('studio_one/AutoMenuAI.surface.xml')), 'surface AutoMenuAI có control LOFI CC118');
     console.log('== 4. A94: Auto-Tune 3 / 4 có CC riêng mặc định (kênh 16, CC34-37) ==');
     { const A = makeAR('Studio Pro 8'); const g = (n) => A.getMidiOutMapping(n);
       const want = { KEY_SCALE_MAJOR_AT3: [34, 0], KEY_SCALE_MINOR_AT3: [34, 5], KEY_ROOT_AT3: [35, 0], KEY_SCALE_MAJOR_AT4: [36, 0], KEY_SCALE_MINOR_AT4: [36, 5], KEY_ROOT_AT4: [37, 0] };

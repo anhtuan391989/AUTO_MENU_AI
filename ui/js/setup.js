@@ -679,7 +679,7 @@ const DAW_MIDI_ACTIONS = [
     // TASK A79 — nút TUNE OFF: bypass Auto-Tune cả 2 mic (ON = bypass bật, OFF = bypass tắt). Trống mặc định, tự MIDI Learn.
     // 1 CC DUY NHẤT cho nút TUNE ON/OFF: Menu tự gửi giá trị 127 (nút thành TUNE OFF = bypass BẬT) hoặc 0 (về TUNE ON = bypass TẮT).
     { action: "TUNE_BYPASS", label: "TUNE ON/OFF — BYPASS cả 4 plugin Auto-Tune (127 = bypass bật, 0 = tắt)" },
-    // TASK A94 — nút LOFI: ON/OFF độc lập, kết hợp được với NORM/RAP/REMIX. 1 CC: 127 = LOFI bật, 0 = tắt (mặc định kênh 16 CC 114 / Cubase 119).
+    // TASK A94 — nút LOFI: ON/OFF độc lập, kết hợp được với NORM/RAP/REMIX. 1 CC: 127 = LOFI bật, 0 = tắt (mặc định kênh 16 CC 118 / Cubase 119).
     { action: "LOFI_STATE", label: "LOFI ON/OFF (127 = bật, 0 = tắt) — kết hợp với preset khác" },
     // MENU-FIX-02 — TUỲ CHỌN: lệnh CHỌN TRACK (macro chỉ "Find Track") gửi TRƯỚC lệnh ON/OFF tương ứng để Monitor không đảo nhầm track cũ.
     { action: "MUSIC_SELECT", label: "MUSIC CHỌN TRACK (Find Track Beat — gửi trước ON/OFF)" },
@@ -744,7 +744,7 @@ function getDawMidiOutMapping(action) {
     }
     if (action === "LOFI_STATE") { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
         const cubase = /^cubase/i.test(String(daw).trim());
-        return { kind: "cc", channel: 16, number: cubase ? 119 : 114, value: 127, source: "DEFAULT_PRESET" };
+        return { kind: "cc", channel: 16, number: cubase ? 119 : 118, value: 127, source: "DEFAULT_PRESET" };
     }
     return null;
 }
@@ -793,7 +793,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
             // MIC-VOLUME-KNOB-01 — 2 CC âm lượng Mic, kênh 15 như bộ KNOB, không trùng CC 20–23 (Knob) và 102–112 (LIVE/CHỌN TRACK).
             // TASK A82 — 1 CC Bypass Auto-Tune (nút TUNE ON/OFF: 127 = bypass bật, 0 = tắt), kênh 16 như LIVE, CC 113 (không trùng 102–112).
             tune: Object.freeze({ title: "TUNE BYPASS", count: 1, mappings: dawQfMake(16, 127, { TUNE_BYPASS: 113 }) }),
-            lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 114 }) }), // A94
+            lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 118 }) }), // A94
             // PRESET-CC-01 — 4 CC (kênh 16, giá trị 127) cho 4 nút Preset NORM/LOFI/RAP/REMIX: mỗi nút gửi 1 CC riêng; trong Studio Pro gán từng CC vào macro/preset
             // (bật-tắt plugin hoặc đặt thông số cài sẵn). Dùng CC 114–117: không trùng LIVE 102–109, CHỌN TRACK 110–112, TUNE 113; tránh CC 120–127 (lệnh hệ thống MIDI).
             preset: Object.freeze({ title: "PRESET NORM/LOFI/RAP/REMIX", count: 4, mappings: dawQfMake(16, 127, { PRESET_NORM: 114, PRESET_LOFI: 115, PRESET_RAP: 116, PRESET_REMIX: 117 }) }),

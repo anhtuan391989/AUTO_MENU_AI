@@ -255,10 +255,10 @@ function getMidiOutMapping(action) {
         const cubase = /^cubase/i.test(String(daw).trim());
         return { kind: "cc", channel: 16, number: cubase ? 118 : 113, value: 127, source: "DEFAULT_PRESET" };
     }
-    // TASK A94 — preset mặc định nút LOFI (ON/OFF độc lập): Studio One/Studio Pro kênh 16 CC 114; Cubase CC 119. Giá trị gửi do nút quyết định (127 = BẬT, 0 = TẮT).
+    // TASK A94 — preset mặc định nút LOFI (ON/OFF độc lập): Studio One/Studio Pro kênh 16 CC 118 (114 đã là PRESET NORM); Cubase CC 119. Giá trị gửi do nút quyết định (127 = BẬT, 0 = TẮT).
     if (action === "LOFI_STATE") {
         const cubase = /^cubase/i.test(String(daw).trim());
-        return { kind: "cc", channel: 16, number: cubase ? 119 : 114, value: 127, source: "DEFAULT_PRESET" };
+        return { kind: "cc", channel: 16, number: cubase ? 119 : 118, value: 127, source: "DEFAULT_PRESET" };
     }
     // TASK A92 — preset mặc định SCALE gửi tới Auto-Tune (Studio One/Studio Pro): kênh 15, CC 26 (Major=0, Minor=5). Khớp bộ "scale" trong DAW_MIDI_PROFILES (setup.js).
     // Chỉ khi chưa lưu mapping riêng (mapping đã lưu luôn thắng). KEY gốc KHÔNG có mặc định CC: vẫn gửi bằng nốt MIDI như cũ (KEY_ROOT chỉ dùng CC khi người dùng tự lưu CC 27). Cubase chưa có bộ CC kiểm chứng nên không có mặc định.

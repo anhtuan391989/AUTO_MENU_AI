@@ -126,9 +126,9 @@
     <Control name="keyRootAt4" title="Key Root AutoTune4 (C=0..B=127)" type="knob" options="receive public">
       <MidiMessage status="#BE" address="37"/>
     </Control>
-    <!-- CC 114 -->
+    <!-- CC 118 -->
     <Control name="lofiOnOff" title="LOFI ON/OFF (127=bat, 0=tat)" type="button" options="receive public">
-      <MidiMessage status="#BF" address="114"/>
+      <MidiMessage status="#BF" address="118"/>
     </Control>
     <!-- CC 28 -->
     <Control name="fxDelay" title="FX Bus Delay" type="knob" options="receive public">
