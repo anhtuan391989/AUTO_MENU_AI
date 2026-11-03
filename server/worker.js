@@ -787,7 +787,7 @@ function taoTrangChu() {
 
         <h3 style="color:#4CAF50;">Tung Doan Khoa</h3>
         <table>
-          <thead><tr><th>Tu</th><th>Den</th><th>Khoa</th><th>Che do</th></tr></thead>
+          <thead><tr><th>Tu</th><th>Den</th><th>Khoa</th><th>Che do</th><th>Sua doan nay</th></tr></thead>
           <tbody id="danhSachDoan"></tbody>
         </table>
 
@@ -831,6 +831,7 @@ function taoTrangChu() {
     <div id="tab-list" class="hidden">
       <div class="card">
         <h3>Tat Ca Bai Da Luu</h3>
+        <div id="kqDS" style="margin:10px 0; padding:10px; border-radius:8px; display:none;"></div>
         <div id="danhSachTatCa"></div>
       </div>
     </div>
@@ -888,7 +889,18 @@ function taoTrangChu() {
           var tagClass = d.mode === 'major' ? 'tag-major' : 'tag-minor';
           tbodyDoan.innerHTML += '<tr><td>' + esc(d.tu) + '</td><td>' + esc(d.den) + '</td>' +
             '<td style="font-weight:bold; font-size:16px;">' + esc(d.khoa) + '</td>' +
-            '<td><span class="tag ' + tagClass + '">' + esc(d.cheDo) + '</span></td></tr>';
+            '<td><span class="tag ' + tagClass + '">' + esc(d.cheDo) + '</span></td>' +
+            '<td><div style="display:flex; gap:6px; align-items:center;">' +
+              '<select class="dt-key" data-val="' + esc(d.khoa) + '" style="padding:8px; border-radius:6px; border:none;">' + OPT_KEY + '</select>' +
+              '<select class="dt-mode" data-val="' + esc(d.mode) + '" style="padding:8px; border-radius:6px; border:none;"><option value="major">Truong</option><option value="minor">Phu</option></select>' +
+              '<button class="btn-primary btn-dt-luu" data-start="' + esc(d.startSec) + '" style="padding:8px 14px;">Luu</button>' +
+            '</div></td></tr>';
+        }
+        var dk = tbodyDoan.querySelectorAll('.dt-key'), dm = tbodyDoan.querySelectorAll('.dt-mode'), dl = tbodyDoan.querySelectorAll('.btn-dt-luu');
+        for (var z = 0; z < dk.length; z++) {
+          dk[z].value = dk[z].getAttribute('data-val');
+          dm[z].value = dm[z].getAttribute('data-val') === 'minor' ? 'minor' : 'major';
+          dl[z].addEventListener('click', function() { suaDoanNay(this); });
         }
         // Dien san Key hien tai vao o sua (doan dau tien) de chi can doi nhung gi muon sua
         if (!window.baiDangXem || window.baiDangXem.id !== data.songId) document.getElementById('kqSua').style.display = 'none';
@@ -1015,6 +1027,7 @@ function taoTrangChu() {
       }
     }
 
+    var OPT_KEY = '<option>C</option><option>C#</option><option>D</option><option>D#</option><option>E</option><option>F</option><option>F#</option><option>G</option><option>G#</option><option>A</option><option>A#</option><option>B</option>';
     // Danh sach tat ca bai
     async function taiDanhSach() {
       var res = await fetch(SERVER + '/list');
@@ -1032,11 +1045,19 @@ function taoTrangChu() {
           : ' <span class="tag" style="background:#555; color:#ddd;">Chua co Key</span>';
         div.innerHTML += '<div class="list-item" data-songid="' + esc(bai.songId) + '">' +
           '<div class="list-title">' + esc(bai.title) + keyTag + '</div>' +
-          '<div class="list-desc">ID: ' + esc(bai.songId) + ' | Thoi luong: ' + esc(bai.tongThoiLuong) + ' | So doan: ' + esc(bai.soDoan) + '</div></div>';
+          '<div class="list-desc">ID: ' + esc(bai.songId) + ' | Thoi luong: ' + esc(bai.tongThoiLuong) + ' | So doan: ' + esc(bai.soDoan) + '</div>' +
+          '<div class="list-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">' +
+            '<select class="ds-key" data-val="' + esc(bai.key || '') + '" style="padding:10px; border-radius:6px; border:none; font-size:15px;">' + OPT_KEY + '</select>' +
+            '<select class="ds-mode" data-val="' + esc(bai.mode || 'major') + '" style="padding:10px; border-radius:6px; border:none; font-size:15px;"><option value="major">Truong</option><option value="minor">Phu</option></select>' +
+            '<button class="btn-primary btn-ds-luu" data-songid="' + esc(bai.songId) + '" data-sodoan="' + esc(bai.soDoan) + '" style="padding:10px 16px;">Luu Key</button>' +
+            '<button class="btn-ds-xoa" data-songid="' + esc(bai.songId) + '" data-title="' + esc(bai.title) + '" style="background:#c62828; color:#fff; padding:10px 16px; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Xoa</button>' +
+          '</div>' +
+          '</div></div>';
       }
       var items = document.querySelectorAll('#danhSachTatCa .list-item');
       for (var k = 0; k < items.length; k++) {
-        items[k].addEventListener('click', function() {
+        items[k].addEventListener('click', function(ev) {
+          if (ev.target.closest && ev.target.closest('button, select, input, label')) return;
           var sid = this.getAttribute('data-songid');
           document.getElementById('songIdInput').value = sid;
           var allTabs = document.querySelectorAll('.tab');
@@ -1047,6 +1068,86 @@ function taoTrangChu() {
           timBai();
         });
       }
+      var sk = document.querySelectorAll('#danhSachTatCa .ds-key');
+      for (var u = 0; u < sk.length; u++) { var kv = sk[u].getAttribute('data-val'); if (kv) sk[u].value = kv; }
+      var sm = document.querySelectorAll('#danhSachTatCa .ds-mode');
+      for (var w = 0; w < sm.length; w++) { sm[w].value = sm[w].getAttribute('data-val') === 'minor' ? 'minor' : 'major'; }
+      var bl = document.querySelectorAll('#danhSachTatCa .btn-ds-luu');
+      for (var n = 0; n < bl.length; n++) {
+        bl[n].addEventListener('click', function(ev) { ev.stopPropagation(); suaKeyDS(this); });
+      }
+      var bx = document.querySelectorAll('#danhSachTatCa .btn-ds-xoa');
+      for (var q = 0; q < bx.length; q++) {
+        bx[q].addEventListener('click', function(ev) { ev.stopPropagation(); xoaBaiDS(this); });
+      }
+    }
+
+    // Sua Key / Xoa bai ngay trong danh sach + sua tung doan: mat khau quan tri hoi 1 lan (nho trong tab, sessionStorage)
+    var OPT_KEY_LIST = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    function hienKqDS(ok, text) {
+      var kq = document.getElementById('kqDS');
+      kq.style.display = 'block';
+      kq.style.background = ok ? 'rgba(76,175,80,0.25)' : 'rgba(244,67,54,0.25)';
+      kq.innerText = text;
+    }
+    function layMatKhau() {
+      var t = '';
+      try { t = sessionStorage.getItem('menuAdminToken') || ''; } catch (e) {}
+      if (!t) { var o = document.getElementById('adminToken'); if (o && o.value) t = o.value; }
+      if (!t) t = prompt('Nhap mat khau quan tri (ADMIN_TOKEN):') || '';
+      return t;
+    }
+    function nhoMatKhau(t) {
+      try { sessionStorage.setItem('menuAdminToken', t); } catch (e) {}
+      var o = document.getElementById('adminToken'); if (o) o.value = t;
+    }
+    function quenMatKhau() { try { sessionStorage.removeItem('menuAdminToken'); } catch (e) {} }
+    async function goiAdmin(path, body, token) {
+      var res = await fetch(SERVER + path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) });
+      var data = await res.json();
+      if (res.status === 401) quenMatKhau();
+      return data;
+    }
+    async function suaKeyDS(btn) {
+      var item = btn.closest('.list-item');
+      var n = Number(btn.getAttribute('data-sodoan')) || 0;
+      var body = { songId: btn.getAttribute('data-songid'), key: item.querySelector('.ds-key').value, mode: item.querySelector('.ds-mode').value };
+      if (n > 1) {
+        if (!confirm('Bai nay co ' + n + ' doan. Dat Key nay cho TAT CA ' + n + ' doan?\\n(Muon sua tung doan: bam vao ten bai, cot "Sua doan nay")')) return;
+        body.all = true;
+      }
+      var token = layMatKhau();
+      if (!token) { hienKqDS(false, 'Chua nhap mat khau quan tri.'); return; }
+      try {
+        var data = await goiAdmin('/set-key', body, token);
+        if (data.ok) { nhoMatKhau(token); hienKqDS(true, 'Da sua ' + data.daSua + ' doan -> ' + data.keyHienThi); taiDanhSach(); }
+        else hienKqDS(false, data.message || data.error || 'Loi');
+      } catch (err) { hienKqDS(false, 'Loi ket noi: ' + err.message); }
+    }
+    async function xoaBaiDS(btn) {
+      var id = btn.getAttribute('data-songid'), ten = btn.getAttribute('data-title') || id;
+      if (!confirm('XOA bai "' + ten + '" va tat ca Key cua bai khoi server? Khong hoan tac duoc.')) return;
+      var token = layMatKhau();
+      if (!token) { hienKqDS(false, 'Chua nhap mat khau quan tri.'); return; }
+      try {
+        var data = await goiAdmin('/delete-song', { songId: id, xacNhan: true }, token);
+        if (data.ok) { nhoMatKhau(token); hienKqDS(true, 'Da xoa bai "' + ten + '" (' + data.daXoaDoan + ' doan Key).'); taiDanhSach(); }
+        else hienKqDS(false, data.message || data.error || 'Loi');
+      } catch (err) { hienKqDS(false, 'Loi ket noi: ' + err.message); }
+    }
+    // Sua tung doan ngay trong bang chi tiet bai
+    async function suaDoanNay(btn) {
+      var tr = btn.closest('tr');
+      var bai = window.baiDangXem;
+      if (!bai || !bai.id) return;
+      var body = { songId: bai.id, key: tr.querySelector('.dt-key').value, mode: tr.querySelector('.dt-mode').value, startSec: Number(btn.getAttribute('data-start')) };
+      var token = layMatKhau();
+      if (!token) { alert('Chua nhap mat khau quan tri.'); return; }
+      try {
+        var data = await goiAdmin('/set-key', body, token);
+        if (data.ok) { nhoMatKhau(token); timBai(); }
+        else alert(data.message || data.error || 'Loi');
+      } catch (err) { alert('Loi ket noi: ' + err.message); }
     }
   </script>
 </body>
