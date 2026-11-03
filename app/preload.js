@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- BẢNG HIỆU ỨNG ĐỘC LẬP (cửa sổ riêng, xem app/EffectsWindow.js) ----
     toggleEffectsWindow: () => ipcRenderer.send("effects-toggle"),
     closeEffectsWindow: () => ipcRenderer.send("effects-close"),
+    onEffectsState: (callback) => ipcRenderer.on("effects-state", (event, open) => callback(!!open)), // EFFECT-LIT-01
     getEffectsAlwaysOnTop: () => ipcRenderer.invoke("effects-get-aot"),
     setEffectsAlwaysOnTop: (enabled) => ipcRenderer.invoke("effects-set-aot", enabled),
     // Nút trong Bảng Hiệu Ứng -> main -> cửa sổ menu (nơi có SoundEffectEngine). effectId: "CLAP" | "LAUGH"
@@ -140,6 +141,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // Xác thực THẬT xảy ra ở main process (core/shared/AdminAuth.js) — hàm này chỉ relay
     // qua IPC, không tự so sánh password ở renderer.
     adminAuthVerify: (password) => ipcRenderer.invoke("admin-auth-verify", password),
+    getDatabaseStatus: () => ipcRenderer.invoke("database-status"), // DB-STATUS-01
+    // HIDE-DAW-01 — Setup > Công cụ và sửa lỗi > Ẩn DAW xuống khay thông báo
+    toolsDawStatus: () => ipcRenderer.invoke("tools-daw-status"),
+    toolsDawHide: () => ipcRenderer.invoke("tools-daw-hide"),
+    toolsDawShow: () => ipcRenderer.invoke("tools-daw-show"),
     adminAuthChangePassword: (currentPassword, newPassword) =>
         ipcRenderer.invoke("admin-auth-change-password", { currentPassword, newPassword }),
 });

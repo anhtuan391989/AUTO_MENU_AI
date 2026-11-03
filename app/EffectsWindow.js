@@ -38,8 +38,10 @@ function computeInitialPosition(mainBounds, workArea) {
     return { x: Math.round(x), y: Math.round(y) };
 }
 
-function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preloadPath, htmlPath }) {
+function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preloadPath, htmlPath, onStateChange }) {
     let win = null;
+    // EFFECT-LIT-01 — báo trạng thái mở/đóng ra ngoài (menu dùng để sáng/tắt nút EFFECT). Lỗi ở callback không được làm hỏng cửa sổ.
+    function emitState(open) { try { if (typeof onStateChange === "function") onStateChange(!!open); } catch (err) { console.error("effects onStateChange lỗi:", err); } }
     let alwaysOnTop = false;
     let boundMain = null;
 
@@ -140,10 +142,12 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
             if (win === thisWin) {
                 win = null;
                 unbindMain();
+                emitState(false);
             }
         });
 
         bindMain(main);
+        emitState(true);
         return { ok: true, open: true };
     }
 
@@ -154,6 +158,7 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
         if (alive(w)) {
             try { w.close(); } catch (err) { console.error("effects close lỗi:", err); }
         }
+        emitState(false);
         return { ok: true, open: false };
     }
 

@@ -1,0 +1,888 @@
+diff --git a/app/DawTray.js b/app/DawTray.js
+new file mode 100644
+index 0000000..286ca4f
+--- /dev/null
++++ b/app/DawTray.js
+@@ -0,0 +1,119 @@
++/**
++ * app/DawTray.js — HIDE-DAW-01
++ * Quản lý "Ẩn DAW xuống khay thông báo": ẩn cửa sổ DAW đang chạy (WindowHider) + biểu tượng khay hệ thống (Tray) có menu Hiện DAW / Ẩn DAW.
++ * Không require("electron") ở đây: Tray/Menu/nativeImage được tiêm vào => test được bằng đối tượng giả. KHÔNG BAO GIỜ throw ra ngoài.
++ * DAW cần ẩn = file .exe đã cấu hình trong Setup (selectedDAWPath, nếu trống thì startupPaths.dawExecutable). Các cửa sổ đã ẩn được ghi vào
++ * file trạng thái trong thư mục dữ liệu app để vẫn "Hiện DAW" được sau khi mở lại Menu. Thoát Menu khi DAW đang ẩn => tự hiện lại DAW (không bỏ DAW vô hình).
++ */
++'use strict';
++
++const TRAY_ICON_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAQElEQVR4nGNgoAl4+v8/Vky2RqIMIlYzTkPQFLAJK6Fg/AYQ0EzYECI0YzVkmBpAXiBSHI1USUgUJ2ViDKIFAACAY4MoRAMNKgAAAABJRU5ErkJggg=='; // chấm tròn 16x16 (nền xanh, lõi tối) — không cần file ảnh ngoài
++
++function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile, fs, windowHider, log }) {
++    let tray = null;
++    let saved = null; // { exePath, handles:number[] } khi DAW đang bị ẩn
++    const say = (m, e) => { try { (log || console.log)('[DawTray] ' + m, e || ''); } catch (x) { /* bỏ qua */ } };
++
++    function loadState() {
++        try {
++            if (!stateFile || !fs.existsSync(stateFile)) return null;
++            const o = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
++            if (o && typeof o.exePath === 'string' && Array.isArray(o.handles) && o.handles.length) return { exePath: o.exePath, handles: o.handles.filter((n) => Number.isSafeInteger(n) && n > 0) };
++        } catch (e) { say('đọc trạng thái lỗi (bỏ qua)', e && e.message); }
++        return null;
++    }
++    function saveState() {
++        try {
++            if (!stateFile) return;
++            if (saved) fs.writeFileSync(stateFile, JSON.stringify(saved), 'utf8');
++            else if (fs.existsSync(stateFile)) fs.unlinkSync(stateFile);
++        } catch (e) { say('ghi trạng thái lỗi (bỏ qua)', e && e.message); }
++    }
++    saved = loadState();
++
++    function configuredExe() {
++        try {
++            const s = readSettings() || {};
++            const a = typeof s.selectedDAWPath === 'string' ? s.selectedDAWPath.trim() : '';
++            const b = s.startupPaths && typeof s.startupPaths.dawExecutable === 'string' ? s.startupPaths.dawExecutable.trim() : '';
++            return a || b || '';
++        } catch (e) { return ''; }
++    }
++
++    function buildMenu() {
++        return Menu.buildFromTemplate([
++            { label: 'Hiện DAW', click: () => { show(() => {}); } },
++            { label: 'Ẩn DAW', click: () => { hide(() => {}); } }
++        ]);
++    }
++    function ensureTray() {
++        if (tray) return;
++        try {
++            const img = nativeImage.createFromBuffer(Buffer.from(TRAY_ICON_PNG_BASE64, 'base64'));
++            tray = new Tray(img);
++            tray.setToolTip('AUTO MENU AI — DAW đang ẩn (bấm đúp để hiện)');
++            tray.setContextMenu(buildMenu());
++            tray.on('double-click', () => { show(() => {}); });
++        } catch (e) { say('tạo khay lỗi', e && e.message); tray = null; }
++    }
++    function dropTray() {
++        try { if (tray) tray.destroy(); } catch (e) { /* bỏ qua */ }
++        tray = null;
++    }
++    // Khôi phục khay nếu lần trước thoát khi DAW còn ẩn (hiếm: app bị tắt đột ngột).
++    function restoreTrayIfHidden() { if (saved) ensureTray(); }
++
++    function status() {
++        const exe = configuredExe();
++        return { configured: !!exe, exePath: exe, hidden: !!saved, trayVisible: !!tray };
++    }
++
++    function hide(cb) {
++        try {
++            if (saved) { cb({ ok: true, state: 'hidden', message: 'DAW đang được ẩn rồi.' }); return; }
++            const exe = configuredExe();
++            if (!exe) { cb({ ok: false, state: 'not_configured', message: 'Chưa chọn file chạy của DAW. Vào Setup > AI > "Đường dẫn & khởi động" để chọn.' }); return; }
++            windowHider.hide(exe, (r) => {
++                try {
++                    if (r.ok) {
++                        saved = { exePath: exe, handles: r.handles };
++                        saveState(); ensureTray();
++                        cb({ ok: true, state: 'hidden', message: 'Đã ẩn DAW xuống khay thông báo (biểu tượng chấm tròn xanh cạnh đồng hồ). Bấm đúp biểu tượng để hiện lại.' });
++                    } else if (r.state === 'not_found') cb({ ok: false, state: 'not_found', message: 'Không thấy DAW đang chạy (đúng file đã chọn). Hãy mở DAW trước.' });
++                    else if (r.reason === 'UNSUPPORTED_PLATFORM') cb({ ok: false, state: 'unsupported', message: 'Chức năng này chỉ chạy trên Windows.' });
++                    else if (r.reason === 'NO_WINDOW_FOUND') cb({ ok: false, state: 'failed', message: 'Thấy DAW đang chạy nhưng không có cửa sổ nào để ẩn (có thể đã ẩn sẵn).' });
++                    else cb({ ok: false, state: 'failed', message: 'Không ẩn được DAW: ' + (r.reason || 'lỗi không rõ') });
++                } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
++            });
++        } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
++    }
++
++    function show(cb) {
++        try {
++            if (!saved) { cb({ ok: true, state: 'visible', message: 'DAW không bị ẩn.' }); return; }
++            const cur = saved;
++            windowHider.show(cur.exePath, cur.handles, (r) => {
++                try {
++                    if (r.ok) { saved = null; saveState(); dropTray(); cb({ ok: true, state: 'visible', message: 'Đã hiện lại DAW.' }); }
++                    else if (r.state === 'not_found') { // DAW đã tắt / cửa sổ không còn => bỏ trạng thái ẩn, không để khay treo mãi
++                        saved = null; saveState(); dropTray();
++                        cb({ ok: false, state: 'not_found', message: 'DAW đã đóng hoặc cửa sổ không còn — đã xoá trạng thái ẩn.' });
++                    } else cb({ ok: false, state: 'failed', message: 'Không hiện được DAW: ' + (r.reason || 'lỗi không rõ') });
++                } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
++            });
++        } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
++    }
++
++    // Gọi lúc thoát app: hiện lại DAW (đồng bộ) để không bỏ DAW vô hình.
++    function restoreOnQuit() {
++        try {
++            if (!saved) return;
++            windowHider.showSync(saved.exePath, saved.handles);
++            saved = null; saveState(); dropTray();
++        } catch (e) { say('khôi phục khi thoát lỗi (bỏ qua)', e && e.message); }
++    }
++
++    return { hide, show, status, restoreOnQuit, restoreTrayIfHidden, _internals: () => ({ saved, tray }) };
++}
++
++module.exports = { createDawTrayManager, TRAY_ICON_PNG_BASE64 };
+diff --git a/app/EffectsWindow.js b/app/EffectsWindow.js
+index a7b0a7f..723d5f7 100644
+--- a/app/EffectsWindow.js
++++ b/app/EffectsWindow.js
+@@ -38,8 +38,10 @@ function computeInitialPosition(mainBounds, workArea) {
+     return { x: Math.round(x), y: Math.round(y) };
+ }
+ 
+-function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preloadPath, htmlPath }) {
++function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preloadPath, htmlPath, onStateChange }) {
+     let win = null;
++    // EFFECT-LIT-01 — báo trạng thái mở/đóng ra ngoài (menu dùng để sáng/tắt nút EFFECT). Lỗi ở callback không được làm hỏng cửa sổ.
++    function emitState(open) { try { if (typeof onStateChange === "function") onStateChange(!!open); } catch (err) { console.error("effects onStateChange lỗi:", err); } }
+     let alwaysOnTop = false;
+     let boundMain = null;
+ 
+@@ -140,10 +142,12 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
+             if (win === thisWin) {
+                 win = null;
+                 unbindMain();
++                emitState(false);
+             }
+         });
+ 
+         bindMain(main);
++        emitState(true);
+         return { ok: true, open: true };
+     }
+ 
+@@ -154,6 +158,7 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
+         if (alive(w)) {
+             try { w.close(); } catch (err) { console.error("effects close lỗi:", err); }
+         }
++        emitState(false);
+         return { ok: true, open: false };
+     }
+ 
+diff --git a/app/main.js b/app/main.js
+index c800406..1df2edf 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -1,6 +1,6 @@
+ const { MenuKeyClient } = require('./menu-api-client.js');
+ const keyServer = new MenuKeyClient("https://menu-key-server.matuotluuly.workers.dev");
+-const { app, BrowserWindow, ipcMain, dialog, session, shell, screen, desktopCapturer } = require("electron");
++const { app, BrowserWindow, ipcMain, dialog, session, shell, screen, desktopCapturer, Tray, Menu, nativeImage } = require("electron");
+ const path = require("path");
+ const fs = require("fs");
+ const { execFile } = require("child_process");
+@@ -701,6 +701,17 @@ ipcMain.on("ai-result", (event, { type, payload } = {}) => {
+ // renderer" vì kết quả đúng/sai được QUYẾT ĐỊNH Ở ĐÂY (main process), renderer chỉ
+ // hiển thị kết quả.
+ // ================================
++// DB-STATUS-01 — ô "Database" trong Setup > Dashboard: hỏi Key Server có trả lời không (chỉ đọc, không gửi dữ liệu nào).
++ipcMain.handle("database-status", async () => {
++    try {
++        const { pingServer } = require("../core/integration/ServerHealth");
++        const { DEFAULT_SERVER_URL } = require("../core/integration/KeyServerSync");
++        return await pingServer({ url: DEFAULT_SERVER_URL, fetchImpl: (u, o) => fetch(u, o), timeoutMs: 3000 });
++    } catch (err) {
++        return { ok: false, status: null, ms: 0, error: String((err && err.message) || err) };
++    }
++});
++
+ ipcMain.handle("admin-auth-verify", async (event, password) => {
+     try {
+         return AdminAuth.verify(password);
+@@ -858,7 +869,9 @@ const effectsWindow = createEffectsWindowManager({
+     screen,
+     getMainWin: () => mainWin,
+     preloadPath: path.join(__dirname, "preload.js"),
+-    htmlPath: path.join(__dirname, "..", "ui", "effects.html")
++    htmlPath: path.join(__dirname, "..", "ui", "effects.html"),
++    // EFFECT-LIT-01 — báo cho menu chính biết Bảng Hiệu Ứng đang mở/đóng để nút EFFECT sáng/tắt đúng.
++    onStateChange: (open) => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send("effects-state", !!open); }
+ });
+ 
+ ipcMain.on("effects-toggle", (event) => {
+@@ -892,6 +905,39 @@ ipcMain.on("effects-play", (event, effectId) => {
+     }
+ });
+ 
++// ================================
++// HIDE-DAW-01 — "Công cụ và sửa lỗi" > Ẩn DAW xuống khay thông báo (system tray). Logic ở app/DawTray.js + core/integration/WindowHider.js.
++// 3 kênh IPC MỚI, CHỈ nhận từ cửa sổ Setup. Chỉ ẨN/HIỆN cửa sổ DAW đang chạy (tiến trình KHÔNG bị tắt, vẫn nhận MIDI/audio). Không đụng Hidden-DAW launcher cũ.
++// ================================
++const { createDawTrayManager } = require("./DawTray");
++const WindowHider = require("../core/integration/WindowHider");
++let dawTrayMgr = null;
++function getDawTray() {
++    if (!dawTrayMgr) {
++        dawTrayMgr = createDawTrayManager({
++            Tray, Menu, nativeImage, readSettings: readSettingsFile, fs, windowHider: WindowHider, log: console.log,
++            stateFile: path.join(app.getPath("userData"), "hidden-daw-state.json")
++        });
++    }
++    return dawTrayMgr;
++}
++const fromSetupWindow = (event) => !!(setupWin && !setupWin.isDestroyed() && event.sender === setupWin.webContents);
++const DENIED = { ok: false, state: "failed", message: "Không được phép" };
++ipcMain.handle("tools-daw-status", (event) => {
++    try { return fromSetupWindow(event) ? getDawTray().status() : { configured: false, exePath: "", hidden: false, trayVisible: false }; }
++    catch (err) { console.error("tools-daw-status lỗi:", err); return { configured: false, exePath: "", hidden: false, trayVisible: false }; }
++});
++ipcMain.handle("tools-daw-hide", (event) => new Promise((resolve) => {
++    try { if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().hide(resolve); }
++    catch (err) { console.error("tools-daw-hide lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
++}));
++ipcMain.handle("tools-daw-show", (event) => new Promise((resolve) => {
++    try { if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().show(resolve); }
++    catch (err) { console.error("tools-daw-show lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
++}));
++app.on("before-quit", () => { try { if (dawTrayMgr) dawTrayMgr.restoreOnQuit(); } catch (err) { console.error("restoreOnQuit lỗi:", err); } });
++app.whenReady().then(() => { try { getDawTray().restoreTrayIfHidden(); } catch (err) { console.error("restoreTrayIfHidden lỗi:", err); } });
++
+ ipcMain.handle("effects-get-aot", (event) => {
+     if (!effectsWindow.isFromEffects(event.sender)) return { ok: false, value: false, error: "Không được phép" };
+     return effectsWindow.getAlwaysOnTop();
+diff --git a/app/preload.js b/app/preload.js
+index 7c27d5e..5d1d92b 100644
+--- a/app/preload.js
++++ b/app/preload.js
+@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
+     // ---- BẢNG HIỆU ỨNG ĐỘC LẬP (cửa sổ riêng, xem app/EffectsWindow.js) ----
+     toggleEffectsWindow: () => ipcRenderer.send("effects-toggle"),
+     closeEffectsWindow: () => ipcRenderer.send("effects-close"),
++    onEffectsState: (callback) => ipcRenderer.on("effects-state", (event, open) => callback(!!open)), // EFFECT-LIT-01
+     getEffectsAlwaysOnTop: () => ipcRenderer.invoke("effects-get-aot"),
+     setEffectsAlwaysOnTop: (enabled) => ipcRenderer.invoke("effects-set-aot", enabled),
+     // Nút trong Bảng Hiệu Ứng -> main -> cửa sổ menu (nơi có SoundEffectEngine). effectId: "CLAP" | "LAUGH"
+@@ -140,6 +141,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
+     // Xác thực THẬT xảy ra ở main process (core/shared/AdminAuth.js) — hàm này chỉ relay
+     // qua IPC, không tự so sánh password ở renderer.
+     adminAuthVerify: (password) => ipcRenderer.invoke("admin-auth-verify", password),
++    getDatabaseStatus: () => ipcRenderer.invoke("database-status"), // DB-STATUS-01
++    // HIDE-DAW-01 — Setup > Công cụ và sửa lỗi > Ẩn DAW xuống khay thông báo
++    toolsDawStatus: () => ipcRenderer.invoke("tools-daw-status"),
++    toolsDawHide: () => ipcRenderer.invoke("tools-daw-hide"),
++    toolsDawShow: () => ipcRenderer.invoke("tools-daw-show"),
+     adminAuthChangePassword: (currentPassword, newPassword) =>
+         ipcRenderer.invoke("admin-auth-change-password", { currentPassword, newPassword }),
+ });
+diff --git a/core/integration/ServerHealth.js b/core/integration/ServerHealth.js
+new file mode 100644
+index 0000000..6c49bf0
+--- /dev/null
++++ b/core/integration/ServerHealth.js
+@@ -0,0 +1,26 @@
++/**
++ * core/integration/ServerHealth.js — DB-STATUS-01
++ * Kiểm tra Key Server (Cloudflare Worker + D1) có trả lời không, để ô "Database" trong Setup > Dashboard báo THẬT thay cho "Coming Soon".
++ * Module thuần Node, KHÔNG phụ thuộc Electron; fetch được tiêm vào để test. KHÔNG BAO GIỜ throw.
++ * Quy ước: server trả lời bất kỳ mã HTTP < 500 = ONLINE (máy chủ sống); mã ≥ 500, lỗi mạng, hết giờ = OFFLINE.
++ */
++'use strict';
++
++async function pingServer({ url, fetchImpl, timeoutMs = 3000, now = Date.now } = {}) {
++    const started = now();
++    if (!url || typeof fetchImpl !== 'function') return { ok: false, status: null, ms: 0, error: 'NOT_CONFIGURED' };
++    let timer = null;
++    try {
++        const ctl = typeof AbortController === 'function' ? new AbortController() : null;
++        if (ctl) timer = setTimeout(() => { try { ctl.abort(); } catch (e) { /* bỏ qua */ } }, timeoutMs);
++        const res = await fetchImpl(String(url).replace(/\/+$/, '') + '/health', { method: 'GET', signal: ctl ? ctl.signal : undefined });
++        const status = Number(res && res.status);
++        return { ok: Number.isFinite(status) && status < 500, status: Number.isFinite(status) ? status : null, ms: now() - started, error: null };
++    } catch (err) {
++        return { ok: false, status: null, ms: now() - started, error: (err && err.name === 'AbortError') ? 'TIMEOUT' : String((err && err.message) || err) };
++    } finally {
++        if (timer) clearTimeout(timer);
++    }
++}
++
++module.exports = { pingServer };
+diff --git a/core/integration/WindowHider.js b/core/integration/WindowHider.js
+new file mode 100644
+index 0000000..bfd9e98
+--- /dev/null
++++ b/core/integration/WindowHider.js
+@@ -0,0 +1,114 @@
++/**
++ * core/integration/WindowHider.js — HIDE-DAW-01
++ * ---------------------------------------------------------------------------
++ * ẨN / HIỆN cửa sổ chính của một chương trình ĐANG CHẠY (vd DAW Studio Pro) theo đường dẫn .exe đã cấu hình, bằng Win32 (user32) qua PowerShell.
++ * "Ẩn" = SW_HIDE (cửa sổ biến mất khỏi Taskbar/Alt-Tab; tiến trình vẫn chạy bình thường, vẫn nhận MIDI và xử lý audio) — KHÁC với minimize.
++ * Module Node THUẦN (không require electron). Trình chạy PowerShell được tiêm vào để test; KHÔNG BAO GIỜ throw — mọi lỗi trả về trong kết quả.
++ * Chỉ Windows. Trên hệ khác trả { ok:false, reason:"UNSUPPORTED_PLATFORM" }.
++ * Quy tắc chọn cửa sổ khi ẨN: cửa sổ top-level của đúng tiến trình, đang hiện, KHÔNG có owner, có tiêu đề, không phải tool-window.
++ * (Cửa sổ plugin thường là cửa sổ có owner nên tự ẩn theo cửa sổ chính; việc ẩn riêng plugin là tính năng khác, KHÔNG nằm ở đây.)
++ */
++'use strict';
++
++const { spawn, spawnSync } = require('child_process');
++
++function defaultRunner(script, cb) {
++    if (process.platform !== 'win32') { cb(new Error('UNSUPPORTED_PLATFORM'), null); return; }
++    let done = false, out = '', errOut = '', ps;
++    try { ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true }); }
++    catch (e) { cb(e, null); return; }
++    const timer = setTimeout(() => { if (done) return; done = true; try { ps.kill(); } catch (e) { /* bỏ qua */ } cb(new Error('TIMEOUT'), null); }, 15000);
++    ps.stdout.on('data', (d) => { out += d.toString(); });
++    ps.stderr.on('data', (d) => { errOut += d.toString(); });
++    ps.on('error', (e) => { if (done) return; done = true; clearTimeout(timer); cb(e, null); });
++    ps.on('close', (code) => { if (done) return; done = true; clearTimeout(timer); if (code !== 0 && !out.trim()) cb(new Error(errOut.trim() || ('powershell exit ' + code)), null); else cb(null, out.trim()); });
++}
++
++// Đường dẫn .exe phải là chuỗi Windows hợp lệ, không ký tự điều khiển / ký tự cấm — vì sẽ nằm trong chuỗi PowerShell (đã nhân đôi dấu ' nhưng vẫn chặn từ đầu).
++function validateExePath(p) {
++    if (typeof p !== 'string' || !p.trim()) return false;
++    if (/[\u0000-\u001f"<>|*?]/.test(p)) return false;
++    return /\.exe$/i.test(p.trim());
++}
++const psq = (s) => "'" + String(s).replace(/'/g, "''") + "'";
++
++const CSHARP = [
++    'using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;',
++    'public static class HW {',
++    '  delegate bool EnumProc(IntPtr h, IntPtr l);',
++    '  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc p, IntPtr l);',
++    '  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);',
++    '  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);',
++    '  [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);',
++    '  [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);',
++    '  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);',
++    '  [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int idx);',
++    '  [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr h, int n);',
++    '  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);',
++    '  public static string Hide(uint[] pids) {',
++    '    var found = new List<IntPtr>(); var set = new HashSet<uint>(pids);',
++    '    EnumWindows((h, l) => { uint pid; GetWindowThreadProcessId(h, out pid);',
++    '      if (set.Contains(pid) && IsWindowVisible(h) && GetWindow(h, 4) == IntPtr.Zero && GetWindowTextLength(h) > 0 && (GetWindowLong(h, -20) & 0x80) == 0) found.Add(h); return true; }, IntPtr.Zero);',
++    '    var sb = new StringBuilder(); foreach (var h in found) { ShowWindowAsync(h, 0); if (sb.Length > 0) sb.Append(","); sb.Append(h.ToInt64()); } return sb.ToString(); }',
++    '  public static string Show(long[] handles, uint[] pids) {',
++    '    var set = new HashSet<uint>(pids); var ok = new StringBuilder(); IntPtr first = IntPtr.Zero;',
++    '    foreach (var v in handles) { var h = new IntPtr(v); if (!IsWindow(h)) continue; uint pid; GetWindowThreadProcessId(h, out pid); if (!set.Contains(pid)) continue;',
++    '      ShowWindowAsync(h, 5); if (first == IntPtr.Zero) first = h; if (ok.Length > 0) ok.Append(","); ok.Append(v); }',
++    '    if (first != IntPtr.Zero) SetForegroundWindow(first); return ok.ToString(); }',
++    '}'
++].join('\n');
++
++function pidScript(exePath) {
++    return '$pids = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ($_.Path -ieq ' + psq(exePath.trim()) + ') } | ForEach-Object { [uint32]$_.Id }); ';
++}
++function loadType() { return 'Add-Type -TypeDefinition @\'\n' + CSHARP + '\n\'@; '; }
++
++function parseHandles(out) {
++    return String(out || '').split(/[\s,]+/).filter((x) => /^\d+$/.test(x)).map((x) => Number(x)).filter((n) => Number.isSafeInteger(n) && n > 0);
++}
++
++/** Ẩn cửa sổ chính của chương trình exePath. callback(result): { ok, state, handles, reason } — state: "hidden" | "not_found" | "failed". */
++function hide(exePath, cb, runner) {
++    if (!validateExePath(exePath)) { cb({ ok: false, state: 'failed', handles: [], reason: 'INVALID_PATH' }); return; }
++    const run = runner || defaultRunner;
++    const script = pidScript(exePath) + 'if ($pids.Count -eq 0) { "NOPROC" } else { ' + loadType() + '"H:" + [HW]::Hide([uint32[]]$pids) }';
++    run(script, (err, out) => {
++        if (err) { cb({ ok: false, state: 'failed', handles: [], reason: err.message === 'UNSUPPORTED_PLATFORM' ? 'UNSUPPORTED_PLATFORM' : String(err.message || err) }); return; }
++        if (String(out).trim() === 'NOPROC') { cb({ ok: false, state: 'not_found', handles: [], reason: 'PROCESS_NOT_RUNNING' }); return; }
++        const handles = parseHandles(String(out).replace(/^[\s\S]*?H:/, ''));
++        if (!/H:/.test(String(out)) || !handles.length) { cb({ ok: false, state: 'failed', handles: [], reason: 'NO_WINDOW_FOUND' }); return; }
++        cb({ ok: true, state: 'hidden', handles, reason: null });
++    });
++}
++
++/** Hiện lại các cửa sổ đã ẩn (handles) của chương trình exePath. callback(result): { ok, state, handles, reason } — state: "visible" | "not_found" | "failed". */
++function show(exePath, handles, cb, runner) {
++    if (!validateExePath(exePath)) { cb({ ok: false, state: 'failed', handles: [], reason: 'INVALID_PATH' }); return; }
++    const hs = (Array.isArray(handles) ? handles : []).filter((n) => Number.isSafeInteger(n) && n > 0);
++    if (!hs.length) { cb({ ok: false, state: 'not_found', handles: [], reason: 'NO_SAVED_WINDOW' }); return; }
++    const run = runner || defaultRunner;
++    const script = pidScript(exePath) + 'if ($pids.Count -eq 0) { "NOPROC" } else { ' + loadType() + '"S:" + [HW]::Show([int64[]](' + hs.join(',') + '), [uint32[]]$pids) }';
++    run(script, (err, out) => {
++        if (err) { cb({ ok: false, state: 'failed', handles: [], reason: err.message === 'UNSUPPORTED_PLATFORM' ? 'UNSUPPORTED_PLATFORM' : String(err.message || err) }); return; }
++        if (String(out).trim() === 'NOPROC') { cb({ ok: false, state: 'not_found', handles: [], reason: 'PROCESS_NOT_RUNNING' }); return; }
++        const shown = parseHandles(String(out).replace(/^[\s\S]*?S:/, ''));
++        if (!shown.length) { cb({ ok: false, state: 'not_found', handles: [], reason: 'WINDOW_GONE' }); return; }
++        cb({ ok: true, state: 'visible', handles: shown, reason: null });
++    });
++}
++
++/** Bản ĐỒNG BỘ của show() — chỉ dùng lúc thoát app để không bỏ lại DAW đang ẩn. Trả { ok, state, handles, reason }. */
++function showSync(exePath, handles) {
++    if (process.platform !== 'win32') return { ok: false, state: 'failed', handles: [], reason: 'UNSUPPORTED_PLATFORM' };
++    if (!validateExePath(exePath)) return { ok: false, state: 'failed', handles: [], reason: 'INVALID_PATH' };
++    const hs = (Array.isArray(handles) ? handles : []).filter((n) => Number.isSafeInteger(n) && n > 0);
++    if (!hs.length) return { ok: false, state: 'not_found', handles: [], reason: 'NO_SAVED_WINDOW' };
++    try {
++        const script = pidScript(exePath) + 'if ($pids.Count -eq 0) { "NOPROC" } else { ' + loadType() + '"S:" + [HW]::Show([int64[]](' + hs.join(',') + '), [uint32[]]$pids) }';
++        const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 6000, encoding: 'utf8' });
++        const shown = parseHandles(String(r.stdout || '').replace(/^[\s\S]*?S:/, ''));
++        return shown.length ? { ok: true, state: 'visible', handles: shown, reason: null } : { ok: false, state: 'not_found', handles: [], reason: 'WINDOW_GONE' };
++    } catch (e) { return { ok: false, state: 'failed', handles: [], reason: String((e && e.message) || e) }; }
++}
++
++module.exports = { hide, show, showSync, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP } };
+diff --git a/studio_one/AutoMenuAI.surface.xml b/studio_one/AutoMenuAI.surface.xml
+index 7f3aa57..fc70dfa 100644
+--- a/studio_one/AutoMenuAI.surface.xml
++++ b/studio_one/AutoMenuAI.surface.xml
+@@ -2,7 +2,7 @@
+ <!--
+   AutoMenuAI - Studio One Control Surface (tao boi setup_all_midi.bat)
+   Cong MIDI: AUTO MENU AI (loopMIDI). Bo CC dong bo voi Menu (Setup > MIDI > Studio One).
+-  CH16 = status #BF (CC 102-113: LIVE ON/OFF, chon track, TUNE). CH15 = status #BE (CC 20-31: Knob, Mic vol, Scale/Key, FX bus).
++  CH16 = status #BF (CC 102-117: LIVE ON/OFF, chon track, TUNE, Preset NORM/LOFI/RAP/REMIX). CH15 = status #BE (CC 20-31: Knob, Mic vol, Scale/Key, FX bus).
+ -->
+ <ControlSurface name="AutoMenuAI" manufacturer="AutoMenuAI" model="AutoMenuAI" protocol="MIDI" version="1.0">
+   <Controls>
+@@ -54,6 +54,22 @@
+     <Control name="tuneBypass" title="TUNE Bypass (127=bat, 0=tat)" type="button" options="receive public">
+       <MidiMessage status="#BF" address="113"/>
+     </Control>
++    <!-- CC 114 -->
++    <Control name="presetNorm" title="Preset NORM" type="button" options="receive public">
++      <MidiMessage status="#BF" address="114"/>
++    </Control>
++    <!-- CC 115 -->
++    <Control name="presetLofi" title="Preset LOFI" type="button" options="receive public">
++      <MidiMessage status="#BF" address="115"/>
++    </Control>
++    <!-- CC 116 -->
++    <Control name="presetRap" title="Preset RAP" type="button" options="receive public">
++      <MidiMessage status="#BF" address="116"/>
++    </Control>
++    <!-- CC 117 -->
++    <Control name="presetRemix" title="Preset REMIX" type="button" options="receive public">
++      <MidiMessage status="#BF" address="117"/>
++    </Control>
+     <!-- CC 20 -->
+     <Control name="beatVol" title="Beat Input Volume" type="knob" options="receive public">
+       <MidiMessage status="#BE" address="20"/>
+diff --git a/tests/unit/DashStatus01.verify.js b/tests/unit/DashStatus01.verify.js
+new file mode 100644
+index 0000000..59dbeb1
+--- /dev/null
++++ b/tests/unit/DashStatus01.verify.js
+@@ -0,0 +1,24 @@
++// DASH-STATUS-01 — ô AI / Database trong Setup > Dashboard báo THẬT. ServerHealth.js dùng fetch giả; phần còn lại kiểm nối dây trong mã nguồn.
++const fs = require('fs'), path = require('path');
++const { pingServer } = require('../../core/integration/ServerHealth.js');
++const rd = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
++let pass = 0, fail = 0; const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m, x === undefined ? '' : JSON.stringify(x)); } };
++(async () => {
++  let r = await pingServer({ url: 'https://x.test/', fetchImpl: async () => ({ status: 200 }) });
++  ok(r.ok === true && r.status === 200, 'HTTP 200 -> ONLINE', r);
++  r = await pingServer({ url: 'https://x.test', fetchImpl: async () => ({ status: 404 }) }); ok(r.ok === true && r.status === 404, 'HTTP 404 (server sống) -> ONLINE', r);
++  r = await pingServer({ url: 'https://x.test', fetchImpl: async () => ({ status: 503 }) }); ok(r.ok === false && r.status === 503, 'HTTP 503 -> OFFLINE', r);
++  r = await pingServer({ url: 'https://x.test', fetchImpl: async () => { throw new Error('ENOTFOUND'); } }); ok(r.ok === false && /ENOTFOUND/.test(r.error), 'lỗi mạng -> OFFLINE, không throw', r);
++  r = await pingServer({ url: 'https://x.test', timeoutMs: 30, fetchImpl: (u, o) => new Promise((_, rej) => o.signal.addEventListener('abort', () => { const e = new Error('aborted'); e.name = 'AbortError'; rej(e); })) }); ok(r.ok === false && r.error === 'TIMEOUT', 'quá giờ -> OFFLINE (TIMEOUT)', r);
++  let url; await pingServer({ url: 'https://x.test///', fetchImpl: async (u) => { url = u; return { status: 200 }; } }); ok(url === 'https://x.test/health', 'gọi đúng route /health, bỏ dấu / thừa', url);
++  r = await pingServer({}); ok(r.ok === false && r.error === 'NOT_CONFIGURED', 'thiếu cấu hình -> OFFLINE, không throw', r);
++  const html = rd('ui/setup.html'), nav = rd('ui/js/setupNav.js'), main = rd('app/main.js'), pre = rd('app/preload.js');
++  ok(/id="dashAiPill"/.test(html) && /id="dashDbPill"/.test(html), 'setup.html: 2 ô AI/Database có id');
++  const dash = html.slice(html.indexOf('id="panel-dashboard"'), html.indexOf('Quick Actions'));
++  ok(!/Coming Soon/.test(dash), 'System Status không còn chữ "Coming Soon"');
++  ok(/getSetting\("selectedSystemAudioDeviceId", ""\)/.test(nav) && /"NO SYSTEM AUDIO"/.test(nav), 'AI: READY khi đã chọn System Audio, ngược lại NO SYSTEM AUDIO');
++  ok(/getDatabaseStatus/.test(nav) && /"ONLINE"/.test(nav) && /"OFFLINE"/.test(nav), 'Database: ONLINE/OFFLINE từ IPC');
++  ok(/ipcMain\.handle\("database-status"/.test(main) && /getDatabaseStatus: \(\) => ipcRenderer\.invoke\("database-status"\)/.test(pre), 'main.js + preload.js nối kênh database-status');
++  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]); ok(new Set(ids).size === ids.length, 'setup.html: không trùng id', ids.filter((x, i) => ids.indexOf(x) !== i));
++  console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})();
+diff --git a/tests/unit/EffectLit01.verify.js b/tests/unit/EffectLit01.verify.js
+new file mode 100644
+index 0000000..289416f
+--- /dev/null
++++ b/tests/unit/EffectLit01.verify.js
+@@ -0,0 +1,29 @@
++// EFFECT-LIT-01 — nút EFFECT sáng khi Bảng Hiệu Ứng mở, tắt khi đóng. Dùng EffectsWindow.js THẬT với BrowserWindow giả.
++const fs = require('fs'), path = require('path');
++const { createEffectsWindowManager } = require('../../app/EffectsWindow.js');
++const rd = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
++let pass = 0, fail = 0; const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m, x === undefined ? '' : JSON.stringify(x)); } };
++const wins = [];
++class FakeWin {
++  constructor() { this.destroyed = false; this.h = {}; this.webContents = {}; wins.push(this); }
++  loadFile() {} once(e, f) { this.h[e] = f; } on(e, f) { this.h[e] = f; } show() {} hide() {} isVisible() { return true; }
++  setAlwaysOnTop() {} isDestroyed() { return this.destroyed; }
++  close() { this.destroyed = true; if (this.h.closed) this.h.closed(); }
++}
++const mainWin = { isDestroyed: () => false, getBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }), on() {}, once() {}, removeListener() {}, isMinimized: () => false, webContents: {} };
++const states = [];
++const m = createEffectsWindowManager({ BrowserWindow: FakeWin, screen: null, getMainWin: () => mainWin, preloadPath: 'p', htmlPath: 'h', onStateChange: (o) => states.push(o) });
++m.toggle(); ok(states.join() === 'true', 'mở cửa sổ -> báo true (nút SÁNG)', states);
++m.toggle(); ok(states.join() === 'true,false', 'bấm lần nữa (đóng) -> báo false (nút TẮT)', states);
++m.toggle(); const w = wins[wins.length - 1]; states.length = 0; w.destroyed = true; w.h.closed();
++ok(states.join() === 'false', 'đóng bằng nút ✕ / hệ thống (sự kiện closed) -> báo false', states);
++const m2 = createEffectsWindowManager({ BrowserWindow: FakeWin, screen: null, getMainWin: () => mainWin, preloadPath: 'p', htmlPath: 'h', onStateChange: () => { throw new Error('boom'); } });
++let threw = false; try { m2.toggle(); m2.toggle(); } catch (e) { threw = true; } ok(!threw, 'callback lỗi không làm hỏng cửa sổ');
++const m3 = createEffectsWindowManager({ BrowserWindow: FakeWin, screen: null, getMainWin: () => mainWin, preloadPath: 'p', htmlPath: 'h' });
++let t3 = false; try { m3.toggle(); m3.toggle(); } catch (e) { t3 = true; } ok(!t3, 'không truyền onStateChange vẫn chạy bình thường (tương thích ngược)');
++ok(/effects-state/.test(rd('app/main.js')) && /onStateChange/.test(rd('app/main.js')), 'main.js: gửi effects-state cho menu chính');
++ok(/onEffectsState: \(callback\) => ipcRenderer\.on\("effects-state"/.test(rd('app/preload.js')), 'preload.js: cầu nối onEffectsState');
++ok(/onEffectsState\(\(open\) => document\.getElementById\("effectPopupBtn"\)\?\.classList\.toggle\("active"/.test(rd('ui/js/renderer.js')), 'renderer.js: bật/tắt class active của #effectPopupBtn');
++ok(/#effectPopupBtn\.preset-sound-btn\.active[^{]*\{[^}]*!important/.test(rd('ui/css/style.css')), 'style.css: có kiểu SÁNG cho #effectPopupBtn.active (thắng các dòng ép tối)');
++ok(!/active/.test((rd('ui/index.html').match(/<button id="effectPopupBtn"[^>]*>/) || [''])[0]), 'index.html KHÔNG đổi: nút mặc định không có active (mở app = tắt)');
++console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
+diff --git a/tests/unit/HideDaw01.verify.js b/tests/unit/HideDaw01.verify.js
+new file mode 100644
+index 0000000..807b595
+--- /dev/null
++++ b/tests/unit/HideDaw01.verify.js
+@@ -0,0 +1,70 @@
++// HIDE-DAW-01 — Công cụ & Sửa lỗi > Ẩn DAW xuống khay thông báo. PowerShell/Tray/fs đều GIẢ; KHÔNG chạm Windows thật.
++const fs = require('fs'), path = require('path');
++const WH = require('../../core/integration/WindowHider.js');
++const { createDawTrayManager, TRAY_ICON_PNG_BASE64 } = require('../../app/DawTray.js');
++const rd = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
++let pass = 0, fail = 0; const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m, x === undefined ? '' : JSON.stringify(x)); } };
++const EXE = 'C:\\Program Files\\PreSonus\\Studio Pro 8\\Studio Pro.exe';
++const sync = (fn) => new Promise((r) => fn(r));
++
++(async () => {
++  // --- validateExePath / chống chèn lệnh
++  ok(WH.validateExePath(EXE) && !WH.validateExePath('') && !WH.validateExePath(null) && !WH.validateExePath('C:\\a\\b.txt'), 'validateExePath: chỉ nhận chuỗi .exe');
++  ok(!WH.validateExePath("C:\\a'; Remove-Item x; '.exe\n") && !WH.validateExePath('C:\\a"b.exe') && !WH.validateExePath('C:\\a|b.exe'), 'validateExePath: chặn xuống dòng / " / |');
++  let scripts = [];
++  let r = await sync((cb) => WH.hide("C:\\O'Brien\\daw.exe", cb, (s, c) => { scripts.push(s); c(null, 'H:111,222'); }));
++  ok(r.ok && r.state === 'hidden' && r.handles.join() === '111,222', 'hide: đọc đúng danh sách cửa sổ đã ẩn', r);
++  ok(/Path -ieq 'C:\\O''Brien\\daw\.exe'/.test(scripts[0]) && /\[HW\]::Hide/.test(scripts[0]), 'hide: đường dẫn có dấu \' được nhân đôi trong PowerShell; gọi HW.Hide', scripts[0].slice(0, 160));
++  ok(/GetWindow\(h, 4\) == IntPtr\.Zero/.test(WH._scriptsForTest.CSHARP) && /ShowWindowAsync\(h, 0\)/.test(WH._scriptsForTest.CSHARP), 'hide: chỉ ẩn cửa sổ KHÔNG có owner, dùng SW_HIDE (0), không phải minimize');
++  r = await sync((cb) => WH.hide(EXE, cb, (s, c) => c(null, 'NOPROC'))); ok(!r.ok && r.state === 'not_found', 'hide: DAW không chạy -> not_found', r);
++  r = await sync((cb) => WH.hide(EXE, cb, (s, c) => c(null, 'H:'))); ok(!r.ok && r.reason === 'NO_WINDOW_FOUND', 'hide: chạy nhưng không có cửa sổ -> NO_WINDOW_FOUND', r);
++  r = await sync((cb) => WH.hide(EXE, cb, (s, c) => c(new Error('boom'), null))); ok(!r.ok && r.state === 'failed', 'hide: PowerShell lỗi -> failed, không throw', r);
++  r = await sync((cb) => WH.hide(EXE, cb, (s, c) => c(new Error('UNSUPPORTED_PLATFORM'), null))); ok(r.reason === 'UNSUPPORTED_PLATFORM', 'hide: không phải Windows -> UNSUPPORTED_PLATFORM', r);
++  r = await sync((cb) => WH.hide('notexe', cb, () => { throw new Error('không được chạy'); })); ok(!r.ok && r.reason === 'INVALID_PATH', 'hide: đường dẫn sai -> không chạy PowerShell', r);
++  scripts = []; r = await sync((cb) => WH.show(EXE, [111, 222], cb, (s, c) => { scripts.push(s); c(null, 'S:111,222'); }));
++  ok(r.ok && r.state === 'visible' && /\[int64\[\]\]\(111,222\)/.test(scripts[0]), 'show: truyền đúng handle đã lưu, hiện lại', r);
++  r = await sync((cb) => WH.show(EXE, [], cb, () => { throw new Error('không được chạy'); })); ok(!r.ok && r.reason === 'NO_SAVED_WINDOW', 'show: không có handle lưu -> không chạy PowerShell', r);
++  r = await sync((cb) => WH.show(EXE, ['1; calc', 5.5, -1, 77], cb, (s, c) => { scripts.push(s); c(null, 'S:77'); }));
++  ok(r.ok && !/calc/.test(scripts[scripts.length - 1]) && /\(77\)/.test(scripts[scripts.length - 1]), 'show: handle không hợp lệ bị loại, không lọt vào script', scripts[scripts.length - 1].slice(-120));
++  r = await sync((cb) => WH.show(EXE, [5], cb, (s, c) => c(null, 'S:'))); ok(!r.ok && r.reason === 'WINDOW_GONE', 'show: cửa sổ đã mất -> WINDOW_GONE', r);
++
++  // --- DawTray manager (giả)
++  const files = {}; const fakeFs = { existsSync: (f) => f in files, readFileSync: (f) => files[f], writeFileSync: (f, d) => { files[f] = d; }, unlinkSync: (f) => { delete files[f]; } };
++  let trays = 0, destroyed = 0, menuLabels = [], clicks = {};
++  class FakeTray { constructor() { trays++; this.h = {}; } setToolTip() {} setContextMenu() {} on(e, f) { this.h[e] = f; } destroy() { destroyed++; } }
++  const Menu = { buildFromTemplate: (t) => { menuLabels = t.map((x) => x.label); t.forEach((x) => { clicks[x.label] = x.click; }); return {}; } };
++  const nativeImage = { createFromBuffer: (b) => ({ size: b.length }) };
++  let settings = { selectedDAWPath: EXE }; const calls = { hide: 0, show: 0, showSync: 0 }; let hideRes = { ok: true, state: 'hidden', handles: [9, 8], reason: null }, showRes = { ok: true, state: 'visible', handles: [9, 8], reason: null };
++  const hider = { hide: (e, cb) => { calls.hide++; calls.hideExe = e; cb(hideRes); }, show: (e, h, cb) => { calls.show++; calls.showArgs = [e, h]; cb(showRes); }, showSync: () => { calls.showSync++; return { ok: true }; } };
++  const mk = () => createDawTrayManager({ Tray: FakeTray, Menu, nativeImage, readSettings: () => settings, stateFile: 'S.json', fs: fakeFs, windowHider: hider, log: () => {} });
++  let m = mk();
++  ok(Buffer.from(TRAY_ICON_PNG_BASE64, 'base64').slice(0, 4).toString('hex') === '89504e47', 'biểu tượng khay là PNG hợp lệ');
++  ok(JSON.stringify(m.status()) === JSON.stringify({ configured: true, exePath: EXE, hidden: false, trayVisible: false }), 'status ban đầu: có cấu hình, đang hiện, chưa có khay', m.status());
++  r = await sync((cb) => m.hide(cb)); ok(r.ok && r.state === 'hidden' && trays === 1 && calls.hideExe === EXE, 'hide: ẩn đúng DAW đã cấu hình + tạo khay', r);
++  ok(JSON.parse(files['S.json']).handles.join() === '9,8', 'hide: ghi trạng thái ra file để hiện lại được sau khi mở lại Menu');
++  ok(menuLabels.join() === 'Hiện DAW,Ẩn DAW' && typeof clicks['Hiện DAW'] === 'function', 'menu khay có "Hiện DAW" và "Ẩn DAW"', menuLabels);
++  r = await sync((cb) => m.hide(cb)); ok(r.ok && calls.hide === 1 && trays === 1, 'hide lần 2: không ẩn lại, không tạo khay thứ hai', r);
++  const m2 = mk(); ok(m2.status().hidden === true, 'mở lại Menu: nhớ DAW đang ẩn (đọc từ file)'); m2.restoreTrayIfHidden(); ok(trays === 2, 'mở lại Menu: dựng lại khay khi DAW còn ẩn');
++  r = await sync((cb) => m.show(cb)); ok(r.ok && r.state === 'visible' && calls.showArgs[1].join() === '9,8' && destroyed >= 1 && !('S.json' in files), 'show: hiện lại, bỏ khay, xoá file trạng thái', r);
++  r = await sync((cb) => m.show(cb)); ok(r.ok && calls.show === 1, 'show khi không ẩn: không làm gì', r);
++  settings = {}; m = mk(); r = await sync((cb) => m.hide(cb)); ok(!r.ok && r.state === 'not_configured' && calls.hide === 1, 'chưa chọn DAW -> not_configured, không gọi ẩn', r);
++  settings = { startupPaths: { dawExecutable: EXE } }; m = mk(); ok(m.status().configured && m.status().exePath === EXE, 'dự phòng: lấy startupPaths.dawExecutable khi selectedDAWPath trống');
++  hideRes = { ok: false, state: 'not_found', handles: [], reason: 'PROCESS_NOT_RUNNING' }; r = await sync((cb) => m.hide(cb)); ok(!r.ok && r.state === 'not_found' && !m.status().hidden && !('S.json' in files), 'DAW chưa mở -> báo, KHÔNG lưu trạng thái ẩn', r);
++  hideRes = { ok: true, state: 'hidden', handles: [3], reason: null }; await sync((cb) => m.hide(cb)); showRes = { ok: false, state: 'not_found', handles: [], reason: 'WINDOW_GONE' };
++  r = await sync((cb) => m.show(cb)); ok(!r.ok && r.state === 'not_found' && !m.status().hidden && !('S.json' in files), 'DAW đã đóng khi đang ẩn -> xoá trạng thái, khay không treo', r);
++  hideRes = { ok: true, state: 'hidden', handles: [4], reason: null }; await sync((cb) => m.hide(cb)); m.restoreOnQuit(); ok(calls.showSync === 1 && !m.status().hidden && !('S.json' in files), 'thoát Menu khi DAW đang ẩn -> tự hiện lại DAW');
++  const bad = createDawTrayManager({ Tray: class { constructor() { throw new Error('no tray'); } }, Menu, nativeImage, readSettings: () => settings, stateFile: 'S.json', fs: fakeFs, windowHider: hider, log: () => {} });
++  hideRes = { ok: true, state: 'hidden', handles: [5], reason: null }; let threw = false; try { await sync((cb) => bad.hide(cb)); } catch (e) { threw = true; } ok(!threw, 'tạo khay lỗi không làm hỏng việc ẩn DAW');
++
++  // --- nối dây
++  const main = rd('app/main.js'), pre = rd('app/preload.js'), html = rd('ui/setup.html'), tools = rd('ui/js/setupTools.js');
++  ok(['tools-daw-status', 'tools-daw-hide', 'tools-daw-show'].every((c) => main.includes('ipcMain.handle("' + c + '"')) && /fromSetupWindow\(event\)/.test(main), 'main.js: 3 kênh IPC, chỉ nhận từ cửa sổ Setup');
++  ok(['toolsDawStatus', 'toolsDawHide', 'toolsDawShow'].every((n) => pre.includes(n + ': () => ipcRenderer.invoke')), 'preload.js: 3 hàm cầu nối');
++  ok(/dawTrayMgr\.restoreOnQuit\(\)/.test(main) && /Tray, Menu, nativeImage/.test(main), 'main.js: khôi phục DAW khi thoát; import Tray/Menu/nativeImage');
++  ok(/data-panel="panel-tools"/.test(html) && /id="panel-tools"/.test(html) && /js\/setupTools\.js/.test(html), 'setup.html: có tab + panel + script Công cụ & Sửa lỗi');
++  const card = html.slice(html.indexOf('id="panel-tools"'), html.indexOf('id="panel-backup"'));
++  ok(/Ẩn DAW xuống khay thông báo/.test(card) && !/Plugin/i.test(card.replace(/<!--[\s\S]*?-->/g, '')), 'panel Công cụ: có thẻ Ẩn DAW riêng; KHÔNG gộp Ẩn Plugin vào');
++  ok(/btnToolsHideDaw/.test(tools) && /toolsDawHide/.test(tools) && /toolsDawShow/.test(tools), 'setupTools.js: nút Ẩn/Hiện gọi đúng IPC');
++  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((x) => x[1]); ok(new Set(ids).size === ids.length, 'setup.html: không trùng id', ids.filter((x, i) => ids.indexOf(x) !== i));
++  console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})();
+diff --git a/tests/unit/PresetCc01.verify.js b/tests/unit/PresetCc01.verify.js
+new file mode 100644
+index 0000000..94d207b
+--- /dev/null
++++ b/tests/unit/PresetCc01.verify.js
+@@ -0,0 +1,38 @@
++// PRESET-CC-01 + PRESET-LIT-01 — 4 nút NORM/LOFI/RAP/REMIX: luôn đúng 1 nút sáng; mỗi nút có 1 CC riêng (kênh 16, CC 114–117) + điều khiển trong surface Studio One.
++const fs = require('fs'), path = require('path');
++const rd = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
++let pass = 0, fail = 0; const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m, x === undefined ? '' : JSON.stringify(x)); } };
++const ren = rd('ui/js/renderer.js'), setup = rd('ui/js/setup.js'), xml = rd('studio_one/AutoMenuAI.surface.xml');
++
++// ---- ensurePresetLit chạy thật trên DOM giả
++const a = ren.indexOf('function ensurePresetLit()'); let depth = 0, i = ren.indexOf('{', a), b = i;
++for (; b < ren.length; b++) { if (ren[b] === '{') depth++; else if (ren[b] === '}') { depth--; if (!depth) break; } }
++const fnSrc = ren.slice(a, b + 1);
++function mkBtn(t, active) { const cls = new Set(active ? ['active'] : []); return { textContent: t, dataset: {}, closest: () => null, classList: { contains: (c) => cls.has(c), add: (c) => cls.add(c), remove: (c) => cls.delete(c) } }; }
++function run(states, extra) {
++  const btns = ['NORM', 'LOFI', 'RAP', 'REMIX'].map((n, k) => mkBtn(n, states[k]));
++  const tune = mkBtn('TUNE ON', true); tune.dataset.tuneBtn = '1'; const all = [...btns, tune, ...(extra || [])];
++  const document = { querySelectorAll: () => all };
++  new Function('document', 'isTuneOffBtn', fnSrc + ';ensurePresetLit();')(document, (b) => !!(b.dataset && b.dataset.tuneBtn === '1'));
++  return { lit: btns.map((x) => x.classList.contains('active')), tuneLit: tune.classList.contains('active') };
++}
++ok(run([false, false, false, false]).lit.join() === 'true,false,false,false', 'không nút nào sáng -> NORM sáng');
++ok(run([false, false, true, false]).lit.join() === 'false,false,true,false', 'RAP đang sáng -> giữ nguyên RAP');
++ok(run([true, false, true, false]).lit.filter(Boolean).length === 1 && run([true, false, true, false]).lit[0] === true, 'sáng 2 nút -> chỉ còn đúng 1 nút');
++ok(run([false, false, false, true]).lit.join() === 'false,false,false,true', 'REMIX đang sáng -> giữ nguyên');
++ok(run([false, false, false, false]).tuneLit === true, 'nút TUNE không bị đụng');
++ok(/loadData\(\);\s*\n\s*ensurePresetLit\(\);/.test(ren.replace(/\r/g, '')), 'gọi ensurePresetLit() ngay sau loadData()');
++const click = ren.slice(ren.indexOf('document.querySelectorAll(".preset-btn").forEach(btn => {'), ren.indexOf('document.getElementById("autoDetectBtn")'));
++ok(/classList\.remove\("active"\)/.test(click) && /e\.target\.classList\.add\("active"\)/.test(click) && /PRESET_NAME_TO_ACTION\[/.test(click), 'bấm preset: tắt nhóm, sáng nút vừa chọn, gửi action PRESET_*');
++
++// ---- bộ CC + surface
++const m = /preset: Object\.freeze\(\{ title: "PRESET NORM\/LOFI\/RAP\/REMIX", count: 4, mappings: dawQfMake\(16, 127, \{([^}]*)\}\)/.exec(setup);
++const nums = m ? [...m[1].matchAll(/(\w+): (\d+)/g)].map((x) => [x[1], +x[2]]) : [];
++ok(nums.length === 4 && nums.map((x) => x[0]).join() === 'PRESET_NORM,PRESET_LOFI,PRESET_RAP,PRESET_REMIX' && nums.map((x) => x[1]).join() === '114,115,116,117', 'bộ điền nhanh PRESET: NORM/LOFI/RAP/REMIX = CC 114/115/116/117, kênh 16', nums);
++ok(nums.every(([, n]) => n < 120), 'không dùng CC 120–127 (lệnh hệ thống MIDI)');
++const used = [...setup.matchAll(/dawQfMake\((\d+), 127, \{([^}]*)\}\)/g)].flatMap((x) => [...x[2].matchAll(/(\w+): (\d+)/g)].map((y) => x[1] + ':' + y[2] + ':' + y[1]));
++const studio = used.slice(0, 20).filter((u) => /PRESET_/.test(u) === false); const keys = studio.map((u) => u.split(':').slice(0, 2).join(':'));
++ok(!nums.some(([, n]) => keys.slice(0, keys.length).includes('16:' + n) && false) && !studio.filter((u) => u.startsWith('16:')).some((u) => [114, 115, 116, 117].includes(+u.split(':')[1])), 'CC 114–117 kênh 16 chưa bị bộ khác trong Studio One dùng');
++ok(/profile\.bundles\.preset \? `<button class="setup-btn" id="btnFillPresetCc">/.test(setup) && /runQuickFill\("preset"\)/.test(setup), 'Setup: có nút "Điền + lưu bộ PRESET gợi ý"');
++ok(['presetNorm:114', 'presetLofi:115', 'presetRap:116', 'presetRemix:117'].every((s) => { const [n, c] = s.split(':'); return new RegExp(`name="${n}"[^>]*>\\s*<MidiMessage status="#BF" address="${c}"/>`).test(xml); }), 'surface Studio One: có 4 điều khiển Preset (#BF = kênh 16, CC 114–117)');
++console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
+diff --git a/ui/css/style.css b/ui/css/style.css
+index 4806c68..04c1101 100644
+--- a/ui/css/style.css
++++ b/ui/css/style.css
+@@ -283,6 +283,8 @@ NÚT HIỆU ỨNG + BẢNG HIỆU ỨNG — đồng bộ màu với phần còn
+  Dùng !important vì HTML đang gắn màu trực tiếp bằng thuộc tính style="...")
+ ===================================== */
+ #effectPopupBtn.preset-sound-btn { background: linear-gradient(180deg,#0a1826,#07111c) !important; border-color: rgba(0,180,255,.45) !important; }
++/* EFFECT-LIT-01 — nút EFFECT sáng khi Bảng Hiệu Ứng đang mở (cùng kiểu sáng của .preset-sound-btn.active; cần !important vì 2 dòng trên ép màu tối) */
++#effectPopupBtn.preset-sound-btn.active, #effectPopupBtn.preset-sound-btn.active:hover { background: linear-gradient(180deg, #00e5ff, #0099ff) !important; color: #000 !important; box-shadow: 0 0 15px rgba(0, 229, 255, 0.5); border-color: #fff !important; }
+ #effectPopupBtn.preset-sound-btn:hover { background: linear-gradient(180deg,#0d2238,#0a1826) !important; border-color: var(--cyan) !important; }
+ #effectModal .custom-modal-box { background: linear-gradient(180deg,#03111f,#010813); border: 1px solid rgba(0,180,255,.35); border-radius: 11px; box-shadow: 0 10px 30px rgba(0,0,0,.6), 0 0 14px rgba(0,180,255,.15); }
+ #effectModal .custom-modal-title { color: var(--cyan); }
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 3705ca8..337f4f5 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -426,6 +426,11 @@ updateClock();
+    ========================================================== */
+ (function setupEffectsWindowButton() {
+ 
++    // EFFECT-LIT-01 — nút EFFECT SÁNG khi Bảng Hiệu Ứng đang mở, TẮT khi đóng (kể cả khi đóng bằng nút ✕ trong cửa sổ hiệu ứng). Mở app: tắt.
++    if (window.electronAPI && typeof window.electronAPI.onEffectsState === "function") {
++        window.electronAPI.onEffectsState((open) => document.getElementById("effectPopupBtn")?.classList.toggle("active", !!open));
++    }
++
+     document.addEventListener("click", (event) => {
+ 
+         const btn = event.target && event.target.closest ? event.target.closest("#effectPopupBtn") : null;
+@@ -673,6 +678,18 @@ document.querySelectorAll(".preset-btn").forEach(btn => {
+ 
+ document.getElementById("autoDetectBtn")?.classList.add("active");
+ 
++// PRESET-LIT-01 — nhóm NORM/LOFI/RAP/REMIX LUÔN có đúng 1 nút sáng (không bao giờ để tắt hết). Mở app / sau khi khôi phục cấu hình: nếu chưa có nút nào sáng -> NORM sáng.
++// Chỉ chỉnh giao diện, KHÔNG gửi MIDI. Nút TUNE (công tắc bypass) không thuộc nhóm này.
++function ensurePresetLit() {
++    const group = [...document.querySelectorAll(".preset-btn")].filter((b) => !isTuneOffBtn(b) && !b.closest(".custom-modal") && ["NORM", "LOFI", "RAP", "REMIX"].includes(b.textContent.trim()));
++    if (!group.length) return;
++    const lit = group.filter((b) => b.classList.contains("active"));
++    if (lit.length === 1) return;
++    group.forEach((b) => b.classList.remove("active"));
++    (lit[0] || group.find((b) => b.textContent.trim() === "NORM") || group[0]).classList.add("active");
++}
++ensurePresetLit();
++
+ // MIDI-DAW-CONTROL-01 — hiển thị kết quả gửi lệnh ON/OFF trên tooltip của nút (KHÔNG đổi HTML/CSS). Chỉ nói "đã GỬI lệnh":
+ // Menu không có phản hồi từ Studio One nên KHÔNG BAO GIỜ hiện "DAW đã xác nhận".
+ function reportDawStateResult(btn, control, promise) {
+@@ -3088,6 +3105,7 @@ document.addEventListener("DOMContentLoaded", () => {
+     checkAllSystems();
+     applyAudioOutputSetting(); // TASK B72 — áp dụng thiết bị đầu ra đã lưu (nếu có) lúc khởi động
+     loadData();
++    ensurePresetLit(); // PRESET-LIT-01
+     if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
+ 
+     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index 6cd8617..41d96f1 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -772,6 +772,9 @@ const DAW_MIDI_PROFILES = Object.freeze({
+             // MIC-VOLUME-KNOB-01 — 2 CC âm lượng Mic, kênh 15 như bộ KNOB, không trùng CC 20–23 (Knob) và 102–112 (LIVE/CHỌN TRACK).
+             // TASK A82 — 1 CC Bypass Auto-Tune (nút TUNE ON/OFF: 127 = bypass bật, 0 = tắt), kênh 16 như LIVE, CC 113 (không trùng 102–112).
+             tune: Object.freeze({ title: "TUNE BYPASS", count: 1, mappings: dawQfMake(16, 127, { TUNE_BYPASS: 113 }) }),
++            // PRESET-CC-01 — 4 CC (kênh 16, giá trị 127) cho 4 nút Preset NORM/LOFI/RAP/REMIX: mỗi nút gửi 1 CC riêng; trong Studio Pro gán từng CC vào macro/preset
++            // (bật-tắt plugin hoặc đặt thông số cài sẵn). Dùng CC 114–117: không trùng LIVE 102–109, CHỌN TRACK 110–112, TUNE 113; tránh CC 120–127 (lệnh hệ thống MIDI).
++            preset: Object.freeze({ title: "PRESET NORM/LOFI/RAP/REMIX", count: 4, mappings: dawQfMake(16, 127, { PRESET_NORM: 114, PRESET_LOFI: 115, PRESET_RAP: 116, PRESET_REMIX: 117 }) }),
+             micvol: Object.freeze({ title: "MIC VOLUME", count: 2, mappings: dawQfMake(15, 127, { MIC1_VOLUME: 24, MIC2_VOLUME: 25 }) }),
+             // FX-BUS-KNOB-01 — 4 CC (kênh 15) cho fader 4 bus hiệu ứng, không trùng CC 20–27 (Knob/Mic/Scale/Root) và 102–113 (LIVE/CHỌN TRACK/TUNE).
+             fxbus: Object.freeze({ title: "FX BUS VOLUME", count: 4, mappings: dawQfMake(15, 127, { FX_BUS_DELAY_VOLUME: 28, FX_BUS_VERB_SHORT_VOLUME: 29, FX_BUS_VERB_LONG_VOLUME: 30, FX_BUS_COM_VERB_VOLUME: 31 }) }),
+@@ -900,6 +903,7 @@ function initDawMidiOutputMappingSection() {
+             ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}
+             ${profile.bundles.tune ? `<button class="setup-btn" id="btnFillTuneCc">Điền + lưu bộ TUNE BYPASS gợi ý — ${profile.name}</button>` : ""}
+             ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}
++            ${profile.bundles.preset ? `<button class="setup-btn" id="btnFillPresetCc">Điền + lưu bộ PRESET (NORM/LOFI/RAP/REMIX) gợi ý — ${profile.name}</button>` : ""}
+             ${profile.bundles.fxbus ? `<button class="setup-btn" id="btnFillFxBusCc">Điền + lưu bộ FX BUS VOLUME gợi ý — ${profile.name}</button>` : ""}
+             ${profile.bundles.scale ? `<button class="setup-btn" id="btnFillScaleCc">Điền + lưu bộ KEY + SCALE gợi ý — ${profile.name}</button>` : ""}`
+                 : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
+@@ -934,6 +938,8 @@ function initDawMidiOutputMappingSection() {
+             if (tuneBtn) tuneBtn.addEventListener("click", () => runQuickFill("tune"));
+             const micVolBtn = liveBox.querySelector("#btnFillMicVolCc");
+             if (micVolBtn) micVolBtn.addEventListener("click", () => runQuickFill("micvol"));
++            const presetBtn = liveBox.querySelector("#btnFillPresetCc");
++            if (presetBtn) presetBtn.addEventListener("click", () => runQuickFill("preset"));
+             const fxBusBtn = liveBox.querySelector("#btnFillFxBusCc");
+             if (fxBusBtn) fxBusBtn.addEventListener("click", () => runQuickFill("fxbus"));
+             const scaleBtn = liveBox.querySelector("#btnFillScaleCc");
+diff --git a/ui/js/setupNav.js b/ui/js/setupNav.js
+index 7e5cb51..5796934 100644
+--- a/ui/js/setupNav.js
++++ b/ui/js/setupNav.js
+@@ -67,6 +67,22 @@
+         return "calibrated";
+     }
+ 
++    // DASH-STATUS-01 — Database: hỏi Key Server qua main process (IPC "database-status"). Chống gọi chồng; lỗi/hết giờ = OFFLINE (không throw).
++    let dbPillBusy = false;
++    function refreshDatabasePill(readyPill, dimPill) {
++        const el = document.getElementById("dashDbPill");
++        if (!el) return;
++        if (!window.electronAPI || typeof window.electronAPI.getDatabaseStatus !== "function") { dimPill(el, "—"); return; }
++        if (dbPillBusy) return;
++        dbPillBusy = true;
++        dimPill(el, "CHECKING…");
++        Promise.resolve(window.electronAPI.getDatabaseStatus()).then((r) => {
++            if (r && r.ok) { readyPill(el, "ONLINE"); el.title = "Key Server trả lời (HTTP " + r.status + ", " + r.ms + " ms)"; }
++            else { el.textContent = "OFFLINE"; el.className = "status-pill status-pill--error"; el.title = "Key Server không trả lời: " + ((r && r.error) || "không rõ"); }
++        }).catch(() => { el.textContent = "OFFLINE"; el.className = "status-pill status-pill--error"; })
++          .finally(() => { dbPillBusy = false; });
++    }
++
+     function refreshDashboard() {
+         try {
+             const readyPill = (el, label) => {
+@@ -98,6 +114,12 @@
+             hasPlugin ? readyPill(document.getElementById("dashPluginPill"), "CONFIGURED")
+                       : dimPill(document.getElementById("dashPluginPill"), "NOT SELECTED");
+ 
++            // DASH-STATUS-01 — AI: Key/BPM/Mod chạy từ System Audio, nên "sẵn sàng" = đã chọn thiết bị System Audio trong Setup > Audio.
++            const hasSystemAudio = typeof getSetting === "function" && !!getSetting("selectedSystemAudioDeviceId", "");
++            hasSystemAudio ? readyPill(document.getElementById("dashAiPill"), "READY")
++                           : dimPill(document.getElementById("dashAiPill"), "NO SYSTEM AUDIO");
++            refreshDatabasePill(readyPill, dimPill);
++
+             const calib = calibrationState();
+             if (calib === "calibrated") readyPill(document.getElementById("dashCalibPill"), "CALIBRATED");
+             else if (calib === "partial") dimPill(document.getElementById("dashCalibPill"), "PARTIAL");
+diff --git a/ui/js/setupTools.js b/ui/js/setupTools.js
+new file mode 100644
+index 0000000..cb52029
+--- /dev/null
++++ b/ui/js/setupTools.js
+@@ -0,0 +1,50 @@
++/* HIDE-DAW-01 — Setup > Công cụ & Sửa lỗi > Ẩn DAW xuống khay thông báo.
++   Chỉ gọi 3 kênh IPC của main process (toolsDawStatus / toolsDawHide / toolsDawShow); không tự ẩn/hiện gì ở đây. Mọi lỗi hiện thành chữ, không throw. */
++(function () {
++    "use strict";
++    const $ = (id) => document.getElementById(id);
++    const api = () => window.electronAPI || null;
++    let busy = false;
++
++    function setMessage(text, ok) {
++        const el = $("toolsDawMessage");
++        if (!el) return;
++        el.textContent = text || "";
++        el.style.color = ok === false ? "#ff6b6b" : "";
++    }
++    function paint(st) {
++        const badge = $("toolsDawBadge"), pathEl = $("toolsDawPath");
++        if (pathEl) pathEl.textContent = st && st.configured ? "DAW: " + st.exePath : "❌ Chưa chọn file chạy của DAW (AI > Đường dẫn & khởi động)";
++        if (badge) {
++            if (st && st.hidden) { badge.textContent = "ĐANG ẨN"; badge.className = "badge badge-live"; }
++            else { badge.textContent = "ĐANG HIỆN"; badge.className = "badge badge-soon"; }
++        }
++        const hideBtn = $("btnToolsHideDaw"), showBtn = $("btnToolsShowDaw");
++        if (hideBtn) hideBtn.disabled = busy || !(st && st.configured) || !!(st && st.hidden);
++        if (showBtn) showBtn.disabled = busy || !(st && st.hidden);
++    }
++    async function refresh() {
++        const a = api();
++        if (!a || typeof a.toolsDawStatus !== "function") { setMessage("Chức năng này chỉ có trong app Menu (Electron).", false); paint({ configured: false, hidden: false }); return; }
++        try { paint(await a.toolsDawStatus()); } catch (e) { setMessage("Không đọc được trạng thái: " + (e && e.message || e), false); }
++    }
++    async function act(kind) {
++        const a = api();
++        if (busy || !a) return;
++        const fn = kind === "hide" ? a.toolsDawHide : a.toolsDawShow;
++        if (typeof fn !== "function") { setMessage("Chức năng này chỉ có trong app Menu (Electron).", false); return; }
++        busy = true; setMessage(kind === "hide" ? "Đang ẩn DAW…" : "Đang hiện DAW…");
++        try {
++            const r = await fn.call(a);
++            setMessage((r && r.message) || (r && r.ok ? "Xong." : "Không thực hiện được."), !!(r && r.ok));
++        } catch (e) { setMessage("Lỗi: " + (e && e.message || e), false); }
++        busy = false;
++        refresh();
++    }
++    document.addEventListener("DOMContentLoaded", () => {
++        $("btnToolsHideDaw")?.addEventListener("click", () => act("hide"));
++        $("btnToolsShowDaw")?.addEventListener("click", () => act("show"));
++        $("sidebarNav")?.addEventListener("click", (e) => { const b = e.target.closest(".nav-item"); if (b && b.dataset.panel === "panel-tools") refresh(); });
++        refresh();
++    });
++})();
+diff --git a/ui/setup.html b/ui/setup.html
+index 85867ae..ab47d2f 100644
+--- a/ui/setup.html
++++ b/ui/setup.html
+@@ -33,6 +33,7 @@
+                 <button class="nav-item" data-panel="panel-calibration">🎯 <span>Calibration</span></button>
+                 <button class="nav-item" data-panel="panel-backup">💾 <span>Backup</span></button>
+                 <button class="nav-item" data-panel="panel-system">🖥 <span>System</span></button>
++                <button class="nav-item" data-panel="panel-tools">🛠 <span>Công cụ &amp; Sửa lỗi</span></button>
+             </nav>
+         </aside>
+ 
+@@ -46,15 +47,15 @@
+                     <div class="panel-card-title">📊 System Status</div>
+                     <div class="status-grid" id="dashboardStatusGrid">
+                         <div class="status-card"><span class="status-label">Audio</span><span class="status-pill status-pill--dim" id="dashAudioPill">—</span></div>
+-                        <div class="status-card"><span class="status-label">AI</span><span class="status-pill status-pill--soon">Coming Soon</span></div>
++                        <div class="status-card"><span class="status-label">AI</span><span class="status-pill status-pill--dim" id="dashAiPill">—</span></div>
+                         <div class="status-card"><span class="status-label">MIDI</span><span class="status-pill status-pill--dim" id="dashMidiPill">—</span></div>
+                         <div class="status-card"><span class="status-label">DAW</span><span class="status-pill status-pill--dim" id="dashDawPill">—</span></div>
+                         <div class="status-card"><span class="status-label">Plugin</span><span class="status-pill status-pill--dim" id="dashPluginPill">—</span></div>
+-                        <div class="status-card"><span class="status-label">Database</span><span class="status-pill status-pill--soon">Coming Soon</span></div>
++                        <div class="status-card"><span class="status-label">Database</span><span class="status-pill status-pill--dim" id="dashDbPill">—</span></div>
+                         <div class="status-card"><span class="status-label">Calibration</span><span class="status-pill status-pill--dim" id="dashCalibPill">—</span></div>
+                     </div>
+-                    <p class="hint-text">Đọc trực tiếp từ cấu hình đã lưu (dữ liệu thật) — "Coming Soon" nghĩa là chưa
+-                        có Engine để tự kiểm tra, không phải lỗi.</p>
++                    <p class="hint-text">Đọc trực tiếp từ cấu hình đã lưu (dữ liệu thật). AI = đã chọn nguồn System Audio cho Key/BPM/Mod;
++                        Database = Key Server (Cloudflare) có trả lời hay không.</p>
+                 </div>
+ 
+                 <div class="panel-card">
+@@ -857,6 +858,24 @@
+             </section>
+ 
+             <!-- ===================== BACKUP (đổi hoàn toàn từ LinkPro) ===================== -->
++            <!-- HIDE-DAW-01 — Công cụ và sửa lỗi. Mỗi công cụ là MỘT thẻ riêng (Ẩn DAW / Ẩn Plugin không gộp chung). Ẩn Plugin sẽ thêm thẻ riêng sau. -->
++            <section class="setup-panel" id="panel-tools" data-title="Công cụ &amp; Sửa lỗi">
++
++                <div class="panel-card">
++                    <div class="panel-card-title">🙈 Ẩn DAW xuống khay thông báo <span class="badge badge-unwired" id="toolsDawBadge">—</span></div>
++                    <p class="hint-text">Ẩn cửa sổ DAW đang chạy (không còn trên Taskbar). DAW <strong>vẫn chạy bình thường</strong>, vẫn nhận MIDI và xử lý audio.
++                        Biểu tượng chấm tròn xanh hiện cạnh đồng hồ Windows: bấm đúp hoặc chuột phải &gt; "Hiện DAW" để hiện lại. Thoát Menu khi DAW đang ẩn thì DAW tự hiện lại.
++                        DAW lấy từ file đã chọn ở <em>AI &gt; Đường dẫn &amp; khởi động</em>.</p>
++                    <div class="status-text" id="toolsDawPath" style="margin-bottom:8px;">—</div>
++                    <div class="row-buttons">
++                        <button id="btnToolsHideDaw" class="setup-btn">🙈 Ẩn DAW</button>
++                        <button id="btnToolsShowDaw" class="setup-btn">👁 Hiện DAW</button>
++                    </div>
++                    <div class="status-text" id="toolsDawMessage" style="margin-top:8px;"></div>
++                </div>
++
++            </section>
++
+             <section class="setup-panel" id="panel-backup" data-title="Backup">
+                 <div class="panel-card">
+                     <div class="panel-card-title">💾 Backup / Restore / Export / Import</div>
+@@ -937,6 +956,7 @@
+     <script src="js/appSettings.js"></script>
+     <script src="js/setup.js"></script>
+     <script src="js/setupNav.js"></script>
++    <script src="js/setupTools.js"></script>
+     <script src="js/setupEffects.js"></script>
+     <script src="js/setupVuMeter.js"></script>
+     <script src="js/midiHealth.js"></script>

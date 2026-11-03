@@ -283,6 +283,8 @@ NÚT HIỆU ỨNG + BẢNG HIỆU ỨNG — đồng bộ màu với phần còn 
  Dùng !important vì HTML đang gắn màu trực tiếp bằng thuộc tính style="...")
 ===================================== */
 #effectPopupBtn.preset-sound-btn { background: linear-gradient(180deg,#0a1826,#07111c) !important; border-color: rgba(0,180,255,.45) !important; }
+/* EFFECT-LIT-01 — nút EFFECT sáng khi Bảng Hiệu Ứng đang mở (cùng kiểu sáng của .preset-sound-btn.active; cần !important vì 2 dòng trên ép màu tối) */
+#effectPopupBtn.preset-sound-btn.active, #effectPopupBtn.preset-sound-btn.active:hover { background: linear-gradient(180deg, #00e5ff, #0099ff) !important; color: #000 !important; box-shadow: 0 0 15px rgba(0, 229, 255, 0.5); border-color: #fff !important; }
 #effectPopupBtn.preset-sound-btn:hover { background: linear-gradient(180deg,#0d2238,#0a1826) !important; border-color: var(--cyan) !important; }
 #effectModal .custom-modal-box { background: linear-gradient(180deg,#03111f,#010813); border: 1px solid rgba(0,180,255,.35); border-radius: 11px; box-shadow: 0 10px 30px rgba(0,0,0,.6), 0 0 14px rgba(0,180,255,.15); }
 #effectModal .custom-modal-title { color: var(--cyan); }

@@ -416,6 +416,106 @@ export default {
       }
     }
 
+    // ========== [A88] THỜI LƯỢNG BÀI HÁT THEO ID ==========
+    // GET /song-duration?id=<ID YouTube>  -> thời lượng (giây). Có trong server thì trả luôn; chưa có thì server tự lấy từ YouTube rồi LƯU.
+    //     Thêm &refresh=1 để lấy lại từ YouTube và ghi đè (bài đã có thời lượng -> cần mật khẩu quản trị).
+    if (url.pathname === "/song-duration" && request.method === "GET") {
+      try {
+        const songId = String(url.searchParams.get("id") || "").trim();
+        if (!songId) return Response.json({ error: "thieu id bai hat" }, { status: 400, headers: corsHeaders });
+        const row = await env.DB.prepare(`
+          SELECT song_id as songId, title, total_duration_sec as totalSec FROM song_info WHERE song_id = ?
+        `).bind(songId).first();
+        const daCo = row && Number(row.totalSec) > 0;
+        const lamMoi = url.searchParams.get("refresh") === "1";
+        if (daCo && !lamMoi) {
+          return Response.json({ ok: true, songId, title: row.title || null, durationSec: Number(row.totalSec), format: giaySangPhutGiay(Number(row.totalSec)), source: "server" }, { headers: corsHeaders });
+        }
+        if (!laIdYouTube(songId)) {
+          return Response.json({ error: "chua_co_thoi_luong", message: "Bai nay chua co thoi luong va ID khong phai ID YouTube (11 ky tu) nen server khong tu lay duoc. Dung /set-duration de nhap tay." }, { status: 404, headers: corsHeaders });
+        }
+        if (daCo && lamMoi) {
+          const tuChoi = kiemTraQuyenSua(request, env, corsHeaders);
+          if (tuChoi) return tuChoi;
+        }
+        const kq = await layThoiLuongYouTube(songId);
+        if (!kq.ok) {
+          return Response.json({ error: "khong_lay_duoc_tu_youtube", chiTiet: kq.loi, message: "Server khong lay duoc thoi luong tu YouTube. Dung /set-duration de nhap tay." }, { status: 502, headers: corsHeaders });
+        }
+        await luuThoiLuong(env, songId, kq.giay, !!row);
+        return Response.json({ ok: true, songId, title: (row && row.title) || null, durationSec: kq.giay, format: giaySangPhutGiay(kq.giay), source: "youtube", daLuu: true }, { headers: corsHeaders });
+      } catch (e) {
+        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
+      }
+    }
+
+    // POST /set-duration  body { songId, totalDurationSec }  -> sửa thời lượng 1 bài (chỉ đổi thời lượng, giữ nguyên tên + các đoạn Key).
+    //     Bài chưa có thời lượng (trống) -> điền được không cần mật khẩu. Bài ĐÃ có thời lượng -> cần mật khẩu quản trị (ADMIN_TOKEN).
+    if (url.pathname === "/set-duration" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const songId = String((body && body.songId) || "").trim();
+        const giay = parseInt(body && body.totalDurationSec, 10);
+        if (!songId) return Response.json({ error: "thieu songId" }, { status: 400, headers: corsHeaders });
+        if (!Number.isFinite(giay) || giay < 1 || giay > 86400) {
+          return Response.json({ error: "thoi_luong_khong_hop_le", message: "totalDurationSec phai la so giay tu 1 den 86400" }, { status: 400, headers: corsHeaders });
+        }
+        const row = await env.DB.prepare(`
+          SELECT song_id as songId, title, total_duration_sec as totalSec FROM song_info WHERE song_id = ?
+        `).bind(songId).first();
+        if (row && Number(row.totalSec) > 0) {
+          const tuChoi = kiemTraQuyenSua(request, env, corsHeaders);
+          if (tuChoi) return tuChoi;
+        }
+        const truoc = row ? (Number(row.totalSec) || null) : null;
+        await luuThoiLuong(env, songId, giay, !!row);
+        return Response.json({ ok: true, songId, durationSec: giay, format: giaySangPhutGiay(giay), truoc }, { headers: corsHeaders });
+      } catch (e) {
+        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
+      }
+    }
+
+    // POST /refresh-durations  (CẦN mật khẩu quản trị) body { limit? (mặc định 10, tối đa 20) }
+    //     Quét các bài ĐÃ có trên server nhưng CHƯA có thời lượng, tự lấy từ YouTube theo ID và lưu. Gọi lặp lại cho tới khi conLai = 0.
+    //     Chỉ điền chỗ trống, không ghi đè thời lượng đã có. ID không phải YouTube (vd app_xxxx) được bỏ qua.
+    if (url.pathname === "/refresh-durations" && request.method === "POST") {
+      const denied = kiemTraQuyenSua(request, env, corsHeaders);
+      if (denied) return denied;
+      try {
+        let body = {};
+        try { body = await request.json(); } catch (_) { body = {}; }
+        const limit = Math.min(20, Math.max(1, parseInt(body && body.limit, 10) || 10));
+        const { results } = await env.DB.prepare(`
+          SELECT song_id as songId, title FROM song_info
+          WHERE total_duration_sec IS NULL OR total_duration_sec = 0
+          ORDER BY updated_at DESC LIMIT 200
+        `).all();
+        const ungVien = (results || []).filter((r) => laIdYouTube(r.songId));
+        const boQua = (results || []).length - ungVien.length;
+        const lamNgay = ungVien.slice(0, limit);
+        const ketQua = [];
+        for (const r of lamNgay) {
+          const kq = await layThoiLuongYouTube(r.songId);
+          if (kq.ok) {
+            await luuThoiLuong(env, r.songId, kq.giay, true);
+            ketQua.push({ songId: r.songId, title: r.title || null, ok: true, durationSec: kq.giay });
+          } else {
+            ketQua.push({ songId: r.songId, title: r.title || null, ok: false, loi: kq.loi });
+          }
+        }
+        return Response.json({
+          ok: true,
+          daDienDuoc: ketQua.filter((x) => x.ok).length,
+          thatBai: ketQua.filter((x) => !x.ok).length,
+          conLai: Math.max(0, ungVien.length - lamNgay.length),
+          boQuaKhongPhaiYouTube: boQua,
+          chiTiet: ketQua
+        }, { headers: corsHeaders });
+      } catch (e) {
+        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
+      }
+    }
+
     return Response.json({ error: "not_found" }, { status: 404, headers: corsHeaders });
   }
 };
@@ -445,6 +545,52 @@ function soSanhAnToan(a, b) {
   const n = Math.max(a.length, b.length);
   for (let i = 0; i < n; i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
   return diff === 0;
+}
+
+// ========== [A88] THỜI LƯỢNG THEO ID ==========
+// ID YouTube = 11 ký tự chữ/số/_/-. ID kiểu "app_xxxx" (Menu tự sinh từ tên bài) KHÔNG phải ID YouTube.
+function laIdYouTube(id) {
+  return /^[A-Za-z0-9_-]{11}$/.test(String(id || "")) && !/^app_/.test(String(id));
+}
+
+// Lấy thời lượng (giây) từ trang xem YouTube ("lengthSeconds"). Không cần khoá API. Lỗi/chặn -> { ok:false, loi }.
+async function layThoiLuongYouTube(videoId) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 6000);
+  try {
+    const res = await fetch("https://www.youtube.com/watch?v=" + encodeURIComponent(videoId) + "&hl=en", {
+      signal: ctl.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cookie": "CONSENT=YES+1; SOCS=CAI"
+      }
+    });
+    if (!res.ok) return { ok: false, loi: "http_" + res.status };
+    const html = await res.text();
+    const m = /"lengthSeconds":"(\d{1,6})"/.exec(html);
+    if (!m) return { ok: false, loi: "khong_thay_lengthSeconds" };
+    const giay = parseInt(m[1], 10);
+    if (!Number.isFinite(giay) || giay < 1 || giay > 86400) return { ok: false, loi: "thoi_luong_vo_ly_" + m[1] };
+    return { ok: true, giay };
+  } catch (e) {
+    return { ok: false, loi: e && e.name === "AbortError" ? "het_gio" : String((e && e.message) || e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Ghi thời lượng cho 1 bài: bài đã có dòng thông tin -> chỉ đổi cột thời lượng (giữ tên/ghi chú); chưa có -> tạo dòng mới.
+async function luuThoiLuong(env, songId, giay, coDong) {
+  if (coDong) {
+    await env.DB.prepare(`
+      UPDATE song_info SET total_duration_sec = ?, updated_at = strftime('%s','now') * 1000 WHERE song_id = ?
+    `).bind(giay, songId).run();
+  } else {
+    await env.DB.prepare(`
+      INSERT INTO song_info (song_id, total_duration_sec, updated_at) VALUES (?, ?, strftime('%s','now') * 1000)
+    `).bind(songId, giay).run();
+  }
 }
 
 // ========== [A83] BÀI MỚI / BÀI ĐÃ BIẾT ==========
@@ -685,6 +831,11 @@ function taoTrangChu() {
     <div id="tab-list" class="hidden">
       <div class="card">
         <h3>Tat Ca Bai Da Luu</h3>
+        <p style="font-size:13px; color:#aaa; margin-bottom:10px;">Sua Key / Xoa bai ngay tai day (can mat khau quan tri). Bam vao ten bai de xem chi tiet.</p>
+        <div class="search-bar" style="flex-wrap:wrap;">
+          <input type="password" id="adminTokenDS" placeholder="Mat khau quan tri (ADMIN_TOKEN)" style="max-width:300px;">
+        </div>
+        <div id="kqDS" style="margin:10px 0; padding:10px; border-radius:8px; display:none;"></div>
         <div id="danhSachTatCa"></div>
       </div>
     </div>
@@ -886,11 +1037,22 @@ function taoTrangChu() {
           : ' <span class="tag" style="background:#555; color:#ddd;">Chua co Key</span>';
         div.innerHTML += '<div class="list-item" data-songid="' + esc(bai.songId) + '">' +
           '<div class="list-title">' + esc(bai.title) + keyTag + '</div>' +
-          '<div class="list-desc">ID: ' + esc(bai.songId) + ' | Thoi luong: ' + esc(bai.tongThoiLuong) + ' | So doan: ' + esc(bai.soDoan) + '</div></div>';
+          '<div class="list-desc">ID: ' + esc(bai.songId) + ' | Thoi luong: ' + esc(bai.tongThoiLuong) + ' | So doan: ' + esc(bai.soDoan) + '</div>' +
+          '<div class="list-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">' +
+            '<button class="btn-ds-sua" data-songid="' + esc(bai.songId) + '" style="background:#ff9800; color:#000; padding:6px 12px; border:none; border-radius:6px; cursor:pointer;">Sua Key</button>' +
+            '<button class="btn-ds-xoa" data-songid="' + esc(bai.songId) + '" data-title="' + esc(bai.title) + '" style="background:#c62828; color:#fff; padding:6px 12px; border:none; border-radius:6px; cursor:pointer;">Xoa</button>' +
+          '</div>' +
+          '<div class="ds-sua-form" style="display:none; margin-top:8px; gap:8px; flex-wrap:wrap; align-items:center;">' +
+            '<select class="ds-key" style="padding:8px; border-radius:6px; border:none;"><option>C</option><option>C#</option><option>D</option><option>D#</option><option>E</option><option>F</option><option>F#</option><option>G</option><option>G#</option><option>A</option><option>A#</option><option>B</option></select>' +
+            '<select class="ds-mode" style="padding:8px; border-radius:6px; border:none;"><option value="major">Truong (Major)</option><option value="minor">Phu (Minor)</option></select>' +
+            (Number(bai.soDoan) > 1 ? '<label style="color:#ddd; font-size:13px;"><input type="checkbox" class="ds-all"> Ap dung cho tat ca ' + esc(bai.soDoan) + ' doan</label>' : '') +
+            '<button class="btn-ds-luu" data-songid="' + esc(bai.songId) + '" style="background:#4CAF50; color:#fff; padding:6px 12px; border:none; border-radius:6px; cursor:pointer;">Luu Key</button>' +
+          '</div></div>';
       }
       var items = document.querySelectorAll('#danhSachTatCa .list-item');
       for (var k = 0; k < items.length; k++) {
-        items[k].addEventListener('click', function() {
+        items[k].addEventListener('click', function(ev) {
+          if (ev.target.closest && ev.target.closest('button, select, input, label')) return;
           var sid = this.getAttribute('data-songid');
           document.getElementById('songIdInput').value = sid;
           var allTabs = document.querySelectorAll('.tab');
@@ -901,6 +1063,67 @@ function taoTrangChu() {
           timBai();
         });
       }
+      var bs = document.querySelectorAll('#danhSachTatCa .btn-ds-sua');
+      for (var m = 0; m < bs.length; m++) {
+        bs[m].addEventListener('click', function(ev) {
+          ev.stopPropagation();
+          var f = this.closest('.list-item').querySelector('.ds-sua-form');
+          f.style.display = (f.style.display === 'none') ? 'flex' : 'none';
+        });
+      }
+      var bl = document.querySelectorAll('#danhSachTatCa .btn-ds-luu');
+      for (var n = 0; n < bl.length; n++) {
+        bl[n].addEventListener('click', function(ev) { ev.stopPropagation(); suaKeyDS(this); });
+      }
+      var bx = document.querySelectorAll('#danhSachTatCa .btn-ds-xoa');
+      for (var q = 0; q < bx.length; q++) {
+        bx[q].addEventListener('click', function(ev) { ev.stopPropagation(); xoaBaiDS(this); });
+      }
+    }
+
+    // Sua Key / Xoa bai ngay trong danh sach (dung chung ADMIN_TOKEN, nho trong tab bang sessionStorage)
+    try { var tkDS = sessionStorage.getItem('menuAdminToken'); if (tkDS) document.getElementById('adminTokenDS').value = tkDS; } catch (e) {}
+    function hienKqDS(ok, text) {
+      var kq = document.getElementById('kqDS');
+      kq.style.display = 'block';
+      kq.style.background = ok ? 'rgba(76,175,80,0.25)' : 'rgba(244,67,54,0.25)';
+      kq.innerText = text;
+    }
+    async function suaKeyDS(btn) {
+      var token = document.getElementById('adminTokenDS').value;
+      if (!token) { hienKqDS(false, 'Chua nhap mat khau quan tri.'); return; }
+      var item = btn.closest('.list-item');
+      var body = { songId: btn.getAttribute('data-songid'), key: item.querySelector('.ds-key').value, mode: item.querySelector('.ds-mode').value };
+      var all = item.querySelector('.ds-all');
+      if (all && all.checked) body.all = true;
+      try {
+        var res = await fetch(SERVER + '/set-key', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) });
+        var data = await res.json();
+        if (data.ok) {
+          try { sessionStorage.setItem('menuAdminToken', token); } catch (e) {}
+          hienKqDS(true, 'Da sua ' + data.daSua + ' doan -> ' + data.keyHienThi);
+          taiDanhSach();
+        } else {
+          hienKqDS(false, data.message || data.error || ('Loi ' + res.status));
+        }
+      } catch (err) { hienKqDS(false, 'Loi ket noi: ' + err.message); }
+    }
+    async function xoaBaiDS(btn) {
+      var token = document.getElementById('adminTokenDS').value;
+      if (!token) { hienKqDS(false, 'Chua nhap mat khau quan tri.'); return; }
+      var id = btn.getAttribute('data-songid'), ten = btn.getAttribute('data-title') || id;
+      if (!confirm('XOA bai "' + ten + '" va tat ca Key cua bai khoi server? Khong hoan tac duoc.')) return;
+      try {
+        var res = await fetch(SERVER + '/delete-song', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ songId: id, xacNhan: true }) });
+        var data = await res.json();
+        if (data.ok) {
+          try { sessionStorage.setItem('menuAdminToken', token); } catch (e) {}
+          hienKqDS(true, 'Da xoa bai "' + ten + '" (' + data.daXoaDoan + ' doan Key).');
+          taiDanhSach();
+        } else {
+          hienKqDS(false, data.message || data.error || ('Loi ' + res.status));
+        }
+      } catch (err) { hienKqDS(false, 'Loi ket noi: ' + err.message); }
     }
   </script>
 </body>

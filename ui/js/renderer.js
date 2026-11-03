@@ -426,6 +426,11 @@ updateClock();
    ========================================================== */
 (function setupEffectsWindowButton() {
 
+    // EFFECT-LIT-01 — nút EFFECT SÁNG khi Bảng Hiệu Ứng đang mở, TẮT khi đóng (kể cả khi đóng bằng nút ✕ trong cửa sổ hiệu ứng). Mở app: tắt.
+    if (window.electronAPI && typeof window.electronAPI.onEffectsState === "function") {
+        window.electronAPI.onEffectsState((open) => document.getElementById("effectPopupBtn")?.classList.toggle("active", !!open));
+    }
+
     document.addEventListener("click", (event) => {
 
         const btn = event.target && event.target.closest ? event.target.closest("#effectPopupBtn") : null;
@@ -672,6 +677,18 @@ document.querySelectorAll(".preset-btn").forEach(btn => {
 });
 
 document.getElementById("autoDetectBtn")?.classList.add("active");
+
+// PRESET-LIT-01 — nhóm NORM/LOFI/RAP/REMIX LUÔN có đúng 1 nút sáng (không bao giờ để tắt hết). Mở app / sau khi khôi phục cấu hình: nếu chưa có nút nào sáng -> NORM sáng.
+// Chỉ chỉnh giao diện, KHÔNG gửi MIDI. Nút TUNE (công tắc bypass) không thuộc nhóm này.
+function ensurePresetLit() {
+    const group = [...document.querySelectorAll(".preset-btn")].filter((b) => !isTuneOffBtn(b) && !b.closest(".custom-modal") && ["NORM", "LOFI", "RAP", "REMIX"].includes(b.textContent.trim()));
+    if (!group.length) return;
+    const lit = group.filter((b) => b.classList.contains("active"));
+    if (lit.length === 1) return;
+    group.forEach((b) => b.classList.remove("active"));
+    (lit[0] || group.find((b) => b.textContent.trim() === "NORM") || group[0]).classList.add("active");
+}
+ensurePresetLit();
 
 // MIDI-DAW-CONTROL-01 — hiển thị kết quả gửi lệnh ON/OFF trên tooltip của nút (KHÔNG đổi HTML/CSS). Chỉ nói "đã GỬI lệnh":
 // Menu không có phản hồi từ Studio One nên KHÔNG BAO GIỜ hiện "DAW đã xác nhận".
@@ -3088,6 +3105,7 @@ document.addEventListener("DOMContentLoaded", () => {
     checkAllSystems();
     applyAudioOutputSetting(); // TASK B72 — áp dụng thiết bị đầu ra đã lưu (nếu có) lúc khởi động
     loadData();
+    ensurePresetLit(); // PRESET-LIT-01
     if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
 
     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây

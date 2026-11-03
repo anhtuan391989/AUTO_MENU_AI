@@ -127,3 +127,14 @@ Trả về HTML trang quản lý (tìm bài, xem tất cả bài, tra khóa tạ
 | 400 | Thiếu tham số bắt buộc (songId, startSec, endSec, key) |
 | 404 | Đường dẫn không tồn tại |
 | 500 | Lỗi server (thường do binding DB sai hoặc bảng chưa tạo) |
+
+## [A88] Thời lượng bài hát theo ID
+
+| Route | Quyền | Việc làm |
+|---|---|---|
+| `GET /song-duration?id=<ID YouTube>` | công khai | Có thời lượng trên server -> trả luôn (`source:"server"`). Chưa có -> server tự lấy từ YouTube rồi lưu (`source:"youtube"`). ID `app_xxx` không phải YouTube -> 404 `chua_co_thoi_luong`. YouTube chặn -> 502 `khong_lay_duoc_tu_youtube`. |
+| `GET /song-duration?id=...&refresh=1` | mật khẩu admin nếu bài đã có thời lượng | Lấy lại từ YouTube và ghi đè. |
+| `POST /set-duration` `{songId, totalDurationSec}` | thời lượng đang trống: công khai; đã có: **mật khẩu admin** | Chỉ đổi thời lượng (giữ tên + đoạn Key). Hợp lệ 1–86400 giây. |
+| `POST /refresh-durations` `{limit?}` | **mật khẩu admin** | Điền thời lượng cho các bài đã có trên server mà chưa có (mặc định 10, tối đa 20 bài/lần). Trả `conLai`; gọi lại tới khi = 0. Không ghi đè thời lượng đã có. |
+
+Mật khẩu: header `Authorization: Bearer <ADMIN_TOKEN>`.

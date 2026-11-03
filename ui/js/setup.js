@@ -772,6 +772,9 @@ const DAW_MIDI_PROFILES = Object.freeze({
             // MIC-VOLUME-KNOB-01 — 2 CC âm lượng Mic, kênh 15 như bộ KNOB, không trùng CC 20–23 (Knob) và 102–112 (LIVE/CHỌN TRACK).
             // TASK A82 — 1 CC Bypass Auto-Tune (nút TUNE ON/OFF: 127 = bypass bật, 0 = tắt), kênh 16 như LIVE, CC 113 (không trùng 102–112).
             tune: Object.freeze({ title: "TUNE BYPASS", count: 1, mappings: dawQfMake(16, 127, { TUNE_BYPASS: 113 }) }),
+            // PRESET-CC-01 — 4 CC (kênh 16, giá trị 127) cho 4 nút Preset NORM/LOFI/RAP/REMIX: mỗi nút gửi 1 CC riêng; trong Studio Pro gán từng CC vào macro/preset
+            // (bật-tắt plugin hoặc đặt thông số cài sẵn). Dùng CC 114–117: không trùng LIVE 102–109, CHỌN TRACK 110–112, TUNE 113; tránh CC 120–127 (lệnh hệ thống MIDI).
+            preset: Object.freeze({ title: "PRESET NORM/LOFI/RAP/REMIX", count: 4, mappings: dawQfMake(16, 127, { PRESET_NORM: 114, PRESET_LOFI: 115, PRESET_RAP: 116, PRESET_REMIX: 117 }) }),
             micvol: Object.freeze({ title: "MIC VOLUME", count: 2, mappings: dawQfMake(15, 127, { MIC1_VOLUME: 24, MIC2_VOLUME: 25 }) }),
             // FX-BUS-KNOB-01 — 4 CC (kênh 15) cho fader 4 bus hiệu ứng, không trùng CC 20–27 (Knob/Mic/Scale/Root) và 102–113 (LIVE/CHỌN TRACK/TUNE).
             fxbus: Object.freeze({ title: "FX BUS VOLUME", count: 4, mappings: dawQfMake(15, 127, { FX_BUS_DELAY_VOLUME: 28, FX_BUS_VERB_SHORT_VOLUME: 29, FX_BUS_VERB_LONG_VOLUME: 30, FX_BUS_COM_VERB_VOLUME: 31 }) }),
@@ -900,6 +903,7 @@ function initDawMidiOutputMappingSection() {
             ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.tune ? `<button class="setup-btn" id="btnFillTuneCc">Điền + lưu bộ TUNE BYPASS gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}
+            ${profile.bundles.preset ? `<button class="setup-btn" id="btnFillPresetCc">Điền + lưu bộ PRESET (NORM/LOFI/RAP/REMIX) gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.fxbus ? `<button class="setup-btn" id="btnFillFxBusCc">Điền + lưu bộ FX BUS VOLUME gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.scale ? `<button class="setup-btn" id="btnFillScaleCc">Điền + lưu bộ KEY + SCALE gợi ý — ${profile.name}</button>` : ""}`
                 : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
@@ -934,6 +938,8 @@ function initDawMidiOutputMappingSection() {
             if (tuneBtn) tuneBtn.addEventListener("click", () => runQuickFill("tune"));
             const micVolBtn = liveBox.querySelector("#btnFillMicVolCc");
             if (micVolBtn) micVolBtn.addEventListener("click", () => runQuickFill("micvol"));
+            const presetBtn = liveBox.querySelector("#btnFillPresetCc");
+            if (presetBtn) presetBtn.addEventListener("click", () => runQuickFill("preset"));
             const fxBusBtn = liveBox.querySelector("#btnFillFxBusCc");
             if (fxBusBtn) fxBusBtn.addEventListener("click", () => runQuickFill("fxbus"));
             const scaleBtn = liveBox.querySelector("#btnFillScaleCc");

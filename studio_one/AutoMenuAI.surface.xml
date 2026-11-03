@@ -2,7 +2,7 @@
 <!--
   AutoMenuAI - Studio One Control Surface (tao boi setup_all_midi.bat)
   Cong MIDI: AUTO MENU AI (loopMIDI). Bo CC dong bo voi Menu (Setup > MIDI > Studio One).
-  CH16 = status #BF (CC 102-113: LIVE ON/OFF, chon track, TUNE). CH15 = status #BE (CC 20-31: Knob, Mic vol, Scale/Key, FX bus).
+  CH16 = status #BF (CC 102-117: LIVE ON/OFF, chon track, TUNE, Preset NORM/LOFI/RAP/REMIX). CH15 = status #BE (CC 20-31: Knob, Mic vol, Scale/Key, FX bus).
 -->
 <ControlSurface name="AutoMenuAI" manufacturer="AutoMenuAI" model="AutoMenuAI" protocol="MIDI" version="1.0">
   <Controls>
@@ -53,6 +53,22 @@
     <!-- CC 113 -->
     <Control name="tuneBypass" title="TUNE Bypass (127=bat, 0=tat)" type="button" options="receive public">
       <MidiMessage status="#BF" address="113"/>
+    </Control>
+    <!-- CC 114 -->
+    <Control name="presetNorm" title="Preset NORM" type="button" options="receive public">
+      <MidiMessage status="#BF" address="114"/>
+    </Control>
+    <!-- CC 115 -->
+    <Control name="presetLofi" title="Preset LOFI" type="button" options="receive public">
+      <MidiMessage status="#BF" address="115"/>
+    </Control>
+    <!-- CC 116 -->
+    <Control name="presetRap" title="Preset RAP" type="button" options="receive public">
+      <MidiMessage status="#BF" address="116"/>
+    </Control>
+    <!-- CC 117 -->
+    <Control name="presetRemix" title="Preset REMIX" type="button" options="receive public">
+      <MidiMessage status="#BF" address="117"/>
     </Control>
     <!-- CC 20 -->
     <Control name="beatVol" title="Beat Input Volume" type="knob" options="receive public">

@@ -67,6 +67,22 @@
         return "calibrated";
     }
 
+    // DASH-STATUS-01 — Database: hỏi Key Server qua main process (IPC "database-status"). Chống gọi chồng; lỗi/hết giờ = OFFLINE (không throw).
+    let dbPillBusy = false;
+    function refreshDatabasePill(readyPill, dimPill) {
+        const el = document.getElementById("dashDbPill");
+        if (!el) return;
+        if (!window.electronAPI || typeof window.electronAPI.getDatabaseStatus !== "function") { dimPill(el, "—"); return; }
+        if (dbPillBusy) return;
+        dbPillBusy = true;
+        dimPill(el, "CHECKING…");
+        Promise.resolve(window.electronAPI.getDatabaseStatus()).then((r) => {
+            if (r && r.ok) { readyPill(el, "ONLINE"); el.title = "Key Server trả lời (HTTP " + r.status + ", " + r.ms + " ms)"; }
+            else { el.textContent = "OFFLINE"; el.className = "status-pill status-pill--error"; el.title = "Key Server không trả lời: " + ((r && r.error) || "không rõ"); }
+        }).catch(() => { el.textContent = "OFFLINE"; el.className = "status-pill status-pill--error"; })
+          .finally(() => { dbPillBusy = false; });
+    }
+
     function refreshDashboard() {
         try {
             const readyPill = (el, label) => {
@@ -97,6 +113,12 @@
             const hasPlugin = typeof getSetting === "function" && !!getSetting("selectedAutoTune");
             hasPlugin ? readyPill(document.getElementById("dashPluginPill"), "CONFIGURED")
                       : dimPill(document.getElementById("dashPluginPill"), "NOT SELECTED");
+
+            // DASH-STATUS-01 — AI: Key/BPM/Mod chạy từ System Audio, nên "sẵn sàng" = đã chọn thiết bị System Audio trong Setup > Audio.
+            const hasSystemAudio = typeof getSetting === "function" && !!getSetting("selectedSystemAudioDeviceId", "");
+            hasSystemAudio ? readyPill(document.getElementById("dashAiPill"), "READY")
+                           : dimPill(document.getElementById("dashAiPill"), "NO SYSTEM AUDIO");
+            refreshDatabasePill(readyPill, dimPill);
 
             const calib = calibrationState();
             if (calib === "calibrated") readyPill(document.getElementById("dashCalibPill"), "CALIBRATED");

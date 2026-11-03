@@ -1,6 +1,6 @@
 const { MenuKeyClient } = require('./menu-api-client.js');
 const keyServer = new MenuKeyClient("https://menu-key-server.matuotluuly.workers.dev");
-const { app, BrowserWindow, ipcMain, dialog, session, shell, screen, desktopCapturer } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, session, shell, screen, desktopCapturer, Tray, Menu, nativeImage } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { execFile } = require("child_process");
@@ -701,6 +701,17 @@ ipcMain.on("ai-result", (event, { type, payload } = {}) => {
 // renderer" vì kết quả đúng/sai được QUYẾT ĐỊNH Ở ĐÂY (main process), renderer chỉ
 // hiển thị kết quả.
 // ================================
+// DB-STATUS-01 — ô "Database" trong Setup > Dashboard: hỏi Key Server có trả lời không (chỉ đọc, không gửi dữ liệu nào).
+ipcMain.handle("database-status", async () => {
+    try {
+        const { pingServer } = require("../core/integration/ServerHealth");
+        const { DEFAULT_SERVER_URL } = require("../core/integration/KeyServerSync");
+        return await pingServer({ url: DEFAULT_SERVER_URL, fetchImpl: (u, o) => fetch(u, o), timeoutMs: 3000 });
+    } catch (err) {
+        return { ok: false, status: null, ms: 0, error: String((err && err.message) || err) };
+    }
+});
+
 ipcMain.handle("admin-auth-verify", async (event, password) => {
     try {
         return AdminAuth.verify(password);
@@ -858,7 +869,9 @@ const effectsWindow = createEffectsWindowManager({
     screen,
     getMainWin: () => mainWin,
     preloadPath: path.join(__dirname, "preload.js"),
-    htmlPath: path.join(__dirname, "..", "ui", "effects.html")
+    htmlPath: path.join(__dirname, "..", "ui", "effects.html"),
+    // EFFECT-LIT-01 — báo cho menu chính biết Bảng Hiệu Ứng đang mở/đóng để nút EFFECT sáng/tắt đúng.
+    onStateChange: (open) => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send("effects-state", !!open); }
 });
 
 ipcMain.on("effects-toggle", (event) => {
@@ -891,6 +904,39 @@ ipcMain.on("effects-play", (event, effectId) => {
         console.error("effects-play lỗi:", err);
     }
 });
+
+// ================================
+// HIDE-DAW-01 — "Công cụ và sửa lỗi" > Ẩn DAW xuống khay thông báo (system tray). Logic ở app/DawTray.js + core/integration/WindowHider.js.
+// 3 kênh IPC MỚI, CHỈ nhận từ cửa sổ Setup. Chỉ ẨN/HIỆN cửa sổ DAW đang chạy (tiến trình KHÔNG bị tắt, vẫn nhận MIDI/audio). Không đụng Hidden-DAW launcher cũ.
+// ================================
+const { createDawTrayManager } = require("./DawTray");
+const WindowHider = require("../core/integration/WindowHider");
+let dawTrayMgr = null;
+function getDawTray() {
+    if (!dawTrayMgr) {
+        dawTrayMgr = createDawTrayManager({
+            Tray, Menu, nativeImage, readSettings: readSettingsFile, fs, windowHider: WindowHider, log: console.log,
+            stateFile: path.join(app.getPath("userData"), "hidden-daw-state.json")
+        });
+    }
+    return dawTrayMgr;
+}
+const fromSetupWindow = (event) => !!(setupWin && !setupWin.isDestroyed() && event.sender === setupWin.webContents);
+const DENIED = { ok: false, state: "failed", message: "Không được phép" };
+ipcMain.handle("tools-daw-status", (event) => {
+    try { return fromSetupWindow(event) ? getDawTray().status() : { configured: false, exePath: "", hidden: false, trayVisible: false }; }
+    catch (err) { console.error("tools-daw-status lỗi:", err); return { configured: false, exePath: "", hidden: false, trayVisible: false }; }
+});
+ipcMain.handle("tools-daw-hide", (event) => new Promise((resolve) => {
+    try { if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().hide(resolve); }
+    catch (err) { console.error("tools-daw-hide lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
+}));
+ipcMain.handle("tools-daw-show", (event) => new Promise((resolve) => {
+    try { if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().show(resolve); }
+    catch (err) { console.error("tools-daw-show lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
+}));
+app.on("before-quit", () => { try { if (dawTrayMgr) dawTrayMgr.restoreOnQuit(); } catch (err) { console.error("restoreOnQuit lỗi:", err); } });
+app.whenReady().then(() => { try { getDawTray().restoreTrayIfHidden(); } catch (err) { console.error("restoreTrayIfHidden lỗi:", err); } });
 
 ipcMain.handle("effects-get-aot", (event) => {
     if (!effectsWindow.isFromEffects(event.sender)) return { ok: false, value: false, error: "Không được phép" };
