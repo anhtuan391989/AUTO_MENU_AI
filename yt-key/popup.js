@@ -70,8 +70,10 @@ function hienThongBaoAuto(noiDung, ok) {
 }
 
 /* ── Hàm chạy trong NGỮ CẢNH TRANG YouTube (world MAIN) ──
-   Đọc ytInitialPlayerResponse chứa title + lengthSeconds chính xác. */
-function trichXuTuTrang() {
+   FIX: YouTube là SPA — window.ytInitialPlayerResponse chỉ đúng với video MỞ ĐẦU TIÊN,
+   chuyển bài xong nó vẫn giữ dữ liệu bài cũ. Nên ưu tiên đọc từ player hiện tại
+   (movie_player.getPlayerResponse) và luôn đối chiếu videoId với URL (idMong). */
+function trichXuTuTrang(idMong) {
   function parseDuration(text) {
     if (!text) return 0;
     const parts = text.trim().split(":").map(Number);
@@ -79,34 +81,66 @@ function trichXuTuTrang() {
     if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
     return 0;
   }
+  function khop(id) { return !idMong || !id || id === idMong; }
+  const player = document.getElementById("movie_player");
+  const video = document.querySelector("video.html5-main-video, video");
+
+  // Cách 1: player hiện tại (luôn đúng bài đang phát)
+  try {
+    const pr = player && player.getPlayerResponse && player.getPlayerResponse();
+    if (pr && pr.videoDetails && pr.videoDetails.title && khop(pr.videoDetails.videoId)) {
+      return {
+        ok: true,
+        title: pr.videoDetails.title,
+        durationSec: parseInt(pr.videoDetails.lengthSeconds) || Math.round((video && video.duration) || 0),
+        author: pr.videoDetails.author || "",
+        videoId: pr.videoDetails.videoId || idMong || "",
+        source: "player"
+      };
+    }
+  } catch (e) {}
+
+  // Cách 2: getVideoData + getDuration của player
+  try {
+    const vd = player && player.getVideoData && player.getVideoData();
+    if (vd && vd.title && khop(vd.video_id)) {
+      const dur = Math.round((player.getDuration && player.getDuration()) || (video && video.duration) || 0);
+      if (dur > 0) {
+        return { ok: true, title: vd.title, durationSec: dur, author: vd.author || "", videoId: vd.video_id || idMong || "", source: "player" };
+      }
+    }
+  } catch (e) {}
+
+  // Cách 3: ytInitialPlayerResponse — CHỈ nhận nếu đúng video đang xem
   try {
     const pr = window.ytInitialPlayerResponse;
-    if (pr && pr.videoDetails && pr.videoDetails.title) {
+    if (pr && pr.videoDetails && pr.videoDetails.title && idMong && pr.videoDetails.videoId === idMong) {
       return {
         ok: true,
         title: pr.videoDetails.title,
         durationSec: parseInt(pr.videoDetails.lengthSeconds) || 0,
         author: pr.videoDetails.author || "",
-        videoId: pr.videoDetails.videoId || "",
+        videoId: pr.videoDetails.videoId,
         source: "ytInitialPlayerResponse"
       };
     }
   } catch (e) {}
-  // Fallback: đọc từ DOM
+
+  // Cách 4 (dự phòng): đọc từ DOM
   try {
     const titleEl = document.querySelector("h1.ytd-watch-metadata yt-formatted-string, h1.title yt-formatted-string");
     const durEl = document.querySelector("span.ytp-time-duration");
     const title = titleEl ? titleEl.textContent.trim() : document.title.replace(/ - YouTube$/, "");
-    const durSec = parseDuration(durEl ? durEl.textContent : "");
-    if (title || durSec) {
-      return { ok: true, title: title, durationSec: durSec, author: "", videoId: "", source: "DOM" };
+    const durSec = parseDuration(durEl ? durEl.textContent : "") || Math.round((video && video.duration) || 0);
+    if (title && durSec) {
+      return { ok: true, title: title, durationSec: durSec, author: "", videoId: idMong || "", source: "DOM" };
     }
   } catch (e) {}
   return { ok: false, error: "Chưa load xong video" };
 }
 
 /* ── Lấy thông tin từ tab YouTube đang mở (thử lại nhiều lần) ── */
-async function layThongTinTuYouTube(soLanThu = 3) {
+async function layThongTinTuYouTube(soLanThu = 5) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.url || !tab.url.includes("youtube.com/watch")) {
     return { ok: false, error: "Hãy mở trang video YouTube (youtube.com/watch?v=...)" };
@@ -116,7 +150,8 @@ async function layThongTinTuYouTube(soLanThu = 3) {
       const [ketQua] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: "MAIN",
-        func: trichXuTuTrang
+        func: trichXuTuTrang,
+        args: [layId(tab.url) || ""]
       });
       const data = ketQua.result;
       if (data && data.ok && data.title && data.durationSec > 0) {
