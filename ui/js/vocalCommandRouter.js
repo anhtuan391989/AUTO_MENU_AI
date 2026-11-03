@@ -172,25 +172,35 @@ async function sendKeyRootCcToAutotune(noteIndex) {
     } catch (e) { return { attempted: true, ok: false, ccValue, status: "ERROR" }; }
 }
 
-// TASK A93 — gửi Scale + Key gốc cho Auto-Tune MIC 2 bằng CC RIÊNG (mặc định CC 32/33 kênh 15). Chỉ chẩn đoán, KHÔNG bao giờ làm hỏng việc gửi Key cho mic 1.
-async function sendKeyMic2ToAutotune(keyName, noteIndex) {
+// TASK A93/A94 — gửi Scale + Key gốc cho các Auto-Tune CÒN LẠI bằng CC RIÊNG (kênh 15): MIC 2 = CC 32/33, Auto-Tune 3 = CC 34/35, Auto-Tune 4 = CC 36/37.
+// Mỗi Auto-Tune xử lý độc lập; lỗi/chưa cấu hình ở một cái KHÔNG chặn các cái khác và KHÔNG bao giờ chặn việc gửi Key cho mic 1. Chỉ trả kết quả chẩn đoán.
+const EXTRA_AUTOTUNE_TARGETS = ["MIC2", "AT3", "AT4"];
+async function sendKeyExtraAutotunes(keyName, noteIndex) {
     const AR = typeof window !== "undefined" ? window.ActionRegistry : null;
     if (!AR || typeof AR.executeAction !== "function" || !AR.ACTIONS || !AR.ACTIONS.KEY_ROOT_MIC2) return { attempted: false, reason: "NO_ACTION_REGISTRY" };
-    const out = { attempted: false };
-    try {
-        const mode = /minor/i.test(keyName) ? "MINOR" : (/major/i.test(keyName) ? "MAJOR" : null);
-        if (mode) {
-            const r = await AR.executeAction(mode === "MINOR" ? AR.ACTIONS.KEY_SCALE_MINOR_MIC2 : AR.ACTIONS.KEY_SCALE_MAJOR_MIC2, { reason: "key-scale-mic2" });
-            if (!(r && r.reason === "NOT_CONFIGURED")) { out.attempted = true; out.scaleOk = !!(r && r.ok); }
-            if (out.attempted && out.scaleOk && typeof delay === "function") await delay(40);
-        }
-        if (Number.isInteger(noteIndex) && noteIndex >= 0 && noteIndex <= 11) {
-            const r2 = await AR.executeAction(AR.ACTIONS.KEY_ROOT_MIC2, { reason: "key-root-mic2", value: keyRootToCc(noteIndex) });
-            if (!(r2 && r2.reason === "NOT_CONFIGURED")) { out.attempted = true; out.rootOk = !!(r2 && r2.ok); }
-        }
-    } catch (e) { out.attempted = true; out.error = true; }
+    const mode = /minor/i.test(keyName) ? "MINOR" : (/major/i.test(keyName) ? "MAJOR" : null);
+    const out = { attempted: false, targets: {} };
+    for (const t of EXTRA_AUTOTUNE_TARGETS) {
+        const o = { attempted: false };
+        try {
+            const scaleAct = AR.ACTIONS["KEY_SCALE_" + (mode === "MINOR" ? "MINOR" : "MAJOR") + "_" + t];
+            const rootAct = AR.ACTIONS["KEY_ROOT_" + t];
+            if (mode && scaleAct) {
+                const r = await AR.executeAction(scaleAct, { reason: "key-scale-" + t.toLowerCase() });
+                if (!(r && r.reason === "NOT_CONFIGURED")) { o.attempted = true; o.scaleOk = !!(r && r.ok); }
+                if (o.attempted && o.scaleOk && typeof delay === "function") await delay(40);
+            }
+            if (rootAct && Number.isInteger(noteIndex) && noteIndex >= 0 && noteIndex <= 11) {
+                const r2 = await AR.executeAction(rootAct, { reason: "key-root-" + t.toLowerCase(), value: keyRootToCc(noteIndex) });
+                if (!(r2 && r2.reason === "NOT_CONFIGURED")) { o.attempted = true; o.rootOk = !!(r2 && r2.ok); }
+            }
+        } catch (e) { o.attempted = true; o.error = true; }
+        if (o.attempted) out.attempted = true;
+        out.targets[t] = o;
+    }
     return out;
 }
+async function sendKeyMic2ToAutotune(keyName, noteIndex) { return sendKeyExtraAutotunes(keyName, noteIndex); } // tên cũ (A93) giữ để tương thích
 
 async function sendKeyToAutotune(keyName) {
     const root = keyName.match(/^[A-G]#?/)?.[0];

@@ -102,6 +102,13 @@ const ACTIONS = Object.freeze({
     KEY_SCALE_MAJOR_MIC2: "KEY_SCALE_MAJOR_MIC2",
     KEY_SCALE_MINOR_MIC2: "KEY_SCALE_MINOR_MIC2",
     KEY_ROOT_MIC2: "KEY_ROOT_MIC2",
+    // TASK A94 — Auto-Tune thứ 3 và thứ 4 (cùng 1 phiên bản, cùng cách gửi như mic 1): CC riêng kênh 15 — AT3: CC 34 Scale / 35 Key gốc; AT4: CC 36 Scale / 37 Key gốc.
+    KEY_SCALE_MAJOR_AT3: "KEY_SCALE_MAJOR_AT3",
+    KEY_SCALE_MINOR_AT3: "KEY_SCALE_MINOR_AT3",
+    KEY_ROOT_AT3: "KEY_ROOT_AT3",
+    KEY_SCALE_MAJOR_AT4: "KEY_SCALE_MAJOR_AT4",
+    KEY_SCALE_MINOR_AT4: "KEY_SCALE_MINOR_AT4",
+    KEY_ROOT_AT4: "KEY_ROOT_AT4",
     // MIDI-DAW-CONTROL-01 — TÁM lệnh ĐẶT TRẠNG THÁI ĐÍCH (ON và OFF là hai action RIÊNG, mỗi cái một mapping riêng),
     // thay cho lệnh toggle không xác định. MUSIC = Monitor track "Beat"; MIC1 = Monitor track "Mic"; MIC2 = Monitor
     // track "Không Dây"; FX = Mute bus Delay/Verb ngắn/Verb dài/Com Verb (FX ON = bỏ mute, FX OFF = mute). Không có
@@ -123,7 +130,10 @@ const ACTIONS = Object.freeze({
     // TASK A79/A82 — nút TUNE (khu Preset) = BYPASS Auto-Tune CẢ 2 MIC, hoạt động ĐỘC LẬP với NORM/LOFI/RAP/REMIX.
     // MỘT CC DUY NHẤT: giá trị 127 = bypass BẬT (nút thành TUNE OFF), 0 = bypass TẮT (nút về TUNE ON) — giống nút Bypass SoundShifter.
     // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_TUNE_OFF cũ (tương thích ngược).
-    TUNE_BYPASS: "TUNE_BYPASS"
+    TUNE_BYPASS: "TUNE_BYPASS",
+    // TASK A94 — nút LOFI = công tắc ON/OFF ĐỘC LẬP (kết hợp được với NORM/RAP/REMIX; chỉ riêng LOFI). MỘT CC: 127 = LOFI BẬT, 0 = LOFI TẮT.
+    // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_LOFI cũ (tương thích ngược).
+    LOFI_STATE: "LOFI_STATE"
 });
 
 // MIDI-DAW-CONTROL-01 — nút Menu -> cặp action ON/OFF + action toggle CŨ (dùng khi người dùng CHƯA cấu hình ON/OFF).
@@ -132,7 +142,8 @@ const DAW_STATE_CONTROLS = Object.freeze({
     MIC1: Object.freeze({ on: "MIC1_ON", off: "MIC1_OFF", legacy: "MONITOR_MIC1", select: "MIC1_SELECT", label: "MIC 1 (Monitor Mic)" }),
     MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", select: "MIC2_SELECT", label: "MIC 2 (Monitor Không Dây)" }),
     FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" }),
-    TUNE: Object.freeze({ on: "TUNE_BYPASS", off: "TUNE_BYPASS", values: Object.freeze({ on: 127, off: 0 }), legacy: "PRESET_TUNE_OFF", label: "TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — Auto-Tune 2 mic)" }) // TASK A79
+    TUNE: Object.freeze({ on: "TUNE_BYPASS", off: "TUNE_BYPASS", values: Object.freeze({ on: 127, off: 0 }), legacy: "PRESET_TUNE_OFF", label: "TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — cả 4 plugin Auto-Tune)" }), // TASK A79/A94
+    LOFI: Object.freeze({ on: "LOFI_STATE", off: "LOFI_STATE", values: Object.freeze({ on: 127, off: 0 }), legacy: "PRESET_LOFI", label: "LOFI (ON/OFF độc lập, kết hợp được với preset khác)" }) // TASK A94
 });
 
 // Action nào đã có Mouse Coordinate key tương ứng (Mục 8, ưu tiên DAW Play/Stop/Record —
@@ -244,10 +255,20 @@ function getMidiOutMapping(action) {
         const cubase = /^cubase/i.test(String(daw).trim());
         return { kind: "cc", channel: 16, number: cubase ? 118 : 113, value: 127, source: "DEFAULT_PRESET" };
     }
+    // TASK A94 — preset mặc định nút LOFI (ON/OFF độc lập): Studio One/Studio Pro kênh 16 CC 114; Cubase CC 119. Giá trị gửi do nút quyết định (127 = BẬT, 0 = TẮT).
+    if (action === "LOFI_STATE") {
+        const cubase = /^cubase/i.test(String(daw).trim());
+        return { kind: "cc", channel: 16, number: cubase ? 119 : 114, value: 127, source: "DEFAULT_PRESET" };
+    }
     // TASK A92 — preset mặc định SCALE gửi tới Auto-Tune (Studio One/Studio Pro): kênh 15, CC 26 (Major=0, Minor=5). Khớp bộ "scale" trong DAW_MIDI_PROFILES (setup.js).
     // Chỉ khi chưa lưu mapping riêng (mapping đã lưu luôn thắng). KEY gốc KHÔNG có mặc định CC: vẫn gửi bằng nốt MIDI như cũ (KEY_ROOT chỉ dùng CC khi người dùng tự lưu CC 27). Cubase chưa có bộ CC kiểm chứng nên không có mặc định.
     if ((action === "KEY_SCALE_MAJOR" || action === "KEY_SCALE_MINOR") && !/^cubase/i.test(String(daw).trim())) {
         return { kind: "cc", channel: 15, number: 26, value: action === "KEY_SCALE_MINOR" ? 5 : 0, source: "DEFAULT_PRESET" };
+    }
+    // TASK A94 — mặc định Auto-Tune thứ 3 (CC 34/35) và thứ 4 (CC 36/37), kênh 15, cùng quy ước Scale (Major=0, Minor=5) / Key gốc như mic 1.
+    if (/^KEY_(SCALE_MAJOR|SCALE_MINOR|ROOT)_AT[34]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) {
+        const base = /_AT3$/.test(action) ? 34 : 36;
+        return { kind: "cc", channel: 15, number: /^KEY_ROOT_/.test(action) ? base + 1 : base, value: /SCALE_MINOR/.test(action) ? 5 : 0, source: "DEFAULT_PRESET" };
     }
     // TASK A93 — mặc định cho Auto-Tune MIC 2 (Studio One/Studio Pro): kênh 15, CC 32 = Scale (Major=0, Minor=5), CC 33 = Key gốc (giá trị do Menu tính theo nốt).
     if ((action === "KEY_SCALE_MAJOR_MIC2" || action === "KEY_SCALE_MINOR_MIC2" || action === "KEY_ROOT_MIC2") && !/^cubase/i.test(String(daw).trim())) {

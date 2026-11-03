@@ -645,12 +645,17 @@ const PRESET_NAME_TO_ACTION = {
     REMIX: "PRESET_REMIX",
     "TUNE OFF": "PRESET_TUNE_OFF",
 };
-// TASK A79/A80 — nút TUNE KHÔNG thuộc nhóm chọn-một của Preset: nó là công tắc bypass Auto-Tune (2 mic) chạy ĐỘC LẬP.
+// TASK A79/A80 — nút TUNE KHÔNG thuộc nhóm chọn-một của Preset: nó là công tắc bypass Auto-Tune (cả 4 plugin) chạy ĐỘC LẬP.
 // Mặc định (mở app): nút SÁNG, chữ "TUNE ON" = Auto-Tune chạy, Bypass TẮT.
 // Bấm: nút TẮT SÁNG, chữ "TUNE OFF" = Bypass BẬT (Auto-Tune bị bỏ qua, cả 2 mic). Bấm lần nữa: về TUNE ON.
 // HTML giữ nguyên (nút vẫn khai báo "TUNE OFF", không có class active) — JS nhận diện nút theo chữ MỘT LẦN rồi gắn data-tune-btn.
 document.querySelectorAll(".preset-btn").forEach((b) => { if (b.textContent.trim() === "TUNE OFF") b.dataset.tuneBtn = "1"; });
 const isTuneOffBtn = (b) => !!(b && b.dataset && b.dataset.tuneBtn === "1");
+// TASK A94 — nút LOFI KHÔNG thuộc nhóm chọn-một: là công tắc ON/OFF ĐỘC LẬP (kết hợp được với NORM/RAP/REMIX). Mặc định TẮT (không sáng).
+// Bấm: nút SÁNG = LOFI BẬT (CC 127), bấm lần nữa: TẮT (CC 0). Không đổi HTML — JS nhận diện nút theo chữ "LOFI" một lần. Không lưu/khôi phục (Menu không đọc được trạng thái DAW): luôn mở ở TẮT.
+document.querySelectorAll(".preset-btn").forEach((b) => { if (!b.closest(".custom-modal") && b.textContent.trim() === "LOFI") b.dataset.lofiBtn = "1"; });
+const isLofiBtn = (b) => !!(b && b.dataset && b.dataset.lofiBtn === "1");
+const isIndependentPresetBtn = (b) => isTuneOffBtn(b) || isLofiBtn(b);
 function renderTuneBtn(btn, tuneOn) {
     btn.classList.toggle("active", tuneOn);
     btn.textContent = tuneOn ? "TUNE ON" : "TUNE OFF";
@@ -665,7 +670,13 @@ document.querySelectorAll(".preset-btn").forEach(btn => {
             reportDawStateResult(e.target, "TUNE", window.ActionRegistry?.setDawControlState?.("TUNE", bypassOn, { reason: "menu-button" }));
             return;
         }
-        document.querySelectorAll(".preset-btn").forEach(b => { if (!isTuneOffBtn(b)) b.classList.remove("active"); });
+        if (isLofiBtn(e.target)) {
+            const lofiOnNow = !e.target.classList.contains("active"); // trạng thái ĐÍCH sau cú bấm
+            e.target.classList.toggle("active", lofiOnNow);
+            reportDawStateResult(e.target, "LOFI", window.ActionRegistry?.setDawControlState?.("LOFI", lofiOnNow, { reason: "menu-button" }));
+            return;
+        }
+        document.querySelectorAll(".preset-btn").forEach(b => { if (!isIndependentPresetBtn(b)) b.classList.remove("active"); });
         e.target.classList.add("active");
         saveData();
         const actionName = PRESET_NAME_TO_ACTION[e.target.textContent.trim()];
@@ -681,7 +692,7 @@ document.getElementById("autoDetectBtn")?.classList.add("active");
 // PRESET-LIT-01 — nhóm NORM/LOFI/RAP/REMIX LUÔN có đúng 1 nút sáng (không bao giờ để tắt hết). Mở app / sau khi khôi phục cấu hình: nếu chưa có nút nào sáng -> NORM sáng.
 // Chỉ chỉnh giao diện, KHÔNG gửi MIDI. Nút TUNE (công tắc bypass) không thuộc nhóm này.
 function ensurePresetLit() {
-    const group = [...document.querySelectorAll(".preset-btn")].filter((b) => !isTuneOffBtn(b) && !b.closest(".custom-modal") && ["NORM", "LOFI", "RAP", "REMIX"].includes(b.textContent.trim()));
+    const group = [...document.querySelectorAll(".preset-btn")].filter((b) => !isIndependentPresetBtn(b) && !b.closest(".custom-modal") && ["NORM", "RAP", "REMIX"].includes(b.textContent.trim())); // A94: LOFI là công tắc độc lập, không thuộc nhóm
     if (!group.length) return;
     const lit = group.filter((b) => b.classList.contains("active"));
     if (lit.length === 1) return;
@@ -2104,7 +2115,7 @@ function saveData() {
         tone: document.getElementById("toneSelector")?.value,
         modEnabled: document.getElementById("modPowerBtn")?.classList.contains("active"),
         preset: (() => { // A79: nút TUNE là công tắc bypass, không phải preset -> không lưu làm preset
-            const isTune = (b) => !!(b && b.dataset && b.dataset.tuneBtn === "1");
+            const isTune = (b) => !!(b && b.dataset && (b.dataset.tuneBtn === "1" || b.dataset.lofiBtn === "1")); // A79/A94: TUNE và LOFI là công tắc, không lưu làm preset
             const a = document.querySelector(".preset-btn.active");
             if (a && !isTune(a)) return a.textContent.trim();
             return [...document.querySelectorAll(".preset-btn.active")].find(b => !isTune(b))?.textContent.trim();
@@ -2155,7 +2166,7 @@ function loadData() {
 
     if (data.preset) {
         document.querySelectorAll(".preset-btn").forEach(btn => {
-            if (btn.dataset && btn.dataset.tuneBtn === "1") return; // A79: bypass không khôi phục (không có phản hồi từ DAW) — luôn mở ở TUNE ON
+            if (btn.dataset && (btn.dataset.tuneBtn === "1" || btn.dataset.lofiBtn === "1")) return; // A79/A94: TUNE/LOFI không khôi phục (không có phản hồi từ DAW) — luôn mở ở TUNE ON / LOFI TẮT
             btn.classList.remove("active");
             if (btn.textContent.trim() === data.preset) {
                 btn.classList.add("active");

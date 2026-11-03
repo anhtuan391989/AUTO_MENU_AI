@@ -411,7 +411,7 @@
         // Bật: cửa sổ 500 ms + chu kỳ tick 100 ms (renderer) => tối đa ≈ 0,5–0,7 s. Tắt: cửa sổ 1000 ms => ≈ 1,0–1,15 s.
         confirmMusicMs: 500,    // cần tín hiệu liên tục gần như đủ trong khoảng này mới coi là có nhạc
         confirmMusicRatio: 0.8, // tỷ lệ khung phải vượt onDbfs trong cửa sổ xác nhận có nhạc
-        confirmSilenceMs: 10000, // FX-AUTO-10S: im lặng liên tục 10 s thì TẮT FX (trước đây 1 s). Có nhạc lại thì BẬT trong ≤ 1 s như cũ (confirmMusicMs). HỆ QUẢ: khoảng lặng/chuyển bài < 10 s KHÔNG tắt FX.
+        confirmSilenceMs: 3000, // A94 (trước đó 10 s, ban đầu 1 s): im lặng liên tục 3 s thì TẮT FX. Có nhạc lại thì BẬT trong ≤ 1 s như cũ (confirmMusicMs). HỆ QUẢ: khoảng lặng/chuyển bài < 3 s KHÔNG tắt FX.
         diagMs: 30000,          // MENU-FX-AUTO-OFF: chu kỳ ghi log chẩn đoán mức dBFS (chỉ để quan sát, không ảnh hưởng quyết định)
         manualHoldMs: 60000,    // MENU-FX-FIX: người dùng bấm tay => Auto KHÔNG ghi đè trong khoảng này, hết hạn thì tiếp quản theo trạng thái nhạc HIỆN TẠI
         silenceMaxAboveRatio: 0.02, // tối đa 2% khung vượt offDbfs trong cửa sổ im lặng (chịu xung nhiễu lẻ)

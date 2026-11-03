@@ -110,6 +110,26 @@
     <Control name="keyRootMic2" title="Key Root Mic2 (C=0..B=127)" type="knob" options="receive public">
       <MidiMessage status="#BE" address="33"/>
     </Control>
+    <!-- CC 34 -->
+    <Control name="keyScaleAt3" title="Key Scale AutoTune3 (Major=0, Minor=5)" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="34"/>
+    </Control>
+    <!-- CC 35 -->
+    <Control name="keyRootAt3" title="Key Root AutoTune3 (C=0..B=127)" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="35"/>
+    </Control>
+    <!-- CC 36 -->
+    <Control name="keyScaleAt4" title="Key Scale AutoTune4 (Major=0, Minor=5)" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="36"/>
+    </Control>
+    <!-- CC 37 -->
+    <Control name="keyRootAt4" title="Key Root AutoTune4 (C=0..B=127)" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="37"/>
+    </Control>
+    <!-- CC 114 -->
+    <Control name="lofiOnOff" title="LOFI ON/OFF (127=bat, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BF" address="114"/>
+    </Control>
     <!-- CC 28 -->
     <Control name="fxDelay" title="FX Bus Delay" type="knob" options="receive public">
       <MidiMessage status="#BE" address="28"/>

@@ -651,6 +651,13 @@ const DAW_MIDI_ACTIONS = [
     { action: "KEY_SCALE_MAJOR_MIC2", label: "KEY SCALE MAJOR (Auto-Tune MIC 2)" },
     { action: "KEY_SCALE_MINOR_MIC2", label: "KEY SCALE MINOR (Auto-Tune MIC 2)" },
     { action: "KEY_ROOT_MIC2", label: "KEY ROOT (Auto-Tune MIC 2)" },
+    // TASK A94 — Auto-Tune thứ 3 / thứ 4 (CC riêng kênh 15: 34-35 và 36-37).
+    { action: "KEY_SCALE_MAJOR_AT3", label: "KEY SCALE MAJOR (Auto-Tune 3)" },
+    { action: "KEY_SCALE_MINOR_AT3", label: "KEY SCALE MINOR (Auto-Tune 3)" },
+    { action: "KEY_ROOT_AT3", label: "KEY ROOT (Auto-Tune 3)" },
+    { action: "KEY_SCALE_MAJOR_AT4", label: "KEY SCALE MAJOR (Auto-Tune 4)" },
+    { action: "KEY_SCALE_MINOR_AT4", label: "KEY SCALE MINOR (Auto-Tune 4)" },
+    { action: "KEY_ROOT_AT4", label: "KEY ROOT (Auto-Tune 4)" },
     // TASK B12 — mở rộng thêm 3 action mới nối ở B12 (musicBtn + Retune×2), tái dùng nguyên
     // vẹn UI/schema đã có, không tạo cơ chế cấu hình thứ hai.
     { action: "MONITOR_BEAT_TOGGLE", label: "MONITOR BEAT" },
@@ -671,7 +678,9 @@ const DAW_MIDI_ACTIONS = [
     { action: "FX_OFF", label: "FX OFF (Mute 4 bus)" },
     // TASK A79 — nút TUNE OFF: bypass Auto-Tune cả 2 mic (ON = bypass bật, OFF = bypass tắt). Trống mặc định, tự MIDI Learn.
     // 1 CC DUY NHẤT cho nút TUNE ON/OFF: Menu tự gửi giá trị 127 (nút thành TUNE OFF = bypass BẬT) hoặc 0 (về TUNE ON = bypass TẮT).
-    { action: "TUNE_BYPASS", label: "TUNE ON/OFF — BYPASS Auto-Tune 2 mic (127 = bypass bật, 0 = tắt)" },
+    { action: "TUNE_BYPASS", label: "TUNE ON/OFF — BYPASS cả 4 plugin Auto-Tune (127 = bypass bật, 0 = tắt)" },
+    // TASK A94 — nút LOFI: ON/OFF độc lập, kết hợp được với NORM/RAP/REMIX. 1 CC: 127 = LOFI bật, 0 = tắt (mặc định kênh 16 CC 114 / Cubase 119).
+    { action: "LOFI_STATE", label: "LOFI ON/OFF (127 = bật, 0 = tắt) — kết hợp với preset khác" },
     // MENU-FIX-02 — TUỲ CHỌN: lệnh CHỌN TRACK (macro chỉ "Find Track") gửi TRƯỚC lệnh ON/OFF tương ứng để Monitor không đảo nhầm track cũ.
     { action: "MUSIC_SELECT", label: "MUSIC CHỌN TRACK (Find Track Beat — gửi trước ON/OFF)" },
     { action: "MIC1_SELECT", label: "MIC 1 CHỌN TRACK (Find Track Mic — gửi trước ON/OFF)" },
@@ -702,7 +711,7 @@ function findDawStateMappingConflict(action, mapping) {
 // Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
 const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2", "MIC1_VOLUME", "MIC2_VOLUME", "FX_BUS_DELAY_VOLUME", "FX_BUS_VERB_SHORT_VOLUME", "FX_BUS_VERB_LONG_VOLUME", "FX_BUS_COM_VERB_VOLUME", "KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_ROOT"]);
 const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
-const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
+const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "LOFI_STATE"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
 function findMidiOutMappingConflict(action, mapping) {
     for (const { action: other } of DAW_MIDI_ACTIONS) {
         if (other === action) continue;
@@ -729,6 +738,14 @@ function getDawMidiOutMapping(action) {
         const cubase = /^cubase/i.test(String(daw).trim());
         return { kind: "cc", channel: 16, number: cubase ? 118 : 113, value: 127, source: "DEFAULT_PRESET" };
     }
+    if (/^KEY_(SCALE_MAJOR|SCALE_MINOR|ROOT)_AT[34]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
+        const base = /_AT3$/.test(action) ? 34 : 36;
+        return { kind: "cc", channel: 15, number: /^KEY_ROOT_/.test(action) ? base + 1 : base, value: /SCALE_MINOR/.test(action) ? 5 : 0, source: "DEFAULT_PRESET" };
+    }
+    if (action === "LOFI_STATE") { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
+        const cubase = /^cubase/i.test(String(daw).trim());
+        return { kind: "cc", channel: 16, number: cubase ? 119 : 114, value: 127, source: "DEFAULT_PRESET" };
+    }
     return null;
 }
 function setDawMidiOutMapping(action, mapping) {
@@ -748,7 +765,7 @@ const DAW_QF_S1_LIVE = Object.freeze({
 });
 // KEY-SCALE-CC-02 — Scale Auto-Tune là DANH SÁCH 29 mục điều khiển bằng 1 CC: Major/Minor dùng CHUNG CC, khác GIÁ TRỊ.
 // Chỉ 2 action này được phép trùng CC/Note (khi khác giá trị); mọi action khác vẫn phải có CC riêng.
-const KEY_SCALE_SHARED_SET = new Set(["KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_SCALE_MAJOR_MIC2", "KEY_SCALE_MINOR_MIC2"]); // A93: Major/Minor của MIC 2 cũng dùng chung 1 CC (32)
+const KEY_SCALE_SHARED_SET = new Set(["KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_SCALE_MAJOR_MIC2", "KEY_SCALE_MINOR_MIC2", "KEY_SCALE_MAJOR_AT3", "KEY_SCALE_MINOR_AT3", "KEY_SCALE_MAJOR_AT4", "KEY_SCALE_MINOR_AT4"]); // A93/A94: Major/Minor của mỗi Auto-Tune dùng chung 1 CC (mic 2: 32, AT3: 34, AT4: 36)
 function midiClashKey(action, m) {
     const base = `${m.kind}|${Number(m.channel)}|${Number(m.number)}`;
     return KEY_SCALE_SHARED_SET.has(action) ? `${base}|v${Number(m.kind === "note" ? m.velocity : m.value)}` : base;
@@ -776,6 +793,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
             // MIC-VOLUME-KNOB-01 — 2 CC âm lượng Mic, kênh 15 như bộ KNOB, không trùng CC 20–23 (Knob) và 102–112 (LIVE/CHỌN TRACK).
             // TASK A82 — 1 CC Bypass Auto-Tune (nút TUNE ON/OFF: 127 = bypass bật, 0 = tắt), kênh 16 như LIVE, CC 113 (không trùng 102–112).
             tune: Object.freeze({ title: "TUNE BYPASS", count: 1, mappings: dawQfMake(16, 127, { TUNE_BYPASS: 113 }) }),
+            lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 114 }) }), // A94
             // PRESET-CC-01 — 4 CC (kênh 16, giá trị 127) cho 4 nút Preset NORM/LOFI/RAP/REMIX: mỗi nút gửi 1 CC riêng; trong Studio Pro gán từng CC vào macro/preset
             // (bật-tắt plugin hoặc đặt thông số cài sẵn). Dùng CC 114–117: không trùng LIVE 102–109, CHỌN TRACK 110–112, TUNE 113; tránh CC 120–127 (lệnh hệ thống MIDI).
             preset: Object.freeze({ title: "PRESET NORM/LOFI/RAP/REMIX", count: 4, mappings: dawQfMake(16, 127, { PRESET_NORM: 114, PRESET_LOFI: 115, PRESET_RAP: 116, PRESET_REMIX: 117 }) }),
@@ -785,7 +803,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
             // KEY-SCALE-CC-02 — 1 CC (26, kênh 15) chọn Scale Auto-Tune theo GIÁ TRỊ: Major=0 (mục 1/29), Minor=5 (mục 2/29: 5/127×28≈1.1).
             // KEY-ROOT-CC-01 — CC 27 (kênh 15) cho Key gốc: Menu tự tính giá trị theo nốt (C=0 … B=127); giá trị 0 ở bộ này chỉ là chỗ giữ.
             // Danh sách Scale của Auto-Tune Pro: 29 mục, Major đầu, Minor thứ hai, Harmonic cuối (=127). Giá trị CHƯA kiểm chứng đủ trên máy thật.
-            scale: Object.freeze({ title: "KEY + SCALE", count: 6, mappings: Object.freeze({
+            scale: Object.freeze({ title: "KEY + SCALE", count: 12, mappings: Object.freeze({
                 KEY_SCALE_MAJOR: Object.freeze({ kind: "cc", channel: 15, number: 26, value: 0 }),
                 KEY_SCALE_MINOR: Object.freeze({ kind: "cc", channel: 15, number: 26, value: 5 }),
                 KEY_ROOT: Object.freeze({ kind: "cc", channel: 15, number: 27, value: 0 }),
@@ -793,6 +811,13 @@ const DAW_MIDI_PROFILES = Object.freeze({
                 KEY_SCALE_MAJOR_MIC2: Object.freeze({ kind: "cc", channel: 15, number: 32, value: 0 }),
                 KEY_SCALE_MINOR_MIC2: Object.freeze({ kind: "cc", channel: 15, number: 32, value: 5 }),
                 KEY_ROOT_MIC2: Object.freeze({ kind: "cc", channel: 15, number: 33, value: 0 }),
+                // A94 — Auto-Tune 3: CC 34 Scale / 35 Key gốc; Auto-Tune 4: CC 36 Scale / 37 Key gốc.
+                KEY_SCALE_MAJOR_AT3: Object.freeze({ kind: "cc", channel: 15, number: 34, value: 0 }),
+                KEY_SCALE_MINOR_AT3: Object.freeze({ kind: "cc", channel: 15, number: 34, value: 5 }),
+                KEY_ROOT_AT3: Object.freeze({ kind: "cc", channel: 15, number: 35, value: 0 }),
+                KEY_SCALE_MAJOR_AT4: Object.freeze({ kind: "cc", channel: 15, number: 36, value: 0 }),
+                KEY_SCALE_MINOR_AT4: Object.freeze({ kind: "cc", channel: 15, number: 36, value: 5 }),
+                KEY_ROOT_AT4: Object.freeze({ kind: "cc", channel: 15, number: 37, value: 0 }),
             }) }),
         }),
     }),
@@ -807,6 +832,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
             live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, { MUSIC_ON: 110, MUSIC_OFF: 111, MIC1_ON: 112, MIC1_OFF: 113, MIC2_ON: 114, MIC2_OFF: 115, FX_ON: 116, FX_OFF: 117 }) }),
             knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 85, MASTER_OUTPUT_VOLUME: 86, RETUNE_SPEED_MIC1: 87, RETUNE_SPEED_MIC2: 88 }) }),
             tune: Object.freeze({ title: "TUNE BYPASS", count: 1, mappings: dawQfMake(16, 127, { TUNE_BYPASS: 118 }) }), // A82
+            lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 119 }) }), // A94
         }),
     }),
 });
@@ -910,6 +936,7 @@ function initDawMidiOutputMappingSection() {
             <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>
             ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.tune ? `<button class="setup-btn" id="btnFillTuneCc">Điền + lưu bộ TUNE BYPASS gợi ý — ${profile.name}</button>` : ""}
+            ${profile.bundles.lofi ? `<button class="setup-btn" id="btnFillLofiCc">Điền + lưu bộ LOFI ON/OFF gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.preset ? `<button class="setup-btn" id="btnFillPresetCc">Điền + lưu bộ PRESET (NORM/LOFI/RAP/REMIX) gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.fxbus ? `<button class="setup-btn" id="btnFillFxBusCc">Điền + lưu bộ FX BUS VOLUME gợi ý — ${profile.name}</button>` : ""}
@@ -944,6 +971,8 @@ function initDawMidiOutputMappingSection() {
             if (selBtn) selBtn.addEventListener("click", () => runQuickFill("select"));
             const tuneBtn = liveBox.querySelector("#btnFillTuneCc");
             if (tuneBtn) tuneBtn.addEventListener("click", () => runQuickFill("tune"));
+            const lofiBtn = liveBox.querySelector("#btnFillLofiCc");
+            if (lofiBtn) lofiBtn.addEventListener("click", () => runQuickFill("lofi"));
             const micVolBtn = liveBox.querySelector("#btnFillMicVolCc");
             if (micVolBtn) micVolBtn.addEventListener("click", () => runQuickFill("micvol"));
             const presetBtn = liveBox.querySelector("#btnFillPresetCc");
