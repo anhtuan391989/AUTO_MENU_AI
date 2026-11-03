@@ -516,6 +516,32 @@ export default {
       }
     }
 
+    // [A91] GET /youtube-search-duration?id=<songId>  -> KHÔNG lưu, chỉ trả danh sách ứng viên (videoId, tiêu đề, thời lượng) để người dùng xác nhận.
+    //   - songId là ID YouTube (11 ký tự): trả đúng video đó.
+    //   - songId kiểu app_xxxx (Menu tự sinh từ tên bài, không có ID YouTube): tìm trên YouTube theo TÊN bài đã lưu, trả tối đa 5 kết quả đầu.
+    //   Người dùng chọn kết quả đúng -> trang chủ gọi /set-duration để lưu.
+    if (url.pathname === "/youtube-search-duration" && request.method === "GET") {
+      try {
+        const songId = String(url.searchParams.get("id") || "").trim();
+        if (!songId) return Response.json({ error: "thieu id bai hat" }, { status: 400, headers: corsHeaders });
+        if (laIdYouTube(songId)) {
+          const kq = await layThoiLuongYouTube(songId);
+          if (!kq.ok) return Response.json({ error: "khong_lay_duoc_tu_youtube", chiTiet: kq.loi }, { status: 502, headers: corsHeaders });
+          return Response.json({ ok: true, cach: "id", ungVien: [{ videoId: songId, title: null, durationSec: kq.giay, format: giaySangPhutGiay(kq.giay) }] }, { headers: corsHeaders });
+        }
+        const row = await env.DB.prepare(`
+          SELECT song_id as songId, title, total_duration_sec as totalSec FROM song_info WHERE song_id = ?
+        `).bind(songId).first();
+        const ten = String((row && row.title) || url.searchParams.get("q") || "").trim();
+        if (!ten) return Response.json({ error: "khong_co_ten_bai", message: "Bai chua co ten de tim tren YouTube" }, { status: 404, headers: corsHeaders });
+        const kq = await timYouTubeTheoTen(ten);
+        if (!kq.ok) return Response.json({ error: "khong_tim_duoc_tren_youtube", chiTiet: kq.loi, message: "Khong tim duoc tren YouTube. Nhap thoi luong bang tay." }, { status: 502, headers: corsHeaders });
+        return Response.json({ ok: true, cach: "ten", tuKhoa: ten, ungVien: kq.ungVien }, { headers: corsHeaders });
+      } catch (e) {
+        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
+      }
+    }
+
     return Response.json({ error: "not_found" }, { status: 404, headers: corsHeaders });
   }
 };
@@ -573,6 +599,57 @@ async function layThoiLuongYouTube(videoId) {
     const giay = parseInt(m[1], 10);
     if (!Number.isFinite(giay) || giay < 1 || giay > 86400) return { ok: false, loi: "thoi_luong_vo_ly_" + m[1] };
     return { ok: true, giay };
+  } catch (e) {
+    return { ok: false, loi: e && e.name === "AbortError" ? "het_gio" : String((e && e.message) || e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// [A91] Tìm video YouTube theo tên bài (đọc trang kết quả tìm kiếm). Trả tối đa 5 ứng viên {videoId, title, durationSec, format}.
+// Chỉ GỢI Ý — người dùng phải xác nhận trước khi lưu (tên giống nhau nhưng bản karaoke/live có thể dài khác).
+function docThoiLuongChuoi(t) {
+  const m = /^(?:(\d+):)?(\d{1,2}):(\d{2})$/.exec(String(t || "").trim());
+  if (!m) return 0;
+  return (m[1] ? parseInt(m[1], 10) * 3600 : 0) + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
+}
+function phanTichKetQuaTimYouTube(html) {
+  const ds = [];
+  const re = /"videoRenderer":\{"videoId":"([A-Za-z0-9_-]{11})"/g;
+  const viTri = [];
+  let m;
+  while ((m = re.exec(html))) viTri.push({ index: m.index, id: m[1] });
+  for (let i = 0; i < viTri.length && ds.length < 5; i++) {
+    m = { index: viTri[i].index, 1: viTri[i].id };
+    // Chỉ đọc trong khối của CHÍNH video này (tới video kế tiếp) để không mượn thời lượng của video khác.
+    const khoi = html.slice(viTri[i].index, Math.min(viTri[i].index + 6000, i + 1 < viTri.length ? viTri[i + 1].index : html.length));
+    const len = /"lengthText":\{(?:"accessibility":\{"accessibilityData":\{"label":"[^"]*"\}\},)?"simpleText":"([0-9:]+)"/.exec(khoi);
+    const ti = /"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"/.exec(khoi);
+    const giay = len ? docThoiLuongChuoi(len[1]) : 0;
+    if (!giay) continue; // video trực tiếp/không có thời lượng -> bỏ
+    let title = null;
+    if (ti) { try { title = JSON.parse('"' + ti[1] + '"'); } catch (_) { title = ti[1]; } }
+    if (ds.some((x) => x.videoId === m[1])) continue;
+    ds.push({ videoId: m[1], title, durationSec: giay, format: giaySangPhutGiay(giay) });
+  }
+  return ds;
+}
+async function timYouTubeTheoTen(ten) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 7000);
+  try {
+    const res = await fetch("https://www.youtube.com/results?hl=en&sp=EgIQAQ%3D%3D&search_query=" + encodeURIComponent(ten), {
+      signal: ctl.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cookie": "CONSENT=YES+1; SOCS=CAI"
+      }
+    });
+    if (!res.ok) return { ok: false, loi: "http_" + res.status };
+    const ds = phanTichKetQuaTimYouTube(await res.text());
+    if (!ds.length) return { ok: false, loi: "khong_co_ket_qua" };
+    return { ok: true, ungVien: ds };
   } catch (e) {
     return { ok: false, loi: e && e.name === "AbortError" ? "het_gio" : String((e && e.message) || e) };
   } finally {
@@ -784,6 +861,7 @@ function taoTrangChu() {
           </div>
           <a id="linkYoutube" target="_blank" style="color:#ffd700; text-decoration:none;">Xem tren YouTube</a>
         </div>
+        <div id="tgChiTiet"></div>
 
         <h3 style="color:#4CAF50;">Tung Doan Khoa</h3>
         <table>
@@ -881,6 +959,9 @@ function taoTrangChu() {
         document.getElementById('thoiLuongHienThi').innerText = (data.thongTin && data.thongTin.tongThoiLuong) || 'Chua cap nhat';
         document.getElementById('soDoanHienThi').innerText = data.tongDoan;
         document.getElementById('linkYoutube').href = 'https://youtube.com/watch?v=' + data.songId;
+        var tgc = document.getElementById('tgChiTiet');
+        tgc.innerHTML = dungThoiLuongUI('', data.songId);
+        ganThoiLuong(tgc, timBai);
 
         var tbodyDoan = document.getElementById('danhSachDoan');
         tbodyDoan.innerHTML = '';
@@ -1052,12 +1133,14 @@ function taoTrangChu() {
             '<button class="btn-primary btn-ds-luu" data-songid="' + esc(bai.songId) + '" data-sodoan="' + esc(bai.soDoan) + '" style="padding:10px 16px;">Luu Key</button>' +
             '<button class="btn-ds-xoa" data-songid="' + esc(bai.songId) + '" data-title="' + esc(bai.title) + '" style="background:#c62828; color:#fff; padding:10px 16px; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Xoa</button>' +
           '</div>' +
-          '</div></div>';
+          '</div>' +
+          dungThoiLuongUI('', bai.songId) +
+          '</div>';
       }
       var items = document.querySelectorAll('#danhSachTatCa .list-item');
       for (var k = 0; k < items.length; k++) {
         items[k].addEventListener('click', function(ev) {
-          if (ev.target.closest && ev.target.closest('button, select, input, label')) return;
+          if (ev.target.closest && ev.target.closest('button, select, input, label, .tg-box')) return;
           var sid = this.getAttribute('data-songid');
           document.getElementById('songIdInput').value = sid;
           var allTabs = document.querySelectorAll('.tab');
@@ -1068,6 +1151,7 @@ function taoTrangChu() {
           timBai();
         });
       }
+      ganThoiLuong(div, taiDanhSach);
       var sk = document.querySelectorAll('#danhSachTatCa .ds-key');
       for (var u = 0; u < sk.length; u++) { var kv = sk[u].getAttribute('data-val'); if (kv) sk[u].value = kv; }
       var sm = document.querySelectorAll('#danhSachTatCa .ds-mode');
@@ -1134,6 +1218,78 @@ function taoTrangChu() {
         if (data.ok) { nhoMatKhau(token); hienKqDS(true, 'Da xoa bai "' + ten + '" (' + data.daXoaDoan + ' doan Key).'); taiDanhSach(); }
         else hienKqDS(false, data.message || data.error || 'Loi');
       } catch (err) { hienKqDS(false, 'Loi ket noi: ' + err.message); }
+    }
+    // [A91] THOI LUONG: o nhap tay (mm:ss hoac so giay) + nut "Tim tren YouTube" (server tim theo ID hoac theo TEN bai, nguoi dung chon dung roi moi luu)
+    function docThoiLuong(t) {
+      t = String(t || '').trim();
+      if (/^\\d+$/.test(t)) return parseInt(t, 10);
+      var m = /^(?:(\\d+):)?(\\d{1,2}):(\\d{2})$/.exec(t);
+      if (!m) return 0;
+      return (m[1] ? parseInt(m[1], 10) * 3600 : 0) + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
+    }
+    function ghiTg(sec) { return Math.floor(sec / 60) + ':' + ('0' + (sec % 60)).slice(-2); }
+    function dungThoiLuongUI(boxId, songId, soDoan0) {
+      return '<div class="tg-box" data-songid="' + esc(songId) + '" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">' +
+        '<input type="text" class="tg-input" placeholder="Thoi luong mm:ss" style="max-width:150px; padding:10px; border-radius:6px; border:none;">' +
+        '<button class="btn-primary tg-luu" style="padding:10px 14px;">Luu TG</button>' +
+        '<button class="tg-tim" style="background:#4a6cf7; color:#fff; padding:10px 14px; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Tim tren YouTube</button>' +
+        '<div class="tg-kq" style="flex-basis:100%;"></div></div>';
+    }
+    async function luuThoiLuongServer(songId, giay) {
+      var token = '';
+      try { token = sessionStorage.getItem('menuAdminToken') || ''; } catch (e) {}
+      for (var lan = 0; lan < 2; lan++) {
+        var h = { 'Content-Type': 'application/json' };
+        if (token) h['Authorization'] = 'Bearer ' + token;
+        var res = await fetch(SERVER + '/set-duration', { method: 'POST', headers: h, body: JSON.stringify({ songId: songId, totalDurationSec: giay }) });
+        var data = await res.json();
+        if (res.status === 401 && lan === 0) { quenMatKhau(); token = prompt('Bai nay da co thoi luong - nhap mat khau quan tri (ADMIN_TOKEN) de sua:') || ''; if (!token) return { error: 'Chua nhap mat khau' }; continue; }
+        if (data.ok && token) nhoMatKhau(token);
+        return data;
+      }
+    }
+    function ganThoiLuong(root, apDung) {
+      var boxes = root.querySelectorAll('.tg-box');
+      for (var i = 0; i < boxes.length; i++) {
+        (function(box) {
+          var sid = box.getAttribute('data-songid');
+          var kq = box.querySelector('.tg-kq');
+          function bao(ok, t) { kq.innerHTML = '<div style="padding:8px; border-radius:6px; background:' + (ok ? 'rgba(76,175,80,0.25)' : 'rgba(244,67,54,0.25)') + ';">' + esc(t) + '</div>'; }
+          box.querySelector('.tg-luu').addEventListener('click', async function(ev) {
+            ev.stopPropagation();
+            var g = docThoiLuong(box.querySelector('.tg-input').value);
+            if (g < 1 || g > 86400) { bao(false, 'Nhap thoi luong dang mm:ss (vd 4:25) hoac so giay.'); return; }
+            var d = await luuThoiLuongServer(sid, g);
+            if (d && d.ok) { bao(true, 'Da luu thoi luong ' + ghiTg(g)); apDung(); } else bao(false, (d && (d.message || d.error)) || 'Loi');
+          });
+          box.querySelector('.tg-tim').addEventListener('click', async function(ev) {
+            ev.stopPropagation();
+            bao(true, 'Dang tim tren YouTube...');
+            try {
+              var res = await fetch(SERVER + '/youtube-search-duration?id=' + encodeURIComponent(sid));
+              var d = await res.json();
+              if (!d.ok) { bao(false, d.message || d.error || 'Khong tim duoc'); return; }
+              var html = '<div style="font-size:13px; color:#aaa; margin:6px 0;">' + (d.cach === 'ten' ? 'Tim theo ten: "' + esc(d.tuKhoa) + '" - chon video DUNG:' : 'Video theo ID:') + '</div>';
+              for (var k = 0; k < d.ungVien.length; k++) {
+                var u = d.ungVien[k];
+                html += '<div style="display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.1);">' +
+                  '<span style="flex:1;">' + esc(u.title || u.videoId) + ' - <b>' + esc(u.format) + '</b></span>' +
+                  '<button class="btn-primary tg-dung" data-giay="' + esc(u.durationSec) + '" style="padding:6px 12px;">Dung</button></div>';
+              }
+              kq.innerHTML = html;
+              var ds = kq.querySelectorAll('.tg-dung');
+              for (var q = 0; q < ds.length; q++) {
+                ds[q].addEventListener('click', async function(ev2) {
+                  ev2.stopPropagation();
+                  var g = Number(this.getAttribute('data-giay'));
+                  var r2 = await luuThoiLuongServer(sid, g);
+                  if (r2 && r2.ok) { bao(true, 'Da luu thoi luong ' + ghiTg(g)); apDung(); } else bao(false, (r2 && (r2.message || r2.error)) || 'Loi');
+                });
+              }
+            } catch (err) { bao(false, 'Loi ket noi: ' + err.message); }
+          });
+        })(boxes[i]);
+      }
     }
     // Sua tung doan ngay trong bang chi tiet bai
     async function suaDoanNay(btn) {
