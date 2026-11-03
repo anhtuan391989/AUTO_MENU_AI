@@ -11,18 +11,18 @@ let pass = 0, fail = 0;
 const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.error('  FAIL', m, x !== undefined ? JSON.stringify(x) : ''); } };
 
 function build({ keyRoot = false, mapping = true, port = 'loopMIDI', ccFail = false, noteFail = false } = {}) {
-    const events = [];
+    const events = [], ev2 = []; // ev2 = CC của Auto-Tune MIC 2 (A93: CC 32/33 kênh 15) — tách riêng để các kiểm tra mic 1 không đổi
     const maps = mapping ? { 'Studio Pro 8': { KEY_SCALE_MAJOR: { kind: 'cc', channel: 15, number: 26, value: 0 }, KEY_SCALE_MINOR: { kind: 'cc', channel: 15, number: 26, value: 5 } } } : {};
     if (keyRoot) maps['Studio Pro 8'].KEY_ROOT = { kind: 'cc', channel: 15, number: 27, value: 0 };
     const store = { selectedDAW: 'Studio Pro 8', dawMidiOutMappings: maps, midiOutputPort: port, mouseControlEnabled: true };
     const sb = { console: { log() {}, warn() {}, error() {} }, Promise, Math, Number, JSON, Error, Array, Object, setTimeout: (f) => { f(); return 0; },
         getSetting: (k, f) => (store[k] === undefined ? f : store[k]), setSetting() {}, getCoordinate: () => null,
-        sendMidiCC: async (n, v, ch) => { events.push(['cc', n, v, ch]); return !ccFail; },
+        sendMidiCC: async (n, v, ch) => { (n === 32 || n === 33 ? ev2 : events).push(['cc', n, v, ch]); return !ccFail; },
         sendMidiNotePulse: async (n) => { events.push(['note', n]); return !noteFail; }, electronAPI: undefined };
     sb.window = sb; vm.createContext(sb);
     vm.runInContext(read('ui/js/vocalCommandRouter.js') + '\nthis.sendKeyToAutotune = sendKeyToAutotune;', sb);
     vm.runInContext(read('ui/js/actionRegistry.js'), sb);
-    return { sb, events };
+    return { sb, events, ev2 };
 }
 
 (async () => {
@@ -92,6 +92,16 @@ function build({ keyRoot = false, mapping = true, port = 'loopMIDI', ccFail = fa
       ok(f.events.some((x) => x[0] === 'note' && x[1] === 2) && rf.ok, 'CC Key lỗi -> rơi về gửi nốt như cũ', f.events);
       const g = build(); await g.sb.sendKeyToAutotune('E Major');
       ok(g.events.every((x) => x[0] !== 'cc' || x[1] !== 27) && g.events.some((x) => x[0] === 'note' && x[1] === 4), 'chưa cấu hình KEY_ROOT -> hành vi cũ (nốt E)', g.events); }
+
+    console.log('== 9. A93: Auto-Tune MIC 2 có CC RIÊNG (kênh 15: CC 32 Scale Major=0/Minor=5, CC 33 Key gốc theo nốt) ==');
+    { const e = build({ mapping: false }); const r = await e.sb.sendKeyToAutotune('A Minor');
+      ok(JSON.stringify(e.ev2) === JSON.stringify([['cc', 32, 5, 14], ['cc', 33, 104, 14]]), 'A Minor: mic 2 nhận CC32=5 (Minor) rồi CC33=104 (A)', e.ev2);
+      ok(JSON.stringify(e.events) === JSON.stringify([['cc', 26, 5, 14], ['note', 9]]) && r.ok, 'mic 1 KHÔNG đổi (CC26=5 rồi nốt A)', e.events);
+      const m = build({ mapping: false }); await m.sb.sendKeyToAutotune('C Major');
+      ok(JSON.stringify(m.ev2) === JSON.stringify([['cc', 32, 0, 14], ['cc', 33, 0, 14]]), 'C Major: CC32=0, CC33=0', m.ev2);
+      const f = build({ mapping: false, ccFail: true }); const rf = await f.sb.sendKeyToAutotune('D Major');
+      ok(f.events.some((x) => x[0] === 'note' && x[1] === 2) && rf.ok, 'CC mic 2 lỗi KHÔNG chặn việc gửi Key mic 1 (vẫn gửi nốt)', f.events); }
+
 
     console.log(`\nKẾT QUẢ: ${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('LỖI HARNESS', e); process.exit(2); });

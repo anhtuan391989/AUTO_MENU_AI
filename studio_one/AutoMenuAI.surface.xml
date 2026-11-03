@@ -102,6 +102,14 @@
     <Control name="keyRoot" title="Key Root (C=0..B=127)" type="knob" options="receive public">
       <MidiMessage status="#BE" address="27"/>
     </Control>
+    <!-- CC 32 -->
+    <Control name="keyScaleMic2" title="Key Scale Mic2 (Major=0, Minor=5)" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="32"/>
+    </Control>
+    <!-- CC 33 -->
+    <Control name="keyRootMic2" title="Key Root Mic2 (C=0..B=127)" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="33"/>
+    </Control>
     <!-- CC 28 -->
     <Control name="fxDelay" title="FX Bus Delay" type="knob" options="receive public">
       <MidiMessage status="#BE" address="28"/>

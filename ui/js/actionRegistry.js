@@ -98,6 +98,10 @@ const ACTIONS = Object.freeze({
     KEY_SCALE_MAJOR: "KEY_SCALE_MAJOR",
     KEY_SCALE_MINOR: "KEY_SCALE_MINOR",
     KEY_ROOT: "KEY_ROOT",   // KEY-ROOT-CC-01 — Key gốc Auto-Tune qua 1 CC (giá trị = nốt 0–11 → 0–127)
+    // TASK A93 — Key/Scale riêng cho Auto-Tune MIC 2 (CC riêng: Studio One không nối 1 CC vào 2 plugin). Gửi cùng lúc với mic 1 trong sendKeyToAutotune().
+    KEY_SCALE_MAJOR_MIC2: "KEY_SCALE_MAJOR_MIC2",
+    KEY_SCALE_MINOR_MIC2: "KEY_SCALE_MINOR_MIC2",
+    KEY_ROOT_MIC2: "KEY_ROOT_MIC2",
     // MIDI-DAW-CONTROL-01 — TÁM lệnh ĐẶT TRẠNG THÁI ĐÍCH (ON và OFF là hai action RIÊNG, mỗi cái một mapping riêng),
     // thay cho lệnh toggle không xác định. MUSIC = Monitor track "Beat"; MIC1 = Monitor track "Mic"; MIC2 = Monitor
     // track "Không Dây"; FX = Mute bus Delay/Verb ngắn/Verb dài/Com Verb (FX ON = bỏ mute, FX OFF = mute). Không có
@@ -244,6 +248,10 @@ function getMidiOutMapping(action) {
     // Chỉ khi chưa lưu mapping riêng (mapping đã lưu luôn thắng). KEY gốc KHÔNG có mặc định CC: vẫn gửi bằng nốt MIDI như cũ (KEY_ROOT chỉ dùng CC khi người dùng tự lưu CC 27). Cubase chưa có bộ CC kiểm chứng nên không có mặc định.
     if ((action === "KEY_SCALE_MAJOR" || action === "KEY_SCALE_MINOR") && !/^cubase/i.test(String(daw).trim())) {
         return { kind: "cc", channel: 15, number: 26, value: action === "KEY_SCALE_MINOR" ? 5 : 0, source: "DEFAULT_PRESET" };
+    }
+    // TASK A93 — mặc định cho Auto-Tune MIC 2 (Studio One/Studio Pro): kênh 15, CC 32 = Scale (Major=0, Minor=5), CC 33 = Key gốc (giá trị do Menu tính theo nốt).
+    if ((action === "KEY_SCALE_MAJOR_MIC2" || action === "KEY_SCALE_MINOR_MIC2" || action === "KEY_ROOT_MIC2") && !/^cubase/i.test(String(daw).trim())) {
+        return { kind: "cc", channel: 15, number: action === "KEY_ROOT_MIC2" ? 33 : 32, value: action === "KEY_SCALE_MINOR_MIC2" ? 5 : 0, source: "DEFAULT_PRESET" };
     }
     return null;
 }

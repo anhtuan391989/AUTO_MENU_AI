@@ -172,6 +172,26 @@ async function sendKeyRootCcToAutotune(noteIndex) {
     } catch (e) { return { attempted: true, ok: false, ccValue, status: "ERROR" }; }
 }
 
+// TASK A93 — gửi Scale + Key gốc cho Auto-Tune MIC 2 bằng CC RIÊNG (mặc định CC 32/33 kênh 15). Chỉ chẩn đoán, KHÔNG bao giờ làm hỏng việc gửi Key cho mic 1.
+async function sendKeyMic2ToAutotune(keyName, noteIndex) {
+    const AR = typeof window !== "undefined" ? window.ActionRegistry : null;
+    if (!AR || typeof AR.executeAction !== "function" || !AR.ACTIONS || !AR.ACTIONS.KEY_ROOT_MIC2) return { attempted: false, reason: "NO_ACTION_REGISTRY" };
+    const out = { attempted: false };
+    try {
+        const mode = /minor/i.test(keyName) ? "MINOR" : (/major/i.test(keyName) ? "MAJOR" : null);
+        if (mode) {
+            const r = await AR.executeAction(mode === "MINOR" ? AR.ACTIONS.KEY_SCALE_MINOR_MIC2 : AR.ACTIONS.KEY_SCALE_MAJOR_MIC2, { reason: "key-scale-mic2" });
+            if (!(r && r.reason === "NOT_CONFIGURED")) { out.attempted = true; out.scaleOk = !!(r && r.ok); }
+            if (out.attempted && out.scaleOk && typeof delay === "function") await delay(40);
+        }
+        if (Number.isInteger(noteIndex) && noteIndex >= 0 && noteIndex <= 11) {
+            const r2 = await AR.executeAction(AR.ACTIONS.KEY_ROOT_MIC2, { reason: "key-root-mic2", value: keyRootToCc(noteIndex) });
+            if (!(r2 && r2.reason === "NOT_CONFIGURED")) { out.attempted = true; out.rootOk = !!(r2 && r2.ok); }
+        }
+    } catch (e) { out.attempted = true; out.error = true; }
+    return out;
+}
+
 async function sendKeyToAutotune(keyName) {
     const root = keyName.match(/^[A-G]#?/)?.[0];
     const note = NOTE_MAP[root];
@@ -181,13 +201,15 @@ async function sendKeyToAutotune(keyName) {
         scale = await sendKeyScaleToAutotune(keyName);
         if (scale && scale.attempted && scale.ok && typeof delay === "function") await delay(40);
     }
+    // TASK A93 — Auto-Tune MIC 2 (CC riêng). Không ảnh hưởng kết quả của mic 1.
+    const mic2 = typeof sendKeyMic2ToAutotune === "function" ? await sendKeyMic2ToAutotune(keyName, note) : { attempted: false, reason: "NOT_AVAILABLE" };
     // TASK MIDI-01 — chỉ THÊM trường chẩn đoán vào kết quả (không đổi ok/driverUsed/status/detail): midi = {attempted, sent|reason}.
     let midi = { attempted: false, reason: getSetting("midiOutputPort") ? "NO_NOTE_FOR_KEY" : "MIDI_PORT_NOT_SELECTED" };
 
     // KEY-ROOT-CC-01 — nếu đã cấu hình CC KEY_ROOT (Setup > MIDI) thì Key gốc đi bằng CC; chưa cấu hình/lỗi thì dùng nốt như cũ.
     const keyCc = typeof sendKeyRootCcToAutotune === "function" ? await sendKeyRootCcToAutotune(note) : { attempted: false, reason: "NOT_AVAILABLE" };
     if (keyCc.attempted && keyCc.ok) {
-        return { ok: true, driverUsed: "midi", midi: { attempted: true, sent: true, port: getSetting("midiOutputPort"), viaCc: true, ccValue: keyCc.ccValue }, scale, keyCc, confirmation: "MIDI_SENT_UNCONFIRMED" };
+        return { ok: true, driverUsed: "midi", midi: { attempted: true, sent: true, port: getSetting("midiOutputPort"), viaCc: true, ccValue: keyCc.ccValue }, scale, mic2, keyCc, confirmation: "MIDI_SENT_UNCONFIRMED" };
     }
 
     // --- 1) Ưu tiên MIDI ---
@@ -196,7 +218,7 @@ async function sendKeyToAutotune(keyName) {
         const sent = await sendMidiNotePulse(note);
         midi = { attempted: true, sent: !!sent, port: midiPort, note };
         // sent=true chỉ nghĩa là API Web MIDI không ném lỗi (MIDI_SENT_UNCONFIRMED) — KHÔNG xác nhận phía đích đã nhận.
-        if (sent) return { ok: true, driverUsed: "midi", midi, scale, confirmation: "MIDI_SENT_UNCONFIRMED" };
+        if (sent) return { ok: true, driverUsed: "midi", midi, scale, mic2, confirmation: "MIDI_SENT_UNCONFIRMED" };
         // Nếu gửi lỗi (vd cổng MIDI đã bị rút/đổi tên) -> rơi xuống fallback bên dưới
     }
 
