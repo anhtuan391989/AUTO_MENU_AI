@@ -240,6 +240,11 @@ function getMidiOutMapping(action) {
         const cubase = /^cubase/i.test(String(daw).trim());
         return { kind: "cc", channel: 16, number: cubase ? 118 : 113, value: 127, source: "DEFAULT_PRESET" };
     }
+    // TASK A92 — preset mặc định SCALE gửi tới Auto-Tune (Studio One/Studio Pro): kênh 15, CC 26 (Major=0, Minor=5). Khớp bộ "scale" trong DAW_MIDI_PROFILES (setup.js).
+    // Chỉ khi chưa lưu mapping riêng (mapping đã lưu luôn thắng). KEY gốc KHÔNG có mặc định CC: vẫn gửi bằng nốt MIDI như cũ (KEY_ROOT chỉ dùng CC khi người dùng tự lưu CC 27). Cubase chưa có bộ CC kiểm chứng nên không có mặc định.
+    if ((action === "KEY_SCALE_MAJOR" || action === "KEY_SCALE_MINOR") && !/^cubase/i.test(String(daw).trim())) {
+        return { kind: "cc", channel: 15, number: 26, value: action === "KEY_SCALE_MINOR" ? 5 : 0, source: "DEFAULT_PRESET" };
+    }
     return null;
 }
 

@@ -35,9 +35,9 @@ function build({ keyRoot = false, mapping = true, port = 'loopMIDI', ccFail = fa
       e.events.length = 0; await e.sb.sendKeyToAutotune('C Minor');
       ok(e.events[0][1] === 26 && e.events[0][2] === 5 && e.events[1][1] === 0, 'C Minor khác C Major dù cùng nốt gốc (CC26 giá trị 5 + nốt C)', e.events); }
 
-    console.log('== 2. Chưa cấu hình CC Scale: hành vi cũ ==');
+    console.log('== 2. Chưa lưu CC Scale: dùng PRESET MẶC ĐỊNH (A92) — Scale CC26 kênh 15 + nốt gốc như cũ ==');
     { const e = build({ mapping: false }); const r = await e.sb.sendKeyToAutotune('D Minor');
-      ok(JSON.stringify(e.events) === JSON.stringify([['note', 2]]) && r.ok && r.scale.attempted === false && r.scale.reason === 'NOT_CONFIGURED', 'không có mapping -> chỉ gửi nốt D(2) như cũ, scale.attempted=false', { ev: e.events, scale: r.scale }); }
+      ok(JSON.stringify(e.events) === JSON.stringify([['cc', 26, 5, 14], ['note', 2]]) && r.ok && r.scale.attempted === true && r.scale.ok === true, 'không có mapping lưu -> preset mặc định: CC26=5 (Minor) rồi nốt D(2) như cũ', { ev: e.events, scale: r.scale }); }
 
     console.log('== 3. Lỗi Scale không chặn Key ==');
     { const e = build({ ccFail: true }); const r = await e.sb.sendKeyToAutotune('E Major');
