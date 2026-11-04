@@ -130,6 +130,9 @@ const ACTIONS = Object.freeze({
     // TASK A79/A82 — nút TUNE (khu Preset) = BYPASS Auto-Tune CẢ 2 MIC, hoạt động ĐỘC LẬP với NORM/LOFI/RAP/REMIX.
     // MỘT CC DUY NHẤT: giá trị 127 = bypass BẬT (nút thành TUNE OFF), 0 = bypass TẮT (nút về TUNE ON) — giống nút Bypass SoundShifter.
     // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_TUNE_OFF cũ (tương thích ngược).
+    // TASK A95 — REMIX bật thêm 2 plugin trong Group Mic: mỗi plugin 1 CC RIÊNG (Studio One không nối 1 CC vào nhiều plugin), kênh 15 CC 92/93, kiểu BYPASS như TUNE/LOFI (0 = plugin BẬT, 127 = plugin TẮT).
+    REMIX_PLUGIN_1: "REMIX_PLUGIN_1",
+    REMIX_PLUGIN_2: "REMIX_PLUGIN_2",
     TUNE_BYPASS: "TUNE_BYPASS",
     // TASK A94 — Studio One không nối 1 CC vào bypass của 4 plugin ở 4 track => mỗi Auto-Tune thứ 2/3/4 có CC bypass RIÊNG (kênh 15: CC 89/90/91). Nút TUNE gửi cả 4 cùng lúc.
     TUNE_BYPASS_2: "TUNE_BYPASS_2",
@@ -256,6 +259,12 @@ function getMidiOutMapping(action) {
     if (all[daw] && all[daw][action]) return all[daw][action];
     if (/^TUNE_BYPASS_[234]$/.test(String(action))) { // A94 — bypass riêng Auto-Tune 2/3/4: kênh 15, CC 89/90/91 (không trùng bộ KNOB 85-88)
         return { kind: "cc", channel: 15, number: 87 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
+    }
+    if (/^REMIX_PLUGIN_[12]$/.test(String(action))) { // A95 — kênh 15, CC 92/93 (không trùng bộ KNOB 85-88, TUNE 89-91)
+        return { kind: "cc", channel: 15, number: 91 + Number(String(action).slice(-1)), value: 0, source: "DEFAULT_PRESET" };
+    }
+    if ((action === "PRESET_NORM" || action === "PRESET_RAP" || action === "PRESET_REMIX") && !/^cubase/i.test(String(daw).trim())) { // A95 — bộ PRESET kênh 16: NORM 114, RAP 116, REMIX 117 (127 = BẬT, 0 = TẮT)
+        return { kind: "cc", channel: 16, number: action === "PRESET_NORM" ? 114 : (action === "PRESET_RAP" ? 116 : 117), value: 127, source: "DEFAULT_PRESET" };
     }
     // TASK A81 — preset mặc định cho nút TUNE (tự chứa trong hàm này để các test cắt hàm vẫn chạy). Studio One/Studio Pro: kênh 16 CC 113; Cubase: CC 118. Giá trị gửi do nút quyết định (127 bypass bật / 0 tắt).. Mapping đã lưu luôn thắng (dòng trên).
     if (action === "TUNE_BYPASS") {
@@ -562,8 +571,65 @@ async function setDawControlState(control, targetOn, context = {}) {
 
 // Expose cho renderer.js (Phase 3: nối nút UI, nếu có) và cho DevTools Console debug —
 // không export gì liên quan Manual/AI/MOD/Key/BPM (đúng phạm vi khoá của task).
+// ---------------------------------------------------------
+// TASK A95 — CHUYỂN PRESET NORM/RAP/REMIX (chọn-một thật sự): mỗi preset chỉ BẬT khi nút sáng, TẮT khi nút tắt.
+// Thứ tự: (1) gửi OFF (CC=0) cho preset đang sáng trước đó, (2) HOÀN TÁC hiệu ứng của nó, (3) gửi ON (CC=127) cho preset mới, (4) áp hiệu ứng của preset mới.
+//   NORM  = bình thường (không đổi gì thêm).
+//   RAP   = chỉ TẮT Verb dài (bus FX_BUS_VERB_LONG_VOLUME -> CC 0). Rời RAP: trả về đúng mức knob FX hiện tại.
+//   REMIX = như NORM + BẬT 2 plugin Group Mic (REMIX_PLUGIN_1/2) + Retune Speed của CẢ 2 mic về 10. Rời REMIX: tắt 2 plugin, trả Retune về giá trị trước đó.
+// ctx = { getKnob(id) -> 0..100, setKnob(id, value) -> cập nhật UI + lưu } do renderer cung cấp. Mọi bước lỗi chỉ ghi nhận, KHÔNG chặn các bước còn lại.
+// ---------------------------------------------------------
+const PRESET_ACTION_BY_NAME = Object.freeze({ NORM: "PRESET_NORM", RAP: "PRESET_RAP", REMIX: "PRESET_REMIX" });
+const REMIX_RETUNE_VALUE = 10;
+let presetSavedRetune = null;
+function clearKnobCache(action) { try { if (window.__knobLastCc) delete window.__knobLastCc[action]; } catch (e) { /* bỏ qua */ } }
+async function applyPresetTransition(prev, next, ctx = {}) {
+    const out = { prev, next, steps: [] };
+    const step = async (label, fn) => { try { const r = await fn(); out.steps.push({ label, ok: !!(r && r.ok !== false) }); } catch (e) { out.steps.push({ label, ok: false }); } };
+    const getKnob = typeof ctx.getKnob === "function" ? ctx.getKnob : () => undefined;
+    const setKnob = typeof ctx.setKnob === "function" ? ctx.setKnob : () => {};
+    if (!PRESET_ACTION_BY_NAME[next]) return { ...out, ok: false, reason: "UNKNOWN_PRESET" };
+    if (prev && prev !== next && PRESET_ACTION_BY_NAME[prev]) {
+        await step(prev + " OFF", () => executeAction(ACTIONS[PRESET_ACTION_BY_NAME[prev]], { reason: "preset-off", value: 0 }));
+        if (prev === "RAP") {
+            clearKnobCache(ACTIONS.FX_BUS_VERB_LONG_VOLUME);
+            const v = getKnob("fxMasterKnob");
+            if (Number.isFinite(v)) await step("Verb dài trả về", () => executeAction(ACTIONS.FX_BUS_VERB_LONG_VOLUME, { reason: "knob", value: v }));
+        }
+        if (prev === "REMIX") {
+            await step("Plugin 1 TẮT", () => executeAction(ACTIONS.REMIX_PLUGIN_1, { reason: "preset-off", value: 127 }));
+            await step("Plugin 2 TẮT", () => executeAction(ACTIONS.REMIX_PLUGIN_2, { reason: "preset-off", value: 127 }));
+            const back = presetSavedRetune || {};
+            for (const [id, act] of [["retune1", ACTIONS.RETUNE_SPEED_MIC1], ["retune2", ACTIONS.RETUNE_SPEED_MIC2]]) {
+                const v = Number.isFinite(back[id]) ? back[id] : 20;
+                setKnob(id, v);
+                await step(id + " trả về " + v, () => executeAction(act, { reason: "knob", value: v }));
+            }
+            presetSavedRetune = null;
+        }
+    }
+    await step(next + " ON", () => executeAction(ACTIONS[PRESET_ACTION_BY_NAME[next]], { reason: "preset-on", value: 127 }));
+    if (next === "RAP") {
+        clearKnobCache(ACTIONS.FX_BUS_VERB_LONG_VOLUME);
+        await step("Verb dài TẮT", () => executeAction(ACTIONS.FX_BUS_VERB_LONG_VOLUME, { reason: "preset-rap", value: 0 }));
+        clearKnobCache(ACTIONS.FX_BUS_VERB_LONG_VOLUME);
+    }
+    if (next === "REMIX") {
+        if (!presetSavedRetune) presetSavedRetune = { retune1: getKnob("retune1"), retune2: getKnob("retune2") };
+        await step("Plugin 1 BẬT", () => executeAction(ACTIONS.REMIX_PLUGIN_1, { reason: "preset-on", value: 0 }));
+        await step("Plugin 2 BẬT", () => executeAction(ACTIONS.REMIX_PLUGIN_2, { reason: "preset-on", value: 0 }));
+        for (const [id, act] of [["retune1", ACTIONS.RETUNE_SPEED_MIC1], ["retune2", ACTIONS.RETUNE_SPEED_MIC2]]) {
+            setKnob(id, REMIX_RETUNE_VALUE);
+            await step(id + " = " + REMIX_RETUNE_VALUE, () => executeAction(act, { reason: "knob", value: REMIX_RETUNE_VALUE }));
+        }
+    }
+    out.ok = out.steps.length > 0 && out.steps.some((x) => x.ok);
+    return out;
+}
+
 window.ActionRegistry = {
-    ACTIONS,
+    ACTIONS,    applyPresetTransition,
+
     ACTION_STATUS,
     SUPPORTED_DAWS,
     executeAction,

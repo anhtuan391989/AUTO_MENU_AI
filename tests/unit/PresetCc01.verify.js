@@ -23,10 +23,10 @@ ok(run([false, false, false, true]).lit.join() === 'false,false,false,true', 'RE
 ok(run([false, false, false, false]).tuneLit === true, 'nút TUNE không bị đụng');
 ok(/loadData\(\);\s*\n\s*ensurePresetLit\(\);/.test(ren.replace(/\r/g, '')), 'gọi ensurePresetLit() ngay sau loadData()');
 const click = ren.slice(ren.indexOf('document.querySelectorAll(".preset-btn").forEach(btn => {'), ren.indexOf('document.getElementById("autoDetectBtn")'));
-ok(/classList\.remove\("active"\)/.test(click) && /e\.target\.classList\.add\("active"\)/.test(click) && /PRESET_NAME_TO_ACTION\[/.test(click), 'bấm preset: tắt nhóm, sáng nút vừa chọn, gửi action PRESET_*');
+ok(/classList\.remove\("active"\)/.test(click) && /e\.target\.classList\.add\("active"\)/.test(click) && /PRESET_NAME_TO_ACTION\[/.test(click) && /applyPresetTransition/.test(click), 'bấm preset: tắt nhóm, sáng nút vừa chọn, gửi action PRESET_* (A95: qua applyPresetTransition)');
 
 // ---- bộ CC + surface
-const m = /preset: Object\.freeze\(\{ title: "PRESET NORM\/LOFI\/RAP\/REMIX", count: 4, mappings: dawQfMake\(16, 127, \{([^}]*)\}\)/.exec(setup);
+const m = /preset: Object\.freeze\(\{ title: "PRESET NORM\/LOFI\/RAP\/REMIX", count: 6, mappings: Object\.freeze\(\{ \.\.\.dawQfMake\(16, 127, \{([^}]*)\}\)/.exec(setup);
 const nums = m ? [...m[1].matchAll(/(\w+): (\d+)/g)].map((x) => [x[1], +x[2]]) : [];
 ok(nums.length === 4 && nums.map((x) => x[0]).join() === 'PRESET_NORM,PRESET_LOFI,PRESET_RAP,PRESET_REMIX' && nums.map((x) => x[1]).join() === '114,115,116,117', 'bộ điền nhanh PRESET: NORM/LOFI/RAP/REMIX = CC 114/115/116/117, kênh 16', nums);
 ok(nums.every(([, n]) => n < 120), 'không dùng CC 120–127 (lệnh hệ thống MIDI)');

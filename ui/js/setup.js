@@ -623,6 +623,9 @@ const DAW_MIDI_ACTIONS = [
     { action: "PRESET_LOFI", label: "PRESET LOFI" },
     { action: "PRESET_RAP", label: "PRESET RAP" },
     { action: "PRESET_REMIX", label: "PRESET REMIX" },
+    // TASK A95 — REMIX bật 2 plugin Group Mic (mỗi plugin 1 CC riêng, kiểu bypass: 0 = plugin BẬT, 127 = TẮT). Mặc định kênh 15 CC 92/93.
+    { action: "REMIX_PLUGIN_1", label: "REMIX — plugin Group Mic 1 (bypass: 0 = bật, 127 = tắt)" },
+    { action: "REMIX_PLUGIN_2", label: "REMIX — plugin Group Mic 2 (bypass: 0 = bật, 127 = tắt)" },
     { action: "PRESET_TUNE_OFF", label: "PRESET TUNE OFF" },
     { action: "CLAP", label: "CLAP" },
     { action: "LAUGH", label: "LAUGH" },
@@ -714,7 +717,7 @@ function findDawStateMappingConflict(action, mapping) {
 // Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
 const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2", "MIC1_VOLUME", "MIC2_VOLUME", "FX_BUS_DELAY_VOLUME", "FX_BUS_VERB_SHORT_VOLUME", "FX_BUS_VERB_LONG_VOLUME", "FX_BUS_COM_VERB_VOLUME", "KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_ROOT"]);
 const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
-const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "TUNE_BYPASS_2", "TUNE_BYPASS_3", "TUNE_BYPASS_4", "LOFI_STATE"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
+const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "TUNE_BYPASS_2", "TUNE_BYPASS_3", "TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
 function findMidiOutMappingConflict(action, mapping) {
     for (const { action: other } of DAW_MIDI_ACTIONS) {
         if (other === action) continue;
@@ -740,6 +743,12 @@ function getDawMidiOutMapping(action) {
     if (action === "TUNE_BYPASS") {
         const cubase = /^cubase/i.test(String(daw).trim());
         return { kind: "cc", channel: 16, number: cubase ? 118 : 113, value: 127, source: "DEFAULT_PRESET" };
+    }
+    if (/^REMIX_PLUGIN_[12]$/.test(String(action))) { // A95 — khớp getMidiOutMapping() ở actionRegistry.js
+        return { kind: "cc", channel: 15, number: 91 + Number(String(action).slice(-1)), value: 0, source: "DEFAULT_PRESET" };
+    }
+    if ((action === "PRESET_NORM" || action === "PRESET_RAP" || action === "PRESET_REMIX") && !/^cubase/i.test(String(daw).trim())) { // A95
+        return { kind: "cc", channel: 16, number: action === "PRESET_NORM" ? 114 : (action === "PRESET_RAP" ? 116 : 117), value: 127, source: "DEFAULT_PRESET" };
     }
     if (/^TUNE_BYPASS_[234]$/.test(String(action))) { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
         return { kind: "cc", channel: 15, number: 87 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
@@ -804,7 +813,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
             lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 118 }) }), // A94
             // PRESET-CC-01 — 4 CC (kênh 16, giá trị 127) cho 4 nút Preset NORM/LOFI/RAP/REMIX: mỗi nút gửi 1 CC riêng; trong Studio Pro gán từng CC vào macro/preset
             // (bật-tắt plugin hoặc đặt thông số cài sẵn). Dùng CC 114–117: không trùng LIVE 102–109, CHỌN TRACK 110–112, TUNE 113; tránh CC 120–127 (lệnh hệ thống MIDI).
-            preset: Object.freeze({ title: "PRESET NORM/LOFI/RAP/REMIX", count: 4, mappings: dawQfMake(16, 127, { PRESET_NORM: 114, PRESET_LOFI: 115, PRESET_RAP: 116, PRESET_REMIX: 117 }) }),
+            preset: Object.freeze({ title: "PRESET NORM/LOFI/RAP/REMIX", count: 6, mappings: Object.freeze({ ...dawQfMake(16, 127, { PRESET_NORM: 114, PRESET_LOFI: 115, PRESET_RAP: 116, PRESET_REMIX: 117 }), REMIX_PLUGIN_1: Object.freeze({ kind: "cc", channel: 15, number: 92, value: 0 }), REMIX_PLUGIN_2: Object.freeze({ kind: "cc", channel: 15, number: 93, value: 0 }) }) }), // A95: +2 CC plugin REMIX (kênh 15)
             micvol: Object.freeze({ title: "MIC VOLUME", count: 2, mappings: dawQfMake(15, 127, { MIC1_VOLUME: 24, MIC2_VOLUME: 25 }) }),
             // FX-BUS-KNOB-01 — 4 CC (kênh 15) cho fader 4 bus hiệu ứng, không trùng CC 20–27 (Knob/Mic/Scale/Root) và 102–113 (LIVE/CHỌN TRACK/TUNE).
             fxbus: Object.freeze({ title: "FX BUS VOLUME", count: 4, mappings: dawQfMake(15, 127, { FX_BUS_DELAY_VOLUME: 28, FX_BUS_VERB_SHORT_VOLUME: 29, FX_BUS_VERB_LONG_VOLUME: 30, FX_BUS_COM_VERB_VOLUME: 31 }) }),

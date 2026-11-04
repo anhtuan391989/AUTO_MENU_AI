@@ -656,6 +656,7 @@ const isTuneOffBtn = (b) => !!(b && b.dataset && b.dataset.tuneBtn === "1");
 document.querySelectorAll(".preset-btn").forEach((b) => { if (!b.closest(".custom-modal") && b.textContent.trim() === "LOFI") b.dataset.lofiBtn = "1"; });
 const isLofiBtn = (b) => !!(b && b.dataset && b.dataset.lofiBtn === "1");
 const isIndependentPresetBtn = (b) => isTuneOffBtn(b) || isLofiBtn(b);
+let currentPresetName = "NORM"; // A95 — preset đang sáng (chỉ đổi khi BẤM; mở app không gửi gì); RAP giữ Verb dài TẮT nên knob FX không được bật lại bus này
 function renderTuneBtn(btn, tuneOn) {
     btn.classList.toggle("active", tuneOn);
     btn.textContent = tuneOn ? "TUNE ON" : "TUNE OFF";
@@ -676,10 +677,22 @@ document.querySelectorAll(".preset-btn").forEach(btn => {
             reportDawStateResult(e.target, "LOFI", window.ActionRegistry?.setDawControlState?.("LOFI", lofiOnNow, { reason: "menu-button" }));
             return;
         }
+        // TASK A95 — NORM/RAP/REMIX chọn-một thật: nút trước TẮT (gửi OFF + hoàn tác hiệu ứng), nút mới SÁNG (gửi ON + áp hiệu ứng). Xem applyPresetTransition (actionRegistry.js).
+        const prevLit = [...document.querySelectorAll(".preset-btn")].find(b => !isIndependentPresetBtn(b) && !b.closest(".custom-modal") && b.classList.contains("active"));
+        const prevName = prevLit ? prevLit.textContent.trim() : null;
         document.querySelectorAll(".preset-btn").forEach(b => { if (!isIndependentPresetBtn(b)) b.classList.remove("active"); });
         e.target.classList.add("active");
         saveData();
-        const actionName = PRESET_NAME_TO_ACTION[e.target.textContent.trim()];
+        const nextName = e.target.textContent.trim();
+        currentPresetName = nextName;
+        if (window.ActionRegistry?.applyPresetTransition && ["NORM", "RAP", "REMIX"].includes(nextName)) {
+            window.ActionRegistry.applyPresetTransition(["NORM", "RAP", "REMIX"].includes(prevName) ? prevName : null, nextName, {
+                getKnob: (id) => { const k = knobData.find(x => x.id === id); return k ? k.value : undefined; },
+                setKnob: (id, v) => { const k = knobData.find(x => x.id === id); if (k) { k.value = v; updateKnob(k); saveData(); } }
+            }).catch(err => console.error(`[MenuControl] PRESET (${nextName}) lỗi:`, err));
+            return;
+        }
+        const actionName = PRESET_NAME_TO_ACTION[nextName];
         if (actionName && window.ActionRegistry?.executeAction) {
             window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[actionName], { reason: "menu-button" })
                 .catch(err => console.error(`[MenuControl] PRESET (${actionName}) lỗi:`, err));
@@ -3155,7 +3168,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function dispatchKnobVolume(knobId, value) {
         const group = KNOB_ID_TO_ACTION_GROUP[knobId];
         if (group && window.ActionRegistry?.executeAction) {
-            group.forEach((name) => window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[name], { reason: "knob", value })
+            (currentPresetName === "RAP" ? group.filter((n) => n !== "FX_BUS_VERB_LONG_VOLUME") : group).forEach((name) => window.ActionRegistry.executeAction(window.ActionRegistry.ACTIONS[name], { reason: "knob", value })
                 .catch((err) => console.error(`[KnobControl] ${name} lỗi:`, err)));
             return;
         }

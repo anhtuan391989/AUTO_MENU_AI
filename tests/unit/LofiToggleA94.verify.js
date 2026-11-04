@@ -56,7 +56,7 @@ function makeAR(daw, saved) {
 
     console.log('== 3. Setup/Surface ==');
     const setup = rd('ui/js/setup.js');
-    ok(/action: "LOFI_STATE"/.test(setup) && /"TUNE_BYPASS_4", "LOFI_STATE"\]/.test(setup) && /LOFI_STATE: 118/.test(setup) && /LOFI_STATE: 119/.test(setup), 'Setup: có dòng LOFI_STATE, nhóm bảo vệ trùng CC, bộ gợi ý Studio One 118 / Cubase 119');
+    ok(/action: "LOFI_STATE"/.test(setup) && /"TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2"\]/.test(setup) && /LOFI_STATE: 118/.test(setup) && /LOFI_STATE: 119/.test(setup), 'Setup: có dòng LOFI_STATE, nhóm bảo vệ trùng CC, bộ gợi ý Studio One 118 / Cubase 119');
     ok(/name="lofiOnOff"[\s\S]{0,160}address="118"/.test(rd('studio_one/AutoMenuAI.surface.xml')), 'surface AutoMenuAI có control LOFI CC118');
     console.log('== 4. A94: Auto-Tune 3 / 4 có CC riêng mặc định (kênh 16, CC34-37) ==');
     { const A = makeAR('Studio Pro 8'); const g = (n) => A.getMidiOutMapping(n);
