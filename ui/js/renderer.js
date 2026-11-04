@@ -786,6 +786,46 @@ function initMicVolumePopups() {
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideAll(); });
 }
 
+// ==========================================================
+// FX-AUTO-TOGGLE-01 — Bấm CHUỘT PHẢI vào nút FX -> thẻ nổi có ô tích "Auto bật FX khi có nhạc" (tạo bằng JS, KHÔNG sửa HTML/CSS).
+// Tích = BẬT Auto FX (setting fxAutoEnabled = true, mặc định). Bỏ tích = TẮT (fxAutoEnabled = false -> Auto không bật/tắt FX nữa).
+// Dùng đúng cờ fxAutoEnabled sẵn có (createFxAutoWiring đã đọc cờ này), lưu qua setSetting nên nhớ sau khi mở lại app.
+// Bấm trái FX giữ nguyên như cũ. Đóng thẻ: bấm ra ngoài, phím Esc, hoặc chuột phải lần nữa.
+// ==========================================================
+function initFxAutoMenu() {
+    const btn = document.getElementById("fxBtn");
+    if (!btn || document.getElementById("fxAutoMenuCard")) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
+    const card = document.createElement("div");
+    card.id = "fxAutoMenuCard";
+    card.style.cssText = "position:fixed;display:none;z-index:3000;background:#081523;border:1px solid #1f3a57;border-radius:8px;padding:8px 12px;color:#cfe3f7;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.5);";
+    card.innerHTML = '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;">'
+        + '<input type="checkbox" id="fxAutoEnabledChk" style="cursor:pointer;"><span>Auto bật FX khi có nhạc</span></label>';
+    document.body.appendChild(card);
+    const chk = card.querySelector("#fxAutoEnabledChk");
+    const hide = () => { card.style.display = "none"; };
+    chk.addEventListener("change", () => { setSetting("fxAutoEnabled", !!chk.checked); });
+    btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (card.style.display !== "none") { hide(); return; }
+        chk.checked = getSetting("fxAutoEnabled", true) !== false; // đọc trạng thái hiện tại mỗi lần mở
+        card.style.display = "block";
+        const r = btn.getBoundingClientRect();
+        const w = card.offsetWidth, h = card.offsetHeight;
+        const left = Math.max(4, Math.min(window.innerWidth - w - 4, r.left + r.width / 2 - w / 2));
+        let top = r.top - h - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
+        if (top < 4) top = r.bottom + 6;
+        card.style.left = left + "px";
+        card.style.top = top + "px";
+    });
+    document.addEventListener("mousedown", (e) => {
+        const t = e.target;
+        if (card.contains(t)) return;
+        if (t && t.closest && t.closest("#fxBtn")) return; // chuột phải mở/đóng do handler contextmenu lo
+        hide();
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+}
+
 ["mic1Btn", "mic2Btn", "fxBtn"].forEach(id => {
     document.getElementById(id)?.addEventListener("click", (e) => {
         e.target.classList.toggle("active");
@@ -3131,6 +3171,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadData();
     ensurePresetLit(); // PRESET-LIT-01
     if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
+    if (typeof initFxAutoMenu === "function") initFxAutoMenu(); // FX-AUTO-TOGGLE-01 — chuột phải FX: ô tích Auto bật FX khi có nhạc
 
     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây
     // (updateNextModTime() dùng modTimeline giả + updateModInfo("02:15","G# Minor",...) dùng
