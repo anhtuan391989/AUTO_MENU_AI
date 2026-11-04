@@ -743,13 +743,28 @@ const MONITOR_BTN_TO_CONTROL = { mic1Btn: "MIC1", mic2Btn: "MIC2", fxBtn: "FX" }
 // MIC1_VOLUME / MIC2_VOLUME -> CC theo mapping Setup). Đóng bằng: bấm ra ngoài, phím Esc, hoặc chuột phải lần nữa. Bấm trái MIC 1/MIC 2
 // vẫn là bật/tắt Monitor như cũ (không đổi).
 // ==========================================================
+// POPUP-AUTOHIDE-01 (A97) — MỌI popup chuột phải (MUSIC / MIC 1 / MIC 2 / FX) tự ẩn sau 5 giây. Đếm lại từ đầu mỗi khi người dùng thao tác TRONG thẻ
+// (kéo knob, cuộn chuột, bấm) để thẻ không biến mất giữa lúc đang chỉnh; mỗi lần mở thẻ đếm lại 5 s. Ẩn bằng đúng hàm ẩn sẵn có của từng popup.
+const POPUP_AUTO_HIDE_MS = 5000;
+function createPopupAutoHide(card, hide) {
+    let timer = null;
+    const disarm = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    const arm = () => { disarm(); timer = setTimeout(() => { timer = null; hide(); }, POPUP_AUTO_HIDE_MS); };
+    ["mousemove", "wheel", "keydown", "change"].forEach((ev) => card.addEventListener(ev, () => { if (timer) arm(); }));
+    // Đang GIỮ chuột trên thẻ (kéo knob, kể cả kéo ra ngoài thẻ) thì không ẩn; thả chuột -> đếm lại 5 s.
+    let pressed = false;
+    card.addEventListener("mousedown", () => { if (timer) { pressed = true; disarm(); } });
+    document.addEventListener("mouseup", () => { if (pressed) { pressed = false; if (card.style.display !== "none") arm(); } });
+    return { arm, disarm };
+}
 const MIC_VOLUME_POPUPS = [
     { btnId: "mic1Btn", knobId: "mic1VolKnob", valueId: "mic1VolValue", label: "MIC 1 VOLUME" },
     { btnId: "mic2Btn", knobId: "mic2VolKnob", valueId: "mic2VolValue", label: "MIC 2 VOLUME" },
 ];
 function initMicVolumePopups() {
     const cards = [];
-    const hideAll = () => cards.forEach((c) => { c.style.display = "none"; });
+    const autos = [];
+    const hideAll = () => { cards.forEach((c) => { c.style.display = "none"; }); autos.forEach((x) => x.disarm()); };
     MIC_VOLUME_POPUPS.forEach((cfg) => {
         const btn = document.getElementById(cfg.btnId);
         if (!btn || document.getElementById(cfg.knobId)) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
@@ -761,6 +776,8 @@ function initMicVolumePopups() {
         document.body.appendChild(card);
         const k = knobData.find((x) => x.id === cfg.knobId);
         if (k) updateKnob(k); // vẽ giá trị đã khôi phục từ lần dùng trước (loadData chạy trước hàm này)
+        const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
+        autos.push(auto);
         btn.addEventListener("contextmenu", (e) => {
             e.preventDefault();
             const wasOpen = card.style.display !== "none";
@@ -773,6 +790,7 @@ function initMicVolumePopups() {
             card.style.left = left + "px";
             card.style.top = top + "px";
             card.style.display = "flex";
+            auto.arm();
         });
         cards.push(card);
     });
@@ -814,7 +832,8 @@ function initAudioChillPopup() {
         Promise.resolve(window.ActionRegistry?.setDawControlState?.("AUDIO_CHILL", onNow, { reason: "menu-button" }))
             .catch((err) => console.error("[MenuControl] AUDIO CHILL lỗi:", err));
     });
-    const hide = () => { card.style.display = "none"; };
+    const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
+    const hide = () => { card.style.display = "none"; auto.disarm(); };
     btn.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         if (card.style.display !== "none") { hide(); return; }
@@ -825,6 +844,7 @@ function initAudioChillPopup() {
         card.style.left = left + "px";
         card.style.top = top + "px";
         card.style.display = "flex";
+        auto.arm();
     });
     document.addEventListener("mousedown", (e) => {
         const t = e.target;
@@ -851,7 +871,8 @@ function initFxAutoMenu() {
         + '<input type="checkbox" id="fxAutoEnabledChk" style="cursor:pointer;"><span>Auto bật FX khi có nhạc</span></label>';
     document.body.appendChild(card);
     const chk = card.querySelector("#fxAutoEnabledChk");
-    const hide = () => { card.style.display = "none"; };
+    const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
+    const hide = () => { card.style.display = "none"; auto.disarm(); };
     chk.addEventListener("change", () => {
         setSetting("fxAutoEnabled", !!chk.checked);
         if (chk.checked) window.__fxAuto?.resume?.(); // tích lại => Auto chạy NGAY theo nhạc hiện tại (có nhạc bật / không nhạc tắt), bỏ qua giữ quyền 60 s
@@ -868,6 +889,7 @@ function initFxAutoMenu() {
         if (top < 4) top = r.bottom + 6;
         card.style.left = left + "px";
         card.style.top = top + "px";
+        auto.arm();
     });
     document.addEventListener("mousedown", (e) => {
         const t = e.target;

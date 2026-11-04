@@ -13,8 +13,8 @@ const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fa
 const REN = read('ui/js/renderer.js');
 function braceEnd(src, open) { let d = 0; for (let i = open; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) return i + 1; } throw new Error('unbalanced'); }
 const fnSrc = (name) => { const a = REN.indexOf('function ' + name + '('); if (a < 0) throw new Error(name); return REN.slice(a, braceEnd(REN, REN.indexOf('{', a))); };
-const popupConst = REN.slice(REN.indexOf('const MIC_VOLUME_POPUPS'), REN.indexOf('function initMicVolumePopups'));
-const kStart = REN.indexOf('let activeKnob = null;'), kEnd = REN.indexOf('document.addEventListener("mouseup"');
+const popupConst = REN.slice(REN.indexOf('const POPUP_AUTO_HIDE_MS'), REN.indexOf('function initMicVolumePopups')); // A97: gồm cả helper tự ẩn 5 s + MIC_VOLUME_POPUPS
+const kStart = REN.indexOf('let activeKnob = null;'), kEnd = REN.indexOf('document.addEventListener("mouseup"', kStart); // A97: helper tự ẩn cũng có listener mouseup ở phía trên, nên tìm từ kStart
 const knobBlock = REN.slice(kStart, kEnd);
 const knobDataSrc = REN.slice(REN.indexOf('const knobData = ['), REN.indexOf('];', REN.indexOf('const knobData = [')) + 2);
 

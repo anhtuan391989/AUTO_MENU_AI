@@ -39,8 +39,8 @@ function makeAR(daw, saved) {
     const document = { getElementById: (id) => els[id] || body.map((c) => c.kids.find((k) => k.id === id)).find(Boolean) || null,
         createElement: (t) => mk(t), body: { appendChild: (c) => body.push(c) }, addEventListener: (n, f) => { (docL[n] = docL[n] || []).push(f); } };
     const calls = []; const knobs = [{ id: 'audioChillKnob', value: 50 }]; const updated = [];
-    const sb = { document, window: { innerWidth: 1200, ActionRegistry: { setDawControlState: async (c, on) => { calls.push([c, on]); return { ok: true }; } } }, console, Promise, knobData: knobs, updateKnob: (k) => updated.push(k.id) };
-    vm.createContext(sb); vm.runInContext(ren.slice(i0, i1) + '\nthis.__init = initAudioChillPopup;', sb);
+    const sb = { setTimeout, clearTimeout, document, window: { innerWidth: 1200, ActionRegistry: { setDawControlState: async (c, on) => { calls.push([c, on]); return { ok: true }; } } }, console, Promise, knobData: knobs, updateKnob: (k) => updated.push(k.id) };
+    vm.createContext(sb); vm.runInContext(ren.slice(ren.indexOf('const POPUP_AUTO_HIDE_MS'), ren.indexOf('const MIC_VOLUME_POPUPS')) + '\n' + ren.slice(i0, i1) + '\nthis.__init = initAudioChillPopup;', sb);
     sb.__init();
     const card = body[0]; const chill = card && card.querySelector('#audioChillBtn');
     ok(card && chill && card.querySelector('#audioChillKnob') && card.querySelector('#audioChillValue'), 'thẻ có nút AUDIO CHILL (trên) + knob + số (dưới)');
