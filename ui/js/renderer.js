@@ -743,13 +743,28 @@ const MONITOR_BTN_TO_CONTROL = { mic1Btn: "MIC1", mic2Btn: "MIC2", fxBtn: "FX" }
 // MIC1_VOLUME / MIC2_VOLUME -> CC theo mapping Setup). Đóng bằng: bấm ra ngoài, phím Esc, hoặc chuột phải lần nữa. Bấm trái MIC 1/MIC 2
 // vẫn là bật/tắt Monitor như cũ (không đổi).
 // ==========================================================
+// POPUP-AUTOHIDE-01 (A97) — MỌI popup chuột phải (MUSIC / MIC 1 / MIC 2 / FX) tự ẩn sau 5 giây. Đếm lại từ đầu mỗi khi người dùng thao tác TRONG thẻ
+// (kéo knob, cuộn chuột, bấm) để thẻ không biến mất giữa lúc đang chỉnh; mỗi lần mở thẻ đếm lại 5 s. Ẩn bằng đúng hàm ẩn sẵn có của từng popup.
+const POPUP_AUTO_HIDE_MS = 5000;
+function createPopupAutoHide(card, hide) {
+    let timer = null;
+    const disarm = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    const arm = () => { disarm(); timer = setTimeout(() => { timer = null; hide(); }, POPUP_AUTO_HIDE_MS); };
+    ["mousemove", "wheel", "keydown", "change"].forEach((ev) => card.addEventListener(ev, () => { if (timer) arm(); }));
+    // Đang GIỮ chuột trên thẻ (kéo knob, kể cả kéo ra ngoài thẻ) thì không ẩn; thả chuột -> đếm lại 5 s.
+    let pressed = false;
+    card.addEventListener("mousedown", () => { if (timer) { pressed = true; disarm(); } });
+    document.addEventListener("mouseup", () => { if (pressed) { pressed = false; if (card.style.display !== "none") arm(); } });
+    return { arm, disarm };
+}
 const MIC_VOLUME_POPUPS = [
     { btnId: "mic1Btn", knobId: "mic1VolKnob", valueId: "mic1VolValue", label: "MIC 1 VOLUME" },
     { btnId: "mic2Btn", knobId: "mic2VolKnob", valueId: "mic2VolValue", label: "MIC 2 VOLUME" },
 ];
 function initMicVolumePopups() {
     const cards = [];
-    const hideAll = () => cards.forEach((c) => { c.style.display = "none"; });
+    const autos = [];
+    const hideAll = () => { cards.forEach((c) => { c.style.display = "none"; }); autos.forEach((x) => x.disarm()); };
     MIC_VOLUME_POPUPS.forEach((cfg) => {
         const btn = document.getElementById(cfg.btnId);
         if (!btn || document.getElementById(cfg.knobId)) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
@@ -761,6 +776,8 @@ function initMicVolumePopups() {
         document.body.appendChild(card);
         const k = knobData.find((x) => x.id === cfg.knobId);
         if (k) updateKnob(k); // vẽ giá trị đã khôi phục từ lần dùng trước (loadData chạy trước hàm này)
+        const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
+        autos.push(auto);
         btn.addEventListener("contextmenu", (e) => {
             e.preventDefault();
             const wasOpen = card.style.display !== "none";
@@ -773,6 +790,7 @@ function initMicVolumePopups() {
             card.style.left = left + "px";
             card.style.top = top + "px";
             card.style.display = "flex";
+            auto.arm();
         });
         cards.push(card);
     });
@@ -784,6 +802,57 @@ function initMicVolumePopups() {
         hideAll();
     });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideAll(); });
+}
+
+// ==========================================================
+// AUDIO-CHILL-01 (A96) — Bấm CHUỘT PHẢI vào nút MUSIC -> thẻ nổi giống popup Mic: TRÊN là nút "AUDIO CHILL" (ON/OFF), DƯỚI là knob điều khiển 1 VST.
+// Tất cả qua MIDI (ActionRegistry: AUDIO_CHILL_STATE / AUDIO_CHILL_KNOB). Nút và knob ĐỘC LẬP: xoay knob không đổi nút, bấm nút không đổi knob.
+// Nút: sáng = ON (gửi 127), tắt = OFF (gửi 0). Mở app luôn ở OFF và knob luôn về mặc định 50 (KHÔNG lưu/khôi phục), không gửi gì (Menu không đọc được trạng thái DAW). Tạo bằng JS, KHÔNG sửa HTML/CSS.
+// Bấm trái MUSIC giữ nguyên như cũ. Đóng thẻ: bấm ra ngoài, phím Esc, hoặc chuột phải lần nữa.
+// ==========================================================
+function initAudioChillPopup() {
+    const btn = document.getElementById("musicBtn");
+    if (!btn || document.getElementById("audioChillKnob")) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
+    const card = document.createElement("div");
+    card.className = "knob-card audio-chill-popup";
+    card.style.cssText = "position:fixed;display:none;width:190px;height:142px;z-index:3000;background:#081523;"; // nền đặc (CSS .knob-card dùng nền mờ)
+    // Bố cục: HÀNG TRÊN = nút AUDIO CHILL (rộng gần hết thẻ); HÀNG DƯỚI = chữ + số bên trái, knob bên phải (CSS .knob-label/.knob-number/.knob là absolute nên dời xuống bằng style riêng, không sửa CSS).
+    card.innerHTML = '<button id="audioChillBtn" class="preset-btn" style="position:absolute;left:12px;top:8px;width:166px;height:30px;cursor:pointer;">AUDIO CHILL</button>'
+        + '<div class="knob-label" style="top:46px;">CHILL</div><div id="audioChillValue" class="knob-number" style="top:70px;">50</div>'
+        + '<div class="knob" id="audioChillKnob" style="top:54px;"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>';
+    document.body.appendChild(card);
+    const k = knobData.find((x) => x.id === "audioChillKnob");
+    if (k) updateKnob(k); // vẽ giá trị đã khôi phục (loadData chạy trước hàm này)
+    const chillBtn = card.querySelector("#audioChillBtn");
+    chillBtn.dataset.noPreset = "1"; // không thuộc nhóm preset NORM/RAP/REMIX
+    chillBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const onNow = !chillBtn.classList.contains("active"); // trạng thái ĐÍCH sau cú bấm
+        chillBtn.classList.toggle("active", onNow);
+        Promise.resolve(window.ActionRegistry?.setDawControlState?.("AUDIO_CHILL", onNow, { reason: "menu-button" }))
+            .catch((err) => console.error("[MenuControl] AUDIO CHILL lỗi:", err));
+    });
+    const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
+    const hide = () => { card.style.display = "none"; auto.disarm(); };
+    btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (card.style.display !== "none") { hide(); return; }
+        const r = btn.getBoundingClientRect();
+        const left = Math.max(4, Math.min(window.innerWidth - 194, r.left + r.width / 2 - 95));
+        let top = r.top - 142 - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
+        if (top < 4) top = r.bottom + 6;
+        card.style.left = left + "px";
+        card.style.top = top + "px";
+        card.style.display = "flex";
+        auto.arm();
+    });
+    document.addEventListener("mousedown", (e) => {
+        const t = e.target;
+        if (card.contains(t)) return;
+        if (t && t.closest && t.closest("#musicBtn")) return; // chuột phải mở/đóng do handler contextmenu lo
+        hide();
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
 }
 
 // ==========================================================
@@ -802,7 +871,8 @@ function initFxAutoMenu() {
         + '<input type="checkbox" id="fxAutoEnabledChk" style="cursor:pointer;"><span>Auto bật FX khi có nhạc</span></label>';
     document.body.appendChild(card);
     const chk = card.querySelector("#fxAutoEnabledChk");
-    const hide = () => { card.style.display = "none"; };
+    const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
+    const hide = () => { card.style.display = "none"; auto.disarm(); };
     chk.addEventListener("change", () => {
         setSetting("fxAutoEnabled", !!chk.checked);
         if (chk.checked) window.__fxAuto?.resume?.(); // tích lại => Auto chạy NGAY theo nhạc hiện tại (có nhạc bật / không nhạc tắt), bỏ qua giữ quyền 60 s
@@ -819,6 +889,7 @@ function initFxAutoMenu() {
         if (top < 4) top = r.bottom + 6;
         card.style.left = left + "px";
         card.style.top = top + "px";
+        auto.arm();
     });
     document.addEventListener("mousedown", (e) => {
         const t = e.target;
@@ -1160,7 +1231,9 @@ const knobData = [
     // FX-BUS-KNOB-01 — Knob "FX" (index.html: #fxMasterKnob) = cộng/trừ volume 4 bus hiệu ứng trong DAW. 50 = giữ mức gốc.
     { id: "fxMasterKnob", valueId: "fxMasterValue", value: 50, defaultValue: 50 },
     { id: "mic1VolKnob", valueId: "mic1VolValue", value: 90, defaultValue: 90 },
-    { id: "mic2VolKnob", valueId: "mic2VolValue", value: 90, defaultValue: 90 }
+    { id: "mic2VolKnob", valueId: "mic2VolValue", value: 90, defaultValue: 90 },
+    // A96 — knob AUDIO CHILL (popup chuột phải MUSIC): 1 tham số VST qua MIDI, độc lập với nút AUDIO CHILL ON/OFF. Mặc định 50.
+    { id: "audioChillKnob", valueId: "audioChillValue", value: 50, defaultValue: 50 }
 ];
 
 // TASK A20 — clapKnob/laughKnob đi tới Internal Audio Backend (SoundEffectEngine), KHÔNG
@@ -2241,7 +2314,7 @@ function loadData() {
     if (Array.isArray(data.knobs)) { // MENU-FX-AUTO-OFF: cấu hình hỏng (knobs không phải mảng) không được làm đổ cả khởi tạo
         data.knobs.forEach(saved => {
             const knob = knobData.find(k => k.id === saved.id);
-            if (knob) {
+            if (knob && knob.id !== "audioChillKnob") { // A96c: Audio chill luôn về mặc định (50) khi mở lại Menu, không khôi phục giá trị cũ
                 knob.value = saved.value;
                 updateKnob(knob);
                 // TASK A20 — đồng bộ ngay volume Clap/Laugh vào SoundEffectEngine khi khôi
@@ -3252,6 +3325,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadData();
     ensurePresetLit(); // PRESET-LIT-01
     if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
+    if (typeof initAudioChillPopup === "function") initAudioChillPopup(); // AUDIO-CHILL-01 — chuột phải MUSIC: nút Audio chill + knob VST
     if (typeof initFxAutoMenu === "function") initFxAutoMenu(); // FX-AUTO-TOGGLE-01 — chuột phải FX: ô tích Auto bật FX khi có nhạc
 
     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây
@@ -3277,6 +3351,7 @@ document.addEventListener("DOMContentLoaded", () => {
         masterKnob: "MASTER_OUTPUT_VOLUME",
         mic1VolKnob: "MIC1_VOLUME", // MIC-VOLUME-KNOB-01 (fader track Mic)
         mic2VolKnob: "MIC2_VOLUME", // MIC-VOLUME-KNOB-01 (fader track Không Dây)
+        audioChillKnob: "AUDIO_CHILL_KNOB", // A96 (knob Audio chill — popup chuột phải MUSIC)
         // TASK B12 — clapKnob/laughKnob CỐ TÌNH KHÔNG có trong map này: bằng chứng (xlsx
         // tham chiếu "Âm lượng ... trên Menu, file đi kèm trong menu") chỉ ra target là
         // audio engine NỘI BỘ (phát file mẫu bundled), KHÔNG phải MIDI/DAW — nối vào dispatch
