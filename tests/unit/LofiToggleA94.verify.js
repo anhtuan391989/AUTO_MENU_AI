@@ -18,15 +18,15 @@ function makeAR(daw, saved) {
     console.log('== 1. actionRegistry: LOFI 1 CC, 127/0, preset mặc định ==');
     let AR = makeAR('Studio Pro 8');
     const d = AR.DAW_STATE_CONTROLS.LOFI;
-    ok(AR.ACTIONS.LOFI_STATE === 'LOFI_STATE' && d && d.on === 'LOFI_STATE' && d.off === 'LOFI_STATE' && d.values.on === 127 && d.values.off === 0 && d.legacy === 'PRESET_LOFI', 'control LOFI: 1 action, giá trị 127/0, legacy PRESET_LOFI');
+    ok(AR.ACTIONS.LOFI_STATE === 'LOFI_STATE' && d && d.on === 'LOFI_STATE' && d.off === 'LOFI_STATE' && d.values.on === 0 && d.values.off === 127 && d.legacy === 'PRESET_LOFI', 'control LOFI: 1 action, giá trị 127/0, legacy PRESET_LOFI');
     let r = await AR.setDawControlState('LOFI', true, {});
-    ok(r.ok && JSON.stringify(AR.__sent[0]) === JSON.stringify([118, 127, 15]), 'LOFI BẬT -> CC118 (không trùng PRESET NORM CC114) = 127 kênh 16 (index 15), không cần Setup');
+    ok(r.ok && JSON.stringify(AR.__sent[0]) === JSON.stringify([118, 0, 15]), 'LOFI BẬT (nút sáng) -> CC118 = 0 (không trùng PRESET NORM CC114) = 127 kênh 16 (index 15), không cần Setup');
     r = await AR.setDawControlState('LOFI', false, {});
-    ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([118, 0, 15]), 'LOFI TẮT -> CC118 = 0');
+    ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([118, 127, 15]), 'LOFI TẮT -> CC118 = 127 = 0');
     AR = makeAR('Cubase 14'); await AR.setDawControlState('LOFI', true, {});
-    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([119, 127, 15]), 'Cubase: CC119');
+    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([119, 0, 15]), 'Cubase: CC119 (bật = 0)');
     AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { LOFI_STATE: { kind: 'cc', channel: 16, number: 90, value: 127 } } }); await AR.setDawControlState('LOFI', true, {});
-    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([90, 127, 15]), 'mapping người dùng đã lưu luôn thắng mặc định');
+    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([90, 0, 15]), 'mapping người dùng đã lưu luôn thắng mặc định');
 
     console.log('== 2. renderer: LOFI độc lập với NORM/RAP/REMIX (mã thật, DOM giả) ==');
     const src = rd('ui/js/renderer.js');

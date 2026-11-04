@@ -135,7 +135,7 @@ const ACTIONS = Object.freeze({
     TUNE_BYPASS_2: "TUNE_BYPASS_2",
     TUNE_BYPASS_3: "TUNE_BYPASS_3",
     TUNE_BYPASS_4: "TUNE_BYPASS_4",
-    // TASK A94 — nút LOFI = công tắc ON/OFF ĐỘC LẬP (kết hợp được với NORM/RAP/REMIX; chỉ riêng LOFI). MỘT CC: 127 = LOFI BẬT, 0 = LOFI TẮT.
+    // TASK A94 — nút LOFI = công tắc ON/OFF ĐỘC LẬP (kết hợp được với NORM/RAP/REMIX; chỉ riêng LOFI). MỘT CC kiểu BYPASS (giống TUNE): nút SÁNG = LOFI BẬT => gửi 0; nút TẮT = LOFI TẮT => gửi 127 (đảo so với bản đầu theo cách nối thật của người dùng).
     // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_LOFI cũ (tương thích ngược).
     LOFI_STATE: "LOFI_STATE"
 });
@@ -147,7 +147,7 @@ const DAW_STATE_CONTROLS = Object.freeze({
     MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", select: "MIC2_SELECT", label: "MIC 2 (Monitor Không Dây)" }),
     FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" }),
     TUNE: Object.freeze({ on: "TUNE_BYPASS", off: "TUNE_BYPASS", values: Object.freeze({ on: 127, off: 0 }), legacy: "PRESET_TUNE_OFF", label: "TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — cả 4 plugin Auto-Tune)" }), // TASK A79/A94
-    LOFI: Object.freeze({ on: "LOFI_STATE", off: "LOFI_STATE", values: Object.freeze({ on: 127, off: 0 }), legacy: "PRESET_LOFI", label: "LOFI (ON/OFF độc lập, kết hợp được với preset khác)" }) // TASK A94
+    LOFI: Object.freeze({ on: "LOFI_STATE", off: "LOFI_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "PRESET_LOFI", label: "LOFI (ON/OFF độc lập, kết hợp được với preset khác)" }) // TASK A94
 });
 
 // Action nào đã có Mouse Coordinate key tương ứng (Mục 8, ưu tiên DAW Play/Stop/Record —
