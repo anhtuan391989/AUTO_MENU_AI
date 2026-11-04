@@ -41,8 +41,8 @@ function env(init = {}, { portOk = true } = {}) {
   {
     const m = /const KNOB_ID_TO_ACTION = \{([\s\S]*?)\};/.exec(ren)[1].replace(/\/\/.*$/gm, '');
     const pairs = [...m.matchAll(/(\w+):\s*"(\w+)"/g)].map((x) => [x[1], x[2]]);
-    const micPairs = pairs.filter(([k]) => k === 'mic1VolKnob' || k === 'mic2VolKnob'); // MIC-VOLUME-KNOB-01: thêm 2 núm mic (tạo bằng JS, chuột phải MIC 1/2)
-    ok(pairs.length === 6 && micPairs.length === 2 && pairs.filter((p) => !micPairs.includes(p)).every(([k, a]) => KNOBS[a] === k), '[1] renderer: 4 Knob MIDI gốc -> 4 Action (musicKnob, masterKnob, retune1, retune2) + 2 núm mic -> MIC1_VOLUME/MIC2_VOLUME', pairs);
+    const micPairs = pairs.filter(([k]) => k === 'mic1VolKnob' || k === 'mic2VolKnob' || k === 'audioChillKnob'); // A96: + knob Audio chill (popup chuột phải MUSIC) // MIC-VOLUME-KNOB-01: thêm 2 núm mic (tạo bằng JS, chuột phải MIC 1/2)
+    ok(pairs.length === 7 && micPairs.length === 3 && pairs.filter((p) => !micPairs.includes(p)).every(([k, a]) => KNOBS[a] === k), '[1] renderer: 4 Knob MIDI gốc -> 4 Action (musicKnob, masterKnob, retune1, retune2) + 2 núm mic -> MIC1_VOLUME/MIC2_VOLUME', pairs);
     ok(!/clapKnob|laughKnob/.test(m) && /clapKnob: "CLAP"/.test(ren) && /laughKnob: "LAUGH"/.test(ren), '[8] clapKnob/laughKnob KHÔNG nằm trong map MIDI; vẫn ở KNOB_ID_TO_SOUND_EFFECT (SoundEffectEngine nội bộ)');
     const knobBundles = setup.slice(setup.indexOf('const DAW_QF_S1_LIVE'), setup.indexOf('// S8 — 3 hàng PLAY/STOP/RECORD'));
     ok(!/CLAP|LAUGH|clapKnob|laughKnob/.test(knobBundles.replace(/dawQfMake/g, '')), '[8] bộ điền nhanh không chứa CLAP/LAUGH');

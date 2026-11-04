@@ -687,6 +687,9 @@ const DAW_MIDI_ACTIONS = [
     { action: "TUNE_BYPASS_4", label: "TUNE ON/OFF — BYPASS Auto-Tune 4 (nút TUNE gửi cả 4)" },
     // TASK A94 — nút LOFI: ON/OFF độc lập, kết hợp được với NORM/RAP/REMIX. 1 CC kiểu bypass: 0 = LOFI bật (nút sáng), 127 = LOFI tắt (mặc định kênh 16 CC 118 / Cubase 119).
     { action: "LOFI_STATE", label: "LOFI ON/OFF kiểu bypass (nút sáng = LOFI bật = gửi 0; tắt = gửi 127) — kết hợp với preset khác" },
+    // TASK A96 — popup chuột phải MUSIC: nút AUDIO CHILL (kiểu bypass: 0 = bật, 127 = tắt) và knob AUDIO CHILL (CC 0..127). Mặc định kênh 15 CC 94 / 95.
+    { action: "AUDIO_CHILL_STATE", label: "AUDIO CHILL — nút ON/OFF kiểu bypass (sáng = bật = gửi 0; tắt = gửi 127)" },
+    { action: "AUDIO_CHILL_KNOB", label: "AUDIO CHILL — knob điều khiển 1 VST (CC 0..127)" },
     // MENU-FIX-02 — TUỲ CHỌN: lệnh CHỌN TRACK (macro chỉ "Find Track") gửi TRƯỚC lệnh ON/OFF tương ứng để Monitor không đảo nhầm track cũ.
     { action: "MUSIC_SELECT", label: "MUSIC CHỌN TRACK (Find Track Beat — gửi trước ON/OFF)" },
     { action: "MIC1_SELECT", label: "MIC 1 CHỌN TRACK (Find Track Mic — gửi trước ON/OFF)" },
@@ -717,7 +720,7 @@ function findDawStateMappingConflict(action, mapping) {
 // Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
 const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2", "MIC1_VOLUME", "MIC2_VOLUME", "FX_BUS_DELAY_VOLUME", "FX_BUS_VERB_SHORT_VOLUME", "FX_BUS_VERB_LONG_VOLUME", "FX_BUS_COM_VERB_VOLUME", "KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_ROOT"]);
 const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
-const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "TUNE_BYPASS_2", "TUNE_BYPASS_3", "TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
+const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "TUNE_BYPASS_2", "TUNE_BYPASS_3", "TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2", "AUDIO_CHILL_STATE", "AUDIO_CHILL_KNOB"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
 function findMidiOutMappingConflict(action, mapping) {
     for (const { action: other } of DAW_MIDI_ACTIONS) {
         if (other === action) continue;
@@ -756,6 +759,9 @@ function getDawMidiOutMapping(action) {
     if (/^KEY_(SCALE_MAJOR|SCALE_MINOR|ROOT)_AT[34]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
         const base = /_AT3$/.test(action) ? 34 : 36;
         return { kind: "cc", channel: 15, number: /^KEY_ROOT_/.test(action) ? base + 1 : base, value: /SCALE_MINOR/.test(action) ? 5 : 0, source: "DEFAULT_PRESET" };
+    }
+    if (action === "AUDIO_CHILL_STATE" || action === "AUDIO_CHILL_KNOB") { // A96 — khớp getMidiOutMapping() ở actionRegistry.js
+        return { kind: "cc", channel: 15, number: action === "AUDIO_CHILL_STATE" ? 94 : 95, value: action === "AUDIO_CHILL_STATE" ? 127 : 64, source: "DEFAULT_PRESET" };
     }
     if (action === "LOFI_STATE") { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
         const cubase = /^cubase/i.test(String(daw).trim());

@@ -146,6 +146,14 @@
     <Control name="remixPlugin2" title="REMIX plugin Group Mic 2 (0=bat, 127=tat)" type="button" options="receive public">
       <MidiMessage status="#BE" address="93"/>
     </Control>
+    <!-- CC 94 -->
+    <Control name="audioChillOnOff" title="AUDIO CHILL Bypass (0=bat, 127=tat)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="94"/>
+    </Control>
+    <!-- CC 95 -->
+    <Control name="audioChillKnob" title="AUDIO CHILL Knob (0..127)" type="knob" options="receive public">
+      <MidiMessage status="#BE" address="95"/>
+    </Control>
     <!-- CC 118 -->
     <Control name="lofiOnOff" title="LOFI Bypass (0=LOFI bat/nut sang, 127=LOFI tat)" type="button" options="receive public">
       <MidiMessage status="#BF" address="118"/>

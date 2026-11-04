@@ -140,7 +140,11 @@ const ACTIONS = Object.freeze({
     TUNE_BYPASS_4: "TUNE_BYPASS_4",
     // TASK A94 — nút LOFI = công tắc ON/OFF ĐỘC LẬP (kết hợp được với NORM/RAP/REMIX; chỉ riêng LOFI). MỘT CC kiểu BYPASS (giống TUNE): nút SÁNG = LOFI BẬT => gửi 0; nút TẮT = LOFI TẮT => gửi 127 (đảo so với bản đầu theo cách nối thật của người dùng).
     // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_LOFI cũ (tương thích ngược).
-    LOFI_STATE: "LOFI_STATE"
+    LOFI_STATE: "LOFI_STATE",
+    // TASK A96 — popup chuột phải nút MUSIC: (1) nút AUDIO CHILL = công tắc ON/OFF kiểu bypass (0 = BẬT, 127 = TẮT) — kênh 15 CC 94;
+    // (2) knob AUDIO CHILL = điều khiển 1 tham số VST bằng CC 0..127 tuyến tính — kênh 15 CC 95. Hai điều khiển ĐỘC LẬP nhau (knob xoay được dù nút bật hay tắt).
+    AUDIO_CHILL_STATE: "AUDIO_CHILL_STATE",
+    AUDIO_CHILL_KNOB: "AUDIO_CHILL_KNOB"
 });
 
 // MIDI-DAW-CONTROL-01 — nút Menu -> cặp action ON/OFF + action toggle CŨ (dùng khi người dùng CHƯA cấu hình ON/OFF).
@@ -150,7 +154,8 @@ const DAW_STATE_CONTROLS = Object.freeze({
     MIC2: Object.freeze({ on: "MIC2_ON", off: "MIC2_OFF", legacy: "MONITOR_MIC2", select: "MIC2_SELECT", label: "MIC 2 (Monitor Không Dây)" }),
     FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" }),
     TUNE: Object.freeze({ on: "TUNE_BYPASS", off: "TUNE_BYPASS", values: Object.freeze({ on: 127, off: 0 }), legacy: "PRESET_TUNE_OFF", label: "TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — cả 4 plugin Auto-Tune)" }), // TASK A79/A94
-    LOFI: Object.freeze({ on: "LOFI_STATE", off: "LOFI_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "PRESET_LOFI", label: "LOFI (ON/OFF độc lập, kết hợp được với preset khác)" }) // TASK A94
+    LOFI: Object.freeze({ on: "LOFI_STATE", off: "LOFI_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "PRESET_LOFI", label: "LOFI (ON/OFF độc lập, kết hợp được với preset khác)" }), // TASK A94
+    AUDIO_CHILL: Object.freeze({ on: "AUDIO_CHILL_STATE", off: "AUDIO_CHILL_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "AUDIO_CHILL_STATE", label: "AUDIO CHILL (ON/OFF kiểu bypass: sáng = bật = gửi 0; tắt = gửi 127; độc lập với knob)" })
 });
 
 // Action nào đã có Mouse Coordinate key tương ứng (Mục 8, ưu tiên DAW Play/Stop/Record —
@@ -271,6 +276,9 @@ function getMidiOutMapping(action) {
         const cubase = /^cubase/i.test(String(daw).trim());
         return { kind: "cc", channel: 16, number: cubase ? 118 : 113, value: 127, source: "DEFAULT_PRESET" };
     }
+    if (action === "AUDIO_CHILL_STATE" || action === "AUDIO_CHILL_KNOB") { // A96 — mặc định cho mọi DAW: kênh 15, CC 94 (nút) / CC 95 (knob); không trùng KNOB 85-88, TUNE 89-91, REMIX 92-93
+        return { kind: "cc", channel: 15, number: action === "AUDIO_CHILL_STATE" ? 94 : 95, value: action === "AUDIO_CHILL_STATE" ? 127 : 64, source: "DEFAULT_PRESET" };
+    }
     // TASK A94 — preset mặc định nút LOFI (ON/OFF độc lập): Studio One/Studio Pro kênh 16 CC 118 (114 đã là PRESET NORM); Cubase CC 119. Giá trị gửi do nút quyết định (127 = BẬT, 0 = TẮT).
     if (action === "LOFI_STATE") {
         const cubase = /^cubase/i.test(String(daw).trim());
@@ -372,7 +380,7 @@ async function executeAction(action, context = {}) {
             const isKnobCc = midiMap.kind === "cc" && dynamicValue !== undefined && context.reason === "knob"
                 && (action === ACTIONS.BEAT_INPUT_VOLUME || action === ACTIONS.MASTER_OUTPUT_VOLUME
                     || action === ACTIONS.MIC1_VOLUME || action === ACTIONS.MIC2_VOLUME
-                    || action === ACTIONS.RETUNE_SPEED_MIC1 || action === ACTIONS.RETUNE_SPEED_MIC2
+                    || action === ACTIONS.RETUNE_SPEED_MIC1 || action === ACTIONS.RETUNE_SPEED_MIC2 || action === ACTIONS.AUDIO_CHILL_KNOB
                     || FX_BUS_BASE_DB[action] !== undefined);
             if (isKnobCc && typeof sendMidiCC === "function") {
                 const ccValue = knobToCc(action, dynamicValue);
