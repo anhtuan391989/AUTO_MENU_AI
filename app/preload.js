@@ -72,6 +72,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // info: { reason, message? } — xem core/integration/WindowsMediaSession.js, event "unavailable"
     onNowPlayingUnavailable: (callback) => ipcRenderer.on("now-playing-unavailable", (event, info) => callback(info)),
 
+    // ---- MOD theo đoạn Key Server (Claude C) ----
+    // plan: { changes:[{time:"02:23", from:"Eb", to:"E", semitone:1, label}] } | null (đổi bài/không có đoạn)
+    onKeyTimelinePlan: (callback) => ipcRenderer.on("key-timeline-plan", (event, plan) => callback(plan)),
+    // evt: { time, fromName, toName, toKeyName:"E Major" } — tới phút đổi tone, bắn đúng 1 lần
+    onKeyTimelineFire: (callback) => ipcRenderer.on("key-timeline-fire", (event, evt) => callback(evt)),
+
     // ---- Key Server (Task C): báo Key vừa dò xong để main gửi lên server ----
     // Chỉ gửi { key, confidence }; tên bài do main process tự biết. Trả { ok, reason } — luôn resolve, không throw.
     submitDetectedKey: (data) => ipcRenderer.invoke("server-submit-key", data),

@@ -214,6 +214,14 @@ class MpcHcSession extends EventEmitter {
 
     }
 
+    // Snapshot MỚI NHẤT của lần poll gần nhất (cập nhật MỖI lần poll, kể cả khi cùng bài) — có positionMs/durationMs/state.
+    // Khác event "change" (chỉ bắn khi đổi bài). Dùng để canh phút hiện tại của bài. Không đổi hành vi cũ.
+    getLatestSnapshot() {
+
+        return this._cache.get();
+
+    }
+
     // -------------------------------------------------------
     // Nội bộ
     // -------------------------------------------------------

@@ -147,6 +147,7 @@ const SongMatcher = require("../core/reference/SongMatcher");
 // Task C — Key Server: HỎI server trước khi dò Key, và TỰ GỬI Key lên server sau khi dò xong.
 // Mặc định BẬT; tắt bằng cách đặt "keyServerAutoSync": false trong app-settings.json.
 const { KeyServerSync } = require("../core/integration/KeyServerSync");
+const KeyTimeline = require("../core/integration/KeyTimeline"); // MOD theo đoạn của Key Server (phút nào đổi tone gì)
 const keyServerSync = new KeyServerSync({
     isEnabled: () => {
         const s = readSettingsFile();
@@ -251,6 +252,55 @@ app.whenReady().then(async () => {
 
     }
 
+    // ---- MOD theo đoạn Key Server (Claude C) ----
+    // Bài có >= 2 đoạn Key khác nhau trên server: gửi KẾ HOẠCH (phút - tone) cho renderer hiển thị, rồi canh phút hiện tại;
+    // tới đoạn mới thì bắn "key-timeline-fire" 1 lần. Renderer đưa sự kiện vào đường MOD sẵn có (Auto-Tune); SoundShifter không bị chạm.
+    // Phút hiện tại: MPC-HC có vị trí thật; trình duyệt (SMTC) chưa có vị trí -> tính từ lúc Menu thấy bài bắt đầu (giới hạn đã biết).
+    let timelineSongKey = null;          // "title|artist" của bài đang canh
+    let timelineArmedKey = null;         // bài đã lấy/đang lấy kế hoạch (tránh gọi server lặp lại)
+    let timelineSongStartedAtMs = Date.now();
+
+    function sendToRenderer(channel, payload) {
+        if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(channel, payload);
+    }
+
+    const keyTimelineRunner = new KeyTimeline.KeyTimelineRunner({
+        getPositionSec: () => {
+            const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
+            return KeyTimeline.estimatePositionSec({
+                source: active ? active.source : null,
+                mpcSnapshot: mpcHcSession.getLatestSnapshot(),
+                songStartedAtMs: timelineSongStartedAtMs
+            });
+        },
+        onFire: (evt) => {
+            console.log(`[KeyTimeline] Tới ${evt.time}: ${evt.fromName} -> ${evt.toName} (gửi sang Key/Auto-Tune)`);
+            sendToRenderer("key-timeline-fire", evt);
+        }
+    });
+
+    function resetKeyTimeline(songKey) {
+        keyTimelineRunner.disarm();
+        sendToRenderer("key-timeline-plan", null);
+        timelineSongKey = songKey;
+        timelineArmedKey = null;
+        timelineSongStartedAtMs = Date.now();
+    }
+
+    async function ensureKeyTimeline(songId, title, artist) {
+        const songKey = title + "|" + artist;
+        if (!songId || timelineArmedKey === songKey) return;
+        timelineArmedKey = songKey;
+        const r = await keyServerSync.fetchSegments(songId);
+        if (timelineSongKey !== songKey) return; // bài đã đổi trong lúc chờ server
+        if (!r.ok) { timelineArmedKey = null; console.log(`[KeyTimeline] Không lấy được đoạn Key từ server (${r.error})`); return; }
+        const plan = KeyTimeline.buildPlan(r.segments);
+        if (!plan) return; // bài chỉ có 1 Key: không có gì để canh
+        console.log(`[KeyTimeline] "${title}": ${plan.changes.map((c) => c.label).join(" | ")}`);
+        sendToRenderer("key-timeline-plan", { changes: plan.changes });
+        keyTimelineRunner.arm(plan);
+    }
+
     function dispatchUnifiedNowPlaying() {
 
         const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
@@ -258,6 +308,7 @@ app.whenReady().then(async () => {
         if (!active) {
 
             currentNowPlayingForSync = null;
+            if (timelineSongKey !== null) resetKeyTimeline(null);
 
             if (mainWin && !mainWin.isDestroyed()) {
                 mainWin.webContents.send("now-playing-change", null);
@@ -268,6 +319,10 @@ app.whenReady().then(async () => {
 
         const { snapshot, source } = active;
         const resolved = resolveTitleArtist(snapshot, source);
+        {
+            const tlKey = resolved.title ? resolved.title + "|" + (resolved.artist || "") : null;
+            if (tlKey !== timelineSongKey) resetKeyTimeline(tlKey); // đổi bài / mất bài: bỏ kế hoạch cũ, đồng hồ bài tính lại từ đầu
+        }
 
         // Tra Song Database — KHÔNG gọi AI/EventBus, chỉ đọc dữ liệu tĩnh có sẵn
         // (SongDatabase/SongMatcher đã xây từ trước, không sửa API của chúng).
@@ -298,6 +353,8 @@ app.whenReady().then(async () => {
                 if (knownServerKey) {
                     databaseMatch = { key: knownServerKey, bpm: null, source: "server" };
                     console.log(`[NowPlaying] Server Match (source=${source})`);
+                    const peekedSrv = keyServerSync.peek(resolved.title, resolved.artist);
+                    if (peekedSrv && peekedSrv.songId) ensureKeyTimeline(peekedSrv.songId, resolved.title, resolved.artist || "").catch(() => {});
                 }
 
             }
@@ -345,6 +402,7 @@ app.whenReady().then(async () => {
                 if (!cur || cur.title !== askedTitle || cur.artist !== askedArtist) return;
                 cur.serverKey = r.key;
                 console.log(`[NowPlaying] Server Match (source=${source})`);
+                if (r.songId) ensureKeyTimeline(r.songId, askedTitle, askedArtist).catch(() => {});
                 if (mainWin && !mainWin.isDestroyed()) {
                     mainWin.webContents.send("now-playing-change", { ...payload, databaseMatch: { key: r.key, bpm: null, source: "server" } });
                 }

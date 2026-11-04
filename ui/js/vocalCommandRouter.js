@@ -95,6 +95,24 @@ async function setSoundShifterPower(isOn) {
 }
 
 /**
+ * MOD OFF — đưa SoundShifter về ĐÚNG trạng thái mặc định (Semitones 0 / Interval Unison / Ratio 1.0000 / Cents 0, và Bypass BẬT).
+ * Gửi núm Semitones TUYỆT ĐỐI về 0 (CC22 = 64) — KHÔNG dựa vào việc Menu "nhớ" đã dịch bao nhiêu, nên dù lần SET nào bị lỗi giữa chừng
+ * hay plugin đang kẹt mức lạ, tắt MOD vẫn về 0. Núm bị lỗi thì vẫn cố bật Bypass (plugin không được kẹt ở trạng thái đang dịch tone).
+ * Cents / Freq / Mode / Interval do preset "default" của plugin giữ — Menu không đụng tới nên không cần reset.
+ * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string}>}
+ */
+async function resetSoundShifterToDefault() {
+    const midiPort = getSetting("midiOutputPort");
+    if (!midiPort) {
+        return { ok: false, detail: 'Chưa cấu hình cổng MIDI (Setup > MIDI) — SoundShifter chỉ điều khiển được qua MIDI.' };
+    }
+    const zero = await _sendSoundShifterAbsolute(0);
+    const off = await setSoundShifterPower(false);
+    if (!zero.ok) return { ok: false, driverUsed: "midi", detail: zero.detail };
+    return off;
+}
+
+/**
  * Dịch tone của SoundShifter đi `semitoneDelta` bán cung THEO ĐÚNG ĐƠN VỊ CỦA MENU/AUTO-TUNE
  * (hàm tự nhân với SOUNDSHIFTER_STEP_RATIO ở bên trong, nơi gọi không cần tự tính lại).
  * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string}>}

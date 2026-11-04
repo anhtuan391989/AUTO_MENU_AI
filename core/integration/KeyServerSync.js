@@ -244,6 +244,21 @@ class KeyServerSync {
     }
 
     /**
+     * Lấy các ĐOẠN Key của 1 bài (route /song-full có sẵn trên server — không cần sửa server).
+     * Luôn resolve, không throw:  { ok:true, segments:[{startSec,key,mode}] } | { ok:false, error }
+     */
+    async fetchSegments(songId) {
+        if (!this._enabled()) return { ok: false, error: 'disabled' };
+        if (!songId) return { ok: false, error: 'no-song-id' };
+        const r = await this._request('/song-full?id=' + encodeURIComponent(String(songId)), { method: 'GET' }, this.lookupTimeoutMs);
+        if (!r.ok || !r.json || !Array.isArray(r.json.doans)) {
+            return { ok: false, error: r.error || ('http-' + r.status) };
+        }
+        const segments = r.json.doans.map((d) => ({ startSec: Number(d.startSec), key: d.khoa, mode: d.mode }));
+        return { ok: true, segments };
+    }
+
+    /**
      * Gửi Key vừa dò lên server (chỉ khi server chưa có bài). Luôn resolve:
      *   { ok:true,  reason:"submitted" | "server-already-has" | "already-submitted" }
      *   { ok:false, reason:"disabled" | "no-title" | "low-confidence" | "bad-key" |

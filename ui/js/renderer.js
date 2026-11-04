@@ -743,36 +743,13 @@ const MONITOR_BTN_TO_CONTROL = { mic1Btn: "MIC1", mic2Btn: "MIC2", fxBtn: "FX" }
 // MIC1_VOLUME / MIC2_VOLUME -> CC theo mapping Setup). Đóng bằng: bấm ra ngoài, phím Esc, hoặc chuột phải lần nữa. Bấm trái MIC 1/MIC 2
 // vẫn là bật/tắt Monitor như cũ (không đổi).
 // ==========================================================
-// POPUP-AUTOHIDE-01 (A97) — MỌI popup chuột phải (MUSIC / MIC 1 / MIC 2 / FX) tự ẩn sau 5 giây. Đếm lại từ đầu mỗi khi người dùng thao tác TRONG thẻ
-// (kéo knob, cuộn chuột, bấm) để thẻ không biến mất giữa lúc đang chỉnh; mỗi lần mở thẻ đếm lại 5 s. Ẩn bằng đúng hàm ẩn sẵn có của từng popup.
-const POPUP_AUTO_HIDE_MS = 5000;
-function createPopupAutoHide(card, hide) {
-    let timer = null;
-    let pressed = false; // đang GIỮ chuột (kéo knob, kể cả kéo ra ngoài thẻ)
-    const disarm = () => { if (timer) { clearTimeout(timer); timer = null; } };
-    const arm = () => {
-        disarm();
-        timer = setTimeout(() => {
-            timer = null;
-            // POPUP-AUTOHIDE-02: chuột còn nằm trong thẻ hoặc đang giữ chuột => KHÔNG ẩn, đếm lại; chỉ ẩn khi đã hết thao tác 5 s.
-            if (pressed || card.matches(":hover")) { arm(); return; }
-            hide();
-        }, POPUP_AUTO_HIDE_MS);
-    };
-    // Mọi thao tác trong thẻ (kể cả chuột rời thẻ) => đếm lại 5 s từ đầu.
-    ["mousemove", "mouseenter", "mouseleave", "wheel", "keydown", "change", "input", "click"].forEach((ev) => card.addEventListener(ev, () => { if (timer) arm(); }));
-    card.addEventListener("mousedown", () => { if (timer) { pressed = true; disarm(); } });
-    document.addEventListener("mouseup", () => { if (pressed) { pressed = false; if (card.style.display !== "none") arm(); } });
-    return { arm, disarm: () => { pressed = false; disarm(); } };
-}
 const MIC_VOLUME_POPUPS = [
     { btnId: "mic1Btn", knobId: "mic1VolKnob", valueId: "mic1VolValue", label: "MIC 1 VOLUME" },
     { btnId: "mic2Btn", knobId: "mic2VolKnob", valueId: "mic2VolValue", label: "MIC 2 VOLUME" },
 ];
 function initMicVolumePopups() {
     const cards = [];
-    const autos = [];
-    const hideAll = () => { cards.forEach((c) => { c.style.display = "none"; }); autos.forEach((x) => x.disarm()); };
+    const hideAll = () => cards.forEach((c) => { c.style.display = "none"; });
     MIC_VOLUME_POPUPS.forEach((cfg) => {
         const btn = document.getElementById(cfg.btnId);
         if (!btn || document.getElementById(cfg.knobId)) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
@@ -784,8 +761,6 @@ function initMicVolumePopups() {
         document.body.appendChild(card);
         const k = knobData.find((x) => x.id === cfg.knobId);
         if (k) updateKnob(k); // vẽ giá trị đã khôi phục từ lần dùng trước (loadData chạy trước hàm này)
-        const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
-        autos.push(auto);
         btn.addEventListener("contextmenu", (e) => {
             e.preventDefault();
             const wasOpen = card.style.display !== "none";
@@ -798,7 +773,6 @@ function initMicVolumePopups() {
             card.style.left = left + "px";
             card.style.top = top + "px";
             card.style.display = "flex";
-            auto.arm();
         });
         cards.push(card);
     });
@@ -810,57 +784,6 @@ function initMicVolumePopups() {
         hideAll();
     });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideAll(); });
-}
-
-// ==========================================================
-// AUDIO-CHILL-01 (A96) — Bấm CHUỘT PHẢI vào nút MUSIC -> thẻ nổi giống popup Mic: TRÊN là nút "AUDIO CHILL" (ON/OFF), DƯỚI là knob điều khiển 1 VST.
-// Tất cả qua MIDI (ActionRegistry: AUDIO_CHILL_STATE / AUDIO_CHILL_KNOB). Nút và knob ĐỘC LẬP: xoay knob không đổi nút, bấm nút không đổi knob.
-// Nút: sáng = ON (gửi 127), tắt = OFF (gửi 0). Mở app luôn ở OFF và knob luôn về mặc định 50 (KHÔNG lưu/khôi phục), không gửi gì (Menu không đọc được trạng thái DAW). Tạo bằng JS, KHÔNG sửa HTML/CSS.
-// Bấm trái MUSIC giữ nguyên như cũ. Đóng thẻ: bấm ra ngoài, phím Esc, hoặc chuột phải lần nữa.
-// ==========================================================
-function initAudioChillPopup() {
-    const btn = document.getElementById("musicBtn");
-    if (!btn || document.getElementById("audioChillKnob")) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
-    const card = document.createElement("div");
-    card.className = "knob-card audio-chill-popup";
-    card.style.cssText = "position:fixed;display:none;width:190px;height:142px;z-index:3000;background:#081523;"; // nền đặc (CSS .knob-card dùng nền mờ)
-    // Bố cục: HÀNG TRÊN = nút AUDIO CHILL (rộng gần hết thẻ); HÀNG DƯỚI = chữ + số bên trái, knob bên phải (CSS .knob-label/.knob-number/.knob là absolute nên dời xuống bằng style riêng, không sửa CSS).
-    card.innerHTML = '<button id="audioChillBtn" class="preset-btn" style="position:absolute;left:12px;top:8px;width:166px;height:30px;cursor:pointer;">AUDIO CHILL</button>'
-        + '<div class="knob-label" style="top:46px;">CHILL</div><div id="audioChillValue" class="knob-number" style="top:70px;">50</div>'
-        + '<div class="knob" id="audioChillKnob" style="top:54px;"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>';
-    document.body.appendChild(card);
-    const k = knobData.find((x) => x.id === "audioChillKnob");
-    if (k) updateKnob(k); // vẽ giá trị đã khôi phục (loadData chạy trước hàm này)
-    const chillBtn = card.querySelector("#audioChillBtn");
-    chillBtn.dataset.noPreset = "1"; // không thuộc nhóm preset NORM/RAP/REMIX
-    chillBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const onNow = !chillBtn.classList.contains("active"); // trạng thái ĐÍCH sau cú bấm
-        chillBtn.classList.toggle("active", onNow);
-        Promise.resolve(window.ActionRegistry?.setDawControlState?.("AUDIO_CHILL", onNow, { reason: "menu-button" }))
-            .catch((err) => console.error("[MenuControl] AUDIO CHILL lỗi:", err));
-    });
-    const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
-    const hide = () => { card.style.display = "none"; auto.disarm(); };
-    btn.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        if (card.style.display !== "none") { hide(); return; }
-        const r = btn.getBoundingClientRect();
-        const left = Math.max(4, Math.min(window.innerWidth - 194, r.left + r.width / 2 - 95));
-        let top = r.top - 142 - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
-        if (top < 4) top = r.bottom + 6;
-        card.style.left = left + "px";
-        card.style.top = top + "px";
-        card.style.display = "flex";
-        auto.arm();
-    });
-    document.addEventListener("mousedown", (e) => {
-        const t = e.target;
-        if (card.contains(t)) return;
-        if (t && t.closest && t.closest("#musicBtn")) return; // chuột phải mở/đóng do handler contextmenu lo
-        hide();
-    });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
 }
 
 // ==========================================================
@@ -879,8 +802,7 @@ function initFxAutoMenu() {
         + '<input type="checkbox" id="fxAutoEnabledChk" style="cursor:pointer;"><span>Auto bật FX khi có nhạc</span></label>';
     document.body.appendChild(card);
     const chk = card.querySelector("#fxAutoEnabledChk");
-    const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
-    const hide = () => { card.style.display = "none"; auto.disarm(); };
+    const hide = () => { card.style.display = "none"; };
     chk.addEventListener("change", () => {
         setSetting("fxAutoEnabled", !!chk.checked);
         if (chk.checked) window.__fxAuto?.resume?.(); // tích lại => Auto chạy NGAY theo nhạc hiện tại (có nhạc bật / không nhạc tắt), bỏ qua giữ quyền 60 s
@@ -897,7 +819,6 @@ function initFxAutoMenu() {
         if (top < 4) top = r.bottom + 6;
         card.style.left = left + "px";
         card.style.top = top + "px";
-        auto.arm();
     });
     document.addEventListener("mousedown", (e) => {
         const t = e.target;
@@ -1145,8 +1066,7 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
     const panel = document.getElementById("controlPanel");
     if (!expandBtn || !panel) return;
 
-    const AUTO_COLLAPSE_MS = 5000; // 5s KHÔNG thao tác mới tự thu gọn (EXPAND-AUTOHIDE-02). Còn thao tác / chuột còn trong Control thì KHÔNG thu gọn.
-    let panelPressed = false; // đang GIỮ chuột (kéo knob, kể cả kéo ra ngoài Control)
+    const AUTO_COLLAPSE_MS = 20000; // 20s — theo yêu cầu người dùng (Task: auto-collapse timing update)
     let collapseTimer = null;
 
     // Co/giãn cửa sổ THẬT (Electron BrowserWindow) khớp đúng chiều cao nội dung
@@ -1176,13 +1096,7 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
 
     function scheduleAutoCollapse() {
         clearCollapseTimer();
-        collapseTimer = setTimeout(() => {
-            collapseTimer = null;
-            if (!panel.classList.contains("expanded")) return;
-            // Chuột còn trong Control hoặc đang giữ chuột => không thu gọn, đếm lại.
-            if (panelPressed || panel.matches(":hover")) { scheduleAutoCollapse(); return; }
-            collapsePanel();
-        }, AUTO_COLLAPSE_MS);
+        collapseTimer = setTimeout(collapsePanel, AUTO_COLLAPSE_MS);
     }
 
     function expandPanel() {
@@ -1218,17 +1132,10 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
     });
 
     // Bất kỳ thao tác nào trong Control (bấm, kéo knob, đổi select...) reset lại giờ tự Collapse
-    ["mousedown", "click", "input", "change", "mousemove", "mouseenter", "mouseleave", "wheel", "keydown", "touchstart"].forEach(evt => {
+    ["mousedown", "click", "input", "change"].forEach(evt => {
         panel.addEventListener(evt, () => {
             if (panel.classList.contains("expanded")) scheduleAutoCollapse();
-        }, { passive: true });
-    });
-    // Giữ chuột (kéo knob) thì không thu gọn; thả chuột => đếm lại 5 s.
-    panel.addEventListener("mousedown", () => { panelPressed = true; });
-    document.addEventListener("mouseup", () => {
-        if (!panelPressed) return;
-        panelPressed = false;
-        if (panel.classList.contains("expanded")) scheduleAutoCollapse();
+        });
     });
 
     // Đồng bộ chiều cao cửa sổ ngay khi tải trang xong (trạng thái mặc định = thu gọn)
@@ -1253,9 +1160,7 @@ const knobData = [
     // FX-BUS-KNOB-01 — Knob "FX" (index.html: #fxMasterKnob) = cộng/trừ volume 4 bus hiệu ứng trong DAW. 50 = giữ mức gốc.
     { id: "fxMasterKnob", valueId: "fxMasterValue", value: 50, defaultValue: 50 },
     { id: "mic1VolKnob", valueId: "mic1VolValue", value: 90, defaultValue: 90 },
-    { id: "mic2VolKnob", valueId: "mic2VolValue", value: 90, defaultValue: 90 },
-    // A96 — knob AUDIO CHILL (popup chuột phải MUSIC): 1 tham số VST qua MIDI, độc lập với nút AUDIO CHILL ON/OFF. Mặc định 50.
-    { id: "audioChillKnob", valueId: "audioChillValue", value: 50, defaultValue: 50 }
+    { id: "mic2VolKnob", valueId: "mic2VolValue", value: 90, defaultValue: 90 }
 ];
 
 // TASK A20 — clapKnob/laughKnob đi tới Internal Audio Backend (SoundEffectEngine), KHÔNG
@@ -1323,6 +1228,10 @@ let manualToneOffset = 0;
 let manualToneSet = false;
 let soundShifterApplied = 0;
 let manualToneChain = Promise.resolve(); // tuần tự hoá các lần SET bấm liên tiếp
+// MOD theo đoạn Key Server (Claude C): kế hoạch "phút - tone" của bài đang phát (null = bài không có đoạn / chưa có). Xem mục 12.
+let __serverTimelinePlan = null;
+let __serverTimelineNextIdx = 0;   // lần đổi tone sắp tới (chỉ số trong plan.changes); = changes.length khi đã qua hết
+let __serverTimelinePending = null; // sự kiện đến lúc MOD tay đang bật: giữ lại, áp khi tắt MOD tay
 
 /* ==========================================================
    7. KEY TRANSPOSE (hỗ trợ cả dấu thăng # và dấu giáng b)
@@ -2332,7 +2241,7 @@ function loadData() {
     if (Array.isArray(data.knobs)) { // MENU-FX-AUTO-OFF: cấu hình hỏng (knobs không phải mảng) không được làm đổ cả khởi tạo
         data.knobs.forEach(saved => {
             const knob = knobData.find(k => k.id === saved.id);
-            if (knob && knob.id !== "audioChillKnob") { // A96c: Audio chill luôn về mặc định (50) khi mở lại Menu, không khôi phục giá trị cũ
+            if (knob) {
                 knob.value = saved.value;
                 updateKnob(knob);
                 // TASK A20 — đồng bộ ngay volume Clap/Laugh vào SoundEffectEngine khi khôi
@@ -2374,10 +2283,10 @@ function turnManualOverrideOff() {
     // dùng cho AI tự động), (2) đưa Auto-Tune về đúng offset AI đang giữ tại thời điểm
     // này (aiSemitoneOffset, mục 12) — KHÔNG ép cứng về 0.
     // MANUAL-KEY-MOD-RESTORE-01: trả SoundShifter về 0 (đúng phần đã dịch tay) TRƯỚC khi tắt nguồn, để lần bật MOD sau không mang theo tone cũ.
-    const shifterBack = -soundShifterApplied;
+    // MOD-MIDI-RESET-01: MOD OFF -> SoundShifter về mặc định bằng lệnh TUYỆT ĐỐI (Semitones 0 rồi Bypass BẬT), không dùng độ lệch tương đối nữa.
     manualToneOffset = 0; manualToneSet = false; soundShifterApplied = 0;
     Promise.all([
-        sendToneStepToSoundShifter(shifterBack).then((back) => setSoundShifterPower(false).then((off) => (back && back.ok === false ? back : off))),
+        resetSoundShifterToDefault(),
         sendToneTarget(aiSemitoneOffset), // TASK AI-ALG-04 (D8): aiSemitoneOffset là TUYỆT ĐỐI so với Key gốc -> đưa Auto-Tune về đúng offset, không gửi tương đối sai
     ]).then(([shifterResult, autotuneResult]) => {
         const newKey = transposeKey(originalKey, aiSemitoneOffset);
@@ -2395,6 +2304,7 @@ function turnManualOverrideOff() {
         }
     });
 
+    if (typeof applyPendingServerTimeline === "function") applyPendingServerTimeline(); // đoạn Key server đến lúc MOD tay đang bật -> áp bây giờ
     saveData();
 }
 
@@ -2546,6 +2456,74 @@ async function applyModEvent(data) {
     }
 }
 
+// ==========================================================
+// MOD THEO ĐOẠN KEY SERVER (Claude C). Bài có >= 2 đoạn Key khác nhau trên server:
+//  - main gửi KẾ HOẠCH (key-timeline-plan): hiện "02:23 | Eb → E | +1 SEMITONES" trong khung MOD.
+//  - tới đúng phút, main bắn key-timeline-fire 1 lần: đổi Key của Song Database sang tone mới rồi để KHỐI KEY gửi xuống Auto-Tune
+//    (đúng đường applyActiveKeyToPlugin có sẵn). KHÔNG chạm SoundShifter (SoundShifter chỉ chạy khi người dùng bấm SET).
+//  - Key chọn tay (Manual) luôn thắng; MOD tay đang bật thì giữ lại, áp khi tắt MOD tay.
+// ==========================================================
+function renderServerTimelineDisplay() {
+    const plan = __serverTimelinePlan;
+    if (!plan || !plan.changes || !plan.changes.length) return;
+    if (typeof manualToneSet !== "undefined" && manualToneSet && isManualOverrideActive()) return; // Tone tay đang hiển thị -> không ghi đè
+    const c = plan.changes[Math.min(__serverTimelineNextIdx, plan.changes.length - 1)];
+    updateModInfo(c.time, c.from, c.to, c.semitone);
+}
+
+function applyServerTimelineFire(evt) {
+    const plan = __serverTimelinePlan;
+    if (!plan || !evt || typeof evt.toKeyName !== "string") return false;
+    if (keySource.manual.active || keySource.manual.sending) {
+        console.log(`[KeyTimeline] ${evt.time}: Key đang chọn TAY -> không tự đổi sang ${evt.toKeyName}`);
+        return false;
+    }
+    if (!keySource.songDb.active) {
+        console.log(`[KeyTimeline] ${evt.time}: Song Database không còn hiệu lực -> bỏ qua`);
+        return false;
+    }
+    if (isManualOverrideActive()) {
+        __serverTimelinePending = evt; // MOD tay đang chạy: không đánh nhau với lệnh tay, áp khi tắt MOD tay
+        console.log(`[KeyTimeline] ${evt.time}: MOD tay đang bật -> giữ ${evt.toKeyName}, áp khi tắt MOD tay`);
+        return false;
+    }
+    __serverTimelinePending = null;
+    __serverTimelineNextIdx = plan.changes.filter((c) => c.index <= evt.index).length;
+    keySource.songDb.value = evt.toKeyName;
+    applyActiveKeyToPlugin("Server Timeline " + evt.time); // Key gửi tone mới xuống Auto-Tune (có dedupe, Scale, Mic2 như mọi lần gửi Key)
+    const done = plan.changes.find((c) => c.index === evt.index);
+    recordModStage("SERVER_TIMELINE_KEY", { time: evt.time, from: evt.fromName, to: evt.toName, semitone: done ? done.semitone : null });
+    window.electronAPI?.reportAiResult?.("mod", { from: evt.fromName, to: evt.toName, semitone: done ? done.semitone : 0, time: evt.time });
+    renderServerTimelineDisplay();
+    return true;
+}
+
+function applyPendingServerTimeline() {
+    if (__serverTimelinePending && !isManualOverrideActive()) {
+        const evt = __serverTimelinePending;
+        __serverTimelinePending = null;
+        applyServerTimelineFire(evt);
+    }
+}
+
+if (window.electronAPI?.onKeyTimelinePlan) {
+    window.electronAPI.onKeyTimelinePlan((plan) => {
+        __serverTimelinePending = null;
+        if (plan && Array.isArray(plan.changes) && plan.changes.length) {
+            __serverTimelinePlan = plan;
+            __serverTimelineNextIdx = 0;
+            console.log("[KeyTimeline] Bài có đoạn đổi tone: " + plan.changes.map((c) => c.label).join(" | "));
+            renderServerTimelineDisplay();
+        } else {
+            __serverTimelinePlan = null;
+            __serverTimelineNextIdx = 0;
+        }
+    });
+}
+if (window.electronAPI?.onKeyTimelineFire) {
+    window.electronAPI.onKeyTimelineFire((evt) => { applyServerTimelineFire(evt); });
+}
+
 // TASK A72-04/05/06 — tách riêng phần RESET HIỂN THỊ (không đụng thuật toán/engine) thành 1 hàm
 // dùng chung, để dùng lại được ở CẢ nút "Auto Detect" (người dùng tự bấm, ĐANG chạy engine, chỉ
 // xoá chữ tạm) LẪN ở chỗ mất SYSTEM_AUDIO (đóng engine luôn — xem systemAudio.onDeviceLost bên
@@ -2566,6 +2544,7 @@ function resetAiDisplaysToListening() {
     if (modTimeResetEl) modTimeResetEl.textContent = "";
     if (modStatusResetEl) modStatusResetEl.textContent = "LISTENING";
     if (modTimelineResetEl) modTimelineResetEl.textContent = "";
+    renderServerTimelineDisplay(); // bài có đoạn Key từ server: giữ hiện "phút - tone" (không bị chữ LISTENING đè)
     if (typeof manualToneSet !== "undefined" && manualToneSet && isManualOverrideActive()) renderManualToneDisplay(); // AUTO DETECT chỉ reset phần AI; Tone tay người dùng đã SET vẫn hiển thị đúng
 }
 
@@ -2617,12 +2596,15 @@ function startModulationWatcher() {
     if (modTimeEl) modTimeEl.textContent = "";
     if (modStatusEl) modStatusEl.textContent = "LISTENING";
     if (modTimelineEl) modTimelineEl.textContent = "";
+    renderServerTimelineDisplay(); // bài có đoạn Key từ server: hiện lại "phút - tone" thay cho LISTENING
     if (typeof manualToneSet !== "undefined" && manualToneSet && isManualOverrideActive()) renderManualToneDisplay(); // không xoá Tone tay đang hiển thị
 
     // TASK AI-ALG-03 — truyền mode của Key gốc để ModEngine phân biệt đổi mode / giọng tương đối / modulation thật.
     // Không parse được mode (định dạng lạ) => undefined => ModEngine chạy đúng hành vi cũ (root-only).
     const originalMode = /minor/i.test(originalKey) ? "Minor" : (/major/i.test(originalKey) ? "Major" : null);
     ModEngine.start(originalRootIndex, (data) => {
+        // Bài đã có kế hoạch đổi tone từ Key Server -> server là nguồn đúng, không để dò audio gửi thêm lệnh dịch tone chồng lên.
+        if (__serverTimelinePlan) { recordModStage("SKIPPED_SERVER_TIMELINE", { semitone: data.semitone }); return; }
         const mins = String(Math.floor(songSeconds / 60)).padStart(2, "0");
         const secs = String(songSeconds % 60).padStart(2, "0");
         applyModEvent({ time: `${mins}:${secs}`, semitone: data.semitone });
@@ -3270,7 +3252,6 @@ document.addEventListener("DOMContentLoaded", () => {
     loadData();
     ensurePresetLit(); // PRESET-LIT-01
     if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
-    if (typeof initAudioChillPopup === "function") initAudioChillPopup(); // AUDIO-CHILL-01 — chuột phải MUSIC: nút Audio chill + knob VST
     if (typeof initFxAutoMenu === "function") initFxAutoMenu(); // FX-AUTO-TOGGLE-01 — chuột phải FX: ô tích Auto bật FX khi có nhạc
 
     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây
@@ -3296,7 +3277,6 @@ document.addEventListener("DOMContentLoaded", () => {
         masterKnob: "MASTER_OUTPUT_VOLUME",
         mic1VolKnob: "MIC1_VOLUME", // MIC-VOLUME-KNOB-01 (fader track Mic)
         mic2VolKnob: "MIC2_VOLUME", // MIC-VOLUME-KNOB-01 (fader track Không Dây)
-        audioChillKnob: "AUDIO_CHILL_KNOB", // A96 (knob Audio chill — popup chuột phải MUSIC)
         // TASK B12 — clapKnob/laughKnob CỐ TÌNH KHÔNG có trong map này: bằng chứng (xlsx
         // tham chiếu "Âm lượng ... trên Menu, file đi kèm trong menu") chỉ ra target là
         // audio engine NỘI BỘ (phát file mẫu bundled), KHÔNG phải MIDI/DAW — nối vào dispatch

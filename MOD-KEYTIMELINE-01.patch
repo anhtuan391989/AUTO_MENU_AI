@@ -1,0 +1,815 @@
+diff --git a/MOD-MIDI-SOUNDSHIFTER-GUIDE.md b/MOD-MIDI-SOUNDSHIFTER-GUIDE.md
+new file mode 100644
+index 0000000..a1c9a8d
+--- /dev/null
++++ b/MOD-MIDI-SOUNDSHIFTER-GUIDE.md
+@@ -0,0 +1,69 @@
++# MOD + SoundShifter qua MIDI — Hướng dẫn (Claude C)
++
++## 1. Bảng MIDI của SoundShifter (kênh MIDI 1)
++
++Menu gửi SoundShifter trên **kênh MIDI 1**. Bộ điều khiển AutoMenuAI của Studio One dùng kênh 15 và 16, nên **không bị trùng**.
++
++| Việc | Học trong Studio One | CC | Giá trị Menu gửi |
++|---|---|---|---|
++| Núm **Semitones** | MIDI Learn vào núm Semitones | **22** | 0 = -12, **64 = 0**, 127 = +12 (mỗi bán cung ≈ 5 đơn vị) |
++| Nút **Bypass** | MIDI Learn vào nút Bypass | **24** | **127 = Bypass BẬT** (plugin bị bỏ qua), **0 = Bypass TẮT** (plugin chạy) |
++
++Hai CC này đã học sẵn ở máy bạn. Khi cài lại máy hoặc đổi project, làm lại đúng bảng trên.
++Nếu nút Bypass của bạn học theo kiểu Power (127 = chạy), đổi `SOUNDSHIFTER_TOGGLE_IS_BYPASS` thành `false` trong `ui/js/vocalCommandRouter.js`.
++
++**Không cần học MIDI** cho Cents, Interval, Freq, Mode, Ratio. Menu không đụng tới. Chúng giữ theo preset `default`, đúng như ảnh bạn gửi (Semitones 0, Cents 0, Interval Unison, Freq 440/440, Mode Transient, Ratio 1.0000).
++
++## 2. Menu điều khiển SoundShifter thế nào
++
++| Bạn làm | Menu gửi |
++|---|---|
++| Bật **MOD ON** | CC24 = 0 (Bypass TẮT), rồi CC22 = 64 (Semitones về 0) |
++| Chọn Tone trong ô chọn (+3...) | **Không gửi gì.** Chỉ xem trước. |
++| Bấm **SET** | CC22 = giá trị của Tone vừa chọn. Đồng thời Auto-Tune nhận Key đã dịch. |
++| Bật **MOD OFF** (hoặc tự tắt sau 5 phút) | CC22 = 64 (Semitones về 0, **tuyệt đối**), rồi CC24 = 127 (Bypass BẬT) |
++
++Điểm mới: MOD OFF luôn gửi **Semitones = 0 tuyệt đối**. Trước đây Menu chỉ trừ phần "nhớ đã dịch", nên nếu một lần SET bị lỗi giữa chừng thì plugin có thể kẹt ở mức lạ. Giờ tắt MOD là về đúng như ảnh.
++
++## 3. MOD tự động theo đoạn của Key Server
++
++Bài có từ 2 đoạn Key khác nhau trên server:
++
++1. Khung MOD hiện: **`02:23` | `Eb → E` | `+1 SEMITONES`** (bài nhiều đoạn thì hiện lần đổi sắp tới).
++2. Tới đúng phút đó, Menu đổi Key sang tone mới và **khối Key tự gửi xuống Auto-Tune**.
++3. Đường tự động này **không gửi gì cho SoundShifter**. SoundShifter chỉ chạy khi bạn bấm SET.
++4. Các ngoại lệ (Menu không tự đổi Key):
++   - Bạn đang chọn **Key tay** (Manual): Key tay luôn thắng.
++   - Bạn đang bật **MOD tay**: Menu giữ đoạn Key đó và áp ngay khi bạn tắt MOD tay.
++   - Bài đã có kế hoạch từ server: phần dò modulation bằng audio không gửi thêm lệnh chồng lên.
++
++**Phút hiện tại của bài lấy từ đâu?**
++- **MPC-HC**: vị trí thật (poll mỗi 2 giây, Menu tự cộng phần trôi qua). Chính xác.
++- **Trình duyệt (Edge/Chrome/Brave)**: Menu chưa đọc được vị trí. Menu tính từ lúc **thấy bài bắt đầu**. Bài phải phát từ đầu, không tua, không pause lâu, thì mới đúng phút. Tua, pause hoặc mở Menu giữa bài sẽ lệch.
++
++## 4. Test nhanh (khoảng 5 phút)
++
++**A. SoundShifter qua MIDI**
++1. Mở project có SoundShifter đã học CC22 và CC24. Bật MIDI trong Setup.
++2. Bấm **MOD ON**. Kỳ vọng: Bypass của SoundShifter **tắt** (plugin sáng), Semitones = 0.
++3. Chọn Tone `+2` nhưng **chưa bấm SET**. Kỳ vọng: Semitones vẫn 0.
++4. Bấm **SET**. Kỳ vọng: Semitones nhảy sang `+2`, Interval/Ratio đổi theo.
++5. Bấm **MOD OFF**. Kỳ vọng: Semitones về `0` (Interval Unison, Ratio 1.0000) rồi Bypass **bật**.
++6. Lặp lại, lần này SET xong rút/cắm loopMIDI rồi bấm MOD OFF. Kỳ vọng: sau khi cổng MIDI trở lại, bấm MOD OFF lần nữa thì Semitones về 0.
++
++**B. Tự đổi tone theo đoạn**
++1. Chuẩn bị 1 bài trên server có 2 đoạn Key khác nhau, ví dụ 0:00 = Eb, 0:30 = E. Dùng bài ngắn để thử cho nhanh.
++2. Phát bài bằng **MPC-HC** (chính xác nhất). Chờ khung MOD hiện `00:30 | Eb → E | +1 SEMITONES`.
++3. Tới 00:30. Kỳ vọng: ô Key đổi sang `E Major` và Auto-Tune nhận Key mới. **SoundShifter không nhúc nhích.**
++4. Tua lùi về đầu bài. Kỳ vọng: Key trả về `Eb Major`.
++5. Chuyển sang bài khác. Kỳ vọng: khung MOD về LISTENING hoặc hiện kế hoạch của bài mới.
++
++Nếu có gì lệch, mở DevTools của Menu, chép các dòng bắt đầu bằng `[KeyTimeline]`, và gửi cho mình.
++
++## 5. Chưa kiểm chứng trên máy thật
++
++Mọi test đã chạy bằng mô phỏng (MIDI giả, mạng giả, đồng hồ giả), **chưa chạy trên Windows + Studio One + SoundShifter thật**.
++Cần bạn xác nhận 3 điều:
++- Giá trị CC22 = 64 đúng là Semitones 0 trên SoundShifter của bạn.
++- Trình duyệt: phút hiện tại tính từ lúc bài bắt đầu có đủ chính xác khi bạn dùng thật không. Nếu không, bước tiếp theo là đọc vị trí thật của trình duyệt (cần sửa file PowerShell đọc SMTC, cần test trên Windows).
++- Đổi Key tuyệt đối xuống Auto-Tune lúc 02:23 nghe không bị khựng.
+diff --git a/app/main.js b/app/main.js
+index 1df2edf..04a27ed 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -147,6 +147,7 @@ const SongMatcher = require("../core/reference/SongMatcher");
+ // Task C — Key Server: HỎI server trước khi dò Key, và TỰ GỬI Key lên server sau khi dò xong.
+ // Mặc định BẬT; tắt bằng cách đặt "keyServerAutoSync": false trong app-settings.json.
+ const { KeyServerSync } = require("../core/integration/KeyServerSync");
++const KeyTimeline = require("../core/integration/KeyTimeline"); // MOD theo đoạn của Key Server (phút nào đổi tone gì)
+ const keyServerSync = new KeyServerSync({
+     isEnabled: () => {
+         const s = readSettingsFile();
+@@ -251,6 +252,55 @@ app.whenReady().then(async () => {
+ 
+     }
+ 
++    // ---- MOD theo đoạn Key Server (Claude C) ----
++    // Bài có >= 2 đoạn Key khác nhau trên server: gửi KẾ HOẠCH (phút - tone) cho renderer hiển thị, rồi canh phút hiện tại;
++    // tới đoạn mới thì bắn "key-timeline-fire" 1 lần. Renderer đưa sự kiện vào đường MOD sẵn có (Auto-Tune); SoundShifter không bị chạm.
++    // Phút hiện tại: MPC-HC có vị trí thật; trình duyệt (SMTC) chưa có vị trí -> tính từ lúc Menu thấy bài bắt đầu (giới hạn đã biết).
++    let timelineSongKey = null;          // "title|artist" của bài đang canh
++    let timelineArmedKey = null;         // bài đã lấy/đang lấy kế hoạch (tránh gọi server lặp lại)
++    let timelineSongStartedAtMs = Date.now();
++
++    function sendToRenderer(channel, payload) {
++        if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(channel, payload);
++    }
++
++    const keyTimelineRunner = new KeyTimeline.KeyTimelineRunner({
++        getPositionSec: () => {
++            const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
++            return KeyTimeline.estimatePositionSec({
++                source: active ? active.source : null,
++                mpcSnapshot: mpcHcSession.getLatestSnapshot(),
++                songStartedAtMs: timelineSongStartedAtMs
++            });
++        },
++        onFire: (evt) => {
++            console.log(`[KeyTimeline] Tới ${evt.time}: ${evt.fromName} -> ${evt.toName} (gửi sang Key/Auto-Tune)`);
++            sendToRenderer("key-timeline-fire", evt);
++        }
++    });
++
++    function resetKeyTimeline(songKey) {
++        keyTimelineRunner.disarm();
++        sendToRenderer("key-timeline-plan", null);
++        timelineSongKey = songKey;
++        timelineArmedKey = null;
++        timelineSongStartedAtMs = Date.now();
++    }
++
++    async function ensureKeyTimeline(songId, title, artist) {
++        const songKey = title + "|" + artist;
++        if (!songId || timelineArmedKey === songKey) return;
++        timelineArmedKey = songKey;
++        const r = await keyServerSync.fetchSegments(songId);
++        if (timelineSongKey !== songKey) return; // bài đã đổi trong lúc chờ server
++        if (!r.ok) { timelineArmedKey = null; console.log(`[KeyTimeline] Không lấy được đoạn Key từ server (${r.error})`); return; }
++        const plan = KeyTimeline.buildPlan(r.segments);
++        if (!plan) return; // bài chỉ có 1 Key: không có gì để canh
++        console.log(`[KeyTimeline] "${title}": ${plan.changes.map((c) => c.label).join(" | ")}`);
++        sendToRenderer("key-timeline-plan", { changes: plan.changes });
++        keyTimelineRunner.arm(plan);
++    }
++
+     function dispatchUnifiedNowPlaying() {
+ 
+         const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
+@@ -258,6 +308,7 @@ app.whenReady().then(async () => {
+         if (!active) {
+ 
+             currentNowPlayingForSync = null;
++            if (timelineSongKey !== null) resetKeyTimeline(null);
+ 
+             if (mainWin && !mainWin.isDestroyed()) {
+                 mainWin.webContents.send("now-playing-change", null);
+@@ -268,6 +319,10 @@ app.whenReady().then(async () => {
+ 
+         const { snapshot, source } = active;
+         const resolved = resolveTitleArtist(snapshot, source);
++        {
++            const tlKey = resolved.title ? resolved.title + "|" + (resolved.artist || "") : null;
++            if (tlKey !== timelineSongKey) resetKeyTimeline(tlKey); // đổi bài / mất bài: bỏ kế hoạch cũ, đồng hồ bài tính lại từ đầu
++        }
+ 
+         // Tra Song Database — KHÔNG gọi AI/EventBus, chỉ đọc dữ liệu tĩnh có sẵn
+         // (SongDatabase/SongMatcher đã xây từ trước, không sửa API của chúng).
+@@ -298,6 +353,8 @@ app.whenReady().then(async () => {
+                 if (knownServerKey) {
+                     databaseMatch = { key: knownServerKey, bpm: null, source: "server" };
+                     console.log(`[NowPlaying] Server Match (source=${source})`);
++                    const peekedSrv = keyServerSync.peek(resolved.title, resolved.artist);
++                    if (peekedSrv && peekedSrv.songId) ensureKeyTimeline(peekedSrv.songId, resolved.title, resolved.artist || "").catch(() => {});
+                 }
+ 
+             }
+@@ -345,6 +402,7 @@ app.whenReady().then(async () => {
+                 if (!cur || cur.title !== askedTitle || cur.artist !== askedArtist) return;
+                 cur.serverKey = r.key;
+                 console.log(`[NowPlaying] Server Match (source=${source})`);
++                if (r.songId) ensureKeyTimeline(r.songId, askedTitle, askedArtist).catch(() => {});
+                 if (mainWin && !mainWin.isDestroyed()) {
+                     mainWin.webContents.send("now-playing-change", { ...payload, databaseMatch: { key: r.key, bpm: null, source: "server" } });
+                 }
+diff --git a/app/preload.js b/app/preload.js
+index 5d1d92b..c5db13d 100644
+--- a/app/preload.js
++++ b/app/preload.js
+@@ -72,6 +72,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
+     // info: { reason, message? } — xem core/integration/WindowsMediaSession.js, event "unavailable"
+     onNowPlayingUnavailable: (callback) => ipcRenderer.on("now-playing-unavailable", (event, info) => callback(info)),
+ 
++    // ---- MOD theo đoạn Key Server (Claude C) ----
++    // plan: { changes:[{time:"02:23", from:"Eb", to:"E", semitone:1, label}] } | null (đổi bài/không có đoạn)
++    onKeyTimelinePlan: (callback) => ipcRenderer.on("key-timeline-plan", (event, plan) => callback(plan)),
++    // evt: { time, fromName, toName, toKeyName:"E Major" } — tới phút đổi tone, bắn đúng 1 lần
++    onKeyTimelineFire: (callback) => ipcRenderer.on("key-timeline-fire", (event, evt) => callback(evt)),
++
+     // ---- Key Server (Task C): báo Key vừa dò xong để main gửi lên server ----
+     // Chỉ gửi { key, confidence }; tên bài do main process tự biết. Trả { ok, reason } — luôn resolve, không throw.
+     submitDetectedKey: (data) => ipcRenderer.invoke("server-submit-key", data),
+diff --git a/core/integration/KeyServerSync.js b/core/integration/KeyServerSync.js
+index 9822e95..65043bf 100644
+--- a/core/integration/KeyServerSync.js
++++ b/core/integration/KeyServerSync.js
+@@ -243,6 +243,21 @@ class KeyServerSync {
+         return p;
+     }
+ 
++    /**
++     * Lấy các ĐOẠN Key của 1 bài (route /song-full có sẵn trên server — không cần sửa server).
++     * Luôn resolve, không throw:  { ok:true, segments:[{startSec,key,mode}] } | { ok:false, error }
++     */
++    async fetchSegments(songId) {
++        if (!this._enabled()) return { ok: false, error: 'disabled' };
++        if (!songId) return { ok: false, error: 'no-song-id' };
++        const r = await this._request('/song-full?id=' + encodeURIComponent(String(songId)), { method: 'GET' }, this.lookupTimeoutMs);
++        if (!r.ok || !r.json || !Array.isArray(r.json.doans)) {
++            return { ok: false, error: r.error || ('http-' + r.status) };
++        }
++        const segments = r.json.doans.map((d) => ({ startSec: Number(d.startSec), key: d.khoa, mode: d.mode }));
++        return { ok: true, segments };
++    }
++
+     /**
+      * Gửi Key vừa dò lên server (chỉ khi server chưa có bài). Luôn resolve:
+      *   { ok:true,  reason:"submitted" | "server-already-has" | "already-submitted" }
+diff --git a/core/integration/KeyTimeline.js b/core/integration/KeyTimeline.js
+new file mode 100644
+index 0000000..8334ca4
+--- /dev/null
++++ b/core/integration/KeyTimeline.js
+@@ -0,0 +1,158 @@
++/**
++ * core/integration/KeyTimeline.js — MOD theo đoạn của Key Server (Claude C)
++ * ----------------------------------------------------------
++ * Bài có nhiều đoạn Key trên server (vd 02:23 đổi Eb -> E):
++ *   1. buildPlan(): đổi danh sách đoạn của server thành "kế hoạch": mỗi lần đổi tone = {time:"02:23", from:"Eb", to:"E", semitone:+1}.
++ *   2. KeyTimelineRunner: canh phút hiện tại của bài; tới đoạn mới thì gọi onFire() ĐÚNG 1 LẦN (renderer sẽ gửi sang Auto-Tune
++ *      bằng đường MOD sẵn có — SoundShifter KHÔNG bị chạm, SoundShifter chỉ chạy khi người dùng bấm SET).
++ *   3. estimatePositionSec(): ước lượng phút hiện tại: MPC-HC có vị trí thật; trình duyệt (SMTC) chưa có vị trí -> tính từ lúc bắt đầu bài.
++ *
++ * Module THUẦN: không Electron, không mạng, không MIDI. Đồng hồ/timer đều tiêm được nên test không phải chờ thật.
++ */
++"use strict";
++
++const NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
++const FLAT_TO_SHARP = { Db: "C#", Eb: "D#", Gb: "F#", Ab: "G#", Bb: "A#" };
++const MPC_STATE_PLAYING = 2;
++
++// "Eb" | "D#" | "E♭" -> 0..11, không hiểu -> -1
++function rootIndex(raw) {
++    const m = /^([A-Ga-g])([#b♯♭]?)$/.exec(String(raw == null ? "" : raw).trim());
++    if (!m) return -1;
++    const root = m[1].toUpperCase() + m[2].replace("♯", "#").replace("♭", "b");
++    return NOTES.indexOf(FLAT_TO_SHARP[root] || root);
++}
++
++function normMode(raw) {
++    return /^min/i.test(String(raw || "").trim()) ? "minor" : "major";
++}
++
++// Số bán cung ngắn nhất (-6..+6) để đi từ Key này sang Key kia. Khác mode (Am <-> C) thì so theo giọng trưởng tương đối.
++function tonicShift(fromRoot, fromMode, toRoot, toMode) {
++    const rel = (idx, mode) => (mode === "minor" ? (idx + 3) % 12 : idx);
++    let d = (((rel(toRoot, toMode) - rel(fromRoot, fromMode)) % 12) + 12) % 12;
++    if (d > 6) d -= 12;
++    return d;
++}
++
++function mmss(sec) {
++    const s = Math.max(0, Math.floor(Number(sec) || 0));
++    return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
++}
++
++function keyId(seg) { return seg.rootIdx + "|" + seg.mode; }
++
++/**
++ * @param {Array<{startSec:number, key?:string, khoa?:string, mode?:string}>} rawSegments đoạn của server (/song-full "doans")
++ * @returns {{segments:Array, changes:Array}|null} null nếu bài không có ít nhất 1 lần đổi Key thật.
++ */
++function buildPlan(rawSegments) {
++    if (!Array.isArray(rawSegments)) return null;
++    const segments = [];
++    for (const r of rawSegments) {
++        if (!r) continue;
++        const startSec = Number(r.startSec);
++        const rootRaw = r.key != null ? r.key : r.khoa;
++        const idx = rootIndex(rootRaw);
++        if (!Number.isFinite(startSec) || startSec < 0 || idx < 0) continue; // đoạn hỏng: bỏ, không bịa
++        const mode = normMode(r.mode);
++        const rootName = String(rootRaw).trim();
++        segments.push({ startSec, rootIdx: idx, mode, name: rootName + (mode === "minor" ? "m" : ""), keyName: rootName + (mode === "minor" ? " Minor" : " Major") });
++    }
++    segments.sort((a, b) => a.startSec - b.startSec);
++    if (segments.length < 2) return null;
++
++    const changes = [];
++    for (let i = 1; i < segments.length; i++) {
++        const prev = segments[i - 1], cur = segments[i];
++        if (keyId(prev) === keyId(cur)) continue; // cùng Key: không phải đổi tone
++        const semitone = tonicShift(prev.rootIdx, prev.mode, cur.rootIdx, cur.mode);
++        const time = mmss(cur.startSec);
++        changes.push({ index: i, timeSec: cur.startSec, time, from: prev.name, to: cur.name, semitone, label: `${time} - ${prev.name} -> ${cur.name}` });
++    }
++    if (!changes.length) return null;
++    return { segments, changes };
++}
++
++// Chỉ số đoạn đang phát tại giây `sec` (đoạn cuối có startSec <= sec; trước đoạn đầu -> 0).
++function segmentIndexAt(plan, sec) {
++    let idx = 0;
++    for (let i = 0; i < plan.segments.length; i++) {
++        if (plan.segments[i].startSec <= sec) idx = i; else break;
++    }
++    return idx;
++}
++
++/**
++ * Ước lượng phút hiện tại (giây) của bài đang phát. Trả null nếu chưa biết.
++ *  - MPC-HC: vị trí thật từ lần poll gần nhất (+ thời gian trôi qua nếu đang Playing).
++ *  - Nguồn khác (trình duyệt/SMTC): SMTC của Menu hiện KHÔNG có vị trí -> tính từ lúc Menu thấy bài bắt đầu (songStartedAtMs).
++ */
++function estimatePositionSec({ source, mpcSnapshot, songStartedAtMs, now }) {
++    const t = typeof now === "number" ? now : Date.now();
++    if (source === "mpc-hc" && mpcSnapshot && Number.isFinite(mpcSnapshot.positionMs) && mpcSnapshot.durationMs > 0) {
++        const elapsedMs = mpcSnapshot.state === MPC_STATE_PLAYING && Number.isFinite(mpcSnapshot.timestamp) ? Math.max(0, t - mpcSnapshot.timestamp) : 0;
++        return (mpcSnapshot.positionMs + elapsedMs) / 1000;
++    }
++    if (Number.isFinite(songStartedAtMs)) return Math.max(0, (t - songStartedAtMs) / 1000);
++    return null;
++}
++
++class KeyTimelineRunner {
++    /**
++     * @param {object} o
++     * @param {Function} o.getPositionSec () => number|null
++     * @param {Function} o.onFire         ({index,timeSec,time,toName,toKeyName,fromName}) => void
++     */
++    constructor(o) {
++        this.getPositionSec = o.getPositionSec;
++        this.onFire = o.onFire;
++        this.tickMs = o.tickMs || 500;
++        this._setInterval = o.setIntervalFn || setInterval;
++        this._clearInterval = o.clearIntervalFn || clearInterval;
++        this._timer = null;
++        this._plan = null;
++        this._appliedId = null;
++        this._appliedIdx = 0;
++    }
++
++    isArmed() { return !!this._plan; }
++
++    arm(plan) {
++        this.disarm();
++        if (!plan || !plan.segments || plan.segments.length < 2) return;
++        this._plan = plan;
++        this._appliedIdx = 0;
++        this._appliedId = keyId(plan.segments[0]); // mở đầu bài = Key gốc (đoạn 0), Menu đã dùng Key này rồi
++        this._timer = this._setInterval(() => this.tick(), this.tickMs);
++        if (this._timer && typeof this._timer.unref === "function") this._timer.unref();
++        this.tick();
++    }
++
++    disarm() {
++        if (this._timer !== null) { this._clearInterval(this._timer); this._timer = null; }
++        this._plan = null;
++        this._appliedId = null;
++        this._appliedIdx = 0;
++    }
++
++    // Quyết định theo TRẠNG THÁI (đang ở đoạn nào), không theo sự kiện: tua tới/lùi vẫn ra Key đúng; mỗi lần Key đổi gửi đúng 1 lần.
++    tick() {
++        const plan = this._plan;
++        if (!plan) return;
++        let pos = null;
++        try { pos = this.getPositionSec(); } catch (e) { pos = null; }
++        if (typeof pos !== "number" || !Number.isFinite(pos)) return;
++        const idx = segmentIndexAt(plan, pos);
++        const seg = plan.segments[idx];
++        if (keyId(seg) === this._appliedId) { this._appliedIdx = idx; return; }
++        const from = plan.segments[this._appliedIdx];
++        this._appliedId = keyId(seg);
++        this._appliedIdx = idx;
++        try {
++            this.onFire({ index: idx, timeSec: seg.startSec, time: mmss(seg.startSec), fromName: from.name, toName: seg.name, toKeyName: seg.keyName });
++        } catch (e) { /* lỗi gửi không được làm hỏng vòng canh giờ */ }
++    }
++}
++
++module.exports = { buildPlan, segmentIndexAt, estimatePositionSec, KeyTimelineRunner, tonicShift, rootIndex, mmss };
+diff --git a/core/integration/MpcHcSession.js b/core/integration/MpcHcSession.js
+index d3d92dc..636968c 100644
+--- a/core/integration/MpcHcSession.js
++++ b/core/integration/MpcHcSession.js
+@@ -214,6 +214,14 @@ class MpcHcSession extends EventEmitter {
+ 
+     }
+ 
++    // Snapshot MỚI NHẤT của lần poll gần nhất (cập nhật MỖI lần poll, kể cả khi cùng bài) — có positionMs/durationMs/state.
++    // Khác event "change" (chỉ bắn khi đổi bài). Dùng để canh phút hiện tại của bài. Không đổi hành vi cũ.
++    getLatestSnapshot() {
++
++        return this._cache.get();
++
++    }
++
+     // -------------------------------------------------------
+     // Nội bộ
+     // -------------------------------------------------------
+diff --git a/tests/unit/KeyTimelineMod01.verify.js b/tests/unit/KeyTimelineMod01.verify.js
+new file mode 100644
+index 0000000..3bb9351
+--- /dev/null
++++ b/tests/unit/KeyTimelineMod01.verify.js
+@@ -0,0 +1,220 @@
++/**
++ * KEY-TIMELINE-MOD-01 — bài có 2 đoạn Key trên server: hiện "phút - tone", tới phút thì tự gửi sang Key (-> Auto-Tune);
++ * SoundShifter chỉ chạy khi bấm SET, MOD OFF đưa SoundShifter về mặc định (Semitones 0 + Bypass).
++ * Kiểm bằng mô phỏng phần mềm (đồng hồ giả, MIDI giả, mạng giả) — KHÔNG phải Windows/Studio One/SoundShifter thật.
++ * Chạy: node tests/unit/KeyTimelineMod01.verify.js
++ */
++"use strict";
++const fs = require("fs"), path = require("path"), vm = require("vm");
++const ROOT = process.env.AUTOMENU_ROOT || path.resolve(__dirname, "../..");
++const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
++const KT = require(path.join(ROOT, "core/integration/KeyTimeline.js"));
++const { KeyServerSync } = require(path.join(ROOT, "core/integration/KeyServerSync.js"));
++let pass = 0, fail = 0;
++const ok = (c, m, extra) => { if (c) { pass++; console.log("  OK   " + m); } else { fail++; console.log("  FAIL " + m + (extra !== undefined ? "  -> " + JSON.stringify(extra) : "")); } };
++
++// lấy nguyên thân hàm theo đếm ngoặc (không dùng regex lười)
++function extractFn(src, name) {
++    const i = src.indexOf("function " + name + "(");
++    if (i < 0) return "";
++    let j = src.indexOf("{", i), depth = 0;
++    for (let k = j; k < src.length; k++) {
++        if (src[k] === "{") depth++;
++        else if (src[k] === "}") { depth--; if (depth === 0) return src.slice(i, k + 1); }
++    }
++    return "";
++}
++
++(async () => {
++    console.log("== A. Kế hoạch từ đoạn của server ==");
++    {
++        const p = KT.buildPlan([{ startSec: 0, key: "Eb", mode: "major" }, { startSec: 143, key: "E", mode: "major" }]);
++        ok(p && p.changes.length === 1 && p.changes[0].label === "02:23 - Eb -> E", "A1. 02:23 - Eb -> E", p && p.changes);
++        ok(p.changes[0].semitone === 1 && p.changes[0].time === "02:23", "A2. +1 bán cung, thời gian 02:23");
++        const pm = KT.buildPlan([{ startSec: 0, key: "C", mode: "minor" }, { startSec: 200, key: "C#", mode: "minor" }]);
++        ok(pm.changes[0].from === "Cm" && pm.changes[0].to === "C#m", "A3. giọng thứ hiện Cm -> C#m");
++        ok(KT.buildPlan([{ startSec: 0, key: "C", mode: "major" }]) === null, "A4. chỉ 1 đoạn -> không có kế hoạch");
++        ok(KT.buildPlan([{ startSec: 0, key: "C", mode: "major" }, { startSec: 90, key: "C", mode: "major" }]) === null, "A5. 2 đoạn cùng Key -> không có đổi tone");
++        const pu = KT.buildPlan([{ startSec: 300, key: "F", mode: "major" }, { startSec: 0, key: "D", mode: "major" }, { startSec: 100, key: "?", mode: "major" }, { startSec: -5, key: "G" }]);
++        ok(pu && pu.changes.length === 1 && pu.changes[0].from === "D" && pu.changes[0].to === "F" && pu.changes[0].semitone === 3, "A6. tự sắp xếp theo thời gian, bỏ đoạn hỏng (Key lạ/thời gian âm)", pu && pu.changes);
++        ok(KT.tonicShift(0, "major", 7, "major") === -5 && KT.tonicShift(7, "major", 0, "major") === 5, "A7. đi đường ngắn nhất (C->G = -5, G->C = +5)");
++        ok(KT.tonicShift(9, "minor", 0, "major") === 0, "A8. Am -> C (giọng tương đối) = 0 bán cung");
++        const pk = KT.buildPlan([{ startSec: 0, khoa: "G", mode: "major" }, { startSec: 61, khoa: "A", mode: "major" }]);
++        ok(pk && pk.changes[0].label === "01:01 - G -> A", "A9. nhận cả tên trường khoa của /song-full");
++    }
++
++    console.log("== B. Đoạn đang phát tại giây X ==");
++    {
++        const p = KT.buildPlan([{ startSec: 0, key: "C", mode: "major" }, { startSec: 100, key: "D", mode: "major" }, { startSec: 200, key: "E", mode: "major" }]);
++        ok(KT.segmentIndexAt(p, 0) === 0 && KT.segmentIndexAt(p, 99.9) === 0 && KT.segmentIndexAt(p, 100) === 1 && KT.segmentIndexAt(p, 250) === 2, "B1. 0->0, 99.9->0, 100->1, 250->2");
++    }
++
++    console.log("== C. Phút hiện tại của bài ==");
++    {
++        const mpc = { positionMs: 60000, durationMs: 240000, state: 2, timestamp: 1000 };
++        ok(KT.estimatePositionSec({ source: "mpc-hc", mpcSnapshot: mpc, songStartedAtMs: 0, now: 3000 }) === 62, "C1. MPC-HC đang phát: vị trí thật + thời gian trôi qua (60s + 2s)");
++        ok(KT.estimatePositionSec({ source: "mpc-hc", mpcSnapshot: { ...mpc, state: 1 }, songStartedAtMs: 0, now: 9000 }) === 60, "C2. MPC-HC đang dừng: không cộng thời gian trôi");
++        ok(KT.estimatePositionSec({ source: "smtc", mpcSnapshot: mpc, songStartedAtMs: 10000, now: 15000 }) === 5, "C3. trình duyệt (SMTC): tính từ lúc thấy bài bắt đầu (5s)");
++        ok(KT.estimatePositionSec({ source: null, mpcSnapshot: null, songStartedAtMs: undefined, now: 1 }) === null, "C4. không có gì -> null (không bịa)");
++    }
++
++    console.log("== D. Bộ canh giờ (đồng hồ giả) ==");
++    {
++        const plan = KT.buildPlan([{ startSec: 0, key: "Eb", mode: "major" }, { startSec: 143, key: "E", mode: "major" }]);
++        let pos = 0, timers = 0, cleared = 0, tickFn = null; const fired = [];
++        const mk = (getPos) => new KT.KeyTimelineRunner({
++            getPositionSec: getPos || (() => pos), onFire: (e) => fired.push(e),
++            setIntervalFn: (f) => { timers++; tickFn = f; return { id: timers }; }, clearIntervalFn: () => { cleared++; tickFn = null; },
++        });
++        const r = mk();
++        r.arm(plan);
++        ok(r.isArmed() && timers === 1 && fired.length === 0, "D1. bắt đầu bài: không gửi gì (đang ở Key gốc)");
++        pos = 142.9; tickFn();
++        ok(fired.length === 0, "D2. 02:22.9 chưa tới -> chưa gửi");
++        pos = 143; tickFn();
++        ok(fired.length === 1 && fired[0].time === "02:23" && fired[0].fromName === "Eb" && fired[0].toName === "E" && fired[0].toKeyName === "E Major", "D3. đúng 02:23 -> gửi 1 lần Eb -> E (E Major)", fired);
++        pos = 150; tickFn(); pos = 200; tickFn();
++        ok(fired.length === 1, "D4. qua đoạn rồi không gửi lặp");
++        pos = 10; tickFn();
++        ok(fired.length === 2 && fired[1].toName === "Eb" && fired[1].toKeyName === "Eb Major", "D5. tua lùi về đầu bài -> trả Key gốc đúng 1 lần", fired[1]);
++        r.disarm();
++        ok(!r.isArmed() && cleared >= 1, "D6. disarm dừng timer");
++        pos = 500; if (tickFn) tickFn();
++        ok(fired.length === 2, "D7. sau disarm không gửi nữa");
++
++        const f2 = []; const late = new KT.KeyTimelineRunner({ getPositionSec: () => 300, onFire: (e) => f2.push(e), setIntervalFn: () => 1, clearIntervalFn() {} });
++        late.arm(plan);
++        ok(f2.length === 1 && f2[0].toName === "E", "D8. mở Menu giữa bài (đã qua 02:23) -> áp ngay Key đúng của đoạn hiện tại");
++
++        let pn = null; const f3 = []; const noPos = new KT.KeyTimelineRunner({ getPositionSec: () => pn, onFire: (e) => f3.push(e), setIntervalFn: () => 1, clearIntervalFn() {} });
++        noPos.arm(plan); noPos.tick();
++        const thr = new KT.KeyTimelineRunner({ getPositionSec: () => { throw new Error("x"); }, onFire: () => {}, setIntervalFn: () => 1, clearIntervalFn() {} });
++        let threw = false; try { thr.arm(plan); thr.tick(); } catch (e) { threw = true; }
++        ok(f3.length === 0 && !threw, "D9. chưa biết vị trí / lỗi đọc vị trí -> không gửi, không crash");
++
++        const f4 = []; let pos4 = 0;
++        const planSame = KT.buildPlan([{ startSec: 0, key: "C", mode: "major" }, { startSec: 50, key: "C", mode: "major" }, { startSec: 100, key: "D", mode: "major" }]);
++        const r4 = new KT.KeyTimelineRunner({ getPositionSec: () => pos4, onFire: (e) => f4.push(e), setIntervalFn: () => 1, clearIntervalFn() {} });
++        r4.arm(planSame); pos4 = 60; r4.tick(); pos4 = 100; r4.tick();
++        ok(f4.length === 1 && f4[0].toName === "D", "D10. đoạn cùng Key (C -> C) không gửi; chỉ gửi khi Key thật sự đổi");
++    }
++
++    console.log("== E. Lấy đoạn từ server (route /song-full có sẵn, không cần sửa server) ==");
++    {
++        const calls = [];
++        const mkSync = (res) => new KeyServerSync({ serverUrl: "https://x.test", logger: { log() {} }, fetchFn: async (url) => { calls.push(url); return res; } });
++        const good = mkSync({ ok: true, status: 200, json: async () => ({ doans: [{ startSec: 0, khoa: "Eb", mode: "major" }, { startSec: 143, khoa: "E", mode: "major" }] }) });
++        const r = await good.fetchSegments("song_1");
++        ok(r.ok && r.segments.length === 2 && r.segments[1].key === "E" && r.segments[1].startSec === 143, "E1. đọc đoạn từ /song-full", r);
++        ok(calls[0] === "https://x.test/song-full?id=song_1", "E2. gọi đúng route /song-full?id=...", calls);
++        const bad = await mkSync({ ok: false, status: 500, json: async () => null }).fetchSegments("s");
++        ok(bad.ok === false, "E3. server lỗi -> ok=false, không throw");
++        const none = await mkSync({ ok: true, status: 200, json: async () => ({ x: 1 }) }).fetchSegments("s");
++        ok(none.ok === false, "E4. trả lời không có doans -> ok=false");
++        ok((await good.fetchSegments("")).ok === false, "E5. không có songId -> ok=false, không gọi mạng");
++        const off = new KeyServerSync({ isEnabled: () => false, fetchFn: async () => { throw new Error("không được gọi"); } });
++        ok((await off.fetchSegments("s")).error === "disabled", "E6. người dùng tắt đồng bộ -> không gọi server");
++    }
++
++    console.log("== F. Renderer: tới phút -> Key gửi Auto-Tune, KHÔNG chạm SoundShifter ==");
++    {
++        const R = read("ui/js/renderer.js");
++        const fire = extractFn(R, "applyServerTimelineFire");
++        ok(fire.length > 100, "F0. có hàm applyServerTimelineFire");
++        ok(/applyActiveKeyToPlugin\(/.test(fire) && !/SoundShifter|sendToneStep|sendToneTarget/.test(fire), "F1. đường tự động đi qua khối Key (applyActiveKeyToPlugin), không gọi SoundShifter/tone-step");
++        ok(/ModEngine\.start\(originalRootIndex, \(data\) => \{\s*\/\/[^\n]*\n\s*if \(__serverTimelinePlan\)/.test(R), "F2. bài đã có kế hoạch từ server -> ModEngine (dò audio) không gửi thêm lệnh chồng");
++        ok(/resetSoundShifterToDefault\(\)/.test(extractFn(R, "turnManualOverrideOff")), "F3. MOD OFF gọi resetSoundShifterToDefault()");
++        ok(/applyPendingServerTimeline\(\)/.test(extractFn(R, "turnManualOverrideOff")), "F4. tắt MOD tay -> áp đoạn Key đang giữ");
++        ok(/onKeyTimelinePlan/.test(R) && /onKeyTimelineFire/.test(R), "F5. renderer nhận key-timeline-plan và key-timeline-fire");
++        ok(/function startModulationWatcher[\s\S]*?renderServerTimelineDisplay\(\)/.test(R) && /function resetAiDisplaysToListening[\s\S]*?renderServerTimelineDisplay\(\)/.test(R), "F6. chữ LISTENING không đè mất dòng 'phút - tone'");
++
++        // chạy thật 3 hàm trong sandbox với mock
++        const sent = []; const reports = []; const stages = []; const infoCalls = [];
++        const sb = {
++            console: { log() {}, warn() {}, error() {} }, Math, Array,
++            keySource: { manual: { active: false, sending: false }, songDb: { active: true, value: "Eb Major" } },
++            _manualOverride: false,
++            isManualOverrideActive: () => sb._manualOverride,
++            manualToneSet: false,
++            applyActiveKeyToPlugin: (label) => sent.push({ label, value: sb.keySource.songDb.value }),
++            recordModStage: (s, i) => stages.push({ s, i }),
++            updateModInfo: (...a) => infoCalls.push(a),
++            window: { electronAPI: { reportAiResult: (k, d) => reports.push({ k, d }) } },
++        };
++        vm.createContext(sb);
++        vm.runInContext("let __serverTimelinePlan = null, __serverTimelineNextIdx = 0, __serverTimelinePending = null;\n"
++            + extractFn(R, "renderServerTimelineDisplay") + "\n" + fire + "\n" + extractFn(R, "applyPendingServerTimeline")
++            + "\nthis.api = { setPlan(p){ __serverTimelinePlan = p; __serverTimelineNextIdx = 0; }, fire: applyServerTimelineFire, pending: applyPendingServerTimeline, getPending(){ return __serverTimelinePending; }, next(){ return __serverTimelineNextIdx; }, render: renderServerTimelineDisplay };", sb);
++        const plan = { changes: [{ index: 1, time: "02:23", from: "Eb", to: "E", semitone: 1 }] };
++        const evt = { index: 1, time: "02:23", fromName: "Eb", toName: "E", toKeyName: "E Major" };
++
++        sb.api.setPlan(plan); sb.api.render();
++        ok(infoCalls.length === 1 && infoCalls[0][0] === "02:23" && infoCalls[0][1] === "Eb" && infoCalls[0][2] === "E" && infoCalls[0][3] === 1, "F7. khung MOD hiện: 02:23 | Eb → E | +1", infoCalls);
++
++        ok(sb.api.fire(evt) === true && sent.length === 1 && sent[0].value === "E Major" && /02:23/.test(sent[0].label), "F8. tới phút: Key đổi sang E Major và gửi xuống Auto-Tune qua khối Key", sent);
++        ok(reports.length === 1 && reports[0].k === "mod" && reports[0].d.semitone === 1 && reports[0].d.time === "02:23", "F9. báo kết quả MOD cho Core (+1 lúc 02:23)", reports);
++
++        sent.length = 0; sb.keySource.songDb.value = "Eb Major"; sb.keySource.manual.active = true;
++        ok(sb.api.fire(evt) === false && sent.length === 0, "F10. Key đang chọn TAY -> không tự đổi");
++        sb.keySource.manual.active = false; sb.keySource.songDb.active = false;
++        ok(sb.api.fire(evt) === false && sent.length === 0, "F11. Song Database không còn hiệu lực -> không tự đổi");
++        sb.keySource.songDb.active = true; sb._manualOverride = true;
++        ok(sb.api.fire(evt) === false && sent.length === 0 && sb.api.getPending() === evt, "F12. MOD tay đang bật -> giữ lại, không đánh nhau với lệnh tay");
++        sb._manualOverride = false; sb.api.pending();
++        ok(sent.length === 1 && sent[0].value === "E Major" && sb.api.getPending() === null, "F13. tắt MOD tay -> áp đúng Key đang giữ, 1 lần");
++        sb.api.setPlan(null); sent.length = 0;
++        ok(sb.api.fire(evt) === false && sent.length === 0, "F14. bài không có kế hoạch -> sự kiện lạ bị bỏ");
++    }
++
++    console.log("== G. MOD OFF: SoundShifter về mặc định như ảnh (Semitones 0, Bypass BẬT) ==");
++    {
++        const ROUTER = read("ui/js/vocalCommandRouter.js");
++        const mk = (port = "loopMIDI", fail = false) => {
++            const sent = [];
++            const sb = { console: { log() {}, warn() {}, error() {} }, Promise, Math, JSON, Number, Array, Error, Set, Date,
++                setTimeout: (f) => { f(); return 0; }, clearTimeout() {}, getSetting: (k) => (k === "midiOutputPort" ? port : undefined), getCoordinate: () => null,
++                sendMidiCC: async (cc, v) => { sent.push([cc, v]); return !fail; }, sendMidiNotePulse: async () => true, window: {} };
++            vm.createContext(sb);
++            vm.runInContext(ROUTER + "\nthis.R = { reset: resetSoundShifterToDefault, step: sendToneStepToSoundShifter, power: setSoundShifterPower, st: soundShifterState };", sb);
++            return { R: sb.R, sent };
++        };
++        {
++            const { R, sent } = mk();
++            await R.power(true); await R.step(5); sent.length = 0;
++            const r = await R.reset();
++            ok(r.ok && sent.length === 2 && sent[0][0] === 22 && sent[0][1] === 64 && sent[1][0] === 24 && sent[1][1] === 127, "G1. đang +5 -> MOD OFF gửi CC22=64 (Semitones 0) rồi CC24=127 (Bypass BẬT)", sent);
++            ok(R.st.semitones === 0, "G2. trạng thái nội bộ về 0");
++        }
++        {
++            // SET bị lỗi giữa chừng: Menu "tưởng" đã dịch 0 nhưng plugin kẹt mức lạ -> reset vẫn gửi 0 tuyệt đối
++            const { R, sent } = mk(); R.st.semitones = 0; sent.length = 0;
++            await R.reset();
++            ok(sent[0][0] === 22 && sent[0][1] === 64, "G3. luôn gửi 0 TUYỆT ĐỐI, không phụ thuộc Menu nhớ đã dịch bao nhiêu");
++        }
++        {
++            const none = mk(""); const r = await none.R.reset();
++            ok(r.ok === false && none.sent.length === 0, "G4. chưa cấu hình cổng MIDI -> báo lỗi, không gửi");
++            const bad = mk("loopMIDI", true); const r2 = await bad.R.reset();
++            ok(r2.ok === false && bad.sent.length === 2, "G5. gửi lỗi -> ok=false (hiện đỏ), vẫn thử bật Bypass", bad.sent);
++        }
++        {
++            // đường tự động không bao giờ gọi vào SoundShifter: Key timeline chỉ tồn tại ở renderer.applyActiveKeyToPlugin
++            const { R, sent } = mk(); sent.length = 0;
++            ok(sent.length === 0, "G6. (đối chứng) chưa SET thì không có lệnh SoundShifter nào");
++        }
++    }
++
++    console.log("== H. Nối dây main/preload ==");
++    {
++        const M = read("app/main.js"), P = read("app/preload.js");
++        ok(/require\("\.\.\/core\/integration\/KeyTimeline"\)/.test(M) && /key-timeline-plan/.test(M) && /key-timeline-fire/.test(M), "H1. main.js nạp KeyTimeline và dùng 2 kênh plan/fire");
++        ok(/onKeyTimelinePlan[\s\S]*key-timeline-plan/.test(P) && /onKeyTimelineFire[\s\S]*key-timeline-fire/.test(P), "H2. preload.js mở đúng 2 kênh cho renderer");
++        ok(/fetchSegments\(/.test(M) && /resetKeyTimeline\(/.test(M), "H3. main.js lấy đoạn từ server và reset khi đổi bài/mất bài");
++        const { execFileSync } = require("child_process");
++        let ch = ""; try { ch = execFileSync("git", ["status", "--porcelain"], { cwd: ROOT }).toString(); } catch (e) {}
++        ok(!ch.split("\n").some((l) => /\.(html|css)$/i.test(l.trim())), "H4. không sửa file .html/.css nào");
++    }
++
++    console.log(`\nKẾT QUẢ: ${pass} PASS / ${fail} FAIL`);
++    process.exit(fail ? 1 : 0);
++})();
+diff --git a/tests/unit/ModBypassPolarity01.verify.js b/tests/unit/ModBypassPolarity01.verify.js
+index 984e7ab..867f0cc 100644
+--- a/tests/unit/ModBypassPolarity01.verify.js
++++ b/tests/unit/ModBypassPolarity01.verify.js
+@@ -43,9 +43,12 @@ function build({ port = 'loopMIDI', ccFail = false, src } = {}) {
+ 
+     console.log('== 4. Nối dây trong renderer.js (không đổi) ==');
+     { const R = read('ui/js/renderer.js');
+-      ok(/setSoundShifterPower\(true\)/.test(R) && /setSoundShifterPower\(false\)/.test(R), 'MOD ON gọi setSoundShifterPower(true); MOD OFF gọi setSoundShifterPower(false)');
+-      const iBack = R.indexOf('sendToneStepToSoundShifter(shifterBack)'), iOff = R.indexOf('setSoundShifterPower(false)', iBack);
+-      ok(iBack > 0 && iOff > iBack, 'MOD OFF: trả SoundShifter về 0 TRƯỚC rồi mới bật Bypass (đúng thứ tự cũ)'); }
++      // MOD-MIDI-RESET-01: MOD OFF gọi resetSoundShifterToDefault() (Semitones 0 TUYỆT ĐỐI rồi Bypass BẬT) thay cho độ lệch tương đối cũ.
++      ok(/setSoundShifterPower\(true\)/.test(R) && /resetSoundShifterToDefault\(\)/.test(R), 'MOD ON gọi setSoundShifterPower(true); MOD OFF gọi resetSoundShifterToDefault()');
++      const RT = read('ui/js/vocalCommandRouter.js');
++      const fn = RT.slice(RT.indexOf('async function resetSoundShifterToDefault'));
++      const iZero = fn.indexOf('_sendSoundShifterAbsolute(0)'), iOff = fn.indexOf('setSoundShifterPower(false)');
++      ok(iZero > 0 && iOff > iZero, 'MOD OFF: trả SoundShifter về 0 TRƯỚC rồi mới bật Bypass (đúng thứ tự cũ)'); }
+ 
+     console.log('== 5. Phạm vi ==');
+     { const { execFileSync } = require('child_process');
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index a6324eb..3c4800d 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -1228,6 +1228,10 @@ let manualToneOffset = 0;
+ let manualToneSet = false;
+ let soundShifterApplied = 0;
+ let manualToneChain = Promise.resolve(); // tuần tự hoá các lần SET bấm liên tiếp
++// MOD theo đoạn Key Server (Claude C): kế hoạch "phút - tone" của bài đang phát (null = bài không có đoạn / chưa có). Xem mục 12.
++let __serverTimelinePlan = null;
++let __serverTimelineNextIdx = 0;   // lần đổi tone sắp tới (chỉ số trong plan.changes); = changes.length khi đã qua hết
++let __serverTimelinePending = null; // sự kiện đến lúc MOD tay đang bật: giữ lại, áp khi tắt MOD tay
+ 
+ /* ==========================================================
+    7. KEY TRANSPOSE (hỗ trợ cả dấu thăng # và dấu giáng b)
+@@ -2279,10 +2283,10 @@ function turnManualOverrideOff() {
+     // dùng cho AI tự động), (2) đưa Auto-Tune về đúng offset AI đang giữ tại thời điểm
+     // này (aiSemitoneOffset, mục 12) — KHÔNG ép cứng về 0.
+     // MANUAL-KEY-MOD-RESTORE-01: trả SoundShifter về 0 (đúng phần đã dịch tay) TRƯỚC khi tắt nguồn, để lần bật MOD sau không mang theo tone cũ.
+-    const shifterBack = -soundShifterApplied;
++    // MOD-MIDI-RESET-01: MOD OFF -> SoundShifter về mặc định bằng lệnh TUYỆT ĐỐI (Semitones 0 rồi Bypass BẬT), không dùng độ lệch tương đối nữa.
+     manualToneOffset = 0; manualToneSet = false; soundShifterApplied = 0;
+     Promise.all([
+-        sendToneStepToSoundShifter(shifterBack).then((back) => setSoundShifterPower(false).then((off) => (back && back.ok === false ? back : off))),
++        resetSoundShifterToDefault(),
+         sendToneTarget(aiSemitoneOffset), // TASK AI-ALG-04 (D8): aiSemitoneOffset là TUYỆT ĐỐI so với Key gốc -> đưa Auto-Tune về đúng offset, không gửi tương đối sai
+     ]).then(([shifterResult, autotuneResult]) => {
+         const newKey = transposeKey(originalKey, aiSemitoneOffset);
+@@ -2300,6 +2304,7 @@ function turnManualOverrideOff() {
+         }
+     });
+ 
++    if (typeof applyPendingServerTimeline === "function") applyPendingServerTimeline(); // đoạn Key server đến lúc MOD tay đang bật -> áp bây giờ
+     saveData();
+ }
+ 
+@@ -2451,6 +2456,74 @@ async function applyModEvent(data) {
+     }
+ }
+ 
++// ==========================================================
++// MOD THEO ĐOẠN KEY SERVER (Claude C). Bài có >= 2 đoạn Key khác nhau trên server:
++//  - main gửi KẾ HOẠCH (key-timeline-plan): hiện "02:23 | Eb → E | +1 SEMITONES" trong khung MOD.
++//  - tới đúng phút, main bắn key-timeline-fire 1 lần: đổi Key của Song Database sang tone mới rồi để KHỐI KEY gửi xuống Auto-Tune
++//    (đúng đường applyActiveKeyToPlugin có sẵn). KHÔNG chạm SoundShifter (SoundShifter chỉ chạy khi người dùng bấm SET).
++//  - Key chọn tay (Manual) luôn thắng; MOD tay đang bật thì giữ lại, áp khi tắt MOD tay.
++// ==========================================================
++function renderServerTimelineDisplay() {
++    const plan = __serverTimelinePlan;
++    if (!plan || !plan.changes || !plan.changes.length) return;
++    if (typeof manualToneSet !== "undefined" && manualToneSet && isManualOverrideActive()) return; // Tone tay đang hiển thị -> không ghi đè
++    const c = plan.changes[Math.min(__serverTimelineNextIdx, plan.changes.length - 1)];
++    updateModInfo(c.time, c.from, c.to, c.semitone);
++}
++
++function applyServerTimelineFire(evt) {
++    const plan = __serverTimelinePlan;
++    if (!plan || !evt || typeof evt.toKeyName !== "string") return false;
++    if (keySource.manual.active || keySource.manual.sending) {
++        console.log(`[KeyTimeline] ${evt.time}: Key đang chọn TAY -> không tự đổi sang ${evt.toKeyName}`);
++        return false;
++    }
++    if (!keySource.songDb.active) {
++        console.log(`[KeyTimeline] ${evt.time}: Song Database không còn hiệu lực -> bỏ qua`);
++        return false;
++    }
++    if (isManualOverrideActive()) {
++        __serverTimelinePending = evt; // MOD tay đang chạy: không đánh nhau với lệnh tay, áp khi tắt MOD tay
++        console.log(`[KeyTimeline] ${evt.time}: MOD tay đang bật -> giữ ${evt.toKeyName}, áp khi tắt MOD tay`);
++        return false;
++    }
++    __serverTimelinePending = null;
++    __serverTimelineNextIdx = plan.changes.filter((c) => c.index <= evt.index).length;
++    keySource.songDb.value = evt.toKeyName;
++    applyActiveKeyToPlugin("Server Timeline " + evt.time); // Key gửi tone mới xuống Auto-Tune (có dedupe, Scale, Mic2 như mọi lần gửi Key)
++    const done = plan.changes.find((c) => c.index === evt.index);
++    recordModStage("SERVER_TIMELINE_KEY", { time: evt.time, from: evt.fromName, to: evt.toName, semitone: done ? done.semitone : null });
++    window.electronAPI?.reportAiResult?.("mod", { from: evt.fromName, to: evt.toName, semitone: done ? done.semitone : 0, time: evt.time });
++    renderServerTimelineDisplay();
++    return true;
++}
++
++function applyPendingServerTimeline() {
++    if (__serverTimelinePending && !isManualOverrideActive()) {
++        const evt = __serverTimelinePending;
++        __serverTimelinePending = null;
++        applyServerTimelineFire(evt);
++    }
++}
++
++if (window.electronAPI?.onKeyTimelinePlan) {
++    window.electronAPI.onKeyTimelinePlan((plan) => {
++        __serverTimelinePending = null;
++        if (plan && Array.isArray(plan.changes) && plan.changes.length) {
++            __serverTimelinePlan = plan;
++            __serverTimelineNextIdx = 0;
++            console.log("[KeyTimeline] Bài có đoạn đổi tone: " + plan.changes.map((c) => c.label).join(" | "));
++            renderServerTimelineDisplay();
++        } else {
++            __serverTimelinePlan = null;
++            __serverTimelineNextIdx = 0;
++        }
++    });
++}
++if (window.electronAPI?.onKeyTimelineFire) {
++    window.electronAPI.onKeyTimelineFire((evt) => { applyServerTimelineFire(evt); });
++}
++
+ // TASK A72-04/05/06 — tách riêng phần RESET HIỂN THỊ (không đụng thuật toán/engine) thành 1 hàm
+ // dùng chung, để dùng lại được ở CẢ nút "Auto Detect" (người dùng tự bấm, ĐANG chạy engine, chỉ
+ // xoá chữ tạm) LẪN ở chỗ mất SYSTEM_AUDIO (đóng engine luôn — xem systemAudio.onDeviceLost bên
+@@ -2471,6 +2544,7 @@ function resetAiDisplaysToListening() {
+     if (modTimeResetEl) modTimeResetEl.textContent = "";
+     if (modStatusResetEl) modStatusResetEl.textContent = "LISTENING";
+     if (modTimelineResetEl) modTimelineResetEl.textContent = "";
++    renderServerTimelineDisplay(); // bài có đoạn Key từ server: giữ hiện "phút - tone" (không bị chữ LISTENING đè)
+     if (typeof manualToneSet !== "undefined" && manualToneSet && isManualOverrideActive()) renderManualToneDisplay(); // AUTO DETECT chỉ reset phần AI; Tone tay người dùng đã SET vẫn hiển thị đúng
+ }
+ 
+@@ -2522,12 +2596,15 @@ function startModulationWatcher() {
+     if (modTimeEl) modTimeEl.textContent = "";
+     if (modStatusEl) modStatusEl.textContent = "LISTENING";
+     if (modTimelineEl) modTimelineEl.textContent = "";
++    renderServerTimelineDisplay(); // bài có đoạn Key từ server: hiện lại "phút - tone" thay cho LISTENING
+     if (typeof manualToneSet !== "undefined" && manualToneSet && isManualOverrideActive()) renderManualToneDisplay(); // không xoá Tone tay đang hiển thị
+ 
+     // TASK AI-ALG-03 — truyền mode của Key gốc để ModEngine phân biệt đổi mode / giọng tương đối / modulation thật.
+     // Không parse được mode (định dạng lạ) => undefined => ModEngine chạy đúng hành vi cũ (root-only).
+     const originalMode = /minor/i.test(originalKey) ? "Minor" : (/major/i.test(originalKey) ? "Major" : null);
+     ModEngine.start(originalRootIndex, (data) => {
++        // Bài đã có kế hoạch đổi tone từ Key Server -> server là nguồn đúng, không để dò audio gửi thêm lệnh dịch tone chồng lên.
++        if (__serverTimelinePlan) { recordModStage("SKIPPED_SERVER_TIMELINE", { semitone: data.semitone }); return; }
+         const mins = String(Math.floor(songSeconds / 60)).padStart(2, "0");
+         const secs = String(songSeconds % 60).padStart(2, "0");
+         applyModEvent({ time: `${mins}:${secs}`, semitone: data.semitone });
+diff --git a/ui/js/vocalCommandRouter.js b/ui/js/vocalCommandRouter.js
+index 62311bb..91b10b3 100644
+--- a/ui/js/vocalCommandRouter.js
++++ b/ui/js/vocalCommandRouter.js
+@@ -94,6 +94,24 @@ async function setSoundShifterPower(isOn) {
+     return { ok: true, driverUsed: "midi" };
+ }
+ 
++/**
++ * MOD OFF — đưa SoundShifter về ĐÚNG trạng thái mặc định (Semitones 0 / Interval Unison / Ratio 1.0000 / Cents 0, và Bypass BẬT).
++ * Gửi núm Semitones TUYỆT ĐỐI về 0 (CC22 = 64) — KHÔNG dựa vào việc Menu "nhớ" đã dịch bao nhiêu, nên dù lần SET nào bị lỗi giữa chừng
++ * hay plugin đang kẹt mức lạ, tắt MOD vẫn về 0. Núm bị lỗi thì vẫn cố bật Bypass (plugin không được kẹt ở trạng thái đang dịch tone).
++ * Cents / Freq / Mode / Interval do preset "default" của plugin giữ — Menu không đụng tới nên không cần reset.
++ * @returns {Promise<{ok: boolean, driverUsed?: string, detail?: string}>}
++ */
++async function resetSoundShifterToDefault() {
++    const midiPort = getSetting("midiOutputPort");
++    if (!midiPort) {
++        return { ok: false, detail: 'Chưa cấu hình cổng MIDI (Setup > MIDI) — SoundShifter chỉ điều khiển được qua MIDI.' };
++    }
++    const zero = await _sendSoundShifterAbsolute(0);
++    const off = await setSoundShifterPower(false);
++    if (!zero.ok) return { ok: false, driverUsed: "midi", detail: zero.detail };
++    return off;
++}
++
+ /**
+  * Dịch tone của SoundShifter đi `semitoneDelta` bán cung THEO ĐÚNG ĐƠN VỊ CỦA MENU/AUTO-TUNE
+  * (hàm tự nhân với SOUNDSHIFTER_STEP_RATIO ở bên trong, nơi gọi không cần tự tính lại).

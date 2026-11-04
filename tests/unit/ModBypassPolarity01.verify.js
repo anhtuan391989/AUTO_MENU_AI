@@ -43,9 +43,12 @@ function build({ port = 'loopMIDI', ccFail = false, src } = {}) {
 
     console.log('== 4. Nối dây trong renderer.js (không đổi) ==');
     { const R = read('ui/js/renderer.js');
-      ok(/setSoundShifterPower\(true\)/.test(R) && /setSoundShifterPower\(false\)/.test(R), 'MOD ON gọi setSoundShifterPower(true); MOD OFF gọi setSoundShifterPower(false)');
-      const iBack = R.indexOf('sendToneStepToSoundShifter(shifterBack)'), iOff = R.indexOf('setSoundShifterPower(false)', iBack);
-      ok(iBack > 0 && iOff > iBack, 'MOD OFF: trả SoundShifter về 0 TRƯỚC rồi mới bật Bypass (đúng thứ tự cũ)'); }
+      // MOD-MIDI-RESET-01: MOD OFF gọi resetSoundShifterToDefault() (Semitones 0 TUYỆT ĐỐI rồi Bypass BẬT) thay cho độ lệch tương đối cũ.
+      ok(/setSoundShifterPower\(true\)/.test(R) && /resetSoundShifterToDefault\(\)/.test(R), 'MOD ON gọi setSoundShifterPower(true); MOD OFF gọi resetSoundShifterToDefault()');
+      const RT = read('ui/js/vocalCommandRouter.js');
+      const fn = RT.slice(RT.indexOf('async function resetSoundShifterToDefault'));
+      const iZero = fn.indexOf('_sendSoundShifterAbsolute(0)'), iOff = fn.indexOf('setSoundShifterPower(false)');
+      ok(iZero > 0 && iOff > iZero, 'MOD OFF: trả SoundShifter về 0 TRƯỚC rồi mới bật Bypass (đúng thứ tự cũ)'); }
 
     console.log('== 5. Phạm vi ==');
     { const { execFileSync } = require('child_process');
