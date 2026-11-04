@@ -803,7 +803,10 @@ function initFxAutoMenu() {
     document.body.appendChild(card);
     const chk = card.querySelector("#fxAutoEnabledChk");
     const hide = () => { card.style.display = "none"; };
-    chk.addEventListener("change", () => { setSetting("fxAutoEnabled", !!chk.checked); });
+    chk.addEventListener("change", () => {
+        setSetting("fxAutoEnabled", !!chk.checked);
+        if (chk.checked) window.__fxAuto?.resume?.(); // tích lại => Auto chạy NGAY theo nhạc hiện tại (có nhạc bật / không nhạc tắt), bỏ qua giữ quyền 60 s
+    });
     btn.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         if (card.style.display !== "none") { hide(); return; }
@@ -941,6 +944,7 @@ function createFxAutoWiring() {
     let __lastFxLogKey = "";
     const ctl = AudioSource.createFxAutoController({
         getFxState: () => busGroup.aggregate(),
+        isEnabled: () => getSetting("fxAutoEnabled", true) !== false, // FX-AUTO-TOGGLE-02: ô tích chuột phải FX
         onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); } }, // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX
         applyFx: async (target) => {
             if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
@@ -986,7 +990,7 @@ function createFxAutoWiring() {
         return res;
     };
     window.__fxAutoDebug = () => Object.assign({}, ctl.getInfo(), { sends: group.getSent(), managed: group.managed(), bus: busGroup.getSent(), busManaged: busGroup.managed(), params: ctl.params });
-    setInterval(() => { if (getSetting("fxAutoEnabled", true) !== false) ctl.tick(); }, 100); // ĐÚNG 1 interval cho cả vòng đời trang
+    setInterval(() => { ctl.tick(); }, 100); // FX-AUTO-TOGGLE-02: luôn theo dõi nhạc; có gửi lệnh hay không do isEnabled (ô tích) quyết định // ĐÚNG 1 interval cho cả vòng đời trang
     return ctl;
 }
 createFxAutoWiring();

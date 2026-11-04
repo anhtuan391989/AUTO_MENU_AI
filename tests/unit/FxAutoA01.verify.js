@@ -58,7 +58,7 @@ const SIL = () => -80, MUS = () => -25, NOISE = (t) => -62 + 4 * Math.sin(t * 7)
     r = rig(); await r.run(5, SIL); await r.run(10, MUS); r.ctl.setSourceState(false);
     await r.run(20, SIL); ok(r.calls.length === 1 && r.ctl.getInfo().musicState === 'SOURCE_UNAVAILABLE', '   nguồn không khả dụng → đóng băng, KHÔNG tắt FX');
     // 11. khởi động lại: 2 controller độc lập không chia sẻ; wiring chỉ tạo 1 interval
-    ok((ren.match(/setInterval\(\(\) => \{ if \(getSetting\("fxAutoEnabled"/g) || []).length === 1 && /if \(window\.__fxAuto \|\| /.test(ren), '11. Wiring: đúng 1 setInterval và có chốt chống tạo controller thứ hai');
+    ok((ren.match(/setInterval\(\(\) => \{ ctl\.tick\(\); \}, 100\)/g) || []).length === 1 && /if \(window\.__fxAuto \|\| /.test(ren), '11. Wiring: đúng 1 setInterval và có chốt chống tạo controller thứ hai');
     // 12. thủ công
     r = rig(); await r.run(5, SIL); await r.run(10, MUS); r.fx = false; r.ctl.notifyManual();
     await r.run(20, MUS); ok(r.fx === false && r.calls.length === 1, '12a. User tắt tay khi nhạc chạy → Auto nhường quyền, không ép bật lại');

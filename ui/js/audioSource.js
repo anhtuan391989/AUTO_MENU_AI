@@ -512,6 +512,7 @@
         }
         async function reconcile(t) {
             if (manualOverride) return;
+            if (deps.isEnabled && !deps.isEnabled()) return; // FX-AUTO-TOGGLE-02: ô tích đang BỎ => Auto bị chặn hoàn toàn (vẫn theo dõi nhạc để có trạng thái đúng khi tích lại)
             if (inflight) { dirty = true; return; } // MENU-FX-FIX: nhạc đổi trạng thái trong lúc lệnh trước chưa trả lời => kiểm lại sau khi nó xong (trước đây bị MẤT)
             const target = desiredTarget();
             if (target === null) return;
@@ -557,8 +558,19 @@
             if (lastResult && lastResult.ok) sentCount++; else failedCount++;
             notify();
         }
+        // FX-AUTO-TOGGLE-02: tích lại ô "Auto bật FX khi có nhạc" => Auto quay lại NGAY (KHÔNG chờ hết 60 s giữ quyền thủ công):
+        // bỏ giữ quyền, rồi đưa FX về đúng trạng thái nhạc HIỆN TẠI (có nhạc => BẬT, không nhạc => TẮT) dù FX đang bật hay tắt.
+        function resume(t) {
+            const tt = t === undefined ? now() : t;
+            manualOverride = false; manualUntil = 0; retries = 0; retryAt = null; dirty = false;
+            if (actionState === FxActionState.MANUAL_OVERRIDE) actionState = FxActionState.IDLE;
+            manualSeq++; // phản hồi của lần bấm tay cũ (nếu còn treo) không được ghi đè
+            evaluate(tt); // cập nhật trạng thái nhạc theo khung mới nhất
+            notify();
+            reconcile(tt);
+        }
         function tick(t) { evaluate(t === undefined ? now() : t); }
-        return { feedLevel, setSourceState, tick, notifyManual, reportManualResult, getManualSeq: () => manualSeq, getInfo, params: P };
+        return { feedLevel, setSourceState, tick, resume, notifyManual, reportManualResult, getManualSeq: () => manualSeq, getInfo, params: P };
     }
 
 
