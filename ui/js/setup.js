@@ -687,8 +687,8 @@ const DAW_MIDI_ACTIONS = [
     { action: "TUNE_BYPASS_4", label: "TUNE ON/OFF — BYPASS Auto-Tune 4 (nút TUNE gửi cả 4)" },
     // TASK A94 — nút LOFI: ON/OFF độc lập, kết hợp được với NORM/RAP/REMIX. 1 CC kiểu bypass: 0 = LOFI bật (nút sáng), 127 = LOFI tắt (mặc định kênh 16 CC 118 / Cubase 119).
     { action: "LOFI_STATE", label: "LOFI ON/OFF kiểu bypass (nút sáng = LOFI bật = gửi 0; tắt = gửi 127) — kết hợp với preset khác" },
-    // TASK A96 — popup chuột phải MUSIC: nút AUDIO CHILL (kiểu bypass: 0 = bật, 127 = tắt) và knob AUDIO CHILL (CC 0..127). Mặc định kênh 15 CC 94 / 95.
-    { action: "AUDIO_CHILL_STATE", label: "AUDIO CHILL — nút ON/OFF kiểu bypass (sáng = bật = gửi 0; tắt = gửi 127)" },
+    // TASK A96 — popup chuột phải MUSIC: nút AUDIO CHILL (sáng = bật = 127, tắt = 0) và knob AUDIO CHILL (CC 0..127). Mặc định kênh 15 CC 94 / 95.
+    { action: "AUDIO_CHILL_STATE", label: "AUDIO CHILL — nút ON/OFF (sáng = bật = gửi 127; tắt = gửi 0)" },
     { action: "AUDIO_CHILL_KNOB", label: "AUDIO CHILL — knob điều khiển 1 VST (CC 0..127)" },
     // MENU-FIX-02 — TUỲ CHỌN: lệnh CHỌN TRACK (macro chỉ "Find Track") gửi TRƯỚC lệnh ON/OFF tương ứng để Monitor không đảo nhầm track cũ.
     { action: "MUSIC_SELECT", label: "MUSIC CHỌN TRACK (Find Track Beat — gửi trước ON/OFF)" },

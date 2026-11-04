@@ -17,8 +17,8 @@ function makeAR(daw, saved) {
         const a = AR.getMidiOutMapping('AUDIO_CHILL_STATE'), b = AR.getMidiOutMapping('AUDIO_CHILL_KNOB');
         ok(a && b && a.channel === 15 && a.number === 94 && b.channel === 15 && b.number === 95, daw + ': nút = CC94, knob = CC95 (kênh 15) mặc định', [a, b]); }
     { const { AR, sent } = makeAR('Studio Pro 8');
-      let r = await AR.setDawControlState('AUDIO_CHILL', true, {}); ok(r.ok && JSON.stringify(sent[0]) === JSON.stringify([94, 0, 14]), 'nút SÁNG (ON) -> CC94 = 0 (kiểu bypass)', sent);
-      r = await AR.setDawControlState('AUDIO_CHILL', false, {}); ok(JSON.stringify(sent[1]) === JSON.stringify([94, 127, 14]), 'nút TẮT (OFF) -> CC94 = 127', sent);
+      let r = await AR.setDawControlState('AUDIO_CHILL', true, {}); ok(r.ok && JSON.stringify(sent[0]) === JSON.stringify([94, 127, 14]), 'nút SÁNG (ON) -> CC94 = 127', sent);
+      r = await AR.setDawControlState('AUDIO_CHILL', false, {}); ok(JSON.stringify(sent[1]) === JSON.stringify([94, 0, 14]), 'nút TẮT (OFF) -> CC94 = 0', sent);
       sent.length = 0;
       for (const [v, cc] of [[0, 0], [50, 64], [100, 127]]) { await AR.executeAction(AR.ACTIONS.AUDIO_CHILL_KNOB, { reason: 'knob', value: v }); }
       ok(JSON.stringify(sent) === JSON.stringify([[95, 0, 14], [95, 64, 14], [95, 127, 14]]), 'knob 0/50/100 -> CC95 = 0/64/127', sent);
@@ -57,6 +57,8 @@ function makeAR(daw, saved) {
     ctx({ preventDefault() {} }); docL.keydown[0]({ key: 'Escape' }); ok(card.style.display === 'none', 'phím Esc -> ẩn');
     ok(/id: "audioChillKnob", valueId: "audioChillValue"/.test(ren) && /audioChillKnob: "AUDIO_CHILL_KNOB"/.test(ren), 'knobData + KNOB_ID_TO_ACTION có audioChillKnob');
     ok(/initAudioChillPopup === "function"\) initAudioChillPopup\(\)/.test(ren), 'được gọi sau loadData()');
+    ok(/knob && knob\.id !== "audioChillKnob"/.test(ren), 'loadData KHÔNG khôi phục knob Audio chill (mở lại Menu = mặc định 50)');
+    ok(!/audioChillBtn[^\n]*localStorage|dataset\.audioChill[^\n]*save/.test(ren) && /chillBtn\.classList\.contains\("active"\)/.test(ren), 'nút Audio chill không lưu trạng thái (luôn mở ở OFF)');
     console.log('== 3. Setup / surface ==');
     const setup = rd('ui/js/setup.js');
     ok(/action: "AUDIO_CHILL_STATE"/.test(setup) && /action: "AUDIO_CHILL_KNOB"/.test(setup) && /"AUDIO_CHILL_STATE", "AUDIO_CHILL_KNOB"\]\)/.test(setup), 'Setup: 2 dòng mapping + nhóm bảo vệ trùng CC');

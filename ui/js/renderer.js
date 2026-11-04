@@ -789,7 +789,7 @@ function initMicVolumePopups() {
 // ==========================================================
 // AUDIO-CHILL-01 (A96) — Bấm CHUỘT PHẢI vào nút MUSIC -> thẻ nổi giống popup Mic: TRÊN là nút "AUDIO CHILL" (ON/OFF), DƯỚI là knob điều khiển 1 VST.
 // Tất cả qua MIDI (ActionRegistry: AUDIO_CHILL_STATE / AUDIO_CHILL_KNOB). Nút và knob ĐỘC LẬP: xoay knob không đổi nút, bấm nút không đổi knob.
-// Nút: sáng = ON (gửi 0, kiểu bypass), tắt = OFF (gửi 127). Mở app luôn ở OFF, không gửi gì (Menu không đọc được trạng thái DAW). Tạo bằng JS, KHÔNG sửa HTML/CSS.
+// Nút: sáng = ON (gửi 127), tắt = OFF (gửi 0). Mở app luôn ở OFF và knob luôn về mặc định 50 (KHÔNG lưu/khôi phục), không gửi gì (Menu không đọc được trạng thái DAW). Tạo bằng JS, KHÔNG sửa HTML/CSS.
 // Bấm trái MUSIC giữ nguyên như cũ. Đóng thẻ: bấm ra ngoài, phím Esc, hoặc chuột phải lần nữa.
 // ==========================================================
 function initAudioChillPopup() {
@@ -2288,7 +2288,7 @@ function loadData() {
     if (Array.isArray(data.knobs)) { // MENU-FX-AUTO-OFF: cấu hình hỏng (knobs không phải mảng) không được làm đổ cả khởi tạo
         data.knobs.forEach(saved => {
             const knob = knobData.find(k => k.id === saved.id);
-            if (knob) {
+            if (knob && knob.id !== "audioChillKnob") { // A96c: Audio chill luôn về mặc định (50) khi mở lại Menu, không khôi phục giá trị cũ
                 knob.value = saved.value;
                 updateKnob(knob);
                 // TASK A20 — đồng bộ ngay volume Clap/Laugh vào SoundEffectEngine khi khôi
