@@ -1,0 +1,27 @@
+// EXPAND-AUTOHIDE-02 — Control (EXPAND) chỉ tự thu gọn sau 5 s KHÔNG thao tác; chuột còn trong Control / đang giữ chuột thì không thu gọn.
+const fs = require('fs'), path = require('path'), vm = require('vm');
+const ren = fs.readFileSync(path.join(__dirname, '..', '..', 'ui/js/renderer.js'), 'utf8');
+let pass = 0, fail = 0;
+const ok = (c, l) => { if (c) { pass++; console.log('  OK  ', l); } else { fail++; console.error('  FAIL ', l); } };
+let now = 0, seq = 0; const timers = new Map();
+const st = (f, ms) => { const id = ++seq; timers.set(id, { at: now + ms, f }); return id; };
+const ct = (id) => timers.delete(id);
+const advance = (ms) => { const end = now + ms; for (;;) { const n = [...timers].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0]; if (!n) break; now = n[1].at; timers.delete(n[0]); n[1].f(); } now = end; };
+const cls = new Set();
+const mkEl = () => ({ h: {}, addEventListener(n, f) { (this.h[n] = this.h[n] || []).push(f); }, fire(n) { (this.h[n] || []).forEach((f) => f({})); }, setAttribute() {}, querySelector() { return null; } });
+const panel = Object.assign(mkEl(), { hovered: false, classList: { add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c) }, matches(s) { return s === ':hover' && this.hovered; } });
+const btn = Object.assign(mkEl(), { classList: { add() {}, remove() {} } });
+const docH = {};
+const doc = { getElementById: (id) => (id === 'expandBtn' ? btn : id === 'controlPanel' ? panel : null), querySelector: () => null, addEventListener: (n, f) => { (docH[n] = docH[n] || []).push(f); } };
+const start = ren.indexOf('5b. EXPAND / COLLAPSE CONTROL PANEL'); const a = ren.indexOf('(function () {', start); const b = ren.indexOf('})();', a) + 5;
+vm.runInNewContext(ren.slice(a, b), { document: doc, window: {}, setTimeout: st, clearTimeout: ct, requestAnimationFrame: (f) => f() });
+const isOpen = () => cls.has('expanded');
+console.log('== EXPAND tự thu gọn ==');
+btn.fire('click'); ok(isOpen(), 'bấm EXPAND: mở');
+advance(4900); ok(isOpen(), 'chưa tới 5 s: vẫn mở'); advance(400); ok(!isOpen(), '5 s không thao tác: thu gọn');
+btn.fire('click'); advance(4000); panel.fire('mousemove'); advance(4000); ok(isOpen(), 'có thao tác (mousemove): đếm lại 5 s');
+panel.hovered = true; advance(30000); ok(isOpen(), 'chuột đứng yên trong Control: KHÔNG thu gọn');
+panel.hovered = false; panel.fire('mouseleave'); advance(4900); ok(isOpen(), 'chuột rời Control: chưa tới 5 s vẫn mở'); advance(400); ok(!isOpen(), 'rời Control 5 s: thu gọn');
+btn.fire('click'); panel.fire('mousedown'); advance(30000); ok(isOpen(), 'đang GIỮ chuột (kéo knob): KHÔNG thu gọn');
+docH.mouseup.forEach((f) => f({})); advance(4900); ok(isOpen(), 'thả chuột: đếm lại 5 s'); advance(400); ok(!isOpen(), '5 s sau khi thả: thu gọn');
+console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);

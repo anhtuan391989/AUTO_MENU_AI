@@ -8,7 +8,7 @@ let now = 0, seq = 0; const timers = new Map();
 const setTimeoutF = (f, ms) => { const id = ++seq; timers.set(id, { at: now + ms, f }); return id; };
 const clearTimeoutF = (id) => timers.delete(id);
 const advance = (ms) => { const end = now + ms; for (;;) { const n = [...timers].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0]; if (!n) break; now = n[1].at; timers.delete(n[0]); n[1].f(); } now = end; };
-const mkCard = () => ({ style: { display: 'flex' }, h: {}, addEventListener(n, f) { (this.h[n] = this.h[n] || []).push(f); }, fire(n) { (this.h[n] || []).forEach((f) => f({})); } });
+const mkCard = () => ({ style: { display: 'flex' }, h: {}, hovered: false, matches(sel) { return sel === ':hover' && this.hovered; }, addEventListener(n, f) { (this.h[n] = this.h[n] || []).push(f); }, fire(n) { (this.h[n] || []).forEach((f) => f({})); } });
 const docH = {};
 const src = ren.slice(ren.indexOf('const POPUP_AUTO_HIDE_MS'), ren.indexOf('const MIC_VOLUME_POPUPS'));
 const sb = { setTimeout: setTimeoutF, clearTimeout: clearTimeoutF, document: { addEventListener: (n, f) => { (docH[n] = docH[n] || []).push(f); } }, console };
@@ -24,6 +24,12 @@ ok(sb.MS === 5000, 'thời gian = 5000 ms');
   docH.mouseup.forEach((f) => f({})); advance(4900); ok(c.style.display === 'flex', 'thả chuột: đếm lại 5 s'); advance(200); ok(c.style.display === 'none', '5 s sau khi thả: ẩn'); }
 { const c = mkCard(); const a = sb.make(c, () => { c.style.display = 'none'; }); a.arm(); a.disarm(); advance(10000); ok(c.style.display === 'flex', 'đóng tay (disarm) rồi không bị ẩn/đếm nhầm'); }
 { const c = mkCard(); const a = sb.make(c, () => { c.style.display = 'none'; }); a.arm(); advance(3000); a.arm(); advance(3000); ok(c.style.display === 'flex', 'mở lại: đếm lại từ lần mở sau'); }
+// POPUP-AUTOHIDE-02: chuột còn nằm trong thẻ thì không ẩn; rời thẻ rồi 5 s mới ẩn
+{ const c = mkCard(); const a = sb.make(c, () => { c.style.display = 'none'; }); a.arm();
+  c.hovered = true; c.fire('mouseenter'); advance(30000); ok(c.style.display === 'flex', 'chuột đứng yên trong thẻ: KHÔNG ẩn');
+  c.hovered = false; c.fire('mouseleave'); advance(4900); ok(c.style.display === 'flex', 'chuột rời thẻ: chưa tới 5 s vẫn hiện'); advance(200); ok(c.style.display === 'none', 'chuột rời thẻ 5 s: ẩn'); }
+{ const c = mkCard(); const a = sb.make(c, () => { c.style.display = 'none'; }); a.arm();
+  c.hovered = true; advance(12000); ok(c.style.display === 'flex', 'hover mà không có sự kiện nào (timer tự kiểm tra :hover): không ẩn'); }
 console.log('== 4 popup đều dùng helper ==');
 const n = (re) => (ren.match(re) || []).length;
 ok(n(/const auto = createPopupAutoHide\(card, /g) === 3, 'MIC(1+2 chung vòng lặp) / FX / MUSIC đều tạo bộ tự ẩn', n(/const auto = createPopupAutoHide\(card, /g));

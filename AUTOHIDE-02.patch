@@ -1,0 +1,152 @@
+From 7049f31c7af2ae145d4d05950eb55fbb2568b15d Mon Sep 17 00:00:00 2001
+From: ClaudeB <b@local>
+Date: Wed, 4 Nov 2026 09:59:21 +0000
+Subject: [PATCH] AUTOHIDE-02: Expand + popup khong tu an khi con thao
+ tac/chuot trong vung; 5s idle moi an
+
+---
+ tests/unit/ExpandAutoHide02.verify.js | 27 ++++++++++++++++++
+ tests/unit/PopupAutoHideA97.verify.js |  8 +++++-
+ ui/js/renderer.js                     | 40 +++++++++++++++++++++------
+ 3 files changed, 65 insertions(+), 10 deletions(-)
+ create mode 100644 tests/unit/ExpandAutoHide02.verify.js
+
+diff --git a/tests/unit/ExpandAutoHide02.verify.js b/tests/unit/ExpandAutoHide02.verify.js
+new file mode 100644
+index 0000000..0df86d5
+--- /dev/null
++++ b/tests/unit/ExpandAutoHide02.verify.js
+@@ -0,0 +1,27 @@
++// EXPAND-AUTOHIDE-02 — Control (EXPAND) chỉ tự thu gọn sau 5 s KHÔNG thao tác; chuột còn trong Control / đang giữ chuột thì không thu gọn.
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const ren = fs.readFileSync(path.join(__dirname, '..', '..', 'ui/js/renderer.js'), 'utf8');
++let pass = 0, fail = 0;
++const ok = (c, l) => { if (c) { pass++; console.log('  OK  ', l); } else { fail++; console.error('  FAIL ', l); } };
++let now = 0, seq = 0; const timers = new Map();
++const st = (f, ms) => { const id = ++seq; timers.set(id, { at: now + ms, f }); return id; };
++const ct = (id) => timers.delete(id);
++const advance = (ms) => { const end = now + ms; for (;;) { const n = [...timers].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0]; if (!n) break; now = n[1].at; timers.delete(n[0]); n[1].f(); } now = end; };
++const cls = new Set();
++const mkEl = () => ({ h: {}, addEventListener(n, f) { (this.h[n] = this.h[n] || []).push(f); }, fire(n) { (this.h[n] || []).forEach((f) => f({})); }, setAttribute() {}, querySelector() { return null; } });
++const panel = Object.assign(mkEl(), { hovered: false, classList: { add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c) }, matches(s) { return s === ':hover' && this.hovered; } });
++const btn = Object.assign(mkEl(), { classList: { add() {}, remove() {} } });
++const docH = {};
++const doc = { getElementById: (id) => (id === 'expandBtn' ? btn : id === 'controlPanel' ? panel : null), querySelector: () => null, addEventListener: (n, f) => { (docH[n] = docH[n] || []).push(f); } };
++const start = ren.indexOf('5b. EXPAND / COLLAPSE CONTROL PANEL'); const a = ren.indexOf('(function () {', start); const b = ren.indexOf('})();', a) + 5;
++vm.runInNewContext(ren.slice(a, b), { document: doc, window: {}, setTimeout: st, clearTimeout: ct, requestAnimationFrame: (f) => f() });
++const isOpen = () => cls.has('expanded');
++console.log('== EXPAND tự thu gọn ==');
++btn.fire('click'); ok(isOpen(), 'bấm EXPAND: mở');
++advance(4900); ok(isOpen(), 'chưa tới 5 s: vẫn mở'); advance(400); ok(!isOpen(), '5 s không thao tác: thu gọn');
++btn.fire('click'); advance(4000); panel.fire('mousemove'); advance(4000); ok(isOpen(), 'có thao tác (mousemove): đếm lại 5 s');
++panel.hovered = true; advance(30000); ok(isOpen(), 'chuột đứng yên trong Control: KHÔNG thu gọn');
++panel.hovered = false; panel.fire('mouseleave'); advance(4900); ok(isOpen(), 'chuột rời Control: chưa tới 5 s vẫn mở'); advance(400); ok(!isOpen(), 'rời Control 5 s: thu gọn');
++btn.fire('click'); panel.fire('mousedown'); advance(30000); ok(isOpen(), 'đang GIỮ chuột (kéo knob): KHÔNG thu gọn');
++docH.mouseup.forEach((f) => f({})); advance(4900); ok(isOpen(), 'thả chuột: đếm lại 5 s'); advance(400); ok(!isOpen(), '5 s sau khi thả: thu gọn');
++console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
+diff --git a/tests/unit/PopupAutoHideA97.verify.js b/tests/unit/PopupAutoHideA97.verify.js
+index fa6c721..18ffb07 100644
+--- a/tests/unit/PopupAutoHideA97.verify.js
++++ b/tests/unit/PopupAutoHideA97.verify.js
+@@ -8,7 +8,7 @@ let now = 0, seq = 0; const timers = new Map();
+ const setTimeoutF = (f, ms) => { const id = ++seq; timers.set(id, { at: now + ms, f }); return id; };
+ const clearTimeoutF = (id) => timers.delete(id);
+ const advance = (ms) => { const end = now + ms; for (;;) { const n = [...timers].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0]; if (!n) break; now = n[1].at; timers.delete(n[0]); n[1].f(); } now = end; };
+-const mkCard = () => ({ style: { display: 'flex' }, h: {}, addEventListener(n, f) { (this.h[n] = this.h[n] || []).push(f); }, fire(n) { (this.h[n] || []).forEach((f) => f({})); } });
++const mkCard = () => ({ style: { display: 'flex' }, h: {}, hovered: false, matches(sel) { return sel === ':hover' && this.hovered; }, addEventListener(n, f) { (this.h[n] = this.h[n] || []).push(f); }, fire(n) { (this.h[n] || []).forEach((f) => f({})); } });
+ const docH = {};
+ const src = ren.slice(ren.indexOf('const POPUP_AUTO_HIDE_MS'), ren.indexOf('const MIC_VOLUME_POPUPS'));
+ const sb = { setTimeout: setTimeoutF, clearTimeout: clearTimeoutF, document: { addEventListener: (n, f) => { (docH[n] = docH[n] || []).push(f); } }, console };
+@@ -24,6 +24,12 @@ ok(sb.MS === 5000, 'thời gian = 5000 ms');
+   docH.mouseup.forEach((f) => f({})); advance(4900); ok(c.style.display === 'flex', 'thả chuột: đếm lại 5 s'); advance(200); ok(c.style.display === 'none', '5 s sau khi thả: ẩn'); }
+ { const c = mkCard(); const a = sb.make(c, () => { c.style.display = 'none'; }); a.arm(); a.disarm(); advance(10000); ok(c.style.display === 'flex', 'đóng tay (disarm) rồi không bị ẩn/đếm nhầm'); }
+ { const c = mkCard(); const a = sb.make(c, () => { c.style.display = 'none'; }); a.arm(); advance(3000); a.arm(); advance(3000); ok(c.style.display === 'flex', 'mở lại: đếm lại từ lần mở sau'); }
++// POPUP-AUTOHIDE-02: chuột còn nằm trong thẻ thì không ẩn; rời thẻ rồi 5 s mới ẩn
++{ const c = mkCard(); const a = sb.make(c, () => { c.style.display = 'none'; }); a.arm();
++  c.hovered = true; c.fire('mouseenter'); advance(30000); ok(c.style.display === 'flex', 'chuột đứng yên trong thẻ: KHÔNG ẩn');
++  c.hovered = false; c.fire('mouseleave'); advance(4900); ok(c.style.display === 'flex', 'chuột rời thẻ: chưa tới 5 s vẫn hiện'); advance(200); ok(c.style.display === 'none', 'chuột rời thẻ 5 s: ẩn'); }
++{ const c = mkCard(); const a = sb.make(c, () => { c.style.display = 'none'; }); a.arm();
++  c.hovered = true; advance(12000); ok(c.style.display === 'flex', 'hover mà không có sự kiện nào (timer tự kiểm tra :hover): không ẩn'); }
+ console.log('== 4 popup đều dùng helper ==');
+ const n = (re) => (ren.match(re) || []).length;
+ ok(n(/const auto = createPopupAutoHide\(card, /g) === 3, 'MIC(1+2 chung vòng lặp) / FX / MUSIC đều tạo bộ tự ẩn', n(/const auto = createPopupAutoHide\(card, /g));
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index cfe17ab..1b48afc 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -748,14 +748,22 @@ const MONITOR_BTN_TO_CONTROL = { mic1Btn: "MIC1", mic2Btn: "MIC2", fxBtn: "FX" }
+ const POPUP_AUTO_HIDE_MS = 5000;
+ function createPopupAutoHide(card, hide) {
+     let timer = null;
++    let pressed = false; // đang GIỮ chuột (kéo knob, kể cả kéo ra ngoài thẻ)
+     const disarm = () => { if (timer) { clearTimeout(timer); timer = null; } };
+-    const arm = () => { disarm(); timer = setTimeout(() => { timer = null; hide(); }, POPUP_AUTO_HIDE_MS); };
+-    ["mousemove", "wheel", "keydown", "change"].forEach((ev) => card.addEventListener(ev, () => { if (timer) arm(); }));
+-    // Đang GIỮ chuột trên thẻ (kéo knob, kể cả kéo ra ngoài thẻ) thì không ẩn; thả chuột -> đếm lại 5 s.
+-    let pressed = false;
++    const arm = () => {
++        disarm();
++        timer = setTimeout(() => {
++            timer = null;
++            // POPUP-AUTOHIDE-02: chuột còn nằm trong thẻ hoặc đang giữ chuột => KHÔNG ẩn, đếm lại; chỉ ẩn khi đã hết thao tác 5 s.
++            if (pressed || card.matches(":hover")) { arm(); return; }
++            hide();
++        }, POPUP_AUTO_HIDE_MS);
++    };
++    // Mọi thao tác trong thẻ (kể cả chuột rời thẻ) => đếm lại 5 s từ đầu.
++    ["mousemove", "mouseenter", "mouseleave", "wheel", "keydown", "change", "input", "click"].forEach((ev) => card.addEventListener(ev, () => { if (timer) arm(); }));
+     card.addEventListener("mousedown", () => { if (timer) { pressed = true; disarm(); } });
+     document.addEventListener("mouseup", () => { if (pressed) { pressed = false; if (card.style.display !== "none") arm(); } });
+-    return { arm, disarm };
++    return { arm, disarm: () => { pressed = false; disarm(); } };
+ }
+ const MIC_VOLUME_POPUPS = [
+     { btnId: "mic1Btn", knobId: "mic1VolKnob", valueId: "mic1VolValue", label: "MIC 1 VOLUME" },
+@@ -1137,7 +1145,8 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
+     const panel = document.getElementById("controlPanel");
+     if (!expandBtn || !panel) return;
+ 
+-    const AUTO_COLLAPSE_MS = 20000; // 20s — theo yêu cầu người dùng (Task: auto-collapse timing update)
++    const AUTO_COLLAPSE_MS = 5000; // 5s KHÔNG thao tác mới tự thu gọn (EXPAND-AUTOHIDE-02). Còn thao tác / chuột còn trong Control thì KHÔNG thu gọn.
++    let panelPressed = false; // đang GIỮ chuột (kéo knob, kể cả kéo ra ngoài Control)
+     let collapseTimer = null;
+ 
+     // Co/giãn cửa sổ THẬT (Electron BrowserWindow) khớp đúng chiều cao nội dung
+@@ -1167,7 +1176,13 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
+ 
+     function scheduleAutoCollapse() {
+         clearCollapseTimer();
+-        collapseTimer = setTimeout(collapsePanel, AUTO_COLLAPSE_MS);
++        collapseTimer = setTimeout(() => {
++            collapseTimer = null;
++            if (!panel.classList.contains("expanded")) return;
++            // Chuột còn trong Control hoặc đang giữ chuột => không thu gọn, đếm lại.
++            if (panelPressed || panel.matches(":hover")) { scheduleAutoCollapse(); return; }
++            collapsePanel();
++        }, AUTO_COLLAPSE_MS);
+     }
+ 
+     function expandPanel() {
+@@ -1203,10 +1218,17 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
+     });
+ 
+     // Bất kỳ thao tác nào trong Control (bấm, kéo knob, đổi select...) reset lại giờ tự Collapse
+-    ["mousedown", "click", "input", "change"].forEach(evt => {
++    ["mousedown", "click", "input", "change", "mousemove", "mouseenter", "mouseleave", "wheel", "keydown", "touchstart"].forEach(evt => {
+         panel.addEventListener(evt, () => {
+             if (panel.classList.contains("expanded")) scheduleAutoCollapse();
+-        });
++        }, { passive: true });
++    });
++    // Giữ chuột (kéo knob) thì không thu gọn; thả chuột => đếm lại 5 s.
++    panel.addEventListener("mousedown", () => { panelPressed = true; });
++    document.addEventListener("mouseup", () => {
++        if (!panelPressed) return;
++        panelPressed = false;
++        if (panel.classList.contains("expanded")) scheduleAutoCollapse();
+     });
+ 
+     // Đồng bộ chiều cao cửa sổ ngay khi tải trang xong (trạng thái mặc định = thu gọn)
+-- 
+2.43.0
+

@@ -748,14 +748,22 @@ const MONITOR_BTN_TO_CONTROL = { mic1Btn: "MIC1", mic2Btn: "MIC2", fxBtn: "FX" }
 const POPUP_AUTO_HIDE_MS = 5000;
 function createPopupAutoHide(card, hide) {
     let timer = null;
+    let pressed = false; // đang GIỮ chuột (kéo knob, kể cả kéo ra ngoài thẻ)
     const disarm = () => { if (timer) { clearTimeout(timer); timer = null; } };
-    const arm = () => { disarm(); timer = setTimeout(() => { timer = null; hide(); }, POPUP_AUTO_HIDE_MS); };
-    ["mousemove", "wheel", "keydown", "change"].forEach((ev) => card.addEventListener(ev, () => { if (timer) arm(); }));
-    // Đang GIỮ chuột trên thẻ (kéo knob, kể cả kéo ra ngoài thẻ) thì không ẩn; thả chuột -> đếm lại 5 s.
-    let pressed = false;
+    const arm = () => {
+        disarm();
+        timer = setTimeout(() => {
+            timer = null;
+            // POPUP-AUTOHIDE-02: chuột còn nằm trong thẻ hoặc đang giữ chuột => KHÔNG ẩn, đếm lại; chỉ ẩn khi đã hết thao tác 5 s.
+            if (pressed || card.matches(":hover")) { arm(); return; }
+            hide();
+        }, POPUP_AUTO_HIDE_MS);
+    };
+    // Mọi thao tác trong thẻ (kể cả chuột rời thẻ) => đếm lại 5 s từ đầu.
+    ["mousemove", "mouseenter", "mouseleave", "wheel", "keydown", "change", "input", "click"].forEach((ev) => card.addEventListener(ev, () => { if (timer) arm(); }));
     card.addEventListener("mousedown", () => { if (timer) { pressed = true; disarm(); } });
     document.addEventListener("mouseup", () => { if (pressed) { pressed = false; if (card.style.display !== "none") arm(); } });
-    return { arm, disarm };
+    return { arm, disarm: () => { pressed = false; disarm(); } };
 }
 const MIC_VOLUME_POPUPS = [
     { btnId: "mic1Btn", knobId: "mic1VolKnob", valueId: "mic1VolValue", label: "MIC 1 VOLUME" },
@@ -1137,7 +1145,8 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
     const panel = document.getElementById("controlPanel");
     if (!expandBtn || !panel) return;
 
-    const AUTO_COLLAPSE_MS = 20000; // 20s — theo yêu cầu người dùng (Task: auto-collapse timing update)
+    const AUTO_COLLAPSE_MS = 5000; // 5s KHÔNG thao tác mới tự thu gọn (EXPAND-AUTOHIDE-02). Còn thao tác / chuột còn trong Control thì KHÔNG thu gọn.
+    let panelPressed = false; // đang GIỮ chuột (kéo knob, kể cả kéo ra ngoài Control)
     let collapseTimer = null;
 
     // Co/giãn cửa sổ THẬT (Electron BrowserWindow) khớp đúng chiều cao nội dung
@@ -1167,7 +1176,13 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
 
     function scheduleAutoCollapse() {
         clearCollapseTimer();
-        collapseTimer = setTimeout(collapsePanel, AUTO_COLLAPSE_MS);
+        collapseTimer = setTimeout(() => {
+            collapseTimer = null;
+            if (!panel.classList.contains("expanded")) return;
+            // Chuột còn trong Control hoặc đang giữ chuột => không thu gọn, đếm lại.
+            if (panelPressed || panel.matches(":hover")) { scheduleAutoCollapse(); return; }
+            collapsePanel();
+        }, AUTO_COLLAPSE_MS);
     }
 
     function expandPanel() {
@@ -1203,10 +1218,17 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
     });
 
     // Bất kỳ thao tác nào trong Control (bấm, kéo knob, đổi select...) reset lại giờ tự Collapse
-    ["mousedown", "click", "input", "change"].forEach(evt => {
+    ["mousedown", "click", "input", "change", "mousemove", "mouseenter", "mouseleave", "wheel", "keydown", "touchstart"].forEach(evt => {
         panel.addEventListener(evt, () => {
             if (panel.classList.contains("expanded")) scheduleAutoCollapse();
-        });
+        }, { passive: true });
+    });
+    // Giữ chuột (kéo knob) thì không thu gọn; thả chuột => đếm lại 5 s.
+    panel.addEventListener("mousedown", () => { panelPressed = true; });
+    document.addEventListener("mouseup", () => {
+        if (!panelPressed) return;
+        panelPressed = false;
+        if (panel.classList.contains("expanded")) scheduleAutoCollapse();
     });
 
     // Đồng bộ chiều cao cửa sổ ngay khi tải trang xong (trạng thái mặc định = thu gọn)
