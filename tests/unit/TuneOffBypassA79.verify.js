@@ -52,7 +52,7 @@ function makeAR2(daw, saved) {
         vm.createContext(sb); vm.runInContext(rd('ui/js/actionRegistry.js'), sb); return { AR: w.ActionRegistry, sent }; })();
     await b.AR.setDawControlState('TUNE', true, { reason: 't' });
     await b.AR.setDawControlState('TUNE', false, { reason: 't' });
-    ok(JSON.stringify(b.sent) === JSON.stringify([[113, 127, 15], [113, 0, 15]]), 'bypass BẬT gửi CC113=127, bypass TẮT gửi CC113=0 (cùng 1 CC, kênh 16) — thực tế: ' + JSON.stringify(b.sent));
+    ok(JSON.stringify(b.sent.filter((x) => x[2] === 15)) === JSON.stringify([[113, 127, 15], [113, 0, 15]]), 'bypass BẬT gửi CC113=127, bypass TẮT gửi CC113=0 (Auto-Tune 1, kênh 16; A94: thêm CC89/90/91 kênh 15 cho Auto-Tune 2-4) — thực tế: ' + JSON.stringify(b.sent));
     finish();
 })();
 
@@ -62,15 +62,15 @@ ok(/isTuneOffBtn\(e\.target\)[\s\S]{0,400}renderTuneBtn\(e\.target, tuneOnNow\)/
 ok(/renderTuneBtn\(b, true\)/.test(r), 'mặc định TUNE ON (sáng, bypass tắt)');
 ok(/btn\.textContent = tuneOn \? "TUNE ON" : "TUNE OFF"/.test(r) && /classList\.toggle\("active", tuneOn\)/.test(r), 'TUNE ON = sáng + chữ TUNE ON; TUNE OFF = tắt sáng + chữ TUNE OFF');
 ok(/const bypassOn = !tuneOnNow/.test(r) && /setDawControlState\?\.\("TUNE", bypassOn/.test(r), 'TUNE OFF => bypass BẬT; TUNE ON => bypass TẮT');
-ok(/forEach\(b => \{ if \(!isTuneOffBtn\(b\)\) b\.classList\.remove\("active"\)/.test(r), 'bấm preset không tắt TUNE OFF');
-ok(/btn\.dataset\.tuneBtn === "1"\) return;/.test(r), 'loadData không khôi phục nút TUNE (luôn mở ở TUNE ON)');
+ok(/forEach\(b => \{ if \(!isIndependentPresetBtn\(b\)\) b\.classList\.remove\("active"\)/.test(r), 'bấm preset không tắt TUNE OFF');
+ok(/btn\.dataset\.tuneBtn === "1"[^\n]*\) return;/.test(r), 'loadData không khôi phục nút TUNE (luôn mở ở TUNE ON)');
 ok(/MIC1.{0,40}MIC2|2 mic/i.test(rd('ui/js/actionRegistry.js')), 'label ghi rõ bypass 2 mic');
 
 // --- 3. Setup có 2 dòng mapping mới ---
 const s = rd('ui/js/setup.js');
 ok(/action: "TUNE_BYPASS"/.test(s), 'Setup có 1 dòng mapping TUNE_BYPASS');
 
-ok(/tune: Object\.freeze\(\{ title: "TUNE BYPASS", count: 1, mappings: dawQfMake\(16, 127, \{ TUNE_BYPASS: 113 \}/.test(s), 'bộ CC gợi ý Studio One: TUNE_BYPASS=113 (kênh 16)');
+ok(/tune: Object\.freeze\(\{ title: "TUNE BYPASS", count: 4, mappings: Object\.freeze\(\{ \.\.\.dawQfMake\(16, 127, \{ TUNE_BYPASS: 113 \}\)/.test(s), 'bộ CC gợi ý Studio One: TUNE_BYPASS=113 (kênh 16)');
 ok(/TUNE_BYPASS: 118/.test(s) && /btnFillTuneCc/.test(s), 'bộ CC Cubase + nút điền nhanh btnFillTuneCc');
 
 // --- 4. HTML không đổi ---

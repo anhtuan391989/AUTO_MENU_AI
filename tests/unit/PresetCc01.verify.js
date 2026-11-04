@@ -13,7 +13,7 @@ function run(states, extra) {
   const btns = ['NORM', 'LOFI', 'RAP', 'REMIX'].map((n, k) => mkBtn(n, states[k]));
   const tune = mkBtn('TUNE ON', true); tune.dataset.tuneBtn = '1'; const all = [...btns, tune, ...(extra || [])];
   const document = { querySelectorAll: () => all };
-  new Function('document', 'isTuneOffBtn', fnSrc + ';ensurePresetLit();')(document, (b) => !!(b.dataset && b.dataset.tuneBtn === '1'));
+  new Function('document', 'isIndependentPresetBtn', fnSrc + ';ensurePresetLit();')(document, (b) => !!(b.dataset && (b.dataset.tuneBtn === '1' || b.dataset.lofiBtn === '1'))); // A94: TUNE và LOFI độc lập
   return { lit: btns.map((x) => x.classList.contains('active')), tuneLit: tune.classList.contains('active') };
 }
 ok(run([false, false, false, false]).lit.join() === 'true,false,false,false', 'không nút nào sáng -> NORM sáng');

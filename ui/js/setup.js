@@ -678,7 +678,10 @@ const DAW_MIDI_ACTIONS = [
     { action: "FX_OFF", label: "FX OFF (Mute 4 bus)" },
     // TASK A79 — nút TUNE OFF: bypass Auto-Tune cả 2 mic (ON = bypass bật, OFF = bypass tắt). Trống mặc định, tự MIDI Learn.
     // 1 CC DUY NHẤT cho nút TUNE ON/OFF: Menu tự gửi giá trị 127 (nút thành TUNE OFF = bypass BẬT) hoặc 0 (về TUNE ON = bypass TẮT).
-    { action: "TUNE_BYPASS", label: "TUNE ON/OFF — BYPASS cả 4 plugin Auto-Tune (127 = bypass bật, 0 = tắt)" },
+    { action: "TUNE_BYPASS", label: "TUNE ON/OFF — BYPASS Auto-Tune 1 (127 = bypass bật, 0 = tắt)" },
+    { action: "TUNE_BYPASS_2", label: "TUNE ON/OFF — BYPASS Auto-Tune 2 (nút TUNE gửi cả 4)" },
+    { action: "TUNE_BYPASS_3", label: "TUNE ON/OFF — BYPASS Auto-Tune 3 (nút TUNE gửi cả 4)" },
+    { action: "TUNE_BYPASS_4", label: "TUNE ON/OFF — BYPASS Auto-Tune 4 (nút TUNE gửi cả 4)" },
     // TASK A94 — nút LOFI: ON/OFF độc lập, kết hợp được với NORM/RAP/REMIX. 1 CC: 127 = LOFI bật, 0 = tắt (mặc định kênh 16 CC 118 / Cubase 119).
     { action: "LOFI_STATE", label: "LOFI ON/OFF (127 = bật, 0 = tắt) — kết hợp với preset khác" },
     // MENU-FIX-02 — TUỲ CHỌN: lệnh CHỌN TRACK (macro chỉ "Find Track") gửi TRƯỚC lệnh ON/OFF tương ứng để Monitor không đảo nhầm track cũ.
@@ -711,7 +714,7 @@ function findDawStateMappingConflict(action, mapping) {
 // Chỉ kiểm lúc LƯU mapping mới; không đổi/ghi đè mapping đã lưu, không đổi định dạng lưu.
 const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2", "MIC1_VOLUME", "MIC2_VOLUME", "FX_BUS_DELAY_VOLUME", "FX_BUS_VERB_SHORT_VOLUME", "FX_BUS_VERB_LONG_VOLUME", "FX_BUS_COM_VERB_VOLUME", "KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_ROOT"]);
 const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
-const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "LOFI_STATE"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
+const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "TUNE_BYPASS_2", "TUNE_BYPASS_3", "TUNE_BYPASS_4", "LOFI_STATE"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
 function findMidiOutMappingConflict(action, mapping) {
     for (const { action: other } of DAW_MIDI_ACTIONS) {
         if (other === action) continue;
@@ -737,6 +740,9 @@ function getDawMidiOutMapping(action) {
     if (action === "TUNE_BYPASS") {
         const cubase = /^cubase/i.test(String(daw).trim());
         return { kind: "cc", channel: 16, number: cubase ? 118 : 113, value: 127, source: "DEFAULT_PRESET" };
+    }
+    if (/^TUNE_BYPASS_[234]$/.test(String(action))) { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
+        return { kind: "cc", channel: 15, number: 87 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
     }
     if (/^KEY_(SCALE_MAJOR|SCALE_MINOR|ROOT)_AT[34]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
         const base = /_AT3$/.test(action) ? 34 : 36;
@@ -792,7 +798,9 @@ const DAW_MIDI_PROFILES = Object.freeze({
             select: Object.freeze({ title: "CHỌN TRACK", count: 3, mappings: dawQfMake(16, 127, { MUSIC_SELECT: 110, MIC1_SELECT: 111, MIC2_SELECT: 112 }) }),
             // MIC-VOLUME-KNOB-01 — 2 CC âm lượng Mic, kênh 15 như bộ KNOB, không trùng CC 20–23 (Knob) và 102–112 (LIVE/CHỌN TRACK).
             // TASK A82 — 1 CC Bypass Auto-Tune (nút TUNE ON/OFF: 127 = bypass bật, 0 = tắt), kênh 16 như LIVE, CC 113 (không trùng 102–112).
-            tune: Object.freeze({ title: "TUNE BYPASS", count: 1, mappings: dawQfMake(16, 127, { TUNE_BYPASS: 113 }) }),
+            tune: Object.freeze({ title: "TUNE BYPASS", count: 4, mappings: Object.freeze({ ...dawQfMake(16, 127, { TUNE_BYPASS: 113 }), TUNE_BYPASS_2: Object.freeze({ kind: "cc", channel: 15, number: 89, value: 127 }),
+                TUNE_BYPASS_3: Object.freeze({ kind: "cc", channel: 15, number: 90, value: 127 }),
+                TUNE_BYPASS_4: Object.freeze({ kind: "cc", channel: 15, number: 91, value: 127 }) }) }),
             lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 118 }) }), // A94
             // PRESET-CC-01 — 4 CC (kênh 16, giá trị 127) cho 4 nút Preset NORM/LOFI/RAP/REMIX: mỗi nút gửi 1 CC riêng; trong Studio Pro gán từng CC vào macro/preset
             // (bật-tắt plugin hoặc đặt thông số cài sẵn). Dùng CC 114–117: không trùng LIVE 102–109, CHỌN TRACK 110–112, TUNE 113; tránh CC 120–127 (lệnh hệ thống MIDI).
@@ -831,7 +839,9 @@ const DAW_MIDI_PROFILES = Object.freeze({
         bundles: Object.freeze({
             live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, { MUSIC_ON: 110, MUSIC_OFF: 111, MIC1_ON: 112, MIC1_OFF: 113, MIC2_ON: 114, MIC2_OFF: 115, FX_ON: 116, FX_OFF: 117 }) }),
             knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 85, MASTER_OUTPUT_VOLUME: 86, RETUNE_SPEED_MIC1: 87, RETUNE_SPEED_MIC2: 88 }) }),
-            tune: Object.freeze({ title: "TUNE BYPASS", count: 1, mappings: dawQfMake(16, 127, { TUNE_BYPASS: 118 }) }), // A82
+            tune: Object.freeze({ title: "TUNE BYPASS", count: 4, mappings: Object.freeze({ ...dawQfMake(16, 127, { TUNE_BYPASS: 118 }), TUNE_BYPASS_2: Object.freeze({ kind: "cc", channel: 15, number: 89, value: 127 }),
+                TUNE_BYPASS_3: Object.freeze({ kind: "cc", channel: 15, number: 90, value: 127 }),
+                TUNE_BYPASS_4: Object.freeze({ kind: "cc", channel: 15, number: 91, value: 127 }) }) }), // A82
             lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 119 }) }), // A94
         }),
     }),

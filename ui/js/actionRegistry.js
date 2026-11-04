@@ -131,6 +131,10 @@ const ACTIONS = Object.freeze({
     // MỘT CC DUY NHẤT: giá trị 127 = bypass BẬT (nút thành TUNE OFF), 0 = bypass TẮT (nút về TUNE ON) — giống nút Bypass SoundShifter.
     // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_TUNE_OFF cũ (tương thích ngược).
     TUNE_BYPASS: "TUNE_BYPASS",
+    // TASK A94 — Studio One không nối 1 CC vào bypass của 4 plugin ở 4 track => mỗi Auto-Tune thứ 2/3/4 có CC bypass RIÊNG (kênh 15: CC 89/90/91). Nút TUNE gửi cả 4 cùng lúc.
+    TUNE_BYPASS_2: "TUNE_BYPASS_2",
+    TUNE_BYPASS_3: "TUNE_BYPASS_3",
+    TUNE_BYPASS_4: "TUNE_BYPASS_4",
     // TASK A94 — nút LOFI = công tắc ON/OFF ĐỘC LẬP (kết hợp được với NORM/RAP/REMIX; chỉ riêng LOFI). MỘT CC: 127 = LOFI BẬT, 0 = LOFI TẮT.
     // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_LOFI cũ (tương thích ngược).
     LOFI_STATE: "LOFI_STATE"
@@ -250,6 +254,9 @@ function getMidiOutMapping(action) {
     if (!daw) return null;
     const all = (typeof getSetting === "function" ? getSetting("dawMidiOutMappings") : {}) || {};
     if (all[daw] && all[daw][action]) return all[daw][action];
+    if (/^TUNE_BYPASS_[234]$/.test(String(action))) { // A94 — bypass riêng Auto-Tune 2/3/4: kênh 15, CC 89/90/91 (không trùng bộ KNOB 85-88)
+        return { kind: "cc", channel: 15, number: 87 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
+    }
     // TASK A81 — preset mặc định cho nút TUNE (tự chứa trong hàm này để các test cắt hàm vẫn chạy). Studio One/Studio Pro: kênh 16 CC 113; Cubase: CC 118. Giá trị gửi do nút quyết định (127 bypass bật / 0 tắt).. Mapping đã lưu luôn thắng (dòng trên).
     if (action === "TUNE_BYPASS") {
         const cubase = /^cubase/i.test(String(daw).trim());
@@ -500,8 +507,21 @@ async function setDawControlState(control, targetOn, context = {}) {
         action = def.legacy;
         res = await executeAction(action, { reason });
     }
+    // A94 — nút TUNE: gửi thêm bypass riêng cho Auto-Tune 2/3/4 (mỗi cái 1 CC). Lỗi/chưa cấu hình ở các CC phụ KHÔNG làm hỏng kết quả của CC chính.
+    let tuneExtra = null;
+    if (control === "TUNE" && mode === "explicit" && res && res.ok) {
+        tuneExtra = {};
+        for (const ex of [ACTIONS.TUNE_BYPASS_2, ACTIONS.TUNE_BYPASS_3, ACTIONS.TUNE_BYPASS_4]) {
+            try {
+                if (!isMidiMappingConfigured(ex)) { tuneExtra[ex] = "NOT_CONFIGURED"; continue; }
+                const rx = await executeAction(ex, { reason, value: targetOn ? def.values.on : def.values.off });
+                tuneExtra[ex] = rx && rx.ok ? "OK" : "FAIL";
+            } catch (e) { tuneExtra[ex] = "FAIL"; }
+        }
+    }
     const out = {
         ...res,
+        ...(tuneExtra ? { tuneExtra } : {}),
         control,
         target: targetOn ? "ON" : "OFF",
         mode,

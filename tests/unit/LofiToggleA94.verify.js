@@ -56,12 +56,20 @@ function makeAR(daw, saved) {
 
     console.log('== 3. Setup/Surface ==');
     const setup = rd('ui/js/setup.js');
-    ok(/action: "LOFI_STATE"/.test(setup) && /"TUNE_BYPASS", "LOFI_STATE"\]/.test(setup) && /LOFI_STATE: 118/.test(setup) && /LOFI_STATE: 119/.test(setup), 'Setup: có dòng LOFI_STATE, nhóm bảo vệ trùng CC, bộ gợi ý Studio One 118 / Cubase 119');
+    ok(/action: "LOFI_STATE"/.test(setup) && /"TUNE_BYPASS_4", "LOFI_STATE"\]/.test(setup) && /LOFI_STATE: 118/.test(setup) && /LOFI_STATE: 119/.test(setup), 'Setup: có dòng LOFI_STATE, nhóm bảo vệ trùng CC, bộ gợi ý Studio One 118 / Cubase 119');
     ok(/name="lofiOnOff"[\s\S]{0,160}address="118"/.test(rd('studio_one/AutoMenuAI.surface.xml')), 'surface AutoMenuAI có control LOFI CC118');
     console.log('== 4. A94: Auto-Tune 3 / 4 có CC riêng mặc định (kênh 16, CC34-37) ==');
     { const A = makeAR('Studio Pro 8'); const g = (n) => A.getMidiOutMapping(n);
       const want = { KEY_SCALE_MAJOR_AT3: [34, 0], KEY_SCALE_MINOR_AT3: [34, 5], KEY_ROOT_AT3: [35, 0], KEY_SCALE_MAJOR_AT4: [36, 0], KEY_SCALE_MINOR_AT4: [36, 5], KEY_ROOT_AT4: [37, 0] };
       for (const k of Object.keys(want)) { const m = g(k); ok(m && m.kind === 'cc' && m.channel === 15 && m.number === want[k][0] && m.value === want[k][1], k + ' -> CC' + want[k][0] + ' giá trị ' + want[k][1]); }
       const C = makeAR('Cubase 14'); ok(!C.getMidiOutMapping('KEY_ROOT_AT3'), 'Cubase: không tự gán (giống MIC 2)'); }
+    console.log('== 5. A94: nút TUNE gửi bypass cho CẢ 4 Auto-Tune (CC113 kênh 16 + CC89/90/91 kênh 15) ==');
+    { let A = makeAR('Studio Pro 8'); let r = await A.setDawControlState('TUNE', true, {});
+      ok(r.ok && JSON.stringify(A.__sent) === JSON.stringify([[113, 127, 15], [89, 127, 14], [90, 127, 14], [91, 127, 14]]), 'TUNE bật -> CC113=127 rồi CC89/90/91=127', A.__sent);
+      A = makeAR('Studio Pro 8'); await A.setDawControlState('TUNE', false, {});
+      ok(JSON.stringify(A.__sent) === JSON.stringify([[113, 0, 15], [89, 0, 14], [90, 0, 14], [91, 0, 14]]), 'TUNE tắt -> cả 4 CC = 0', A.__sent);
+      A = makeAR('Studio Pro 8', { 'Studio Pro 8': { TUNE_BYPASS_3: { kind: 'cc', channel: 15, number: 70, value: 127 } } }); await A.setDawControlState('TUNE', true, {});
+      ok(A.__sent.some((x) => x[0] === 70 && x[1] === 127) && !A.__sent.some((x) => x[0] === 90), 'mapping đã lưu của Auto-Tune 3 thắng mặc định');
+      A = makeAR('Studio Pro 8'); await A.setDawControlState('LOFI', true, {}); ok(A.__sent.length === 1, 'LOFI không kéo theo bypass'); }
     console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })();
