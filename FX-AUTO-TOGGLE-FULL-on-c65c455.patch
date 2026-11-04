@@ -1,0 +1,213 @@
+From 954f2a0025fd67a395f8f32b2866d4f09b106d07 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 05:51:48 +0000
+Subject: [PATCH 1/2] =?UTF-8?q?FX-AUTO-TOGGLE-01:=20chu=E1=BB=99t=20ph?=
+ =?UTF-8?q?=E1=BA=A3i=20n=C3=BAt=20FX=20->=20=C3=B4=20t=C3=ADch=20Auto=20b?=
+ =?UTF-8?q?=E1=BA=ADt=20FX=20khi=20c=C3=B3=20nh=E1=BA=A1c?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Chỉ sửa ui/js/renderer.js (thêm initFxAutoMenu). Dùng cờ fxAutoEnabled sẵn có, không đổi HTML/CSS.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JEwxfoDKR6m2kYP8bX2svp
+---
+ ui/js/renderer.js | 41 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index dde056c..fe5c8b5 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -786,6 +786,46 @@ function initMicVolumePopups() {
+     document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideAll(); });
+ }
+ 
++// ==========================================================
++// FX-AUTO-TOGGLE-01 — Bấm CHUỘT PHẢI vào nút FX -> thẻ nổi có ô tích "Auto bật FX khi có nhạc" (tạo bằng JS, KHÔNG sửa HTML/CSS).
++// Tích = BẬT Auto FX (setting fxAutoEnabled = true, mặc định). Bỏ tích = TẮT (fxAutoEnabled = false -> Auto không bật/tắt FX nữa).
++// Dùng đúng cờ fxAutoEnabled sẵn có (createFxAutoWiring đã đọc cờ này), lưu qua setSetting nên nhớ sau khi mở lại app.
++// Bấm trái FX giữ nguyên như cũ. Đóng thẻ: bấm ra ngoài, phím Esc, hoặc chuột phải lần nữa.
++// ==========================================================
++function initFxAutoMenu() {
++    const btn = document.getElementById("fxBtn");
++    if (!btn || document.getElementById("fxAutoMenuCard")) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
++    const card = document.createElement("div");
++    card.id = "fxAutoMenuCard";
++    card.style.cssText = "position:fixed;display:none;z-index:3000;background:#081523;border:1px solid #1f3a57;border-radius:8px;padding:8px 12px;color:#cfe3f7;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.5);";
++    card.innerHTML = '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;">'
++        + '<input type="checkbox" id="fxAutoEnabledChk" style="cursor:pointer;"><span>Auto bật FX khi có nhạc</span></label>';
++    document.body.appendChild(card);
++    const chk = card.querySelector("#fxAutoEnabledChk");
++    const hide = () => { card.style.display = "none"; };
++    chk.addEventListener("change", () => { setSetting("fxAutoEnabled", !!chk.checked); });
++    btn.addEventListener("contextmenu", (e) => {
++        e.preventDefault();
++        if (card.style.display !== "none") { hide(); return; }
++        chk.checked = getSetting("fxAutoEnabled", true) !== false; // đọc trạng thái hiện tại mỗi lần mở
++        card.style.display = "block";
++        const r = btn.getBoundingClientRect();
++        const w = card.offsetWidth, h = card.offsetHeight;
++        const left = Math.max(4, Math.min(window.innerWidth - w - 4, r.left + r.width / 2 - w / 2));
++        let top = r.top - h - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
++        if (top < 4) top = r.bottom + 6;
++        card.style.left = left + "px";
++        card.style.top = top + "px";
++    });
++    document.addEventListener("mousedown", (e) => {
++        const t = e.target;
++        if (card.contains(t)) return;
++        if (t && t.closest && t.closest("#fxBtn")) return; // chuột phải mở/đóng do handler contextmenu lo
++        hide();
++    });
++    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
++}
++
+ ["mic1Btn", "mic2Btn", "fxBtn"].forEach(id => {
+     document.getElementById(id)?.addEventListener("click", (e) => {
+         e.target.classList.toggle("active");
+@@ -3131,6 +3171,7 @@ document.addEventListener("DOMContentLoaded", () => {
+     loadData();
+     ensurePresetLit(); // PRESET-LIT-01
+     if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
++    if (typeof initFxAutoMenu === "function") initFxAutoMenu(); // FX-AUTO-TOGGLE-01 — chuột phải FX: ô tích Auto bật FX khi có nhạc
+ 
+     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây
+     // (updateNextModTime() dùng modTimeline giả + updateModInfo("02:15","G# Minor",...) dùng
+-- 
+2.43.0
+
+
+From 0e0db9cf4ee570660ea57d71cac2e65f7043961e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 09:10:50 +0000
+Subject: [PATCH 2/2] =?UTF-8?q?FX-AUTO-TOGGLE-02:=20t=C3=ADch=20l=E1=BA=A1?=
+ =?UTF-8?q?i=20=C3=B4=20Auto=20FX=20=3D>=20Auto=20ch=E1=BA=A1y=20ngay=20th?=
+ =?UTF-8?q?eo=20nh=E1=BA=A1c;=20b=E1=BB=8F=20t=C3=ADch=20=3D>=20ch?=
+ =?UTF-8?q?=E1=BA=B7n=20ho=C3=A0n=20to=C3=A0n?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JEwxfoDKR6m2kYP8bX2svp
+---
+ tests/unit/FxAutoA01.verify.js      |  2 +-
+ tests/unit/FxAutoToggle02.verify.js | 23 +++++++++++++++++++++++
+ ui/js/audioSource.js                | 14 +++++++++++++-
+ ui/js/renderer.js                   |  8 ++++++--
+ 4 files changed, 43 insertions(+), 4 deletions(-)
+ create mode 100644 tests/unit/FxAutoToggle02.verify.js
+
+diff --git a/tests/unit/FxAutoA01.verify.js b/tests/unit/FxAutoA01.verify.js
+index 63e4192..02db2c0 100644
+--- a/tests/unit/FxAutoA01.verify.js
++++ b/tests/unit/FxAutoA01.verify.js
+@@ -58,7 +58,7 @@ const SIL = () => -80, MUS = () => -25, NOISE = (t) => -62 + 4 * Math.sin(t * 7)
+     r = rig(); await r.run(5, SIL); await r.run(10, MUS); r.ctl.setSourceState(false);
+     await r.run(20, SIL); ok(r.calls.length === 1 && r.ctl.getInfo().musicState === 'SOURCE_UNAVAILABLE', '   nguồn không khả dụng → đóng băng, KHÔNG tắt FX');
+     // 11. khởi động lại: 2 controller độc lập không chia sẻ; wiring chỉ tạo 1 interval
+-    ok((ren.match(/setInterval\(\(\) => \{ if \(getSetting\("fxAutoEnabled"/g) || []).length === 1 && /if \(window\.__fxAuto \|\| /.test(ren), '11. Wiring: đúng 1 setInterval và có chốt chống tạo controller thứ hai');
++    ok((ren.match(/setInterval\(\(\) => \{ ctl\.tick\(\); \}, 100\)/g) || []).length === 1 && /if \(window\.__fxAuto \|\| /.test(ren), '11. Wiring: đúng 1 setInterval và có chốt chống tạo controller thứ hai');
+     // 12. thủ công
+     r = rig(); await r.run(5, SIL); await r.run(10, MUS); r.fx = false; r.ctl.notifyManual();
+     await r.run(20, MUS); ok(r.fx === false && r.calls.length === 1, '12a. User tắt tay khi nhạc chạy → Auto nhường quyền, không ép bật lại');
+diff --git a/tests/unit/FxAutoToggle02.verify.js b/tests/unit/FxAutoToggle02.verify.js
+new file mode 100644
+index 0000000..44559fa
+--- /dev/null
++++ b/tests/unit/FxAutoToggle02.verify.js
+@@ -0,0 +1,23 @@
++// FX-AUTO-TOGGLE-02 — ô tích: BỎ tích => Auto bị chặn; TÍCH lại => Auto quay lại NGAY theo nhạc hiện tại (bỏ qua giữ quyền 60 s). audioSource.js THẬT + đồng hồ ảo.
++const fs = require('fs'), path = require('path'), vm = require('vm');
++const win = { performance: { now: () => 0 } }; vm.createContext(win); win.window = win;
++vm.runInContext(fs.readFileSync(path.resolve(__dirname, '../../ui/js/audioSource.js'), 'utf8'), win);
++const AS = win.AudioSource; let pass = 0, fail = 0;
++const ok = (c, m) => { c ? pass++ : fail++; console.log(c ? '  OK  ' : '  FAIL', m); };
++const clock = { t: 100000 }; let fx = false, enabled = true; const calls = [];
++const ctl = AS.createFxAutoController({ now: () => clock.t, isEnabled: () => enabled, getFxState: () => fx, applyFx: async (t) => { calls.push(t); fx = t; return { ok: true }; } });
++ctl.setSourceState(true);
++async function run(sec, db) { const end = clock.t + sec * 1000; while (clock.t < end) { clock.t += 16; ctl.feedLevel(db, clock.t); if (Math.round(clock.t / 16) % 6 === 0) ctl.tick(clock.t); await Promise.resolve(); } await Promise.resolve(); }
++(async () => {
++  await run(3, -25); ok(fx === true, 'có nhạc, tích => FX BẬT');
++  enabled = false; await run(8, -80); ok(fx === true && calls.length === 1, 'BỎ tích + im lặng => Auto KHÔNG tắt FX (bị chặn)');
++  enabled = true; ctl.resume(clock.t); await Promise.resolve(); await Promise.resolve();
++  ok(fx === false && calls.length === 2, 'TÍCH lại, đang không nhạc, FX đang bật => TẮT NGAY');
++  enabled = false; await run(3, -25); ok(fx === false, 'BỎ tích + có nhạc => FX KHÔNG tự bật');
++  enabled = true; ctl.resume(clock.t); await Promise.resolve(); await Promise.resolve();
++  ok(fx === true, 'TÍCH lại, đang có nhạc, FX đang tắt => BẬT NGAY');
++  ctl.notifyManual(false); fx = false; await run(2, -25); ok(fx === false, 'bấm tay TẮT => Auto nhường quyền (60 s)');
++  ctl.resume(clock.t); await Promise.resolve(); await Promise.resolve();
++  ok(fx === true, 'tích lại trong lúc giữ quyền thủ công => Auto quay lại NGAY (không chờ 60 s)');
++  console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})();
+diff --git a/ui/js/audioSource.js b/ui/js/audioSource.js
+index 011f276..269b31c 100644
+--- a/ui/js/audioSource.js
++++ b/ui/js/audioSource.js
+@@ -512,6 +512,7 @@
+         }
+         async function reconcile(t) {
+             if (manualOverride) return;
++            if (deps.isEnabled && !deps.isEnabled()) return; // FX-AUTO-TOGGLE-02: ô tích đang BỎ => Auto bị chặn hoàn toàn (vẫn theo dõi nhạc để có trạng thái đúng khi tích lại)
+             if (inflight) { dirty = true; return; } // MENU-FX-FIX: nhạc đổi trạng thái trong lúc lệnh trước chưa trả lời => kiểm lại sau khi nó xong (trước đây bị MẤT)
+             const target = desiredTarget();
+             if (target === null) return;
+@@ -557,8 +558,19 @@
+             if (lastResult && lastResult.ok) sentCount++; else failedCount++;
+             notify();
+         }
++        // FX-AUTO-TOGGLE-02: tích lại ô "Auto bật FX khi có nhạc" => Auto quay lại NGAY (KHÔNG chờ hết 60 s giữ quyền thủ công):
++        // bỏ giữ quyền, rồi đưa FX về đúng trạng thái nhạc HIỆN TẠI (có nhạc => BẬT, không nhạc => TẮT) dù FX đang bật hay tắt.
++        function resume(t) {
++            const tt = t === undefined ? now() : t;
++            manualOverride = false; manualUntil = 0; retries = 0; retryAt = null; dirty = false;
++            if (actionState === FxActionState.MANUAL_OVERRIDE) actionState = FxActionState.IDLE;
++            manualSeq++; // phản hồi của lần bấm tay cũ (nếu còn treo) không được ghi đè
++            evaluate(tt); // cập nhật trạng thái nhạc theo khung mới nhất
++            notify();
++            reconcile(tt);
++        }
+         function tick(t) { evaluate(t === undefined ? now() : t); }
+-        return { feedLevel, setSourceState, tick, notifyManual, reportManualResult, getManualSeq: () => manualSeq, getInfo, params: P };
++        return { feedLevel, setSourceState, tick, resume, notifyManual, reportManualResult, getManualSeq: () => manualSeq, getInfo, params: P };
+     }
+ 
+ 
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index fe5c8b5..a6324eb 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -803,7 +803,10 @@ function initFxAutoMenu() {
+     document.body.appendChild(card);
+     const chk = card.querySelector("#fxAutoEnabledChk");
+     const hide = () => { card.style.display = "none"; };
+-    chk.addEventListener("change", () => { setSetting("fxAutoEnabled", !!chk.checked); });
++    chk.addEventListener("change", () => {
++        setSetting("fxAutoEnabled", !!chk.checked);
++        if (chk.checked) window.__fxAuto?.resume?.(); // tích lại => Auto chạy NGAY theo nhạc hiện tại (có nhạc bật / không nhạc tắt), bỏ qua giữ quyền 60 s
++    });
+     btn.addEventListener("contextmenu", (e) => {
+         e.preventDefault();
+         if (card.style.display !== "none") { hide(); return; }
+@@ -941,6 +944,7 @@ function createFxAutoWiring() {
+     let __lastFxLogKey = "";
+     const ctl = AudioSource.createFxAutoController({
+         getFxState: () => busGroup.aggregate(),
++        isEnabled: () => getSetting("fxAutoEnabled", true) !== false, // FX-AUTO-TOGGLE-02: ô tích chuột phải FX
+         onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); } }, // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX
+         applyFx: async (target) => {
+             if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
+@@ -986,7 +990,7 @@ function createFxAutoWiring() {
+         return res;
+     };
+     window.__fxAutoDebug = () => Object.assign({}, ctl.getInfo(), { sends: group.getSent(), managed: group.managed(), bus: busGroup.getSent(), busManaged: busGroup.managed(), params: ctl.params });
+-    setInterval(() => { if (getSetting("fxAutoEnabled", true) !== false) ctl.tick(); }, 100); // ĐÚNG 1 interval cho cả vòng đời trang
++    setInterval(() => { ctl.tick(); }, 100); // FX-AUTO-TOGGLE-02: luôn theo dõi nhạc; có gửi lệnh hay không do isEnabled (ô tích) quyết định // ĐÚNG 1 interval cho cả vòng đời trang
+     return ctl;
+ }
+ createFxAutoWiring();
+-- 
+2.43.0
+
