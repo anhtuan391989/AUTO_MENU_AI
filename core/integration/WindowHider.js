@@ -11,6 +11,8 @@
  * A99 (DAW-RECOGNITION-01) — NHẬN DIỆN TIẾN TRÌNH DÙNG CHUNG cho status/hide/show: đọc ExecutablePath qua CIM Win32_Process (tin cậy hơn Get-Process.Path vốn trả rỗng khi
  * không đọc được MainModule, vd tiến trình chạy quyền cao hơn); dự phòng Get-Process nếu CIM lỗi. So đường dẫn đã chuẩn hóa (GetFullPath, bỏ '\\' cuối), KHÔNG phân biệt hoa/thường.
  * Chỉ nhận tiến trình có ĐÚNG đường dẫn đã cấu hình (không nhận DAW khác chỉ vì trùng tên). Không đọc được đường dẫn / lỗi truy vấn => KHÔNG kết luận "chưa chạy" (trạng thái unknown + lý do).
+ * A100 (DAW-HIDE-SHOW-STATE-RECOVERY-FIX-01) — xác minh ẩn/hiện CHỜ TỐI ĐA ~2 s (ShowWindowAsync là bất đồng bộ; bản A98/A99 chỉ chờ 0,25 s nên DAW nặng có thể bị báo
+ * "chưa ẩn được" dù cửa sổ ẨN SAU ĐÓ => mất danh sách cửa sổ); kết quả trả thêm attempted (mọi cửa sổ đã gửi lệnh) + diag (hwnd/pid/V|H/tiêu đề) để ghi nhật ký; thêm showAny() khôi phục theo cửa sổ đang ẩn.
  * Quy tắc chọn cửa sổ khi ẨN: cửa sổ top-level của đúng tiến trình, đang hiện, KHÔNG có owner, có tiêu đề, không phải tool-window.
  * (Cửa sổ plugin thường là cửa sổ có owner nên tự ẩn theo cửa sổ chính; việc ẩn riêng plugin là tính năng khác, KHÔNG nằm ở đây.)
  */
@@ -55,27 +57,42 @@ const CSHARP = [
     '  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);',
     '  [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);',
     '  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);',
+    '  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L; public int T; public int R; public int B; }',
+    '  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);',
+    '  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);',
+    '  static string Clean(string s) { var b = new StringBuilder(); foreach (var c in s) { if (b.Length >= 40) break; b.Append((c == \';\' || c == \'|\' || c == \'~\' || c == \',\' || c < \' \') ? \' \' : c); } return b.ToString(); }',
+    '  static string Diag(IntPtr h) { uint pid; GetWindowThreadProcessId(h, out pid); var t = new StringBuilder(256); GetWindowText(h, t, 256); return h.ToInt64() + "/" + pid + "/" + (IsWindowVisible(h) ? "V" : "H") + "/" + Clean(t.ToString()); }',
+    '  static bool Settled(List<IntPtr> l, bool wantVisible) { foreach (var h in l) { if (IsWindowVisible(h) != wantVisible) return false; } return true; }',
+    '  static string Report(List<IntPtr> all, bool wantVisible, bool hung) {',
+    '    var okS = new StringBuilder(); var badS = new StringBuilder(); var allS = new StringBuilder(); var dS = new StringBuilder();',
+    '    foreach (var h in all) { var t = (IsWindowVisible(h) == wantVisible) ? okS : badS; if (t.Length > 0) t.Append(","); t.Append(h.ToInt64());',
+    '      if (allS.Length > 0) allS.Append(","); allS.Append(h.ToInt64()); if (dS.Length > 0) dS.Append("~"); dS.Append(Diag(h)); }',
+    '    return okS.ToString() + ";F:" + badS.ToString() + (hung ? ";HUNG" : "") + ";A:" + allS.ToString() + ";D:" + dS.ToString(); }',
     '  public static string Hide(uint[] pids) {',
     '    var found = new List<IntPtr>(); var set = new HashSet<uint>(pids);',
     '    EnumWindows((h, l) => { uint pid; GetWindowThreadProcessId(h, out pid);',
     '      if (set.Contains(pid) && IsWindowVisible(h) && GetWindow(h, 4) == IntPtr.Zero && GetWindowTextLength(h) > 0 && (GetWindowLong(h, -20) & 0x80) == 0) found.Add(h); return true; }, IntPtr.Zero);',
     '    bool hung = false; foreach (var h in found) { if (IsHungAppWindow(h)) hung = true; ShowWindowAsync(h, 0); }',
-    '    System.Threading.Thread.Sleep(250);',
-    '    var okS = new StringBuilder(); var badS = new StringBuilder();',
-    '    foreach (var h in found) { var t = IsWindowVisible(h) ? badS : okS; if (t.Length > 0) t.Append(","); t.Append(h.ToInt64()); }',
-    '    return okS.ToString() + ";F:" + badS.ToString() + (hung ? ";HUNG" : ""); }',
-    '  public static string Show(long[] handles, uint[] pids) {',
-    '    var set = new HashSet<uint>(pids); var good = new List<IntPtr>(); bool hung = false;',
-    '    foreach (var v in handles) { var h = new IntPtr(v); if (!IsWindow(h)) continue; uint pid; GetWindowThreadProcessId(h, out pid); if (!set.Contains(pid)) continue;',
-    '      if (IsHungAppWindow(h)) hung = true; ShowWindowAsync(h, IsIconic(h) ? 9 : 5); good.Add(h); }',
-    '    System.Threading.Thread.Sleep(250);',
-    '    var okS = new StringBuilder(); var badS = new StringBuilder(); IntPtr first = IntPtr.Zero;',
-    '    foreach (var h in good) { if (IsWindowVisible(h)) {',
-    '        if (MonitorFromWindow(h, 0) == IntPtr.Zero) SetWindowPos(h, IntPtr.Zero, 100, 100, 0, 0, 0x5);',
-    '        if (first == IntPtr.Zero) first = h; if (okS.Length > 0) okS.Append(","); okS.Append(h.ToInt64()); }',
-    '      else { if (badS.Length > 0) badS.Append(","); badS.Append(h.ToInt64()); } }',
+    '    for (int i = 0; i < 20; i++) { System.Threading.Thread.Sleep(100); if (Settled(found, false)) break; }',
+    '    return Report(found, false, hung); }',
+    '  static string Bring(List<IntPtr> good, bool hung) {',
+    '    foreach (var h in good) { if (IsHungAppWindow(h)) hung = true; ShowWindowAsync(h, IsIconic(h) ? 9 : 5); }',
+    '    for (int i = 0; i < 20; i++) { System.Threading.Thread.Sleep(100); if (Settled(good, true)) break; }',
+    '    IntPtr first = IntPtr.Zero;',
+    '    foreach (var h in good) { if (IsWindowVisible(h)) { if (MonitorFromWindow(h, 0) == IntPtr.Zero) SetWindowPos(h, IntPtr.Zero, 100, 100, 0, 0, 0x5); if (first == IntPtr.Zero) first = h; } }',
     '    if (first != IntPtr.Zero) SetForegroundWindow(first);',
-    '    return okS.ToString() + ";F:" + badS.ToString() + (hung ? ";HUNG" : ""); }',
+    '    return Report(good, true, hung); }',
+    '  public static string Show(long[] handles, uint[] pids) {',
+    '    var set = new HashSet<uint>(pids); var good = new List<IntPtr>();',
+    '    foreach (var v in handles) { var h = new IntPtr(v); if (!IsWindow(h)) continue; uint pid; GetWindowThreadProcessId(h, out pid); if (!set.Contains(pid)) continue; good.Add(h); }',
+    '    return Bring(good, false); }',
+    '  public static string ShowHidden(uint[] pids) {',
+    '    var set = new HashSet<uint>(pids); IntPtr best = IntPtr.Zero; long bestArea = 0;',
+    '    EnumWindows((h, l) => { uint pid; GetWindowThreadProcessId(h, out pid); RECT r;',
+    '      if (set.Contains(pid) && !IsWindowVisible(h) && GetWindow(h, 4) == IntPtr.Zero && GetWindowTextLength(h) > 0 && (GetWindowLong(h, -20) & 0x80) == 0 && GetWindowRect(h, out r) && (r.R - r.L) >= 200 && (r.B - r.T) >= 150) {',
+    '        long a = (long)(r.R - r.L) * (long)(r.B - r.T); if (a > bestArea) { bestArea = a; best = h; } } return true; }, IntPtr.Zero);',
+    '    var good = new List<IntPtr>(); if (best != IntPtr.Zero) good.Add(best);',
+    '    return Bring(good, false); }',
     '}'
 ].join('\n');
 
@@ -120,7 +137,8 @@ function loadType() { return 'Add-Type -TypeDefinition @\'\n' + CSHARP + '\n\'@;
 function parseOutcome(out, tag) {
     const body = String(out || '').replace(new RegExp('^[\\s\\S]*?' + tag + ':'), '');
     const parts = body.split(';');
-    return { ok: parseHandles(parts[0]), failed: parseHandles((parts.find((x) => /^F:/.test(x)) || '').slice(2)), hung: parts.includes('HUNG') };
+    const pick = (p) => (parts.find((x) => x.indexOf(p) === 0) || '').slice(p.length);
+    return { ok: parseHandles(parts[0]), failed: parseHandles(pick('F:')), attempted: parseHandles(pick('A:')), diag: pick('D:'), hung: parts.includes('HUNG') };
 }
 
 function parseHandles(out) {
@@ -138,8 +156,8 @@ function hide(exePath, cb, runner) {
         const o = parseOutcome(out, 'H');
         const handles = o.ok;
         if (!/H:/.test(String(out)) || (!handles.length && !o.failed.length)) { cb({ ok: false, state: 'failed', handles: [], reason: 'NO_WINDOW_FOUND' }); return; }
-        if (!handles.length) { cb({ ok: false, state: 'failed', handles: [], failed: o.failed, reason: o.hung ? 'DAW_NOT_RESPONDING' : 'HIDE_NOT_APPLIED' }); return; } // gọi ẩn nhưng cửa sổ vẫn hiện -> KHÔNG báo thành công
-        cb({ ok: true, state: 'hidden', handles, failed: o.failed, reason: null });
+        if (!handles.length) { cb({ ok: false, state: 'failed', handles: [], failed: o.failed, attempted: o.attempted, diag: o.diag, reason: o.hung ? 'DAW_NOT_RESPONDING' : 'HIDE_NOT_APPLIED' }); return; } // gọi ẩn nhưng cửa sổ vẫn hiện -> KHÔNG báo thành công
+        cb({ ok: true, state: 'hidden', handles, failed: o.failed, attempted: o.attempted, diag: o.diag, reason: null });
     });
 }
 
@@ -156,7 +174,22 @@ function show(exePath, handles, cb, runner) {
         const o = parseOutcome(out, 'S'); const shown = o.ok;
         if (!shown.length && o.failed.length) { cb({ ok: false, state: 'failed', handles: [], failed: o.failed, reason: o.hung ? 'DAW_NOT_RESPONDING' : 'SHOW_NOT_APPLIED' }); return; }
         if (!shown.length) { cb({ ok: false, state: 'not_found', handles: [], reason: 'WINDOW_GONE' }); return; }
-        cb({ ok: true, state: 'visible', handles: shown, failed: o.failed, reason: null });
+        cb({ ok: true, state: 'visible', handles: shown, failed: o.failed, diag: o.diag, reason: null });
+    });
+}
+
+/** KHÔI PHỤC khi mất danh sách cửa sổ đã ẩn (handle cũ không còn / state bị mất): tìm trong tiến trình DAW đúng đường dẫn cửa sổ top-level đang ẨN (có tiêu đề, không owner, không tool-window, >=200x150) và hiện CỬA SỔ LỚN NHẤT.
+ *  callback: { ok, state: 'visible'|'not_found'|'failed', handles, reason } — not_found + reason PROCESS_NOT_RUNNING (DAW không chạy) | NO_HIDDEN_WINDOW (DAW chạy nhưng không có cửa sổ nào đang ẩn). */
+function showAny(exePath, cb, runner) {
+    if (!validateExePath(exePath)) { cb({ ok: false, state: 'failed', handles: [], reason: 'INVALID_PATH' }); return; }
+    const run = runner || defaultRunner;
+    run(pidScript(exePath) + guarded(loadType() + '"S:" + [HW]::ShowHidden([uint32[]]$pids)'), (err, out) => {
+        if (err) { cb({ ok: false, state: 'failed', handles: [], reason: err.message === 'UNSUPPORTED_PLATFORM' ? 'UNSUPPORTED_PLATFORM' : String(err.message || err) }); return; }
+        const idf = identityFailure(parseInfo(out)); if (idf) { cb({ ok: false, handles: [], ...idf }); return; }
+        const o = parseOutcome(out, 'S');
+        if (!/S:/.test(String(out)) || !o.attempted.length) { cb({ ok: false, state: 'not_found', handles: [], reason: 'NO_HIDDEN_WINDOW' }); return; }
+        if (!o.ok.length) { cb({ ok: false, state: 'failed', handles: [], failed: o.failed, diag: o.diag, reason: o.hung ? 'DAW_NOT_RESPONDING' : 'SHOW_NOT_APPLIED' }); return; }
+        cb({ ok: true, state: 'visible', handles: o.ok, diag: o.diag, reason: null });
     });
 }
 
@@ -165,11 +198,14 @@ function showSync(exePath, handles) {
     if (process.platform !== 'win32') return { ok: false, state: 'failed', handles: [], reason: 'UNSUPPORTED_PLATFORM' };
     if (!validateExePath(exePath)) return { ok: false, state: 'failed', handles: [], reason: 'INVALID_PATH' };
     const hs = (Array.isArray(handles) ? handles : []).filter((n) => Number.isSafeInteger(n) && n > 0);
-    if (!hs.length) return { ok: false, state: 'not_found', handles: [], reason: 'NO_SAVED_WINDOW' };
+    const runSync = (body) => {
+        const script = pidScript(exePath) + guarded(loadType() + body);
+        const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 8000, encoding: 'utf8' });
+        return parseOutcome(r.stdout, 'S').ok;
+    };
     try {
-        const script = pidScript(exePath) + guarded(loadType() + '"S:" + [HW]::Show([int64[]](' + hs.join(',') + '), [uint32[]]$pids)');
-        const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 6000, encoding: 'utf8' });
-        const shown = parseOutcome(r.stdout, 'S').ok;
+        let shown = hs.length ? runSync('"S:" + [HW]::Show([int64[]](' + hs.join(',') + '), [uint32[]]$pids)') : [];
+        if (!shown.length) shown = runSync('"S:" + [HW]::ShowHidden([uint32[]]$pids)'); // handle cũ không còn dùng được => tìm cửa sổ ẩn của DAW (lúc thoát Menu)
         return shown.length ? { ok: true, state: 'visible', handles: shown, reason: null } : { ok: false, state: 'not_found', handles: [], reason: 'WINDOW_GONE' };
     } catch (e) { return { ok: false, state: 'failed', handles: [], reason: String((e && e.message) || e) }; }
 }
@@ -195,4 +231,4 @@ function probe(exePath, cb, runner) {
     });
 }
 
-module.exports = { hide, show, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo } };
+module.exports = { hide, show, showAny, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo } };

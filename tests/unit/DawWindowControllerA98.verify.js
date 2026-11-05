@@ -10,7 +10,7 @@ const sync = (fn) => new Promise((r) => fn(r));
 (async () => {
   console.log('== WindowHider: kiểm chứng sau thao tác ==');
   const C = WH._scriptsForTest.CSHARP;
-  ok(/Thread\.Sleep\(250\)/.test(C) && /IsWindowVisible\(h\) \? badS : okS/.test(C), 'ẨN: chờ rồi kiểm tra cửa sổ còn hiện không (không tin ShowWindowAsync)');
+  ok(/Thread\.Sleep\(100\)/.test(C) && /Settled\(found, false\)/.test(C) && /IsWindowVisible\(h\) == wantVisible\) \? okS : badS/.test(C), 'ẨN: chờ rồi kiểm tra cửa sổ còn hiện không (không tin ShowWindowAsync)');
   ok(/IsHungAppWindow/.test(C), 'phát hiện cửa sổ Not Responding');
   ok(/IsIconic\(h\) \? 9 : 5/.test(C) && /MonitorFromWindow\(h, 0\) == IntPtr\.Zero\) SetWindowPos/.test(C), 'HIỆN: restore nếu đang minimize; đưa về trong màn hình nếu nằm ngoài mọi màn hình');
   ok(/ShowWindowAsync\(h, 0\)/.test(C) && !/ShowWindowAsync\(h, [1-9]\)\s*;\s*if \(first/.test(C.split('public static string Show')[0]), 'ẨN vẫn dùng SW_HIDE bất đồng bộ (không treo khi DAW không phản hồi)');
@@ -52,7 +52,8 @@ const sync = (fn) => new Promise((r) => fn(r));
   r = await sync((cb) => m.statusAsync(cb)); ok(r.state === 'visible' && r.running === true && r.hidden === false, 'DAW chạy, đang hiện', r);
   await sync((cb) => m.hide(cb));
   r = await sync((cb) => m.statusAsync(cb)); ok(r.state === 'hidden' && r.running === true && r.trayVisible, 'DAW chạy, đang ẩn (có khay)', r);
-  running = false; r = await sync((cb) => m.statusAsync(cb));
+  running = false; r = await sync((cb) => m.statusAsync(cb)); ok(r.state === 'hidden' && r.hidden === true, 'A100: lần dò đầu báo không chạy => CHƯA gỡ trạng thái ẩn (cần 2 lần liên tiếp)', r);
+  r = await sync((cb) => m.statusAsync(cb));
   ok(r.state === 'not_running' && r.hidden === false && !('S.json' in files) && destroyed >= 1, 'đang ẩn mà DAW đã thoát -> tự xoá trạng thái ẩn + gỡ khay, báo chưa chạy', r);
   r = await sync((cb) => m.statusAsync(cb)); ok(r.state === 'not_running', 'DAW chưa chạy', r);
   running = true; await sync((cb) => m.hide(cb)); probeFail = true;

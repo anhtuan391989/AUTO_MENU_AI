@@ -24,12 +24,13 @@
         }
         const hideBtn = $("btnToolsHideDaw"), showBtn = $("btnToolsShowDaw");
         if (hideBtn) hideBtn.disabled = busy || !(st && st.configured) || !!(st && st.hidden) || !!(st && (st.state === "not_running" || st.state === "path_mismatch"));
-        if (showBtn) showBtn.disabled = busy || !(st && st.hidden);
+        // A100: nút Hiện chỉ bị khoá khi đang bận. KHÔNG khoá theo trạng thái dò (hidden/unknown/not_running...) — nếu trạng thái sai thì đây là đường khôi phục duy nhất; main tự tìm cửa sổ DAW đang ẩn.
+        if (showBtn) showBtn.disabled = busy;
     }
     async function refresh(keepMessage) {
         const a = api();
         if (!a || typeof a.toolsDawStatus !== "function") { setMessage("Chức năng này chỉ có trong app Menu (Electron).", false); paint({ configured: false, hidden: false }); return; }
-        try { const st = await a.toolsDawStatus(); paint(st); if (st && st.detail && (st.state === "unknown" || st.state === "path_mismatch") && !keepMessage) setMessage(st.detail, false); } catch (e) { setMessage("Không đọc được trạng thái: " + (e && e.message || e), false); }
+        try { const st = await a.toolsDawStatus(); paint(st); if (st && st.detail && (st.state === "unknown" || st.state === "path_mismatch") && !keepMessage) setMessage(st.detail, false); } catch (e) { setMessage("Không đọc được trạng thái: " + (e && e.message || e), false); const sb = $("btnToolsShowDaw"); if (sb) sb.disabled = busy; }
     }
     async function act(kind) {
         const a = api();

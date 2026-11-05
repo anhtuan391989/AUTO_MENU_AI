@@ -62,7 +62,8 @@ const info = (st, o = {}) => 'INFO|ST=' + st + '|R=' + (o.r || '') + '|U=' + (o.
   pr = { ok: false, state: 'unknown', running: null, reason: 'PROCESS_QUERY_FAILED' }; r = await sync((cb) => m.statusAsync(cb));
   ok(r.state === 'unknown' && r.hidden === true && r.trayVisible === true && ('S.json' in files) && destroyed === 0, 'đang ẩn + chưa xác minh được: KHÔNG xoá trạng thái ẩn, KHÔNG gỡ khay', r);
   pr = { ok: true, state: 'path_mismatch', running: null, others: ['D:\\x.exe'] }; r = await sync((cb) => m.statusAsync(cb)); ok(r.hidden === true && ('S.json' in files), 'đang ẩn + lệch đường dẫn: giữ trạng thái ẩn', r);
-  pr = { ok: true, state: 'not_running', running: false }; r = await sync((cb) => m.statusAsync(cb));
+  pr = { ok: true, state: 'not_running', running: false }; r = await sync((cb) => m.statusAsync(cb)); ok(r.hidden === true && ('S.json' in files), 'A100: 1 lần dò không chạy chưa đủ để gỡ trạng thái ẩn', r);
+  r = await sync((cb) => m.statusAsync(cb));
   ok(r.state === 'not_running' && r.hidden === false && !('S.json' in files) && destroyed >= 1, 'chỉ khi ĐÃ XÁC MINH tiến trình không còn mới xoá trạng thái ẩn + gỡ khay', r);
   const m2 = createDawTrayManager({ Tray: FakeTray, Menu, nativeImage, readSettings: () => ({ selectedDAWPath: EXE }), stateFile: 'S2.json', fs: fakeFs, windowHider: { ...hider, hide: (e, cb) => cb({ ok: false, state: 'failed', handles: [], reason: 'PROCESS_PATH_UNREADABLE' }) }, log: () => {} });
   r = await sync((cb) => m2.hide(cb)); ok(!r.ok && r.state === 'failed' && /Windows không cho đọc đường dẫn/.test(r.message) && !m2.status().hidden, 'ẩn khi không đọc được đường dẫn: báo đúng lý do, không lưu trạng thái ẩn', r);

@@ -1,0 +1,284 @@
+diff --git a/app/DawTray.js b/app/DawTray.js
+index 0847b8a..3afc818 100644
+--- a/app/DawTray.js
++++ b/app/DawTray.js
+@@ -13,7 +13,18 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+     let tray = null;
+     let saved = null; // { exePath, handles:number[] } khi DAW đang bị ẩn
+     let busy = false; // A98: đang có 1 thao tác ẩn/hiện chạy => bấm dồn dập không chồng nhiều PowerShell lên nhau
++    let notRunStrikes = 0; // A100: chỉ gỡ trạng thái ẩn khi 2 lần dò LIÊN TIẾP đều xác minh DAW không còn chạy (1 lần dò sai không được làm mất đường khôi phục)
+     const say = (m, e) => { try { (log || console.log)('[DawTray] ' + m, e || ''); } catch (x) { /* bỏ qua */ } };
++    // A100 — nhật ký chẩn đoán (daw-hide-diagnostic.log cạnh file trạng thái): ghi mỗi lần ẩn/hiện/dò để lần chạy thật trên Windows có BẰNG CHỨNG. Lỗi ghi file bị bỏ qua.
++    const diagFile = (() => { try { return stateFile ? String(stateFile).replace(/[^\\/]*$/, '') + 'daw-hide-diagnostic.log' : ''; } catch (e) { return ''; } })();
++    const diag = (m) => {
++        try {
++            say(m);
++            if (!diagFile || !fs || typeof fs.appendFileSync !== 'function') return;
++            try { if (fs.existsSync(diagFile) && fs.statSync(diagFile).size > 200000) fs.writeFileSync(diagFile, '', 'utf8'); } catch (e) { /* bỏ qua */ }
++            fs.appendFileSync(diagFile, new Date().toISOString() + ' ' + m + '\n', 'utf8');
++        } catch (e) { /* bỏ qua */ }
++    };
+ 
+     function loadState() {
+         try {
+@@ -51,8 +62,10 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+     function ensureTray() {
+         if (tray) return;
+         try {
+-            const img = nativeImage.createFromBuffer(Buffer.from(TRAY_ICON_PNG_BASE64, 'base64'));
++            let img = nativeImage.createFromBuffer(Buffer.from(TRAY_ICON_PNG_BASE64, 'base64'));
++            try { if (img && typeof img.isEmpty === 'function' && img.isEmpty()) { diag('icon khay rỗng — dùng icon dự phòng'); img = nativeImage.createFromDataURL('data:image/png;base64,' + TRAY_ICON_PNG_BASE64); } } catch (e) { /* bỏ qua */ }
+             tray = new Tray(img);
++            diag('đã tạo biểu tượng khay');
+             tray.setToolTip('AUTO MENU AI — DAW đang ẩn (bấm đúp để hiện)');
+             tray.setContextMenu(buildMenu());
+             tray.on('double-click', () => { show(() => {}); });
+@@ -89,7 +102,11 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+                         say('DAW cùng tên đang chạy ở đường dẫn khác: ' + (p.others || []).join(' | '));
+                         done({ ...base, running: null, state: 'path_mismatch', busy, reason: 'DAW_AT_DIFFERENT_PATH', others: p.others || [], detail: describeIdentity('DAW_AT_DIFFERENT_PATH', p, exe) }); return;
+                     }
+-                    if (p.state === 'not_running' && saved) { saved = null; saveState(); dropTray(); } // chỉ xoá trạng thái ẩn khi ĐÃ XÁC MINH tiến trình không còn
++                    if (p.state === 'not_running' && saved) { // A100: chỉ xoá trạng thái ẩn khi 2 lần dò LIÊN TIẾP đều xác minh tiến trình không còn
++                        notRunStrikes++; diag('dò: DAW không chạy (lần ' + notRunStrikes + ') — đang ẩn=true');
++                        if (notRunStrikes >= 2) { saved = null; saveState(); dropTray(); notRunStrikes = 0; }
++                        else { done({ ...status(), running: false, state: 'hidden', busy }); return; }
++                    } else if (p.state !== 'not_running') notRunStrikes = 0;
+                     const st = status();
+                     done({ ...st, running: p.state === 'running', state: p.state === 'not_running' ? 'not_running' : (st.hidden ? 'hidden' : 'visible'), busy });
+                 } catch (e) { done({ ...base, running: null, state: 'unknown', busy }); }
+@@ -116,9 +133,12 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+             windowHider.hide(exe, (r) => {
+                 busy = false;
+                 try {
++                    diag('HIDE kết quả: ok=' + r.ok + ' reason=' + (r.reason || '') + ' handles=[' + (r.handles || []).join(',') + '] failed=[' + (r.failed || []).join(',') + '] attempted=[' + (r.attempted || []).join(',') + '] diag=' + (r.diag || ''));
+                     if (r.ok) {
+                         saved = { exePath: exe, handles: r.handles };
++                        notRunStrikes = 0;
+                         saveState(); ensureTray();
++                        try { if (tray && typeof tray.displayBalloon === 'function') tray.displayBalloon({ title: 'AUTO MENU AI', content: 'DAW đã ẩn xuống khay. Bấm đúp biểu tượng này hoặc nút "Hiện DAW" trong Setup để hiện lại.' }); } catch (e) { /* bỏ qua */ }
+                         cb({ ok: true, state: 'hidden', message: 'Đã ẩn DAW xuống khay thông báo (biểu tượng chấm tròn xanh cạnh đồng hồ). Bấm đúp biểu tượng để hiện lại.' });
+                     } else if (r.state === 'not_found') cb({ ok: false, state: 'not_found', message: 'Không thấy DAW đang chạy (đúng file đã chọn). Hãy mở DAW trước.' });
+                     else if (r.reason === 'UNSUPPORTED_PLATFORM') cb({ ok: false, state: 'unsupported', message: 'Chức năng này chỉ chạy trên Windows.' });
+@@ -132,23 +152,53 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+         } catch (e) { busy = false; cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
+     }
+ 
++    // A100: hiện DAW KHÔNG dựa vào danh sách đã lưu — nếu không có / handle cũ không còn dùng được thì tìm cửa sổ đang ẨN của đúng tiến trình DAW (showAny).
++    function recover(exe, cb) {
++        if (!exe || typeof windowHider.showAny !== 'function') { cb(null); return; }
++        windowHider.showAny(exe, (r) => { diag('SHOW-ANY kết quả: ok=' + r.ok + ' state=' + r.state + ' reason=' + (r.reason || '') + ' diag=' + (r.diag || '')); cb(r); });
++    }
+     function show(cb) {
+         try {
+             if (busy) { cb({ ok: false, state: 'busy', message: 'Đang xử lý thao tác trước, thử lại sau giây lát.' }); return; }
+-            if (!saved) { cb({ ok: true, state: 'visible', message: 'DAW không bị ẩn.' }); return; }
++            if (!saved) {
++                const exe0 = configuredExe();
++                if (!exe0 || typeof windowHider.showAny !== 'function') { cb({ ok: true, state: 'visible', message: 'DAW không bị ẩn.' }); return; }
++                busy = true;
++                recover(exe0, (r) => {
++                    busy = false;
++                    try {
++                        if (r && r.ok) { dropTray(); cb({ ok: true, state: 'visible', message: 'Đã hiện lại cửa sổ DAW (khôi phục theo cửa sổ đang ẩn).' }); }
++                        else if (r && r.reason === 'NO_HIDDEN_WINDOW') cb({ ok: true, state: 'visible', message: 'DAW không có cửa sổ nào đang bị ẩn.' });
++                        else if (r && r.state === 'not_found') cb({ ok: false, state: 'not_found', message: 'Không thấy DAW đang chạy (đúng file đã chọn).' });
++                        else cb({ ok: false, state: 'failed', message: r && r.reason && /PROCESS_PATH_UNREADABLE|DAW_AT_DIFFERENT_PATH|PROCESS_QUERY_FAILED/.test(r.reason) ? describeIdentity(r.reason, r, exe0) : 'Không hiện được DAW: ' + ((r && r.reason) || 'lỗi không rõ') });
++                    } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
++                });
++                return;
++            }
+             const cur = saved;
+             busy = true;
+             windowHider.show(cur.exePath, cur.handles, (r) => {
+-                busy = false;
+                 try {
+-                    if (r.ok) { saved = null; saveState(); dropTray(); cb({ ok: true, state: 'visible', message: 'Đã hiện lại DAW.' }); }
+-                    else if (r.state === 'not_found') { // DAW đã tắt / cửa sổ không còn => bỏ trạng thái ẩn, không để khay treo mãi
+-                        saved = null; saveState(); dropTray();
+-                        cb({ ok: false, state: 'not_found', message: 'DAW đã đóng hoặc cửa sổ không còn — đã xoá trạng thái ẩn.' });
+-                    } else if (r.reason === 'DAW_NOT_RESPONDING') cb({ ok: false, state: 'failed', message: 'DAW đang không phản hồi (Not Responding) nên chưa hiện được. Giữ nguyên trạng thái ẩn, thử lại sau.' });
++                    diag('SHOW kết quả: ok=' + r.ok + ' state=' + r.state + ' reason=' + (r.reason || '') + ' handles=[' + (r.handles || []).join(',') + '] diag=' + (r.diag || ''));
++                    if (r.ok) { busy = false; saved = null; notRunStrikes = 0; saveState(); dropTray(); cb({ ok: true, state: 'visible', message: 'Đã hiện lại DAW.' }); return; }
++                    if (r.state === 'not_found' && r.reason !== 'PROCESS_NOT_RUNNING' && typeof windowHider.showAny === 'function') { // handle cũ không còn (cửa sổ được tạo lại?) => thử khôi phục theo cửa sổ đang ẩn trước khi bỏ trạng thái
++                        recover(cur.exePath, (r2) => {
++                            busy = false;
++                            try {
++                                if (r2 && r2.ok) { saved = null; saveState(); dropTray(); cb({ ok: true, state: 'visible', message: 'Đã hiện lại DAW (khôi phục theo cửa sổ đang ẩn).' }); }
++                                else if (r2 && r2.reason === 'NO_HIDDEN_WINDOW') { saved = null; saveState(); dropTray(); cb({ ok: true, state: 'visible', message: 'DAW không còn cửa sổ nào đang ẩn — đã xoá trạng thái ẩn.' }); }
++                                else if (r2 && r2.reason === 'PROCESS_NOT_RUNNING') { saved = null; saveState(); dropTray(); cb({ ok: false, state: 'not_found', message: 'DAW đã đóng — đã xoá trạng thái ẩn.' }); }
++                                else cb({ ok: false, state: 'failed', message: 'Không hiện được DAW: ' + ((r2 && r2.reason) || 'lỗi không rõ') + '. Giữ nguyên trạng thái ẩn, thử lại.' });
++                            } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
++                        });
++                        return;
++                    }
++                    busy = false;
++                    if (r.state === 'not_found') { saved = null; saveState(); dropTray(); cb({ ok: false, state: 'not_found', message: 'DAW đã đóng hoặc cửa sổ không còn — đã xoá trạng thái ẩn.' }); } // đã XÁC MINH tiến trình không chạy
++                    else if (r.reason === 'DAW_NOT_RESPONDING') cb({ ok: false, state: 'failed', message: 'DAW đang không phản hồi (Not Responding) nên chưa hiện được. Giữ nguyên trạng thái ẩn, thử lại sau.' });
+                     else if (r.reason === 'PROCESS_PATH_UNREADABLE' || r.reason === 'DAW_AT_DIFFERENT_PATH' || r.reason === 'PROCESS_QUERY_FAILED') cb({ ok: false, state: 'failed', message: describeIdentity(r.reason, r, cur.exePath) + ' Giữ nguyên trạng thái ẩn.' });
+                     else cb({ ok: false, state: 'failed', message: 'Không hiện được DAW: ' + (r.reason || 'lỗi không rõ') });
+-                } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
++                } catch (e) { busy = false; cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
+             });
+         } catch (e) { busy = false; cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
+     }
+diff --git a/core/integration/WindowHider.js b/core/integration/WindowHider.js
+index 3debbaa..0a18e9a 100644
+--- a/core/integration/WindowHider.js
++++ b/core/integration/WindowHider.js
+@@ -11,6 +11,8 @@
+  * A99 (DAW-RECOGNITION-01) — NHẬN DIỆN TIẾN TRÌNH DÙNG CHUNG cho status/hide/show: đọc ExecutablePath qua CIM Win32_Process (tin cậy hơn Get-Process.Path vốn trả rỗng khi
+  * không đọc được MainModule, vd tiến trình chạy quyền cao hơn); dự phòng Get-Process nếu CIM lỗi. So đường dẫn đã chuẩn hóa (GetFullPath, bỏ '\\' cuối), KHÔNG phân biệt hoa/thường.
+  * Chỉ nhận tiến trình có ĐÚNG đường dẫn đã cấu hình (không nhận DAW khác chỉ vì trùng tên). Không đọc được đường dẫn / lỗi truy vấn => KHÔNG kết luận "chưa chạy" (trạng thái unknown + lý do).
++ * A100 (DAW-HIDE-SHOW-STATE-RECOVERY-FIX-01) — xác minh ẩn/hiện CHỜ TỐI ĐA ~2 s (ShowWindowAsync là bất đồng bộ; bản A98/A99 chỉ chờ 0,25 s nên DAW nặng có thể bị báo
++ * "chưa ẩn được" dù cửa sổ ẨN SAU ĐÓ => mất danh sách cửa sổ); kết quả trả thêm attempted (mọi cửa sổ đã gửi lệnh) + diag (hwnd/pid/V|H/tiêu đề) để ghi nhật ký; thêm showAny() khôi phục theo cửa sổ đang ẩn.
+  * Quy tắc chọn cửa sổ khi ẨN: cửa sổ top-level của đúng tiến trình, đang hiện, KHÔNG có owner, có tiêu đề, không phải tool-window.
+  * (Cửa sổ plugin thường là cửa sổ có owner nên tự ẩn theo cửa sổ chính; việc ẩn riêng plugin là tính năng khác, KHÔNG nằm ở đây.)
+  */
+@@ -55,27 +57,42 @@ const CSHARP = [
+     '  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);',
+     '  [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);',
+     '  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);',
++    '  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L; public int T; public int R; public int B; }',
++    '  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);',
++    '  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);',
++    '  static string Clean(string s) { var b = new StringBuilder(); foreach (var c in s) { if (b.Length >= 40) break; b.Append((c == \';\' || c == \'|\' || c == \'~\' || c == \',\' || c < \' \') ? \' \' : c); } return b.ToString(); }',
++    '  static string Diag(IntPtr h) { uint pid; GetWindowThreadProcessId(h, out pid); var t = new StringBuilder(256); GetWindowText(h, t, 256); return h.ToInt64() + "/" + pid + "/" + (IsWindowVisible(h) ? "V" : "H") + "/" + Clean(t.ToString()); }',
++    '  static bool Settled(List<IntPtr> l, bool wantVisible) { foreach (var h in l) { if (IsWindowVisible(h) != wantVisible) return false; } return true; }',
++    '  static string Report(List<IntPtr> all, bool wantVisible, bool hung) {',
++    '    var okS = new StringBuilder(); var badS = new StringBuilder(); var allS = new StringBuilder(); var dS = new StringBuilder();',
++    '    foreach (var h in all) { var t = (IsWindowVisible(h) == wantVisible) ? okS : badS; if (t.Length > 0) t.Append(","); t.Append(h.ToInt64());',
++    '      if (allS.Length > 0) allS.Append(","); allS.Append(h.ToInt64()); if (dS.Length > 0) dS.Append("~"); dS.Append(Diag(h)); }',
++    '    return okS.ToString() + ";F:" + badS.ToString() + (hung ? ";HUNG" : "") + ";A:" + allS.ToString() + ";D:" + dS.ToString(); }',
+     '  public static string Hide(uint[] pids) {',
+     '    var found = new List<IntPtr>(); var set = new HashSet<uint>(pids);',
+     '    EnumWindows((h, l) => { uint pid; GetWindowThreadProcessId(h, out pid);',
+     '      if (set.Contains(pid) && IsWindowVisible(h) && GetWindow(h, 4) == IntPtr.Zero && GetWindowTextLength(h) > 0 && (GetWindowLong(h, -20) & 0x80) == 0) found.Add(h); return true; }, IntPtr.Zero);',
+     '    bool hung = false; foreach (var h in found) { if (IsHungAppWindow(h)) hung = true; ShowWindowAsync(h, 0); }',
+-    '    System.Threading.Thread.Sleep(250);',
+-    '    var okS = new StringBuilder(); var badS = new StringBuilder();',
+-    '    foreach (var h in found) { var t = IsWindowVisible(h) ? badS : okS; if (t.Length > 0) t.Append(","); t.Append(h.ToInt64()); }',
+-    '    return okS.ToString() + ";F:" + badS.ToString() + (hung ? ";HUNG" : ""); }',
+-    '  public static string Show(long[] handles, uint[] pids) {',
+-    '    var set = new HashSet<uint>(pids); var good = new List<IntPtr>(); bool hung = false;',
+-    '    foreach (var v in handles) { var h = new IntPtr(v); if (!IsWindow(h)) continue; uint pid; GetWindowThreadProcessId(h, out pid); if (!set.Contains(pid)) continue;',
+-    '      if (IsHungAppWindow(h)) hung = true; ShowWindowAsync(h, IsIconic(h) ? 9 : 5); good.Add(h); }',
+-    '    System.Threading.Thread.Sleep(250);',
+-    '    var okS = new StringBuilder(); var badS = new StringBuilder(); IntPtr first = IntPtr.Zero;',
+-    '    foreach (var h in good) { if (IsWindowVisible(h)) {',
+-    '        if (MonitorFromWindow(h, 0) == IntPtr.Zero) SetWindowPos(h, IntPtr.Zero, 100, 100, 0, 0, 0x5);',
+-    '        if (first == IntPtr.Zero) first = h; if (okS.Length > 0) okS.Append(","); okS.Append(h.ToInt64()); }',
+-    '      else { if (badS.Length > 0) badS.Append(","); badS.Append(h.ToInt64()); } }',
++    '    for (int i = 0; i < 20; i++) { System.Threading.Thread.Sleep(100); if (Settled(found, false)) break; }',
++    '    return Report(found, false, hung); }',
++    '  static string Bring(List<IntPtr> good, bool hung) {',
++    '    foreach (var h in good) { if (IsHungAppWindow(h)) hung = true; ShowWindowAsync(h, IsIconic(h) ? 9 : 5); }',
++    '    for (int i = 0; i < 20; i++) { System.Threading.Thread.Sleep(100); if (Settled(good, true)) break; }',
++    '    IntPtr first = IntPtr.Zero;',
++    '    foreach (var h in good) { if (IsWindowVisible(h)) { if (MonitorFromWindow(h, 0) == IntPtr.Zero) SetWindowPos(h, IntPtr.Zero, 100, 100, 0, 0, 0x5); if (first == IntPtr.Zero) first = h; } }',
+     '    if (first != IntPtr.Zero) SetForegroundWindow(first);',
+-    '    return okS.ToString() + ";F:" + badS.ToString() + (hung ? ";HUNG" : ""); }',
++    '    return Report(good, true, hung); }',
++    '  public static string Show(long[] handles, uint[] pids) {',
++    '    var set = new HashSet<uint>(pids); var good = new List<IntPtr>();',
++    '    foreach (var v in handles) { var h = new IntPtr(v); if (!IsWindow(h)) continue; uint pid; GetWindowThreadProcessId(h, out pid); if (!set.Contains(pid)) continue; good.Add(h); }',
++    '    return Bring(good, false); }',
++    '  public static string ShowHidden(uint[] pids) {',
++    '    var set = new HashSet<uint>(pids); IntPtr best = IntPtr.Zero; long bestArea = 0;',
++    '    EnumWindows((h, l) => { uint pid; GetWindowThreadProcessId(h, out pid); RECT r;',
++    '      if (set.Contains(pid) && !IsWindowVisible(h) && GetWindow(h, 4) == IntPtr.Zero && GetWindowTextLength(h) > 0 && (GetWindowLong(h, -20) & 0x80) == 0 && GetWindowRect(h, out r) && (r.R - r.L) >= 200 && (r.B - r.T) >= 150) {',
++    '        long a = (long)(r.R - r.L) * (long)(r.B - r.T); if (a > bestArea) { bestArea = a; best = h; } } return true; }, IntPtr.Zero);',
++    '    var good = new List<IntPtr>(); if (best != IntPtr.Zero) good.Add(best);',
++    '    return Bring(good, false); }',
+     '}'
+ ].join('\n');
+ 
+@@ -120,7 +137,8 @@ function loadType() { return 'Add-Type -TypeDefinition @\'\n' + CSHARP + '\n\'@;
+ function parseOutcome(out, tag) {
+     const body = String(out || '').replace(new RegExp('^[\\s\\S]*?' + tag + ':'), '');
+     const parts = body.split(';');
+-    return { ok: parseHandles(parts[0]), failed: parseHandles((parts.find((x) => /^F:/.test(x)) || '').slice(2)), hung: parts.includes('HUNG') };
++    const pick = (p) => (parts.find((x) => x.indexOf(p) === 0) || '').slice(p.length);
++    return { ok: parseHandles(parts[0]), failed: parseHandles(pick('F:')), attempted: parseHandles(pick('A:')), diag: pick('D:'), hung: parts.includes('HUNG') };
+ }
+ 
+ function parseHandles(out) {
+@@ -138,8 +156,8 @@ function hide(exePath, cb, runner) {
+         const o = parseOutcome(out, 'H');
+         const handles = o.ok;
+         if (!/H:/.test(String(out)) || (!handles.length && !o.failed.length)) { cb({ ok: false, state: 'failed', handles: [], reason: 'NO_WINDOW_FOUND' }); return; }
+-        if (!handles.length) { cb({ ok: false, state: 'failed', handles: [], failed: o.failed, reason: o.hung ? 'DAW_NOT_RESPONDING' : 'HIDE_NOT_APPLIED' }); return; } // gọi ẩn nhưng cửa sổ vẫn hiện -> KHÔNG báo thành công
+-        cb({ ok: true, state: 'hidden', handles, failed: o.failed, reason: null });
++        if (!handles.length) { cb({ ok: false, state: 'failed', handles: [], failed: o.failed, attempted: o.attempted, diag: o.diag, reason: o.hung ? 'DAW_NOT_RESPONDING' : 'HIDE_NOT_APPLIED' }); return; } // gọi ẩn nhưng cửa sổ vẫn hiện -> KHÔNG báo thành công
++        cb({ ok: true, state: 'hidden', handles, failed: o.failed, attempted: o.attempted, diag: o.diag, reason: null });
+     });
+ }
+ 
+@@ -156,7 +174,22 @@ function show(exePath, handles, cb, runner) {
+         const o = parseOutcome(out, 'S'); const shown = o.ok;
+         if (!shown.length && o.failed.length) { cb({ ok: false, state: 'failed', handles: [], failed: o.failed, reason: o.hung ? 'DAW_NOT_RESPONDING' : 'SHOW_NOT_APPLIED' }); return; }
+         if (!shown.length) { cb({ ok: false, state: 'not_found', handles: [], reason: 'WINDOW_GONE' }); return; }
+-        cb({ ok: true, state: 'visible', handles: shown, failed: o.failed, reason: null });
++        cb({ ok: true, state: 'visible', handles: shown, failed: o.failed, diag: o.diag, reason: null });
++    });
++}
++
++/** KHÔI PHỤC khi mất danh sách cửa sổ đã ẩn (handle cũ không còn / state bị mất): tìm trong tiến trình DAW đúng đường dẫn cửa sổ top-level đang ẨN (có tiêu đề, không owner, không tool-window, >=200x150) và hiện CỬA SỔ LỚN NHẤT.
++ *  callback: { ok, state: 'visible'|'not_found'|'failed', handles, reason } — not_found + reason PROCESS_NOT_RUNNING (DAW không chạy) | NO_HIDDEN_WINDOW (DAW chạy nhưng không có cửa sổ nào đang ẩn). */
++function showAny(exePath, cb, runner) {
++    if (!validateExePath(exePath)) { cb({ ok: false, state: 'failed', handles: [], reason: 'INVALID_PATH' }); return; }
++    const run = runner || defaultRunner;
++    run(pidScript(exePath) + guarded(loadType() + '"S:" + [HW]::ShowHidden([uint32[]]$pids)'), (err, out) => {
++        if (err) { cb({ ok: false, state: 'failed', handles: [], reason: err.message === 'UNSUPPORTED_PLATFORM' ? 'UNSUPPORTED_PLATFORM' : String(err.message || err) }); return; }
++        const idf = identityFailure(parseInfo(out)); if (idf) { cb({ ok: false, handles: [], ...idf }); return; }
++        const o = parseOutcome(out, 'S');
++        if (!/S:/.test(String(out)) || !o.attempted.length) { cb({ ok: false, state: 'not_found', handles: [], reason: 'NO_HIDDEN_WINDOW' }); return; }
++        if (!o.ok.length) { cb({ ok: false, state: 'failed', handles: [], failed: o.failed, diag: o.diag, reason: o.hung ? 'DAW_NOT_RESPONDING' : 'SHOW_NOT_APPLIED' }); return; }
++        cb({ ok: true, state: 'visible', handles: o.ok, diag: o.diag, reason: null });
+     });
+ }
+ 
+@@ -165,11 +198,14 @@ function showSync(exePath, handles) {
+     if (process.platform !== 'win32') return { ok: false, state: 'failed', handles: [], reason: 'UNSUPPORTED_PLATFORM' };
+     if (!validateExePath(exePath)) return { ok: false, state: 'failed', handles: [], reason: 'INVALID_PATH' };
+     const hs = (Array.isArray(handles) ? handles : []).filter((n) => Number.isSafeInteger(n) && n > 0);
+-    if (!hs.length) return { ok: false, state: 'not_found', handles: [], reason: 'NO_SAVED_WINDOW' };
++    const runSync = (body) => {
++        const script = pidScript(exePath) + guarded(loadType() + body);
++        const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 8000, encoding: 'utf8' });
++        return parseOutcome(r.stdout, 'S').ok;
++    };
+     try {
+-        const script = pidScript(exePath) + guarded(loadType() + '"S:" + [HW]::Show([int64[]](' + hs.join(',') + '), [uint32[]]$pids)');
+-        const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 6000, encoding: 'utf8' });
+-        const shown = parseOutcome(r.stdout, 'S').ok;
++        let shown = hs.length ? runSync('"S:" + [HW]::Show([int64[]](' + hs.join(',') + '), [uint32[]]$pids)') : [];
++        if (!shown.length) shown = runSync('"S:" + [HW]::ShowHidden([uint32[]]$pids)'); // handle cũ không còn dùng được => tìm cửa sổ ẩn của DAW (lúc thoát Menu)
+         return shown.length ? { ok: true, state: 'visible', handles: shown, reason: null } : { ok: false, state: 'not_found', handles: [], reason: 'WINDOW_GONE' };
+     } catch (e) { return { ok: false, state: 'failed', handles: [], reason: String((e && e.message) || e) }; }
+ }
+@@ -195,4 +231,4 @@ function probe(exePath, cb, runner) {
+     });
+ }
+ 
+-module.exports = { hide, show, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo } };
++module.exports = { hide, show, showAny, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo } };
+diff --git a/ui/js/setupTools.js b/ui/js/setupTools.js
+index e346e9f..b05c4aa 100644
+--- a/ui/js/setupTools.js
++++ b/ui/js/setupTools.js
+@@ -24,12 +24,13 @@
+         }
+         const hideBtn = $("btnToolsHideDaw"), showBtn = $("btnToolsShowDaw");
+         if (hideBtn) hideBtn.disabled = busy || !(st && st.configured) || !!(st && st.hidden) || !!(st && (st.state === "not_running" || st.state === "path_mismatch"));
+-        if (showBtn) showBtn.disabled = busy || !(st && st.hidden);
++        // A100: nút Hiện chỉ bị khoá khi đang bận. KHÔNG khoá theo trạng thái dò (hidden/unknown/not_running...) — nếu trạng thái sai thì đây là đường khôi phục duy nhất; main tự tìm cửa sổ DAW đang ẩn.
++        if (showBtn) showBtn.disabled = busy;
+     }
+     async function refresh(keepMessage) {
+         const a = api();
+         if (!a || typeof a.toolsDawStatus !== "function") { setMessage("Chức năng này chỉ có trong app Menu (Electron).", false); paint({ configured: false, hidden: false }); return; }
+-        try { const st = await a.toolsDawStatus(); paint(st); if (st && st.detail && (st.state === "unknown" || st.state === "path_mismatch") && !keepMessage) setMessage(st.detail, false); } catch (e) { setMessage("Không đọc được trạng thái: " + (e && e.message || e), false); }
++        try { const st = await a.toolsDawStatus(); paint(st); if (st && st.detail && (st.state === "unknown" || st.state === "path_mismatch") && !keepMessage) setMessage(st.detail, false); } catch (e) { setMessage("Không đọc được trạng thái: " + (e && e.message || e), false); const sb = $("btnToolsShowDaw"); if (sb) sb.disabled = busy; }
+     }
+     async function act(kind) {
+         const a = api();
