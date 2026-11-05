@@ -10,8 +10,10 @@ Giao thức (1 dòng JSON / lần, kết thúc bằng \n) — KHÔNG ĐỔI so v
 bản trước:
   {"type":"ready","pid":<số>}
       -> in ĐÚNG 1 LẦN, ngay sau khi nạp WinRT thành công.
-  {"type":"snapshot","data":{application,title,artist,album,thumbnail,timestamp}}
-      -> có bài đang phát.
+  {"type":"snapshot","data":{application,title,artist,album,thumbnail,timestamp,
+                             positionMs,durationMs,timelineUpdatedMs,playing,playbackRate}}
+      -> có bài đang phát. 5 field cuối (thời lượng/vị trí) là CỘNG THÊM, = null nếu
+         app/trang web không báo cho Windows.
   {"type":"snapshot","data":null}
       -> không có session nào đang phát.
   {"type":"error","message":"..."}
@@ -264,6 +266,66 @@ function Select-BestSession {
 }
 
 # ---------------------------------------------------------------
+# BƯỚC 2.5 — Đọc THỜI LƯỢNG / VỊ TRÍ bài (Windows SMTC GetTimelineProperties).
+# - positionMs là vị trí TẠI thời điểm timelineUpdatedMs (LastUpdatedTime); bên Node cộng phần
+#   thời gian đã trôi nếu đang phát (xem core/integration/NowPlayingClock.js).
+# - Trình duyệt chỉ có số này nếu trang web đang báo vị trí cho Windows. Không báo -> trả toàn
+#   bộ field = null (KHÔNG bịa số). Đọc lỗi cũng trả null — tuyệt đối không làm hỏng việc đọc
+#   tên bài/ca sĩ ở Get-Snapshot (lỗi ở đây KHÔNG được throw ra ngoài).
+# ---------------------------------------------------------------
+function Get-TimelineInfo {
+    param($Session)
+
+    $empty = @{ positionMs = $null; durationMs = $null; timelineUpdatedMs = $null; playing = $null; playbackRate = $null }
+
+    try {
+
+        $tl = $Session.GetTimelineProperties()
+        if (-not $tl) { return $empty }
+
+        $startMs = [int64]$tl.StartTime.TotalMilliseconds
+        $endMs   = [int64]$tl.EndTime.TotalMilliseconds
+        $durMs   = $endMs - $startMs
+
+        # Thời lượng 0/âm = trang web chưa báo thời lượng -> coi như không có.
+        if ($durMs -le 0) { return $empty }
+
+        $posMs = [int64]$tl.Position.TotalMilliseconds - $startMs
+
+        # LastUpdatedTime chưa từng được đặt thì ra mốc năm 1601 (số âm) -> bỏ, để Node dùng giờ lần poll.
+        $updatedMs = $null
+        try {
+            $u = $tl.LastUpdatedTime.ToUnixTimeMilliseconds()
+            if ($u -gt 0) { $updatedMs = [int64]$u }
+        } catch { }
+
+        $isPlaying = $false
+        $rate = 1.0
+        try {
+            $pb = $Session.GetPlaybackInfo()
+            if ($pb) {
+                $isPlaying = ($pb.PlaybackStatus -eq [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus]::Playing)
+                if ($pb.PlaybackRate -and [double]$pb.PlaybackRate -gt 0) { $rate = [double]$pb.PlaybackRate }
+            }
+        } catch { }
+
+        return @{
+            positionMs        = [Math]::Max([int64]0, $posMs)
+            durationMs        = $durMs
+            timelineUpdatedMs = $updatedMs
+            playing           = $isPlaying
+            playbackRate      = $rate
+        }
+
+    } catch {
+
+        return $empty
+
+    }
+
+}
+
+# ---------------------------------------------------------------
 # BƯỚC 3 — Lấy 1 snapshot, đúng contract output của WindowsMediaSession.js.
 # Thumbnail: CHƯA đọc nội dung ảnh thật (đọc IRandomAccessStreamReference
 # rồi encode base64 là thao tác nhị phân phức tạp, không thể kiểm thử
@@ -300,13 +362,21 @@ function Get-Snapshot {
         return $null
     }
 
+    $timeline = Get-TimelineInfo -Session $best
+
     return @{
-        application = $best.SourceAppUserModelId
-        title       = $props.Title
-        artist      = $props.Artist
-        album       = $props.AlbumTitle
-        thumbnail   = $null
-        timestamp   = Get-UnixTimeMs
+        application       = $best.SourceAppUserModelId
+        title             = $props.Title
+        artist            = $props.Artist
+        album             = $props.AlbumTitle
+        thumbnail         = $null
+        timestamp         = Get-UnixTimeMs
+        # Thời lượng/vị trí bài (CỘNG THÊM — field cũ giữ nguyên). null nếu app/trang web không báo cho Windows.
+        positionMs        = $timeline.positionMs
+        durationMs        = $timeline.durationMs
+        timelineUpdatedMs = $timeline.timelineUpdatedMs
+        playing           = $timeline.playing
+        playbackRate      = $timeline.playbackRate
     }
 
 }

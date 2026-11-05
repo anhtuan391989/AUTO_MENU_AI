@@ -79,13 +79,31 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
             if (!exe || typeof windowHider.probe !== 'function') { done({ ...base, running: null, state: !exe ? 'not_configured' : (base.hidden ? 'hidden' : 'visible'), busy }); return; }
             windowHider.probe(exe, (p) => {
                 try {
-                    if (!p || !p.ok) { done({ ...base, running: null, state: base.hidden ? 'hidden' : 'unknown', busy, reason: p && p.reason }); return; }
-                    if (!p.running && saved) { saved = null; saveState(); dropTray(); }
+                    // A99: KHÔNG bao giờ báo not_running khi chưa xác minh được. unknown / path_mismatch giữ nguyên trạng thái ẩn đang lưu (không xoá khay).
+                    if (!p || p.state === 'unknown' || (!p.ok && p.state !== 'not_running')) {
+                        const reason = (p && p.reason) || 'UNKNOWN';
+                        say('chưa xác minh được tiến trình DAW: ' + reason + (p && p.detail ? ' — ' + p.detail : ''));
+                        done({ ...base, running: null, state: 'unknown', busy, reason, detail: describeIdentity(reason, p, exe) }); return;
+                    }
+                    if (p.state === 'path_mismatch') {
+                        say('DAW cùng tên đang chạy ở đường dẫn khác: ' + (p.others || []).join(' | '));
+                        done({ ...base, running: null, state: 'path_mismatch', busy, reason: 'DAW_AT_DIFFERENT_PATH', others: p.others || [], detail: describeIdentity('DAW_AT_DIFFERENT_PATH', p, exe) }); return;
+                    }
+                    if (p.state === 'not_running' && saved) { saved = null; saveState(); dropTray(); } // chỉ xoá trạng thái ẩn khi ĐÃ XÁC MINH tiến trình không còn
                     const st = status();
-                    done({ ...st, running: p.running, state: !p.running ? 'not_running' : (st.hidden ? 'hidden' : 'visible'), busy });
+                    done({ ...st, running: p.state === 'running', state: p.state === 'not_running' ? 'not_running' : (st.hidden ? 'hidden' : 'visible'), busy });
                 } catch (e) { done({ ...base, running: null, state: 'unknown', busy }); }
             });
         } catch (e) { done({ configured: false, exePath: '', hidden: false, trayVisible: false, running: null, state: 'unknown', busy }); }
+    }
+
+    // Lời giải thích tiếng Việt cho các trường hợp KHÔNG xác minh được / lệch đường dẫn (hiện ở Setup, kèm bằng chứng để người dùng đối chiếu).
+    function describeIdentity(reason, p, exe) {
+        if (reason === 'DAW_AT_DIFFERENT_PATH') return 'Thấy tiến trình cùng tên đang chạy nhưng ở ĐƯỜNG DẪN KHÁC: ' + ((p && p.others) || []).join(' | ') + ' — khác với đường dẫn đã chọn (' + exe + '). Hãy chọn lại đúng file DAW ở AI > Đường dẫn & khởi động.';
+        if (reason === 'PROCESS_PATH_UNREADABLE') return 'Thấy tiến trình cùng tên nhưng Windows không cho đọc đường dẫn của nó (có thể DAW chạy quyền Administrator). Chưa xác minh được nên KHÔNG kết luận "chưa chạy".';
+        if (reason === 'PROCESS_QUERY_FAILED') return 'Không truy vấn được danh sách tiến trình của Windows' + (p && p.detail ? ': ' + p.detail : '') + '. Chưa xác minh được trạng thái DAW.';
+        if (reason === 'UNSUPPORTED_PLATFORM') return 'Chức năng này chỉ chạy trên Windows.';
+        return 'Chưa xác minh được trạng thái DAW (' + reason + ').';
     }
 
     function hide(cb) {
@@ -106,6 +124,7 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
                     else if (r.reason === 'UNSUPPORTED_PLATFORM') cb({ ok: false, state: 'unsupported', message: 'Chức năng này chỉ chạy trên Windows.' });
                     else if (r.reason === 'NO_WINDOW_FOUND') cb({ ok: false, state: 'failed', message: 'Thấy DAW đang chạy nhưng không có cửa sổ nào để ẩn (có thể đã ẩn sẵn).' });
                     else if (r.reason === 'DAW_NOT_RESPONDING') cb({ ok: false, state: 'failed', message: 'DAW đang không phản hồi (Not Responding) nên chưa ẩn được. Chờ DAW xử lý xong rồi thử lại.' });
+                    else if (r.reason === 'PROCESS_PATH_UNREADABLE' || r.reason === 'DAW_AT_DIFFERENT_PATH' || r.reason === 'PROCESS_QUERY_FAILED') cb({ ok: false, state: 'failed', message: describeIdentity(r.reason, r, exe) });
                     else if (r.reason === 'HIDE_NOT_APPLIED') cb({ ok: false, state: 'failed', message: 'Đã gửi lệnh ẩn nhưng cửa sổ DAW vẫn đang hiện — chưa ẩn được.' });
                     else cb({ ok: false, state: 'failed', message: 'Không ẩn được DAW: ' + (r.reason || 'lỗi không rõ') });
                 } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
@@ -127,6 +146,7 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
                         saved = null; saveState(); dropTray();
                         cb({ ok: false, state: 'not_found', message: 'DAW đã đóng hoặc cửa sổ không còn — đã xoá trạng thái ẩn.' });
                     } else if (r.reason === 'DAW_NOT_RESPONDING') cb({ ok: false, state: 'failed', message: 'DAW đang không phản hồi (Not Responding) nên chưa hiện được. Giữ nguyên trạng thái ẩn, thử lại sau.' });
+                    else if (r.reason === 'PROCESS_PATH_UNREADABLE' || r.reason === 'DAW_AT_DIFFERENT_PATH' || r.reason === 'PROCESS_QUERY_FAILED') cb({ ok: false, state: 'failed', message: describeIdentity(r.reason, r, cur.exePath) + ' Giữ nguyên trạng thái ẩn.' });
                     else cb({ ok: false, state: 'failed', message: 'Không hiện được DAW: ' + (r.reason || 'lỗi không rõ') });
                 } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
             });

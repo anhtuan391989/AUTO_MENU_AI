@@ -14,7 +14,7 @@ const sync = (fn) => new Promise((r) => fn(r));
   let scripts = [];
   let r = await sync((cb) => WH.hide("C:\\O'Brien\\daw.exe", cb, (s, c) => { scripts.push(s); c(null, 'H:111,222'); }));
   ok(r.ok && r.state === 'hidden' && r.handles.join() === '111,222', 'hide: đọc đúng danh sách cửa sổ đã ẩn', r);
-  ok(/Path -ieq 'C:\\O''Brien\\daw\.exe'/.test(scripts[0]) && /\[HW\]::Hide/.test(scripts[0]), 'hide: đường dẫn có dấu \' được nhân đôi trong PowerShell; gọi HW.Hide', scripts[0].slice(0, 160));
+  ok(/GetFullPath\('C:\\O''Brien\\daw\.exe'\)/.test(scripts[0]) && /-ieq \$target/.test(scripts[0]) && /\[HW\]::Hide/.test(scripts[0]), 'hide: đường dẫn có dấu \' được nhân đôi trong PowerShell; gọi HW.Hide', scripts[0].slice(0, 160));
   ok(/GetWindow\(h, 4\) == IntPtr\.Zero/.test(WH._scriptsForTest.CSHARP) && /ShowWindowAsync\(h, 0\)/.test(WH._scriptsForTest.CSHARP), 'hide: chỉ ẩn cửa sổ KHÔNG có owner, dùng SW_HIDE (0), không phải minimize');
   r = await sync((cb) => WH.hide(EXE, cb, (s, c) => c(null, 'NOPROC'))); ok(!r.ok && r.state === 'not_found', 'hide: DAW không chạy -> not_found', r);
   r = await sync((cb) => WH.hide(EXE, cb, (s, c) => c(null, 'H:'))); ok(!r.ok && r.reason === 'NO_WINDOW_FOUND', 'hide: chạy nhưng không có cửa sổ -> NO_WINDOW_FOUND', r);

@@ -8,6 +8,9 @@
  * A98 (DAW-WINDOW-CONTROLLER-01) — KIỂM CHỨNG SAU KHI THAO TÁC: ẨN xong chờ ~0,25 s rồi kiểm tra cửa sổ thật sự không còn hiện (không báo thành công khi API không có tác dụng);
  * phát hiện cửa sổ đang "Not Responding" (IsHungAppWindow) để báo rõ; HIỆN xong kiểm tra đã hiện, nếu đang minimize thì restore, nếu nằm ngoài mọi màn hình thì đưa về trong màn hình.
  * probe() cho biết DAW đang chạy hay chưa (3 trạng thái ở lớp trên: chưa chạy / đang hiện / đang ẩn).
+ * A99 (DAW-RECOGNITION-01) — NHẬN DIỆN TIẾN TRÌNH DÙNG CHUNG cho status/hide/show: đọc ExecutablePath qua CIM Win32_Process (tin cậy hơn Get-Process.Path vốn trả rỗng khi
+ * không đọc được MainModule, vd tiến trình chạy quyền cao hơn); dự phòng Get-Process nếu CIM lỗi. So đường dẫn đã chuẩn hóa (GetFullPath, bỏ '\\' cuối), KHÔNG phân biệt hoa/thường.
+ * Chỉ nhận tiến trình có ĐÚNG đường dẫn đã cấu hình (không nhận DAW khác chỉ vì trùng tên). Không đọc được đường dẫn / lỗi truy vấn => KHÔNG kết luận "chưa chạy" (trạng thái unknown + lý do).
  * Quy tắc chọn cửa sổ khi ẨN: cửa sổ top-level của đúng tiến trình, đang hiện, KHÔNG có owner, có tiêu đề, không phải tool-window.
  * (Cửa sổ plugin thường là cửa sổ có owner nên tự ẩn theo cửa sổ chính; việc ẩn riêng plugin là tính năng khác, KHÔNG nằm ở đây.)
  */
@@ -76,9 +79,41 @@ const CSHARP = [
     '}'
 ].join('\n');
 
+// Quy tắc nhận diện DÙNG CHUNG (status/hide/show). Đặt: $pids (uint32[] khớp ĐÚNG đường dẫn), $info (chuỗi chẩn đoán), $st = OK | NOPROC | UNREADABLE | MISMATCH | ERR.
+//   NOPROC     : không có tiến trình nào cùng TÊN file .exe.
+//   UNREADABLE : có tiến trình cùng tên nhưng KHÔNG đọc được đường dẫn (không được coi là "chưa chạy").
+//   MISMATCH   : có tiến trình cùng tên nhưng ở đường dẫn KHÁC đường dẫn đã cấu hình (không nhận nhầm DAW khác).
+//   ERR        : truy vấn tiến trình lỗi (cả CIM lẫn Get-Process).
 function pidScript(exePath) {
-    return '$pids = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ($_.Path -ieq ' + psq(exePath.trim()) + ') } | ForEach-Object { [uint32]$_.Id }); ';
+    return '$target = [IO.Path]::GetFullPath(' + psq(exePath.trim()) + ').TrimEnd([char]92); $leaf = [IO.Path]::GetFileName($target); $src = "CIM"; $qerr = ""; $list = @(); '
+        + 'try { $list = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | Where-Object { $_.Name -ieq $leaf } | ForEach-Object { [pscustomobject]@{ Id = [uint32]$_.ProcessId; Path = [string]$_.ExecutablePath } }) } '
+        + 'catch { $src = "PS"; try { $list = @(Get-Process -ErrorAction Stop | Where-Object { ($_.ProcessName + ".exe") -ieq $leaf } | ForEach-Object { [pscustomobject]@{ Id = [uint32]$_.Id; Path = [string]$_.Path } }) } catch { $src = "NONE"; $qerr = ($_.Exception.Message -replace "[\\r\\n|]+", " ") } } '
+        + '$match = @(); $unread = @(); $other = @(); '
+        + 'foreach ($x in $list) { $p = $null; if ($x.Path) { try { $p = [IO.Path]::GetFullPath($x.Path).TrimEnd([char]92) } catch { $p = $x.Path.TrimEnd([char]92) } } '
+        + 'if (-not $p) { $unread += $x.Id } elseif ($p -ieq $target) { $match += $x.Id } else { $other += $p } } '
+        + '$pids = [uint32[]]$match; '
+        + 'if ($src -eq "NONE") { $st = "ERR" } elseif ($match.Count -gt 0) { $st = "OK" } elseif ($unread.Count -gt 0) { $st = "UNREADABLE" } elseif ($other.Count -gt 0) { $st = "MISMATCH" } else { $st = "NOPROC" } '
+        + '$info = "INFO|ST=" + $st + "|R=" + ($match -join ",") + "|U=" + ($unread -join ",") + "|O=" + ((@($other) | Select-Object -Unique) -join ";;") + "|SRC=" + $src + "|ERR=" + $qerr; ';
 }
+// Đọc chuỗi chẩn đoán từ PowerShell. Tương thích bản cũ: "NOPROC" trơn = không có tiến trình.
+function parseInfo(out) {
+    const t = String(out || '');
+    const m = /INFO\|ST=(OK|NOPROC|UNREADABLE|MISMATCH|ERR)\|R=([\d,]*)\|U=([\d,]*)\|O=([^|\r\n]*)\|SRC=(\w*)\|ERR=([^\r\n]*)/.exec(t);
+    if (!m) return /^\s*NOPROC\s*$/.test(t) ? { st: 'NOPROC', running: [], unreadable: [], others: [], src: '', err: '' } : null;
+    return { st: m[1], running: parseHandles(m[2]), unreadable: parseHandles(m[3]), others: m[4] ? m[4].split(';;').filter(Boolean) : [], src: m[5], err: m[6].trim() };
+}
+// Đổi kết quả nhận diện "không chạy tiếp được" thành mã lỗi thống nhất cho hide/show. Trả null nếu st === OK.
+function identityFailure(info) {
+    if (!info) return null;
+    if (info.st === 'NOPROC') return { state: 'not_found', reason: 'PROCESS_NOT_RUNNING' };
+    if (info.st === 'UNREADABLE') return { state: 'failed', reason: 'PROCESS_PATH_UNREADABLE', unreadable: info.unreadable };
+    if (info.st === 'MISMATCH') return { state: 'failed', reason: 'DAW_AT_DIFFERENT_PATH', others: info.others };
+    if (info.st === 'ERR') return { state: 'failed', reason: 'PROCESS_QUERY_FAILED', detail: info.err };
+    return null;
+}
+// Phần chạy sau khi nhận diện: nếu không có tiến trình khớp thì in $info (kèm lý do) và dừng; có thì chạy đoạn thao tác.
+const guarded = (body) => 'if ($st -ne "OK") { $info } else { ' + body + ' }';
+
 function loadType() { return 'Add-Type -TypeDefinition @\'\n' + CSHARP + '\n\'@; '; }
 
 // Kết quả C#: "<danh sách thành công>;F:<danh sách thất bại>[;HUNG]". Bản cũ chỉ có danh sách thành công vẫn đọc được.
@@ -96,10 +131,10 @@ function parseHandles(out) {
 function hide(exePath, cb, runner) {
     if (!validateExePath(exePath)) { cb({ ok: false, state: 'failed', handles: [], reason: 'INVALID_PATH' }); return; }
     const run = runner || defaultRunner;
-    const script = pidScript(exePath) + 'if ($pids.Count -eq 0) { "NOPROC" } else { ' + loadType() + '"H:" + [HW]::Hide([uint32[]]$pids) }';
+    const script = pidScript(exePath) + guarded(loadType() + '"H:" + [HW]::Hide([uint32[]]$pids)');
     run(script, (err, out) => {
         if (err) { cb({ ok: false, state: 'failed', handles: [], reason: err.message === 'UNSUPPORTED_PLATFORM' ? 'UNSUPPORTED_PLATFORM' : String(err.message || err) }); return; }
-        if (String(out).trim() === 'NOPROC') { cb({ ok: false, state: 'not_found', handles: [], reason: 'PROCESS_NOT_RUNNING' }); return; }
+        const idf = identityFailure(parseInfo(out)); if (idf) { cb({ ok: false, handles: [], ...idf }); return; }
         const o = parseOutcome(out, 'H');
         const handles = o.ok;
         if (!/H:/.test(String(out)) || (!handles.length && !o.failed.length)) { cb({ ok: false, state: 'failed', handles: [], reason: 'NO_WINDOW_FOUND' }); return; }
@@ -114,10 +149,10 @@ function show(exePath, handles, cb, runner) {
     const hs = (Array.isArray(handles) ? handles : []).filter((n) => Number.isSafeInteger(n) && n > 0);
     if (!hs.length) { cb({ ok: false, state: 'not_found', handles: [], reason: 'NO_SAVED_WINDOW' }); return; }
     const run = runner || defaultRunner;
-    const script = pidScript(exePath) + 'if ($pids.Count -eq 0) { "NOPROC" } else { ' + loadType() + '"S:" + [HW]::Show([int64[]](' + hs.join(',') + '), [uint32[]]$pids) }';
+    const script = pidScript(exePath) + guarded(loadType() + '"S:" + [HW]::Show([int64[]](' + hs.join(',') + '), [uint32[]]$pids)');
     run(script, (err, out) => {
         if (err) { cb({ ok: false, state: 'failed', handles: [], reason: err.message === 'UNSUPPORTED_PLATFORM' ? 'UNSUPPORTED_PLATFORM' : String(err.message || err) }); return; }
-        if (String(out).trim() === 'NOPROC') { cb({ ok: false, state: 'not_found', handles: [], reason: 'PROCESS_NOT_RUNNING' }); return; }
+        const idf = identityFailure(parseInfo(out)); if (idf) { cb({ ok: false, handles: [], ...idf }); return; }
         const o = parseOutcome(out, 'S'); const shown = o.ok;
         if (!shown.length && o.failed.length) { cb({ ok: false, state: 'failed', handles: [], failed: o.failed, reason: o.hung ? 'DAW_NOT_RESPONDING' : 'SHOW_NOT_APPLIED' }); return; }
         if (!shown.length) { cb({ ok: false, state: 'not_found', handles: [], reason: 'WINDOW_GONE' }); return; }
@@ -132,24 +167,32 @@ function showSync(exePath, handles) {
     const hs = (Array.isArray(handles) ? handles : []).filter((n) => Number.isSafeInteger(n) && n > 0);
     if (!hs.length) return { ok: false, state: 'not_found', handles: [], reason: 'NO_SAVED_WINDOW' };
     try {
-        const script = pidScript(exePath) + 'if ($pids.Count -eq 0) { "NOPROC" } else { ' + loadType() + '"S:" + [HW]::Show([int64[]](' + hs.join(',') + '), [uint32[]]$pids) }';
+        const script = pidScript(exePath) + guarded(loadType() + '"S:" + [HW]::Show([int64[]](' + hs.join(',') + '), [uint32[]]$pids)');
         const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 6000, encoding: 'utf8' });
         const shown = parseOutcome(r.stdout, 'S').ok;
         return shown.length ? { ok: true, state: 'visible', handles: shown, reason: null } : { ok: false, state: 'not_found', handles: [], reason: 'WINDOW_GONE' };
     } catch (e) { return { ok: false, state: 'failed', handles: [], reason: String((e && e.message) || e) }; }
 }
 
-/** DAW (đúng file .exe) đang chạy hay không. callback({ ok, running, reason }). Không đụng cửa sổ nào. */
+/** Nhận diện DAW (đúng file .exe) bằng CÙNG quy tắc với hide/show. callback({ ok, state, running, pids, unreadable, others, reason, detail }).
+ *  state: "running" | "not_running" | "path_mismatch" | "unknown". KHÔNG BAO GIỜ trả "not_running" khi chưa xác minh được (không đọc được đường dẫn / PowerShell lỗi => "unknown" + lý do). */
 function probe(exePath, cb, runner) {
-    if (!validateExePath(exePath)) { cb({ ok: false, running: false, reason: 'INVALID_PATH' }); return; }
+    const unk = (reason, extra) => cb({ ok: false, state: 'unknown', running: null, pids: [], unreadable: [], others: [], reason, ...(extra || {}) });
+    if (!validateExePath(exePath)) { unk('INVALID_PATH'); return; }
     const run = runner || defaultRunner;
-    run(pidScript(exePath) + 'if ($pids.Count -eq 0) { "NOPROC" } else { "RUN:" + $pids.Count }', (err, out) => {
-        if (err) { cb({ ok: false, running: false, reason: err.message === 'UNSUPPORTED_PLATFORM' ? 'UNSUPPORTED_PLATFORM' : String(err.message || err) }); return; }
+    run(pidScript(exePath) + '$info', (err, out) => {
+        if (err) { unk(err.message === 'UNSUPPORTED_PLATFORM' ? 'UNSUPPORTED_PLATFORM' : String(err.message || err)); return; }
         const t = String(out || '').trim();
-        if (t === 'NOPROC') { cb({ ok: true, running: false, reason: null }); return; }
-        if (/^RUN:\d+$/.test(t)) { cb({ ok: true, running: true, reason: null }); return; }
-        cb({ ok: false, running: false, reason: 'UNKNOWN_OUTPUT' });
+        if (/^RUN:\d+$/.test(t)) { cb({ ok: true, state: 'running', running: true, pids: [], unreadable: [], others: [], reason: null }); return; } // tương thích bản cũ
+        const info = parseInfo(out);
+        if (!info) { unk('UNKNOWN_OUTPUT'); return; }
+        const base = { pids: info.running, unreadable: info.unreadable, others: info.others };
+        if (info.st === 'OK') cb({ ok: true, state: 'running', running: true, reason: null, ...base });
+        else if (info.st === 'NOPROC') cb({ ok: true, state: 'not_running', running: false, reason: null, ...base });
+        else if (info.st === 'MISMATCH') cb({ ok: true, state: 'path_mismatch', running: null, reason: 'DAW_AT_DIFFERENT_PATH', ...base });
+        else if (info.st === 'UNREADABLE') cb({ ok: false, state: 'unknown', running: null, reason: 'PROCESS_PATH_UNREADABLE', ...base });
+        else cb({ ok: false, state: 'unknown', running: null, reason: 'PROCESS_QUERY_FAILED', detail: info.err, ...base });
     });
 }
 
-module.exports = { hide, show, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP } };
+module.exports = { hide, show, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo } };

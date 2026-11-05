@@ -148,6 +148,7 @@ const SongMatcher = require("../core/reference/SongMatcher");
 // Mặc định BẬT; tắt bằng cách đặt "keyServerAutoSync": false trong app-settings.json.
 const { KeyServerSync } = require("../core/integration/KeyServerSync");
 const KeyTimeline = require("../core/integration/KeyTimeline"); // MOD theo đoạn của Key Server (phút nào đổi tone gì)
+const NowPlayingClock = require("../core/integration/NowPlayingClock"); // đồng hồ bài đang phát (vị trí/thời lượng thật từ MPC-HC hoặc SMTC)
 const keyServerSync = new KeyServerSync({
     isEnabled: () => {
         const s = readSettingsFile();
@@ -270,6 +271,8 @@ app.whenReady().then(async () => {
             return KeyTimeline.estimatePositionSec({
                 source: active ? active.source : null,
                 mpcSnapshot: mpcHcSession.getLatestSnapshot(),
+                // Snapshot SMTC MỚI NHẤT của lần poll gần nhất (latestSmtcSnapshot chỉ cập nhật khi đổi bài nên không có vị trí tươi).
+                smtcSnapshot: windowsMediaSession.getLastSnapshot(),
                 songStartedAtMs: timelineSongStartedAtMs
             });
         },
@@ -472,6 +475,71 @@ app.whenReady().then(async () => {
         dispatchUnifiedNowPlaying();
     });
 
+    // ---- ĐỒNG HỒ BÀI ĐANG PHÁT (Claude C) ----
+    // Hiện "01:23 / 04:05" cạnh NOW PLAYING và giúp MOD canh đúng phút. Vị trí/thời lượng THẬT lấy từ nguồn đang active:
+    //   MPC-HC (Web Interface) hoặc trình duyệt (SMTC timeline, nếu trang web báo cho Windows). Nguồn không báo -> hasTimeline:false
+    //   (renderer hiện "--:--", KHÔNG bịa số). Tua bài trên web/MPC-HC -> lần đọc kế tiếp (<= ~2s) kéo đồng hồ + MOD theo đúng chỗ.
+    // Chỉ gửi khi giây hiển thị đổi (hoặc nhắc lại mỗi 3s phòng renderer vừa nạp lại). Kênh IPC mới "now-playing-position" CỘNG THÊM,
+    // không đổi kênh "now-playing-change" nào.
+    const NOW_PLAYING_CLOCK_TICK_MS = 500;
+    const NOW_PLAYING_CLOCK_RESEND_MS = 3000;
+    let lastClockSentKey = null;
+    let lastClockSentAt = 0;
+    let lastClockTimelineLog = null;
+
+    function tickNowPlayingClock() {
+
+        try {
+
+            const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
+            let payload = null;
+            let key = "null";
+
+            if (active && currentNowPlayingForSync) {
+
+                // Snapshot MỚI NHẤT của lần poll gần nhất (khác latestSmtcSnapshot/latestMpcHcSnapshot chỉ cập nhật khi đổi bài).
+                const live = active.source === "smtc" ? windowsMediaSession.getLastSnapshot() : mpcHcSession.getLatestSnapshot();
+                const clock = NowPlayingClock.compute(active.source, live);
+
+                payload = clock
+                    ? { hasTimeline: true, positionSec: Math.round(clock.positionSec * 1000) / 1000, durationSec: clock.durationSec, playing: clock.playing, source: active.source }
+                    : { hasTimeline: false, source: active.source };
+
+                key = clock
+                    ? `1|${Math.floor(clock.positionSec)}|${Math.floor(clock.durationSec)}|${clock.playing ? 1 : 0}|${active.source}`
+                    : `0|${active.source}`;
+
+                const logKey = `${currentNowPlayingForSync.title}|${active.source}|${clock ? "yes" : "no"}`;
+                if (logKey !== lastClockTimelineLog) {
+                    lastClockTimelineLog = logKey;
+                    console.log(`[NowPlayingClock] source=${active.source} timeline=${clock ? "CÓ (vị trí + thời lượng thật)" : "KHÔNG (nguồn không báo thời lượng)"}`);
+                }
+
+            } else {
+
+                lastClockTimelineLog = null;
+
+            }
+
+            const nowMs = Date.now();
+            if (key === lastClockSentKey && nowMs - lastClockSentAt < NOW_PLAYING_CLOCK_RESEND_MS) return;
+
+            lastClockSentKey = key;
+            lastClockSentAt = nowMs;
+            sendToRenderer("now-playing-position", payload);
+
+        } catch (err) {
+
+            // Đồng hồ chỉ là phần hiển thị phụ: lỗi ở đây không được ảnh hưởng Now Playing/Key/MOD.
+            console.error("[NowPlayingClock] tick lỗi (bỏ qua):", err.message);
+
+        }
+
+    }
+
+    const nowPlayingClockTimer = setInterval(tickNowPlayingClock, NOW_PLAYING_CLOCK_TICK_MS);
+    if (nowPlayingClockTimer && typeof nowPlayingClockTimer.unref === "function") nowPlayingClockTimer.unref();
+
     console.log("[WindowsMediaSession] START");
     windowsMediaSession.start();
 
@@ -490,6 +558,10 @@ app.whenReady().then(async () => {
     // try/catch riêng (giống pattern CommandRuntime.stop()) — lỗi ở đây KHÔNG được chặn việc
     // app thoát.
     app.on("before-quit", () => {
+        try {
+            clearInterval(nowPlayingClockTimer);
+        } catch (err) { /* không được chặn việc thoát app */ }
+
         try {
             windowsMediaSession.stop();
         } catch (err) {

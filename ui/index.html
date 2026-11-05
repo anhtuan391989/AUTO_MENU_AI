@@ -69,7 +69,6 @@
             </div>
             <div class="window-buttons">
                 <button id="verticalToggleBtn" title="Xoay dọc Menu (Kiểu PDL)" onclick="toggleVerticalMode()">📐</button>
-                <button id="toolsPopupBtn" title="Công cụ sửa lỗi & quản lý" onclick="openToolsModal()">🛠</button>
                 <button id="setupBtn" title="Cài đặt (Khóa toàn bộ)">⚙</button>
                 <button id="minBtn">—</button>
                 <button id="closeBtn">✕</button>
@@ -270,19 +269,6 @@
         </div>
     </div>
 
-    <!-- BẢNG ĐỘC LẬP 2: CÔNG CỤ SỬA LỖI & QUẢN LÝ (Chứa Ẩn DAW & Ẩn Plugin lấy từ ổ C) -->
-    <div class="custom-modal" id="toolsModal">
-        <div class="custom-modal-box">
-            <div class="custom-modal-title">🛠️ Công Cụ Sửa Lỗi & Quản Lý <button class="preset-btn" style="padding: 2px 8px;" onclick="closeToolsModal()">✕</button></div>
-            <p style="font-size: 11px; color: #9ca3af;">Quản lý và gọi tiến trình trực tiếp từ thư mục cài đặt gốc ở ổ C:</p>
-            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 5px;">
-                <button class="preset-btn" style="text-align: left; border-color: #00d2ff;" onclick="triggerHideDawAction()">📂 Ẩn Toàn Bộ Tiến Trình DAW (Ổ C)</button>
-                <button class="preset-btn" style="text-align: left; border-color: #00d2ff;" onclick="triggerHidePluginAction()">🔌 Ẩn Toàn Bộ Cửa Sổ Plugin VST3 (Ổ C)</button>
-                <button class="preset-btn" style="text-align: left; background: rgba(16,185,129,0.15); border-color: #10b981;" onclick="alert('Đã khóa bố cục giao diện thành công!')">📌 Khóa Bố Cục Giao Diện (Lock Layout)</button>
-            </div>
-        </div>
-    </div>
-
     <!-- SCRIPTS GỐC -->
     <script src="js/appSettings.js"></script>
     <script src="js/vocalCommandRouter.js"></script>
@@ -314,12 +300,6 @@
             alert("Trạng thái Always on Top cho bảng hiệu ứng: " + (checkbox.checked ? "Bật (Luôn nổi)" : "Tắt"));
             // Trong Electron, bạn có thể gọi window.electronAPI.setAlwaysOnTop(checkbox.checked) ở đây.
         }
-
-        // 4. Bảng Công Cụ Sửa Lỗi (Chứa Ẩn DAW & Ẩn Plugin từ ổ C)
-        function openToolsModal() { document.getElementById('toolsModal').classList.add('active'); }
-        function closeToolsModal() { document.getElementById('toolsModal').classList.remove('active'); }
-        function triggerHideDawAction() { alert("Đã thực thi lệnh từ ổ C: Ẩn hoàn toàn tiến trình DAW ngầm."); }
-        function triggerHidePluginAction() { alert("Đã thực thi lệnh từ ổ C: Ẩn hoàn toàn cửa sổ Plugin."); }
     </script>
     <script src="./menu-api-client.js"></script>
     <script>

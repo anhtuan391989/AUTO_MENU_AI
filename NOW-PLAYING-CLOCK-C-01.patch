@@ -1,0 +1,742 @@
+diff --git a/app/main.js b/app/main.js
+index 5127679..363ae64 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -148,6 +148,7 @@ const SongMatcher = require("../core/reference/SongMatcher");
+ // Mặc định BẬT; tắt bằng cách đặt "keyServerAutoSync": false trong app-settings.json.
+ const { KeyServerSync } = require("../core/integration/KeyServerSync");
+ const KeyTimeline = require("../core/integration/KeyTimeline"); // MOD theo đoạn của Key Server (phút nào đổi tone gì)
++const NowPlayingClock = require("../core/integration/NowPlayingClock"); // đồng hồ bài đang phát (vị trí/thời lượng thật từ MPC-HC hoặc SMTC)
+ const keyServerSync = new KeyServerSync({
+     isEnabled: () => {
+         const s = readSettingsFile();
+@@ -270,6 +271,8 @@ app.whenReady().then(async () => {
+             return KeyTimeline.estimatePositionSec({
+                 source: active ? active.source : null,
+                 mpcSnapshot: mpcHcSession.getLatestSnapshot(),
++                // Snapshot SMTC MỚI NHẤT của lần poll gần nhất (latestSmtcSnapshot chỉ cập nhật khi đổi bài nên không có vị trí tươi).
++                smtcSnapshot: windowsMediaSession.getLastSnapshot(),
+                 songStartedAtMs: timelineSongStartedAtMs
+             });
+         },
+@@ -472,6 +475,71 @@ app.whenReady().then(async () => {
+         dispatchUnifiedNowPlaying();
+     });
+ 
++    // ---- ĐỒNG HỒ BÀI ĐANG PHÁT (Claude C) ----
++    // Hiện "01:23 / 04:05" cạnh NOW PLAYING và giúp MOD canh đúng phút. Vị trí/thời lượng THẬT lấy từ nguồn đang active:
++    //   MPC-HC (Web Interface) hoặc trình duyệt (SMTC timeline, nếu trang web báo cho Windows). Nguồn không báo -> hasTimeline:false
++    //   (renderer hiện "--:--", KHÔNG bịa số). Tua bài trên web/MPC-HC -> lần đọc kế tiếp (<= ~2s) kéo đồng hồ + MOD theo đúng chỗ.
++    // Chỉ gửi khi giây hiển thị đổi (hoặc nhắc lại mỗi 3s phòng renderer vừa nạp lại). Kênh IPC mới "now-playing-position" CỘNG THÊM,
++    // không đổi kênh "now-playing-change" nào.
++    const NOW_PLAYING_CLOCK_TICK_MS = 500;
++    const NOW_PLAYING_CLOCK_RESEND_MS = 3000;
++    let lastClockSentKey = null;
++    let lastClockSentAt = 0;
++    let lastClockTimelineLog = null;
++
++    function tickNowPlayingClock() {
++
++        try {
++
++            const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
++            let payload = null;
++            let key = "null";
++
++            if (active && currentNowPlayingForSync) {
++
++                // Snapshot MỚI NHẤT của lần poll gần nhất (khác latestSmtcSnapshot/latestMpcHcSnapshot chỉ cập nhật khi đổi bài).
++                const live = active.source === "smtc" ? windowsMediaSession.getLastSnapshot() : mpcHcSession.getLatestSnapshot();
++                const clock = NowPlayingClock.compute(active.source, live);
++
++                payload = clock
++                    ? { hasTimeline: true, positionSec: Math.round(clock.positionSec * 1000) / 1000, durationSec: clock.durationSec, playing: clock.playing, source: active.source }
++                    : { hasTimeline: false, source: active.source };
++
++                key = clock
++                    ? `1|${Math.floor(clock.positionSec)}|${Math.floor(clock.durationSec)}|${clock.playing ? 1 : 0}|${active.source}`
++                    : `0|${active.source}`;
++
++                const logKey = `${currentNowPlayingForSync.title}|${active.source}|${clock ? "yes" : "no"}`;
++                if (logKey !== lastClockTimelineLog) {
++                    lastClockTimelineLog = logKey;
++                    console.log(`[NowPlayingClock] source=${active.source} timeline=${clock ? "CÓ (vị trí + thời lượng thật)" : "KHÔNG (nguồn không báo thời lượng)"}`);
++                }
++
++            } else {
++
++                lastClockTimelineLog = null;
++
++            }
++
++            const nowMs = Date.now();
++            if (key === lastClockSentKey && nowMs - lastClockSentAt < NOW_PLAYING_CLOCK_RESEND_MS) return;
++
++            lastClockSentKey = key;
++            lastClockSentAt = nowMs;
++            sendToRenderer("now-playing-position", payload);
++
++        } catch (err) {
++
++            // Đồng hồ chỉ là phần hiển thị phụ: lỗi ở đây không được ảnh hưởng Now Playing/Key/MOD.
++            console.error("[NowPlayingClock] tick lỗi (bỏ qua):", err.message);
++
++        }
++
++    }
++
++    const nowPlayingClockTimer = setInterval(tickNowPlayingClock, NOW_PLAYING_CLOCK_TICK_MS);
++    if (nowPlayingClockTimer && typeof nowPlayingClockTimer.unref === "function") nowPlayingClockTimer.unref();
++
+     console.log("[WindowsMediaSession] START");
+     windowsMediaSession.start();
+ 
+@@ -490,6 +558,10 @@ app.whenReady().then(async () => {
+     // try/catch riêng (giống pattern CommandRuntime.stop()) — lỗi ở đây KHÔNG được chặn việc
+     // app thoát.
+     app.on("before-quit", () => {
++        try {
++            clearInterval(nowPlayingClockTimer);
++        } catch (err) { /* không được chặn việc thoát app */ }
++
+         try {
+             windowsMediaSession.stop();
+         } catch (err) {
+diff --git a/app/preload.js b/app/preload.js
+index c5db13d..72dae31 100644
+--- a/app/preload.js
++++ b/app/preload.js
+@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
+     onNowPlayingChange: (callback) => ipcRenderer.on("now-playing-change", (event, snapshot) => callback(snapshot)),
+     // info: { reason, message? } — xem core/integration/WindowsMediaSession.js, event "unavailable"
+     onNowPlayingUnavailable: (callback) => ipcRenderer.on("now-playing-unavailable", (event, info) => callback(info)),
++    // Đồng hồ bài đang phát: { hasTimeline:true, positionSec, durationSec, playing, source } | { hasTimeline:false, source } | null (không có bài)
++    onNowPlayingPosition: (callback) => ipcRenderer.on("now-playing-position", (event, data) => callback(data)),
+ 
+     // ---- MOD theo đoạn Key Server (Claude C) ----
+     // plan: { changes:[{time:"02:23", from:"Eb", to:"E", semitone:1, label}] } | null (đổi bài/không có đoạn)
+diff --git a/core/integration/KeyTimeline.js b/core/integration/KeyTimeline.js
+index 8334ca4..dab9677 100644
+--- a/core/integration/KeyTimeline.js
++++ b/core/integration/KeyTimeline.js
+@@ -5,13 +5,16 @@
+  *   1. buildPlan(): đổi danh sách đoạn của server thành "kế hoạch": mỗi lần đổi tone = {time:"02:23", from:"Eb", to:"E", semitone:+1}.
+  *   2. KeyTimelineRunner: canh phút hiện tại của bài; tới đoạn mới thì gọi onFire() ĐÚNG 1 LẦN (renderer sẽ gửi sang Auto-Tune
+  *      bằng đường MOD sẵn có — SoundShifter KHÔNG bị chạm, SoundShifter chỉ chạy khi người dùng bấm SET).
+- *   3. estimatePositionSec(): ước lượng phút hiện tại: MPC-HC có vị trí thật; trình duyệt (SMTC) chưa có vị trí -> tính từ lúc bắt đầu bài.
++ *   3. estimatePositionSec(): phút hiện tại: MPC-HC có vị trí thật; trình duyệt (SMTC) có vị trí thật nếu trang web báo cho Windows
++ *      (NowPlayingClock), nếu không thì tính từ lúc bắt đầu bài.
+  *
+  * Module THUẦN: không Electron, không mạng, không MIDI. Đồng hồ/timer đều tiêm được nên test không phải chờ thật.
+  */
+ "use strict";
+ 
+-const NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
++const NowPlayingClock = require("./NowPlayingClock");
++
++const NOTES =["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+ const FLAT_TO_SHARP = { Db: "C#", Eb: "D#", Gb: "F#", Ab: "G#", Bb: "A#" };
+ const MPC_STATE_PLAYING = 2;
+ 
+@@ -88,12 +91,18 @@ function segmentIndexAt(plan, sec) {
+  *  - MPC-HC: vị trí thật từ lần poll gần nhất (+ thời gian trôi qua nếu đang Playing).
+  *  - Nguồn khác (trình duyệt/SMTC): SMTC của Menu hiện KHÔNG có vị trí -> tính từ lúc Menu thấy bài bắt đầu (songStartedAtMs).
+  */
+-function estimatePositionSec({ source, mpcSnapshot, songStartedAtMs, now }) {
++function estimatePositionSec({ source, mpcSnapshot, smtcSnapshot, songStartedAtMs, now }) {
+     const t = typeof now === "number" ? now : Date.now();
+     if (source === "mpc-hc" && mpcSnapshot && Number.isFinite(mpcSnapshot.positionMs) && mpcSnapshot.durationMs > 0) {
+         const elapsedMs = mpcSnapshot.state === MPC_STATE_PLAYING && Number.isFinite(mpcSnapshot.timestamp) ? Math.max(0, t - mpcSnapshot.timestamp) : 0;
+         return (mpcSnapshot.positionMs + elapsedMs) / 1000;
+     }
++    // Trình duyệt: nếu trang web có báo vị trí cho Windows (SMTC timeline) thì dùng vị trí THẬT -> người nghe tua tới đoạn nào, MOD đi theo đoạn đó.
++    if (source === "smtc" && smtcSnapshot) {
++        const clock = NowPlayingClock.compute("smtc", smtcSnapshot, t);
++        if (clock) return clock.positionSec;
++    }
++    // Không có vị trí thật (trình duyệt không báo): tính từ lúc Menu thấy bài bắt đầu (giới hạn đã biết, giữ nguyên như cũ).
+     if (Number.isFinite(songStartedAtMs)) return Math.max(0, (t - songStartedAtMs) / 1000);
+     return null;
+ }
+diff --git a/core/integration/NowPlayingClock.js b/core/integration/NowPlayingClock.js
+new file mode 100644
+index 0000000..c1d7c07
+--- /dev/null
++++ b/core/integration/NowPlayingClock.js
+@@ -0,0 +1,76 @@
++/**
++ * core/integration/NowPlayingClock.js — Đồng hồ bài đang phát (Claude C)
++ * ----------------------------------------------------------
++ * Từ snapshot của nguồn đang active (MPC-HC hoặc trình duyệt qua SMTC) tính ra:
++ *   { positionSec, durationSec, playing, source }
++ * hoặc null nếu nguồn đó KHÔNG cung cấp thời lượng thật (không bịa số).
++ *
++ * Dùng chung cho 2 việc:
++ *   1. Hiển thị "01:23 / 04:05" cạnh NOW PLAYING (app/main.js gửi sang renderer).
++ *   2. Giúp MOD canh đúng phút (KeyTimeline.estimatePositionSec): tua bài thì đồng hồ + MOD đi theo.
++ *
++ * Quy ước dữ liệu:
++ *   - MPC-HC  : positionMs/durationMs đọc lúc `timestamp` (mỗi lần poll), state 2 = đang phát.
++ *   - Trình duyệt (SMTC): positionMs/durationMs/timelineUpdatedMs/playing/playbackRate do smtc-daemon.ps1 đọc
++ *     từ GetTimelineProperties(). positionMs là vị trí TẠI timelineUpdatedMs; đang phát thì cộng phần thời gian đã trôi.
++ *
++ * Module THUẦN: không Electron, không mạng, không timer. `now` tiêm được nên test không phải chờ thật.
++ */
++"use strict";
++
++const MPC_STATE_PLAYING = 2;
++
++function isFiniteNumber(n) {
++    return typeof n === "number" && Number.isFinite(n);
++}
++
++function clamp(value, min, max) {
++    return Math.min(Math.max(value, min), max);
++}
++
++/**
++ * @param {"smtc"|"mpc-hc"|null} source nguồn đang active (NowPlayingArbitrator.resolveActiveSource().source)
++ * @param {object|null} snapshot snapshot MỚI NHẤT của chính nguồn đó (không phải bản cũ từ lần "change")
++ * @param {number} [now] Date.now() (tiêm khi test)
++ * @returns {{positionSec:number, durationSec:number, playing:boolean, source:string}|null}
++ */
++function compute(source, snapshot, now) {
++    const t = isFiniteNumber(now) ? now : Date.now();
++    if (!snapshot || typeof snapshot !== "object") return null;
++
++    if (source === "mpc-hc") {
++        if (!isFiniteNumber(snapshot.positionMs) || !(snapshot.durationMs > 0)) return null;
++        const playing = snapshot.state === MPC_STATE_PLAYING;
++        const elapsedMs = playing && isFiniteNumber(snapshot.timestamp) ? Math.max(0, t - snapshot.timestamp) : 0;
++        const durationSec = snapshot.durationMs / 1000;
++        return { positionSec: clamp((snapshot.positionMs + elapsedMs) / 1000, 0, durationSec), durationSec, playing, source };
++    }
++
++    if (source === "smtc") {
++        // Trình duyệt chưa/không đẩy thời lượng vào SMTC (vd trang web không báo vị trí) -> không có đồng hồ thật.
++        if (!isFiniteNumber(snapshot.positionMs) || !(snapshot.durationMs > 0)) return null;
++        const playing = snapshot.playing === true;
++        const rate = isFiniteNumber(snapshot.playbackRate) && snapshot.playbackRate > 0 ? snapshot.playbackRate : 1;
++        // Không biết lúc nào vị trí được ghi -> coi như vừa đọc xong (timestamp của lần poll).
++        const baseAtMs = isFiniteNumber(snapshot.timelineUpdatedMs) && snapshot.timelineUpdatedMs > 0
++            ? snapshot.timelineUpdatedMs
++            : (isFiniteNumber(snapshot.timestamp) ? snapshot.timestamp : t);
++        const elapsedMs = playing ? Math.max(0, t - baseAtMs) * rate : 0;
++        const durationSec = snapshot.durationMs / 1000;
++        return { positionSec: clamp((snapshot.positionMs + elapsedMs) / 1000, 0, durationSec), durationSec, playing, source };
++    }
++
++    return null;
++}
++
++// 125 -> "02:05" ; từ 1 giờ trở lên -> "1:02:05". Không hợp lệ -> "--:--".
++function formatClock(sec) {
++    if (!isFiniteNumber(sec) || sec < 0) return "--:--";
++    const s = Math.floor(sec);
++    const h = Math.floor(s / 3600);
++    const m = Math.floor((s % 3600) / 60);
++    const ss = String(s % 60).padStart(2, "0");
++    return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${String(m).padStart(2, "0")}:${ss}`;
++}
++
++module.exports = { compute, formatClock, MPC_STATE_PLAYING };
+diff --git a/core/integration/smtc-daemon.ps1 b/core/integration/smtc-daemon.ps1
+index 915faaf..e1e4ccd 100644
+--- a/core/integration/smtc-daemon.ps1
++++ b/core/integration/smtc-daemon.ps1
+@@ -10,8 +10,10 @@ Giao thức (1 dòng JSON / lần, kết thúc bằng \n) — KHÔNG ĐỔI so v
+ bản trước:
+   {"type":"ready","pid":<số>}
+       -> in ĐÚNG 1 LẦN, ngay sau khi nạp WinRT thành công.
+-  {"type":"snapshot","data":{application,title,artist,album,thumbnail,timestamp}}
+-      -> có bài đang phát.
++  {"type":"snapshot","data":{application,title,artist,album,thumbnail,timestamp,
++                             positionMs,durationMs,timelineUpdatedMs,playing,playbackRate}}
++      -> có bài đang phát. 5 field cuối (thời lượng/vị trí) là CỘNG THÊM, = null nếu
++         app/trang web không báo cho Windows.
+   {"type":"snapshot","data":null}
+       -> không có session nào đang phát.
+   {"type":"error","message":"..."}
+@@ -263,6 +265,66 @@ function Select-BestSession {
+ 
+ }
+ 
++# ---------------------------------------------------------------
++# BƯỚC 2.5 — Đọc THỜI LƯỢNG / VỊ TRÍ bài (Windows SMTC GetTimelineProperties).
++# - positionMs là vị trí TẠI thời điểm timelineUpdatedMs (LastUpdatedTime); bên Node cộng phần
++#   thời gian đã trôi nếu đang phát (xem core/integration/NowPlayingClock.js).
++# - Trình duyệt chỉ có số này nếu trang web đang báo vị trí cho Windows. Không báo -> trả toàn
++#   bộ field = null (KHÔNG bịa số). Đọc lỗi cũng trả null — tuyệt đối không làm hỏng việc đọc
++#   tên bài/ca sĩ ở Get-Snapshot (lỗi ở đây KHÔNG được throw ra ngoài).
++# ---------------------------------------------------------------
++function Get-TimelineInfo {
++    param($Session)
++
++    $empty = @{ positionMs = $null; durationMs = $null; timelineUpdatedMs = $null; playing = $null; playbackRate = $null }
++
++    try {
++
++        $tl = $Session.GetTimelineProperties()
++        if (-not $tl) { return $empty }
++
++        $startMs = [int64]$tl.StartTime.TotalMilliseconds
++        $endMs   = [int64]$tl.EndTime.TotalMilliseconds
++        $durMs   = $endMs - $startMs
++
++        # Thời lượng 0/âm = trang web chưa báo thời lượng -> coi như không có.
++        if ($durMs -le 0) { return $empty }
++
++        $posMs = [int64]$tl.Position.TotalMilliseconds - $startMs
++
++        # LastUpdatedTime chưa từng được đặt thì ra mốc năm 1601 (số âm) -> bỏ, để Node dùng giờ lần poll.
++        $updatedMs = $null
++        try {
++            $u = $tl.LastUpdatedTime.ToUnixTimeMilliseconds()
++            if ($u -gt 0) { $updatedMs = [int64]$u }
++        } catch { }
++
++        $isPlaying = $false
++        $rate = 1.0
++        try {
++            $pb = $Session.GetPlaybackInfo()
++            if ($pb) {
++                $isPlaying = ($pb.PlaybackStatus -eq [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus]::Playing)
++                if ($pb.PlaybackRate -and [double]$pb.PlaybackRate -gt 0) { $rate = [double]$pb.PlaybackRate }
++            }
++        } catch { }
++
++        return @{
++            positionMs        = [Math]::Max([int64]0, $posMs)
++            durationMs        = $durMs
++            timelineUpdatedMs = $updatedMs
++            playing           = $isPlaying
++            playbackRate      = $rate
++        }
++
++    } catch {
++
++        return $empty
++
++    }
++
++}
++
+ # ---------------------------------------------------------------
+ # BƯỚC 3 — Lấy 1 snapshot, đúng contract output của WindowsMediaSession.js.
+ # Thumbnail: CHƯA đọc nội dung ảnh thật (đọc IRandomAccessStreamReference
+@@ -300,13 +362,21 @@ function Get-Snapshot {
+         return $null
+     }
+ 
++    $timeline = Get-TimelineInfo -Session $best
++
+     return @{
+-        application = $best.SourceAppUserModelId
+-        title       = $props.Title
+-        artist      = $props.Artist
+-        album       = $props.AlbumTitle
+-        thumbnail   = $null
+-        timestamp   = Get-UnixTimeMs
++        application       = $best.SourceAppUserModelId
++        title             = $props.Title
++        artist            = $props.Artist
++        album             = $props.AlbumTitle
++        thumbnail         = $null
++        timestamp         = Get-UnixTimeMs
++        # Thời lượng/vị trí bài (CỘNG THÊM — field cũ giữ nguyên). null nếu app/trang web không báo cho Windows.
++        positionMs        = $timeline.positionMs
++        durationMs        = $timeline.durationMs
++        timelineUpdatedMs = $timeline.timelineUpdatedMs
++        playing           = $timeline.playing
++        playbackRate      = $timeline.playbackRate
+     }
+ 
+ }
+diff --git a/tests/unit/NowPlayingClockC.verify.js b/tests/unit/NowPlayingClockC.verify.js
+new file mode 100644
+index 0000000..5b508e0
+--- /dev/null
++++ b/tests/unit/NowPlayingClockC.verify.js
+@@ -0,0 +1,292 @@
++/**
++ * NOW-PLAYING-CLOCK-C — thời lượng bài đang phát: hiện "01:23 / 04:05" cạnh NOW PLAYING + đồng hồ MOD theo vị trí thật.
++ * Kiểm bằng mô phỏng phần mềm (đồng hồ giả, snapshot giả) — KHÔNG phải Windows/MPC-HC/trình duyệt thật.
++ * Chạy: node tests/unit/NowPlayingClockC.verify.js
++ */
++"use strict";
++const fs = require("fs"), path = require("path"), vm = require("vm");
++const ROOT = process.env.AUTOMENU_ROOT || path.resolve(__dirname, "../..");
++const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
++const Clock = require(path.join(ROOT, "core/integration/NowPlayingClock.js"));
++const KT = require(path.join(ROOT, "core/integration/KeyTimeline.js"));
++const Arbitrator = require(path.join(ROOT, "core/integration/NowPlayingArbitrator.js"));
++let pass = 0, fail = 0;
++const ok = (c, m, extra) => { if (c) { pass++; console.log("  OK   " + m); } else { fail++; console.log("  FAIL " + m + (extra !== undefined ? "  -> " + JSON.stringify(extra) : "")); } };
++
++// lấy nguyên thân hàm theo đếm ngoặc (không dùng regex lười)
++function extractFn(src, name) {
++    const i = src.indexOf("function " + name + "(");
++    if (i < 0) return "";
++    let j = src.indexOf("{", i), depth = 0;
++    for (let k = j; k < src.length; k++) {
++        if (src[k] === "{") depth++;
++        else if (src[k] === "}") { depth--; if (depth === 0) return src.slice(i, k + 1); }
++    }
++    return "";
++}
++// lấy nguyên 1 khối "(function name() { ... })();" theo đếm ngoặc
++function extractIife(src, name) {
++    const marker = "(function " + name + "() {";
++    const i = src.indexOf(marker);
++    if (i < 0) return "";
++    let depth = 0;
++    for (let k = i + marker.length - 1; k < src.length; k++) {
++        if (src[k] === "{") depth++;
++        else if (src[k] === "}") { depth--; if (depth === 0) return src.slice(i, src.indexOf("();", k) + 3); }
++    }
++    return "";
++}
++
++// ---------- A. NowPlayingClock.compute ----------
++console.log("== A. Tính vị trí/thời lượng thật ==");
++{
++    const mpc = { state: 2, positionMs: 60000, durationMs: 240000, timestamp: 1000 };
++    let c = Clock.compute("mpc-hc", mpc, 3000);
++    ok(c && c.positionSec === 62 && c.durationSec === 240 && c.playing === true, "A1. MPC-HC đang phát: 60s + 2s trôi = 62s / 240s", c);
++    c = Clock.compute("mpc-hc", { ...mpc, state: 1 }, 99000);
++    ok(c && c.positionSec === 60 && c.playing === false, "A2. MPC-HC không phát: đứng yên ở 60s", c);
++    ok(Clock.compute("mpc-hc", { ...mpc, durationMs: 0 }, 3000) === null, "A3. MPC-HC chưa có thời lượng (0) -> null, không bịa");
++    c = Clock.compute("mpc-hc", mpc, 1000 + 9999999);
++    ok(c && c.positionSec === 240, "A4. không bao giờ vượt quá thời lượng (kẹp ở 240s)", c);
++
++    const smtc = { positionMs: 30000, durationMs: 200000, timelineUpdatedMs: 5000, playing: true, playbackRate: 1, timestamp: 5500 };
++    c = Clock.compute("smtc", smtc, 8000);
++    ok(c && c.positionSec === 33 && c.durationSec === 200 && c.playing === true, "A5. Trình duyệt đang phát: 30s + 3s trôi (từ lúc ghi vị trí) = 33s", c);
++    c = Clock.compute("smtc", { ...smtc, playing: false }, 99999);
++    ok(c && c.positionSec === 30 && c.playing === false, "A6. Trình duyệt tạm dừng: đứng yên ở 30s", c);
++    c = Clock.compute("smtc", { ...smtc, playbackRate: 2 }, 8000);
++    ok(c && c.positionSec === 36, "A7. Tốc độ phát 2x: 30s + 3s*2 = 36s", c);
++    c = Clock.compute("smtc", { ...smtc, timelineUpdatedMs: null }, 8000);
++    ok(c && c.positionSec === 32.5, "A8. Không biết lúc ghi vị trí: dùng giờ lần poll (timestamp) làm mốc -> 30s + 2.5s", c);
++    ok(Clock.compute("smtc", { application: "brave", title: "x", positionMs: null, durationMs: null }, 1) === null, "A9. Trang web không báo thời lượng (null) -> null");
++    ok(Clock.compute("smtc", { ...smtc, durationMs: 0 }, 1) === null, "A10. Thời lượng 0 -> null");
++    ok(Clock.compute(null, smtc, 1) === null && Clock.compute("smtc", null, 1) === null && Clock.compute("khac", smtc, 1) === null, "A11. Không có nguồn/snapshot/nguồn lạ -> null");
++    // tua: snapshot mới của lần poll sau có vị trí khác -> kết quả đi theo ngay
++    const afterSeek = { ...smtc, positionMs: 150000, timelineUpdatedMs: 9000, timestamp: 9100 };
++    c = Clock.compute("smtc", afterSeek, 9000);
++    ok(c && c.positionSec === 150, "A12. Tua tới 02:30: lần đọc kế tiếp cho 150s", c);
++
++    ok(Clock.formatClock(125) === "02:05" && Clock.formatClock(0) === "00:00" && Clock.formatClock(59.9) === "00:59", "A13. formatClock mm:ss");
++    ok(Clock.formatClock(3725) === "1:02:05", "A14. formatClock từ 1 giờ: h:mm:ss");
++    ok(Clock.formatClock(null) === "--:--" && Clock.formatClock(-1) === "--:--" && Clock.formatClock(NaN) === "--:--", "A15. giá trị không hợp lệ -> --:--");
++}
++
++// ---------- B. KeyTimeline.estimatePositionSec ----------
++console.log("== B. MOD lấy vị trí thật của trình duyệt ==");
++{
++    const smtc = { positionMs: 143000, durationMs: 250000, timelineUpdatedMs: 1000, playing: true, playbackRate: 1, timestamp: 1100 };
++    ok(KT.estimatePositionSec({ source: "smtc", mpcSnapshot: null, smtcSnapshot: smtc, songStartedAtMs: 0, now: 3000 }) === 145, "B1. trình duyệt có vị trí thật: 143s + 2s = 145s (không dùng đồng hồ tính từ lúc bắt đầu)");
++    ok(KT.estimatePositionSec({ source: "smtc", mpcSnapshot: null, smtcSnapshot: { application: "brave", positionMs: null, durationMs: null }, songStartedAtMs: 10000, now: 15000 }) === 5, "B2. trình duyệt KHÔNG báo vị trí: quay về cách cũ (tính từ lúc bắt đầu bài = 5s)");
++    ok(KT.estimatePositionSec({ source: "smtc", mpcSnapshot: null, songStartedAtMs: 10000, now: 15000 }) === 5, "B3. không truyền smtcSnapshot (code cũ gọi y như trước): giữ nguyên 5s");
++    const mpc = { state: 2, positionMs: 60000, durationMs: 240000, timestamp: 1000 };
++    ok(KT.estimatePositionSec({ source: "mpc-hc", mpcSnapshot: mpc, smtcSnapshot: smtc, songStartedAtMs: 0, now: 3000 }) === 62, "B4. MPC-HC vẫn dùng vị trí MPC-HC (không bị smtcSnapshot lấn)");
++    ok(KT.estimatePositionSec({ source: null, mpcSnapshot: null, songStartedAtMs: undefined, now: 1 }) === null, "B5. không có gì -> null");
++}
++
++// ---------- C. MOD đi theo khi tua bài ----------
++console.log("== C. Tua tới đoạn lên tone -> MOD bắn đúng đoạn, đúng 1 lần ==");
++{
++    const plan = KT.buildPlan([{ startSec: 0, key: "Eb", mode: "major" }, { startSec: 143, key: "E", mode: "major" }]); // 02:23 Eb -> E
++    ok(!!plan && plan.changes[0].time === "02:23", "C0. kế hoạch có đổi tone ở 02:23");
++
++    let now = 1000;
++    let smtc = { positionMs: 10000, durationMs: 250000, timelineUpdatedMs: 1000, playing: true, playbackRate: 1, timestamp: 1000 };
++    const fired = [];
++    let tickFn = null;
++    const runner = new KT.KeyTimelineRunner({
++        getPositionSec: () => KT.estimatePositionSec({ source: "smtc", mpcSnapshot: null, smtcSnapshot: smtc, songStartedAtMs: 0, now }),
++        onFire: (e) => fired.push(e),
++        setIntervalFn: (fn) => { tickFn = fn; return 1; },
++        clearIntervalFn: () => { tickFn = null; }
++    });
++    runner.arm(plan);
++    ok(fired.length === 0, "C1. đầu bài (10s): chưa bắn");
++    now = 31000; tickFn();
++    ok(fired.length === 0, "C2. nghe tới 40s: vẫn chưa bắn");
++    // người nghe tua trên web tới 02:30 -> lần đọc kế tiếp của SMTC có vị trí mới
++    smtc = { ...smtc, positionMs: 150000, timelineUpdatedMs: 31500, timestamp: 31600 }; now = 32000; tickFn();
++    ok(fired.length === 1 && fired[0].toName === "E" && fired[0].time === "02:23", "C3. tua tới 02:30 -> MOD bắn đúng 1 lần: Eb -> E", fired);
++    now = 34000; tickFn(); now = 36000; tickFn();
++    ok(fired.length === 1, "C4. tiếp tục nghe: không bắn lặp");
++    // tua ngược về đầu -> trở lại Key gốc (quyết định theo trạng thái)
++    smtc = { ...smtc, positionMs: 5000, timelineUpdatedMs: 36500, timestamp: 36600 }; now = 37000; tickFn();
++    ok(fired.length === 2 && fired[1].toName === "Eb", "C5. tua lùi về đầu bài -> trả về Key gốc Eb", fired.map((f) => f.toName));
++    runner.disarm();
++}
++
++// ---------- D. Bộ phát đồng hồ trong main.js (chạy thật hàm tickNowPlayingClock) ----------
++console.log("== D. main.js: bộ phát 'now-playing-position' ==");
++{
++    const M = read("app/main.js");
++    const fnSrc = extractFn(M, "tickNowPlayingClock");
++    ok(!!fnSrc, "D0. tìm thấy tickNowPlayingClock trong main.js");
++
++    let nowMs = 100000;
++    const sent = [];
++    const logs = [];
++    const ctx = vm.createContext({
++        NowPlayingArbitrator: Arbitrator,
++        // Module thật, nhưng tiêm đồng hồ giả (module tự gọi Date.now() THẬT của máy nếu không được truyền `now`).
++        NowPlayingClock: { compute: (source, snap) => Clock.compute(source, snap, nowMs) },
++        windowsMediaSession: { getLastSnapshot: () => ctx.__smtcLive },
++        mpcHcSession: { getLatestSnapshot: () => ctx.__mpcLive },
++        sendToRenderer: (ch, p) => sent.push({ ch, p }),
++        Date: { now: () => nowMs }, Math, console: { log: (...a) => logs.push(a.join(" ")), error: (...a) => logs.push("ERR " + a.join(" ")) }
++    });
++    vm.runInContext(`
++        var latestSmtcSnapshot = null, latestMpcHcSnapshot = null, currentNowPlayingForSync = null;
++        var lastClockSentKey = null, lastClockSentAt = 0, lastClockTimelineLog = null;
++        var NOW_PLAYING_CLOCK_RESEND_MS = 3000;
++        ${fnSrc}
++    `, ctx);
++    const tick = () => vm.runInContext("tickNowPlayingClock()", ctx);
++
++    // không có bài
++    tick();
++    ok(sent.length === 1 && sent[0].ch === "now-playing-position" && sent[0].p === null, "D1. không có bài -> gửi null (renderer ẩn đồng hồ)", sent);
++    tick(); ok(sent.length === 1, "D2. vẫn không có bài, <3s: không gửi lặp");
++
++    // trình duyệt có thời lượng
++    ctx.latestSmtcSnapshot = { application: "brave", title: "A", artist: "B" };
++    ctx.currentNowPlayingForSync = { title: "A", artist: "B" };
++    ctx.__smtcLive = { application: "brave", title: "A", artist: "B", positionMs: 83000, durationMs: 245000, timelineUpdatedMs: nowMs, playing: true, playbackRate: 1, timestamp: nowMs };
++    tick();
++    let last = sent[sent.length - 1].p;
++    ok(last && last.hasTimeline === true && last.positionSec === 83 && last.durationSec === 245 && last.playing === true && last.source === "smtc", "D3. trình duyệt có thời lượng -> gửi 83s / 245s", last);
++    const n3 = sent.length;
++    nowMs += 300; tick();
++    ok(sent.length === n3, "D4. cùng giây hiển thị (+0.3s): không gửi thừa");
++    nowMs += 800; tick();
++    last = sent[sent.length - 1].p;
++    ok(sent.length === n3 + 1 && last.positionSec > 84 && last.positionSec < 85, "D5. sang giây mới: gửi 84.x giây", last);
++    // tua: lần poll sau có vị trí khác
++    ctx.__smtcLive = { ...ctx.__smtcLive, positionMs: 150000, timelineUpdatedMs: nowMs, timestamp: nowMs };
++    tick();
++    last = sent[sent.length - 1].p;
++    ok(last.positionSec === 150, "D6. tua tới 02:30 -> đồng hồ gửi 150s ngay lần đọc kế tiếp", last);
++    // tạm dừng
++    const nPause = sent.length;
++    ctx.__smtcLive = { ...ctx.__smtcLive, playing: false };
++    tick();
++    ok(sent.length === nPause + 1 && sent[sent.length - 1].p.playing === false, "D7. tạm dừng -> gửi playing:false");
++    const nFrozen = sent.length;
++    nowMs += 1500; tick();
++    ok(sent.length === nFrozen, "D8. đang dừng: đồng hồ đứng yên, không gửi thừa");
++    nowMs += 3000; tick();
++    ok(sent.length === nFrozen + 1, "D9. quá 3s không đổi: nhắc lại 1 lần (phòng renderer vừa nạp lại)");
++
++    // trình duyệt KHÔNG báo thời lượng
++    ctx.__smtcLive = { application: "brave", title: "A", artist: "B", positionMs: null, durationMs: null, timelineUpdatedMs: null, playing: null, playbackRate: null, timestamp: nowMs };
++    tick();
++    last = sent[sent.length - 1].p;
++    ok(last && last.hasTimeline === false && last.source === "smtc", "D10. trình duyệt không báo thời lượng -> hasTimeline:false (không bịa số)", last);
++    ok(logs.some((l) => /\[NowPlayingClock\] source=smtc timeline=KHÔNG/.test(l)), "D11. có log chẩn đoán 'timeline=KHÔNG' để người dùng biết vì sao");
++
++    // MPC-HC đang phát thắng trình duyệt
++    ctx.latestMpcHcSnapshot = { state: 2, title: "song.mp3" };
++    ctx.currentNowPlayingForSync = { title: "song", artist: "" };
++    ctx.__mpcLive = { state: 2, positionMs: 20000, durationMs: 180000, timestamp: nowMs };
++    tick();
++    last = sent[sent.length - 1].p;
++    ok(last && last.source === "mpc-hc" && last.hasTimeline === true && last.positionSec === 20 && last.durationSec === 180, "D12. MPC-HC đang phát -> lấy đồng hồ MPC-HC 20s / 180s", last);
++
++    // lỗi bất ngờ không văng ra ngoài
++    ctx.__mpcLive = { get positionMs() { throw new Error("boom"); }, state: 2, durationMs: 1 };
++    let threw = false; try { tick(); } catch (e) { threw = true; }
++    ok(!threw, "D13. lỗi bất ngờ khi tính đồng hồ bị nuốt, không làm hỏng Now Playing/Key/MOD");
++
++    // nối dây
++    ok(/require\("\.\.\/core\/integration\/NowPlayingClock"\)/.test(M), "D14. main.js nạp NowPlayingClock");
++    ok(/smtcSnapshot:\s*windowsMediaSession\.getLastSnapshot\(\)/.test(M), "D15. MOD nhận snapshot SMTC mới nhất (có vị trí tươi)");
++    ok(/clearInterval\(nowPlayingClockTimer\)/.test(M), "D16. tắt timer đồng hồ khi thoát app");
++    ok(/sendToRenderer\("now-playing-position"/.test(M) && /now-playing-change/.test(M), "D17. kênh mới được thêm, kênh now-playing-change cũ vẫn còn");
++}
++
++// ---------- E. Renderer: hiển thị + đồng bộ đồng hồ MOD ----------
++console.log("== E. renderer.js: hiển thị đồng hồ + kéo songSeconds ==");
++{
++    const R = read("ui/js/renderer.js");
++    const iife = extractIife(R, "setupNowPlayingClock");
++    ok(!!iife, "E0. tìm thấy khối setupNowPlayingClock");
++
++    const appended = [];
++    let handler = null;
++    const host = { appendChild: (el) => appended.push(el) };
++    let nowMs = 50000;
++    const ctx = vm.createContext({
++        document: {
++            querySelector: (sel) => (sel === ".now-playing" ? host : null),
++            createElement: () => ({ style: {}, textContent: "", title: "" })
++        },
++        window: { electronAPI: { onNowPlayingPosition: (cb) => { handler = cb; } } },
++        Date: { now: () => nowMs }, Math, Number, String
++    });
++    vm.runInContext(`var songSeconds = 0; var __songClockSyncedAt = 0; ${iife}`, ctx);
++    const el = appended[0];
++    ok(appended.length === 1 && el && el.id === "nowPlayingClock", "E1. tạo đúng 1 phần tử đồng hồ gắn vào hàng .now-playing");
++    ok(el.style.display === "none", "E2. lúc đầu (chưa có bài) đồng hồ ẩn");
++    ok(typeof handler === "function", "E3. đã đăng ký nhận kênh onNowPlayingPosition");
++
++    handler({ hasTimeline: true, positionSec: 83.4, durationSec: 245, playing: true, source: "mpc-hc" });
++    ok(el.style.display === "" && el.textContent === "01:23 / 04:05", "E4. hiển thị 01:23 / 04:05", el.textContent);
++    ok(vm.runInContext("songSeconds", ctx) === 83, "E5. đồng hồ MOD (songSeconds) được kéo về 83s");
++    ok(el.style.opacity === "1", "E6. đang phát: rõ nét");
++    handler({ hasTimeline: true, positionSec: 150, durationSec: 245, playing: false, source: "smtc" });
++    ok(el.textContent === "02:30 / 04:05" && el.style.opacity === "0.6", "E7. tua tới 02:30 + tạm dừng: 02:30 / 04:05, mờ nhẹ", el.textContent);
++    ok(vm.runInContext("songSeconds", ctx) === 150, "E8. songSeconds theo tới 150s (MOD đúng đoạn)");
++    handler({ hasTimeline: true, positionSec: 3725, durationSec: 7300, playing: true, source: "mpc-hc" });
++    ok(el.textContent === "1:02:05 / 2:01:40", "E9. bài dài trên 1 giờ: 1:02:05 / 2:01:40", el.textContent);
++    handler({ hasTimeline: false, source: "smtc" });
++    ok(el.style.display === "" && el.textContent === "--:-- / --:--" && el.style.opacity === "0.4", "E10. nguồn không báo thời lượng: --:-- / --:-- (mờ), không bịa số", el.textContent);
++    const keep = vm.runInContext("songSeconds", ctx);
++    ok(keep === 3725, "E11. không có thời lượng thật: songSeconds không bị ghi đè (giữ cách đếm cũ)");
++    handler(null);
++    ok(el.style.display === "none" && el.textContent === "", "E12. không còn bài: ẩn đồng hồ");
++
++    // updateSongPosition: đang đồng bộ thì không tự cộng thêm; hết đồng bộ thì đếm tự do như cũ
++    const posEl = { textContent: "" };
++    const ctx2 = vm.createContext({ document: { getElementById: (id) => (id === "songPosition" ? posEl : null) }, Date: { now: () => nowMs }, String, Math });
++    vm.runInContext(`var songSeconds = 100; var __songClockSyncedAt = 0; ${extractFn(R, "updateSongPosition")}`, ctx2);
++    vm.runInContext("__songClockSyncedAt = " + (nowMs - 1000), ctx2);
++    vm.runInContext("updateSongPosition()", ctx2);
++    ok(vm.runInContext("songSeconds", ctx2) === 100, "E13. vừa đồng bộ (<3s): không tự cộng thêm (khỏi lệch)");
++    vm.runInContext("__songClockSyncedAt = " + (nowMs - 5000), ctx2);
++    vm.runInContext("updateSongPosition()", ctx2);
++    ok(vm.runInContext("songSeconds", ctx2) === 101, "E14. quá 3s không có vị trí thật: đếm tự do như cũ (+1/giây)");
++    ok(posEl.textContent === "01:40", "E15. phần tử ẩn #songPosition vẫn cập nhật như cũ", posEl.textContent);
++
++    ok(/onNowPlayingPosition:\s*\(callback\)\s*=>\s*ipcRenderer\.on\("now-playing-position"/.test(read("app/preload.js")), "E16. preload.js mở kênh now-playing-position cho renderer");
++    ok(/onNowPlayingChange/.test(read("app/preload.js")) && /onNowPlayingUnavailable/.test(read("app/preload.js")), "E17. 2 kênh Now Playing cũ trong preload vẫn còn");
++}
++
++// ---------- F. smtc-daemon.ps1 (kiểm cấu trúc — không chạy được PowerShell/WinRT ở đây) ----------
++console.log("== F. smtc-daemon.ps1 (kiểm cấu trúc, KHÔNG phải chạy thật) ==");
++{
++    const P = read("core/integration/smtc-daemon.ps1");
++    ok(/GetTimelineProperties\(\)/.test(P), "F1. gọi GetTimelineProperties()");
++    const fn = P.slice(P.indexOf("function Get-TimelineInfo"), P.indexOf("# BƯỚC 3"));
++    ok(/try\s*\{[\s\S]*GetTimelineProperties[\s\S]*\}\s*catch\s*\{[\s\S]*return \$empty/.test(fn), "F2. đọc timeline nằm trong try/catch, lỗi -> trả toàn null, không throw");
++    ok(/\$durMs -le 0\) \{ return \$empty \}/.test(fn), "F3. thời lượng <= 0 -> coi như không có (không bịa)");
++    ok(/positionMs\s*=\s*\$timeline\.positionMs/.test(P) && /durationMs\s*=\s*\$timeline\.durationMs/.test(P) && /timelineUpdatedMs\s*=\s*\$timeline\.timelineUpdatedMs/.test(P) && /playing\s*=\s*\$timeline\.playing/.test(P) && /playbackRate\s*=\s*\$timeline\.playbackRate/.test(P), "F4. snapshot có đủ 5 field mới");
++    ok(/application\s*=\s*\$best\.SourceAppUserModelId/.test(P) && /title\s*=\s*\$props\.Title/.test(P) && /artist\s*=\s*\$props\.Artist/.test(P) && /album\s*=\s*\$props\.AlbumTitle/.test(P) && /thumbnail\s*=\s*\$null/.test(P) && /timestamp\s*=\s*Get-UnixTimeMs/.test(P), "F5. 6 field cũ của snapshot giữ nguyên");
++    const open = (P.match(/\{/g) || []).length, close = (P.match(/\}/g) || []).length;
++    ok(open === close, `F6. ngoặc nhọn {} cân bằng (${open}/${close})`);
++    ok(P.indexOf("function Get-TimelineInfo") < P.indexOf("Write-JsonLine @{ type = \"ready\""), "F7. hàm mới được định nghĩa trước vòng lặp chính");
++}
++
++// ---------- G. Phạm vi ----------
++console.log("== G. Phạm vi thay đổi ==");
++{
++    const { execFileSync } = require("child_process");
++    let ch = ""; try { ch = execFileSync("git", ["status", "--porcelain"], { cwd: ROOT }).toString(); } catch (e) {}
++    const lines = ch.split("\n").map((l) => l.trim()).filter(Boolean);
++    ok(!lines.some((l) => /\.(html|css)$/i.test(l)), "G1. không sửa file .html/.css nào");
++    const R = read("ui/js/renderer.js");
++    ok(/id="songPosition"/.test(read("ui/index.html")), "G2. index.html còn nguyên thẻ #songPosition cũ");
++    ok(!/nowPlayingClock/.test(read("ui/index.html")), "G3. không thêm gì vào index.html (phần tử tạo bằng JS)");
++    void R;
++}
++
++console.log(`\nKẾT QUẢ: ${pass} PASS / ${fail} FAIL`);
++console.log("⚠️ NHẮC LẠI: smtc-daemon.ps1 + trình duyệt/MPC-HC thật CHƯA được kiểm trên Windows — chỉ kiểm bằng mô phỏng.");
++process.exit(fail ? 1 : 0);
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 1dc6de5..5cf3f86 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -2688,6 +2688,9 @@ function startModulationWatcher() {
+ }
+ 
+ let songSeconds = 0;
++// Lúc gần nhất songSeconds được kéo theo vị trí THẬT của bài (từ đồng hồ Now Playing bên dưới). 0 = chưa từng.
++// Đang "đồng bộ" (<3s) thì KHÔNG tự cộng thêm nữa; nguồn không báo vị trí -> đếm tự do như cũ.
++let __songClockSyncedAt = 0;
+ function updateSongPosition() {
+     const posEl = document.getElementById("songPosition");
+     if (!posEl) return;
+@@ -2695,10 +2698,74 @@ function updateSongPosition() {
+     const mins = String(Math.floor(songSeconds / 60)).padStart(2, "0");
+     const secs = String(songSeconds % 60).padStart(2, "0");
+     posEl.textContent = `${mins}:${secs}`;
+-    songSeconds++;
++    if (Date.now() - __songClockSyncedAt > 3000) songSeconds++;
+ }
+ setInterval(updateSongPosition, 1000);
+ 
++/* ==========================================================
++   ĐỒNG HỒ NOW PLAYING — "01:23 / 04:05" cạnh tên bài, phía nút ⚙ (Claude C)
++   ----------------------------------------------------------
++   Main process (app/main.js) gửi "now-playing-position" với vị trí/thời lượng THẬT của bài đang phát
++   (MPC-HC hoặc trình duyệt qua Windows SMTC). Phần tử được tạo bằng JS và gắn vào hàng NOW PLAYING sẵn có
++   (không sửa index.html). Nguồn không báo thời lượng -> hiện "--:-- / --:--" (không bịa số).
++   Mỗi lần nhận vị trí thật còn kéo songSeconds (đồng hồ MOD) theo, nên người nghe tua tới đoạn lên tone thì
++   đồng hồ hiển thị + MOD đi theo đúng đoạn đó.
++   ========================================================== */
++(function setupNowPlayingClock() {
++
++    const host = document.querySelector(".now-playing");
++    if (!host) return; // an toàn nếu HTML thiếu phần tử
++
++    // Kiểu đặt thẳng bằng JS (không thêm gì vào style.css) để KHÔNG đổi file giao diện nào. Giữ cùng tông màu/cỡ chữ với NOW PLAYING.
++    const el = document.createElement("span");
++    el.id = "nowPlayingClock";
++    el.style.cssText = "font-size:12px;font-weight:600;color:#8fe9ff;letter-spacing:.3px;white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums;";
++    el.style.display = "none"; // chưa có bài -> ẩn
++    host.appendChild(el);
++
++    // 125 -> "02:05"; từ 1 giờ -> "1:02:05"; không hợp lệ -> "--:--" (cùng quy ước NowPlayingClock.formatClock bên main).
++    function fmt(sec) {
++        if (typeof sec !== "number" || !Number.isFinite(sec) || sec < 0) return "--:--";
++        const s = Math.floor(sec);
++        const h = Math.floor(s / 3600);
++        const m = Math.floor((s % 3600) / 60);
++        const ss = String(s % 60).padStart(2, "0");
++        return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${String(m).padStart(2, "0")}:${ss}`;
++    }
++
++    function render(data) {
++
++        if (!data) {
++            el.style.display = "none";
++            el.textContent = "";
++            return;
++        }
++
++        el.style.display = "";
++
++        if (!data.hasTimeline) {
++            el.textContent = "--:-- / --:--";
++            el.style.opacity = "0.4"; // mờ: nguồn này không báo thời lượng
++            el.title = "Nguồn nhạc này chưa báo thời lượng bài cho Windows";
++            return;
++        }
++
++        el.style.opacity = data.playing ? "1" : "0.6"; // tạm dừng: mờ nhẹ
++        el.textContent = `${fmt(data.positionSec)} / ${fmt(data.durationSec)}`;
++        el.title = data.playing ? "Thời gian bài đang phát / thời lượng" : "Đang tạm dừng";
++
++        // Kéo đồng hồ MOD theo vị trí thật (xem updateSongPosition ở trên).
++        songSeconds = Math.floor(data.positionSec);
++        __songClockSyncedAt = Date.now();
++
++    }
++
++    if (window.electronAPI && typeof window.electronAPI.onNowPlayingPosition === "function") {
++        window.electronAPI.onNowPlayingPosition(render);
++    }
++
++})();
++
+ /* ==========================================================
+    13. AUDIO ENGINE — khởi tạo audio dùng chung, giao việc cho 3 engine riêng
+    -----------------------------------------------------------

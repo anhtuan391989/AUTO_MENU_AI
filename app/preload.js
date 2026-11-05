@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     onNowPlayingChange: (callback) => ipcRenderer.on("now-playing-change", (event, snapshot) => callback(snapshot)),
     // info: { reason, message? } — xem core/integration/WindowsMediaSession.js, event "unavailable"
     onNowPlayingUnavailable: (callback) => ipcRenderer.on("now-playing-unavailable", (event, info) => callback(info)),
+    // Đồng hồ bài đang phát: { hasTimeline:true, positionSec, durationSec, playing, source } | { hasTimeline:false, source } | null (không có bài)
+    onNowPlayingPosition: (callback) => ipcRenderer.on("now-playing-position", (event, data) => callback(data)),
 
     // ---- MOD theo đoạn Key Server (Claude C) ----
     // plan: { changes:[{time:"02:23", from:"Eb", to:"E", semitone:1, label}] } | null (đổi bài/không có đoạn)

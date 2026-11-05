@@ -2688,6 +2688,9 @@ function startModulationWatcher() {
 }
 
 let songSeconds = 0;
+// Lúc gần nhất songSeconds được kéo theo vị trí THẬT của bài (từ đồng hồ Now Playing bên dưới). 0 = chưa từng.
+// Đang "đồng bộ" (<3s) thì KHÔNG tự cộng thêm nữa; nguồn không báo vị trí -> đếm tự do như cũ.
+let __songClockSyncedAt = 0;
 function updateSongPosition() {
     const posEl = document.getElementById("songPosition");
     if (!posEl) return;
@@ -2695,9 +2698,73 @@ function updateSongPosition() {
     const mins = String(Math.floor(songSeconds / 60)).padStart(2, "0");
     const secs = String(songSeconds % 60).padStart(2, "0");
     posEl.textContent = `${mins}:${secs}`;
-    songSeconds++;
+    if (Date.now() - __songClockSyncedAt > 3000) songSeconds++;
 }
 setInterval(updateSongPosition, 1000);
+
+/* ==========================================================
+   ĐỒNG HỒ NOW PLAYING — "01:23 / 04:05" cạnh tên bài, phía nút ⚙ (Claude C)
+   ----------------------------------------------------------
+   Main process (app/main.js) gửi "now-playing-position" với vị trí/thời lượng THẬT của bài đang phát
+   (MPC-HC hoặc trình duyệt qua Windows SMTC). Phần tử được tạo bằng JS và gắn vào hàng NOW PLAYING sẵn có
+   (không sửa index.html). Nguồn không báo thời lượng -> hiện "--:-- / --:--" (không bịa số).
+   Mỗi lần nhận vị trí thật còn kéo songSeconds (đồng hồ MOD) theo, nên người nghe tua tới đoạn lên tone thì
+   đồng hồ hiển thị + MOD đi theo đúng đoạn đó.
+   ========================================================== */
+(function setupNowPlayingClock() {
+
+    const host = document.querySelector(".now-playing");
+    if (!host) return; // an toàn nếu HTML thiếu phần tử
+
+    // Kiểu đặt thẳng bằng JS (không thêm gì vào style.css) để KHÔNG đổi file giao diện nào. Giữ cùng tông màu/cỡ chữ với NOW PLAYING.
+    const el = document.createElement("span");
+    el.id = "nowPlayingClock";
+    el.style.cssText = "font-size:12px;font-weight:600;color:#8fe9ff;letter-spacing:.3px;white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums;";
+    el.style.display = "none"; // chưa có bài -> ẩn
+    host.appendChild(el);
+
+    // 125 -> "02:05"; từ 1 giờ -> "1:02:05"; không hợp lệ -> "--:--" (cùng quy ước NowPlayingClock.formatClock bên main).
+    function fmt(sec) {
+        if (typeof sec !== "number" || !Number.isFinite(sec) || sec < 0) return "--:--";
+        const s = Math.floor(sec);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const ss = String(s % 60).padStart(2, "0");
+        return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${String(m).padStart(2, "0")}:${ss}`;
+    }
+
+    function render(data) {
+
+        if (!data) {
+            el.style.display = "none";
+            el.textContent = "";
+            return;
+        }
+
+        el.style.display = "";
+
+        if (!data.hasTimeline) {
+            el.textContent = "--:-- / --:--";
+            el.style.opacity = "0.4"; // mờ: nguồn này không báo thời lượng
+            el.title = "Nguồn nhạc này chưa báo thời lượng bài cho Windows";
+            return;
+        }
+
+        el.style.opacity = data.playing ? "1" : "0.6"; // tạm dừng: mờ nhẹ
+        el.textContent = `${fmt(data.positionSec)} / ${fmt(data.durationSec)}`;
+        el.title = data.playing ? "Thời gian bài đang phát / thời lượng" : "Đang tạm dừng";
+
+        // Kéo đồng hồ MOD theo vị trí thật (xem updateSongPosition ở trên).
+        songSeconds = Math.floor(data.positionSec);
+        __songClockSyncedAt = Date.now();
+
+    }
+
+    if (window.electronAPI && typeof window.electronAPI.onNowPlayingPosition === "function") {
+        window.electronAPI.onNowPlayingPosition(render);
+    }
+
+})();
 
 /* ==========================================================
    13. AUDIO ENGINE — khởi tạo audio dùng chung, giao việc cho 3 engine riêng

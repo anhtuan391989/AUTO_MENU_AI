@@ -31,8 +31,8 @@ const sync = (fn) => new Promise((r) => fn(r));
   r = await sync((cb) => WH.show(EXE, [5], cb, (s, c) => c(null, 'S:;F:')));
   ok(!r.ok && r.reason === 'WINDOW_GONE', 'cửa sổ không còn -> WINDOW_GONE', r);
   console.log('== probe: DAW chạy hay chưa ==');
-  r = await sync((cb) => WH.probe(EXE, cb, (s, c) => c(null, 'NOPROC'))); ok(r.ok && r.running === false, 'chưa chạy', r);
-  r = await sync((cb) => WH.probe(EXE, cb, (s, c) => c(null, 'RUN:2'))); ok(r.ok && r.running === true, 'đang chạy', r);
+  r = await sync((cb) => WH.probe(EXE, cb, (s, c) => c(null, 'NOPROC'))); ok(r.ok && r.running === false && r.state === 'not_running', 'chưa chạy (đầu ra cũ "NOPROC" vẫn đọc được)', r);
+  r = await sync((cb) => WH.probe(EXE, cb, (s, c) => c(null, 'RUN:2'))); ok(r.ok && r.running === true && r.state === 'running', 'đang chạy', r);
   r = await sync((cb) => WH.probe(EXE, cb, (s, c) => c(new Error('TIMEOUT'), null))); ok(!r.ok && r.reason === 'TIMEOUT', 'PowerShell timeout -> báo lỗi, không đoán', r);
   r = await sync((cb) => WH.probe('x', cb, () => { throw new Error('không được chạy'); })); ok(!r.ok && r.reason === 'INVALID_PATH', 'đường dẫn sai -> không chạy PowerShell', r);
   console.log('== DawTray: trạng thái 3 mức, khóa, khay ==');
@@ -43,7 +43,7 @@ const sync = (fn) => new Promise((r) => fn(r));
   const nativeImage = { createFromBuffer: (b) => ({ size: b.length }) };
   let running = true, probeFail = false; let pending = null; let hideAsync = false;
   const hider = {
-    probe: (e, cb) => cb(probeFail ? { ok: false, running: false, reason: 'TIMEOUT' } : { ok: true, running, reason: null }),
+    probe: (e, cb) => cb(probeFail ? { ok: false, state: 'unknown', running: null, reason: 'TIMEOUT' } : { ok: true, state: running ? 'running' : 'not_running', running, reason: null }), // A99: probe trả state
     hide: (e, cb) => { const f = () => cb({ ok: true, state: 'hidden', handles: [1], reason: null }); if (hideAsync) pending = f; else f(); },
     show: (e, h, cb) => cb({ ok: true, state: 'visible', handles: h, reason: null }), showSync: () => ({ ok: true })
   };
@@ -56,7 +56,7 @@ const sync = (fn) => new Promise((r) => fn(r));
   ok(r.state === 'not_running' && r.hidden === false && !('S.json' in files) && destroyed >= 1, 'đang ẩn mà DAW đã thoát -> tự xoá trạng thái ẩn + gỡ khay, báo chưa chạy', r);
   r = await sync((cb) => m.statusAsync(cb)); ok(r.state === 'not_running', 'DAW chưa chạy', r);
   running = true; await sync((cb) => m.hide(cb)); probeFail = true;
-  r = await sync((cb) => m.statusAsync(cb)); ok(r.state === 'hidden' && r.running === null && r.hidden === true, 'dò tiến trình lỗi: giữ nguyên trạng thái ẩn, running = null (không đoán)', r);
+  r = await sync((cb) => m.statusAsync(cb)); ok(r.state === 'unknown' && r.running === null && r.hidden === true && r.trayVisible === true, 'dò tiến trình lỗi: state = unknown, vẫn nhớ đang ẩn + giữ khay, running = null (không đoán)', r);
   probeFail = false; await sync((cb) => m.show(cb));
   clicks['Mở AUTO MENU AI'](); ok(opened === 1, 'khay có mục "Mở AUTO MENU AI" gọi hàm mở Menu');
   hideAsync = true; let r1 = null, r2 = null;

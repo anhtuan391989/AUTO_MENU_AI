@@ -142,28 +142,13 @@
     // — tức là KHÔNG có cách nào (chuột, Tab, Enter, Space) chạm được nội dung panel-ai
     // trước khi authenticate thành công, vì nó chưa từng được activatePanel() render active.
     // ================================
-    let aiTabUnlockedThisSession = false;
-
+    // 05/11/2026 — THEO YÊU CẦU CHỦ DỰ ÁN: ĐÃ BỎ KHOÁ MẬT KHẨU TAB AI.
+    // Bấm vào tab AI là mở thẳng, không hỏi mật khẩu admin nữa.
+    // (Code xác thực AdminAuth / AdminAuthUI vẫn còn nguyên, chỉ không còn được gọi từ đây —
+    // muốn bật lại khoá thì khôi phục khối kiểm tra "panel-ai" từ lịch sử git của file này.)
     document.getElementById("sidebarNav")?.addEventListener("click", (e) => {
         const btn = e.target.closest(".nav-item");
         if (!btn) return;
-
-        if (btn.dataset.panel === "panel-ai" && !aiTabUnlockedThisSession) {
-            if (window.AdminAuthUI && typeof window.AdminAuthUI.requestLogin === "function") {
-                window.AdminAuthUI.requestLogin(() => {
-                    // Chỉ callback onSuccess THẬT (từ AdminAuth.verify() ở main process trả
-                    // ok=true) mới tới được đây — sai password/Cancel không bao giờ gọi hàm
-                    // này (xem ui/js/adminAuthUI.js), nên aiTabUnlockedThisSession không thể
-                    // bị set true bởi bất kỳ đường nào khác.
-                    aiTabUnlockedThisSession = true;
-                    activatePanel("panel-ai");
-                });
-            } else {
-                console.error("AdminAuthUI chưa sẵn sàng — không thể mở khoá tab AI.");
-            }
-            return;
-        }
-
         activatePanel(btn.dataset.panel);
     });
 

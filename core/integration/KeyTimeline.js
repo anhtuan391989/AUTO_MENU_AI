@@ -5,13 +5,16 @@
  *   1. buildPlan(): đổi danh sách đoạn của server thành "kế hoạch": mỗi lần đổi tone = {time:"02:23", from:"Eb", to:"E", semitone:+1}.
  *   2. KeyTimelineRunner: canh phút hiện tại của bài; tới đoạn mới thì gọi onFire() ĐÚNG 1 LẦN (renderer sẽ gửi sang Auto-Tune
  *      bằng đường MOD sẵn có — SoundShifter KHÔNG bị chạm, SoundShifter chỉ chạy khi người dùng bấm SET).
- *   3. estimatePositionSec(): ước lượng phút hiện tại: MPC-HC có vị trí thật; trình duyệt (SMTC) chưa có vị trí -> tính từ lúc bắt đầu bài.
+ *   3. estimatePositionSec(): phút hiện tại: MPC-HC có vị trí thật; trình duyệt (SMTC) có vị trí thật nếu trang web báo cho Windows
+ *      (NowPlayingClock), nếu không thì tính từ lúc bắt đầu bài.
  *
  * Module THUẦN: không Electron, không mạng, không MIDI. Đồng hồ/timer đều tiêm được nên test không phải chờ thật.
  */
 "use strict";
 
-const NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const NowPlayingClock = require("./NowPlayingClock");
+
+const NOTES =["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const FLAT_TO_SHARP = { Db: "C#", Eb: "D#", Gb: "F#", Ab: "G#", Bb: "A#" };
 const MPC_STATE_PLAYING = 2;
 
@@ -88,12 +91,18 @@ function segmentIndexAt(plan, sec) {
  *  - MPC-HC: vị trí thật từ lần poll gần nhất (+ thời gian trôi qua nếu đang Playing).
  *  - Nguồn khác (trình duyệt/SMTC): SMTC của Menu hiện KHÔNG có vị trí -> tính từ lúc Menu thấy bài bắt đầu (songStartedAtMs).
  */
-function estimatePositionSec({ source, mpcSnapshot, songStartedAtMs, now }) {
+function estimatePositionSec({ source, mpcSnapshot, smtcSnapshot, songStartedAtMs, now }) {
     const t = typeof now === "number" ? now : Date.now();
     if (source === "mpc-hc" && mpcSnapshot && Number.isFinite(mpcSnapshot.positionMs) && mpcSnapshot.durationMs > 0) {
         const elapsedMs = mpcSnapshot.state === MPC_STATE_PLAYING && Number.isFinite(mpcSnapshot.timestamp) ? Math.max(0, t - mpcSnapshot.timestamp) : 0;
         return (mpcSnapshot.positionMs + elapsedMs) / 1000;
     }
+    // Trình duyệt: nếu trang web có báo vị trí cho Windows (SMTC timeline) thì dùng vị trí THẬT -> người nghe tua tới đoạn nào, MOD đi theo đoạn đó.
+    if (source === "smtc" && smtcSnapshot) {
+        const clock = NowPlayingClock.compute("smtc", smtcSnapshot, t);
+        if (clock) return clock.positionSec;
+    }
+    // Không có vị trí thật (trình duyệt không báo): tính từ lúc Menu thấy bài bắt đầu (giới hạn đã biết, giữ nguyên như cũ).
     if (Number.isFinite(songStartedAtMs)) return Math.max(0, (t - songStartedAtMs) / 1000);
     return null;
 }
