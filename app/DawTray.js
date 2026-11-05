@@ -9,9 +9,10 @@
 
 const TRAY_ICON_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAQElEQVR4nGNgoAl4+v8/Vky2RqIMIlYzTkPQFLAJK6Fg/AYQ0EzYECI0YzVkmBpAXiBSHI1USUgUJ2ViDKIFAACAY4MoRAMNKgAAAABJRU5ErkJggg=='; // chấm tròn 16x16 (nền xanh, lõi tối) — không cần file ảnh ngoài
 
-function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile, fs, windowHider, log }) {
+function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile, fs, windowHider, log, openMenu }) {
     let tray = null;
     let saved = null; // { exePath, handles:number[] } khi DAW đang bị ẩn
+    let busy = false; // A98: đang có 1 thao tác ẩn/hiện chạy => bấm dồn dập không chồng nhiều PowerShell lên nhau
     const say = (m, e) => { try { (log || console.log)('[DawTray] ' + m, e || ''); } catch (x) { /* bỏ qua */ } };
 
     function loadState() {
@@ -43,7 +44,8 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
     function buildMenu() {
         return Menu.buildFromTemplate([
             { label: 'Hiện DAW', click: () => { show(() => {}); } },
-            { label: 'Ẩn DAW', click: () => { hide(() => {}); } }
+            { label: 'Ẩn DAW', click: () => { hide(() => {}); } },
+            { label: 'Mở AUTO MENU AI', click: () => { try { if (typeof openMenu === 'function') openMenu(); } catch (e) { say('mở Menu lỗi', e && e.message); } } }
         ]);
     }
     function ensureTray() {
@@ -68,12 +70,33 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
         return { configured: !!exe, exePath: exe, hidden: !!saved, trayVisible: !!tray };
     }
 
+    // A98 — trạng thái 3 mức cho Menu: not_configured | not_running | visible | hidden (+ busy). Kiểm tra tiến trình DAW thật bằng probe();
+    // nếu đang ghi "ẩn" mà DAW đã thoát (tiến trình không còn) thì tự xoá trạng thái ẩn + gỡ khay (không để khay treo). probe lỗi => giữ nguyên, running = null.
+    function statusAsync(cb) {
+        let called = false; const done = (v) => { if (called) return; called = true; try { cb(v); } catch (e) { /* bỏ qua */ } };
+        try {
+            const base = status(); const exe = base.exePath;
+            if (!exe || typeof windowHider.probe !== 'function') { done({ ...base, running: null, state: !exe ? 'not_configured' : (base.hidden ? 'hidden' : 'visible'), busy }); return; }
+            windowHider.probe(exe, (p) => {
+                try {
+                    if (!p || !p.ok) { done({ ...base, running: null, state: base.hidden ? 'hidden' : 'unknown', busy, reason: p && p.reason }); return; }
+                    if (!p.running && saved) { saved = null; saveState(); dropTray(); }
+                    const st = status();
+                    done({ ...st, running: p.running, state: !p.running ? 'not_running' : (st.hidden ? 'hidden' : 'visible'), busy });
+                } catch (e) { done({ ...base, running: null, state: 'unknown', busy }); }
+            });
+        } catch (e) { done({ configured: false, exePath: '', hidden: false, trayVisible: false, running: null, state: 'unknown', busy }); }
+    }
+
     function hide(cb) {
         try {
+            if (busy) { cb({ ok: false, state: 'busy', message: 'Đang xử lý thao tác trước, thử lại sau giây lát.' }); return; }
             if (saved) { cb({ ok: true, state: 'hidden', message: 'DAW đang được ẩn rồi.' }); return; }
             const exe = configuredExe();
             if (!exe) { cb({ ok: false, state: 'not_configured', message: 'Chưa chọn file chạy của DAW. Vào Setup > AI > "Đường dẫn & khởi động" để chọn.' }); return; }
+            busy = true;
             windowHider.hide(exe, (r) => {
+                busy = false;
                 try {
                     if (r.ok) {
                         saved = { exePath: exe, handles: r.handles };
@@ -82,26 +105,32 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
                     } else if (r.state === 'not_found') cb({ ok: false, state: 'not_found', message: 'Không thấy DAW đang chạy (đúng file đã chọn). Hãy mở DAW trước.' });
                     else if (r.reason === 'UNSUPPORTED_PLATFORM') cb({ ok: false, state: 'unsupported', message: 'Chức năng này chỉ chạy trên Windows.' });
                     else if (r.reason === 'NO_WINDOW_FOUND') cb({ ok: false, state: 'failed', message: 'Thấy DAW đang chạy nhưng không có cửa sổ nào để ẩn (có thể đã ẩn sẵn).' });
+                    else if (r.reason === 'DAW_NOT_RESPONDING') cb({ ok: false, state: 'failed', message: 'DAW đang không phản hồi (Not Responding) nên chưa ẩn được. Chờ DAW xử lý xong rồi thử lại.' });
+                    else if (r.reason === 'HIDE_NOT_APPLIED') cb({ ok: false, state: 'failed', message: 'Đã gửi lệnh ẩn nhưng cửa sổ DAW vẫn đang hiện — chưa ẩn được.' });
                     else cb({ ok: false, state: 'failed', message: 'Không ẩn được DAW: ' + (r.reason || 'lỗi không rõ') });
                 } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
             });
-        } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
+        } catch (e) { busy = false; cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
     }
 
     function show(cb) {
         try {
+            if (busy) { cb({ ok: false, state: 'busy', message: 'Đang xử lý thao tác trước, thử lại sau giây lát.' }); return; }
             if (!saved) { cb({ ok: true, state: 'visible', message: 'DAW không bị ẩn.' }); return; }
             const cur = saved;
+            busy = true;
             windowHider.show(cur.exePath, cur.handles, (r) => {
+                busy = false;
                 try {
                     if (r.ok) { saved = null; saveState(); dropTray(); cb({ ok: true, state: 'visible', message: 'Đã hiện lại DAW.' }); }
                     else if (r.state === 'not_found') { // DAW đã tắt / cửa sổ không còn => bỏ trạng thái ẩn, không để khay treo mãi
                         saved = null; saveState(); dropTray();
                         cb({ ok: false, state: 'not_found', message: 'DAW đã đóng hoặc cửa sổ không còn — đã xoá trạng thái ẩn.' });
-                    } else cb({ ok: false, state: 'failed', message: 'Không hiện được DAW: ' + (r.reason || 'lỗi không rõ') });
+                    } else if (r.reason === 'DAW_NOT_RESPONDING') cb({ ok: false, state: 'failed', message: 'DAW đang không phản hồi (Not Responding) nên chưa hiện được. Giữ nguyên trạng thái ẩn, thử lại sau.' });
+                    else cb({ ok: false, state: 'failed', message: 'Không hiện được DAW: ' + (r.reason || 'lỗi không rõ') });
                 } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
             });
-        } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
+        } catch (e) { busy = false; cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
     }
 
     // Gọi lúc thoát app: hiện lại DAW (đồng bộ) để không bỏ DAW vô hình.
@@ -113,7 +142,7 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
         } catch (e) { say('khôi phục khi thoát lỗi (bỏ qua)', e && e.message); }
     }
 
-    return { hide, show, status, restoreOnQuit, restoreTrayIfHidden, _internals: () => ({ saved, tray }) };
+    return { hide, show, status, statusAsync, restoreOnQuit, restoreTrayIfHidden, _internals: () => ({ saved, tray }) };
 }
 
 module.exports = { createDawTrayManager, TRAY_ICON_PNG_BASE64 };

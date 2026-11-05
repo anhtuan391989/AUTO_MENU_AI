@@ -42,7 +42,7 @@ const sync = (fn) => new Promise((r) => fn(r));
   ok(JSON.stringify(m.status()) === JSON.stringify({ configured: true, exePath: EXE, hidden: false, trayVisible: false }), 'status ban đầu: có cấu hình, đang hiện, chưa có khay', m.status());
   r = await sync((cb) => m.hide(cb)); ok(r.ok && r.state === 'hidden' && trays === 1 && calls.hideExe === EXE, 'hide: ẩn đúng DAW đã cấu hình + tạo khay', r);
   ok(JSON.parse(files['S.json']).handles.join() === '9,8', 'hide: ghi trạng thái ra file để hiện lại được sau khi mở lại Menu');
-  ok(menuLabels.join() === 'Hiện DAW,Ẩn DAW' && typeof clicks['Hiện DAW'] === 'function', 'menu khay có "Hiện DAW" và "Ẩn DAW"', menuLabels);
+  ok(menuLabels.join() === 'Hiện DAW,Ẩn DAW,Mở AUTO MENU AI' && typeof clicks['Hiện DAW'] === 'function', 'menu khay có "Hiện DAW", "Ẩn DAW" và (A98) "Mở AUTO MENU AI"', menuLabels);
   r = await sync((cb) => m.hide(cb)); ok(r.ok && calls.hide === 1 && trays === 1, 'hide lần 2: không ẩn lại, không tạo khay thứ hai', r);
   const m2 = mk(); ok(m2.status().hidden === true, 'mở lại Menu: nhớ DAW đang ẩn (đọc từ file)'); m2.restoreTrayIfHidden(); ok(trays === 2, 'mở lại Menu: dựng lại khay khi DAW còn ẩn');
   r = await sync((cb) => m.show(cb)); ok(r.ok && r.state === 'visible' && calls.showArgs[1].join() === '9,8' && destroyed >= 1 && !('S.json' in files), 'show: hiện lại, bỏ khay, xoá file trạng thái', r);

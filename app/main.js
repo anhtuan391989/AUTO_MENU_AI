@@ -974,6 +974,7 @@ function getDawTray() {
     if (!dawTrayMgr) {
         dawTrayMgr = createDawTrayManager({
             Tray, Menu, nativeImage, readSettings: readSettingsFile, fs, windowHider: WindowHider, log: console.log,
+            openMenu: () => { try { if (mainWin && !mainWin.isDestroyed()) { if (mainWin.isMinimized()) mainWin.restore(); mainWin.show(); mainWin.focus(); } } catch (err) { console.error("openMenu lỗi:", err); } }, // A98: mục "Mở AUTO MENU AI" trên khay
             stateFile: path.join(app.getPath("userData"), "hidden-daw-state.json")
         });
     }
@@ -981,10 +982,11 @@ function getDawTray() {
 }
 const fromSetupWindow = (event) => !!(setupWin && !setupWin.isDestroyed() && event.sender === setupWin.webContents);
 const DENIED = { ok: false, state: "failed", message: "Không được phép" };
-ipcMain.handle("tools-daw-status", (event) => {
-    try { return fromSetupWindow(event) ? getDawTray().status() : { configured: false, exePath: "", hidden: false, trayVisible: false }; }
-    catch (err) { console.error("tools-daw-status lỗi:", err); return { configured: false, exePath: "", hidden: false, trayVisible: false }; }
-});
+ipcMain.handle("tools-daw-status", (event) => new Promise((resolve) => {
+    const EMPTY = { configured: false, exePath: "", hidden: false, trayVisible: false, running: null, state: "unknown" };
+    try { if (!fromSetupWindow(event)) { resolve(EMPTY); return; } getDawTray().statusAsync(resolve); } // A98: thêm running + state (not_running | visible | hidden)
+    catch (err) { console.error("tools-daw-status lỗi:", err); resolve(EMPTY); }
+}));
 ipcMain.handle("tools-daw-hide", (event) => new Promise((resolve) => {
     try { if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().hide(resolve); }
     catch (err) { console.error("tools-daw-hide lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }

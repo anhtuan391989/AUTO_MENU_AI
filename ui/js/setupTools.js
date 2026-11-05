@@ -16,11 +16,12 @@
         const badge = $("toolsDawBadge"), pathEl = $("toolsDawPath");
         if (pathEl) pathEl.textContent = st && st.configured ? "DAW: " + st.exePath : "❌ Chưa chọn file chạy của DAW (AI > Đường dẫn & khởi động)";
         if (badge) {
-            if (st && st.hidden) { badge.textContent = "ĐANG ẨN"; badge.className = "badge badge-live"; }
+            if (st && st.state === "not_running") { badge.textContent = "DAW CHƯA CHẠY"; badge.className = "badge badge-unwired"; } // A98: 3 trạng thái thật (đã dò tiến trình DAW)
+            else if (st && st.hidden) { badge.textContent = "ĐANG ẨN"; badge.className = "badge badge-live"; }
             else { badge.textContent = "ĐANG HIỆN"; badge.className = "badge badge-soon"; }
         }
         const hideBtn = $("btnToolsHideDaw"), showBtn = $("btnToolsShowDaw");
-        if (hideBtn) hideBtn.disabled = busy || !(st && st.configured) || !!(st && st.hidden);
+        if (hideBtn) hideBtn.disabled = busy || !(st && st.configured) || !!(st && st.hidden) || !!(st && st.state === "not_running");
         if (showBtn) showBtn.disabled = busy || !(st && st.hidden);
     }
     async function refresh() {
