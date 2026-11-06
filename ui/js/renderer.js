@@ -2314,7 +2314,8 @@ function loadData() {
     if (Array.isArray(data.knobs)) { // MENU-FX-AUTO-OFF: cấu hình hỏng (knobs không phải mảng) không được làm đổ cả khởi tạo
         data.knobs.forEach(saved => {
             const knob = knobData.find(k => k.id === saved.id);
-            if (knob && knob.id !== "audioChillKnob") { // A96c: Audio chill luôn về mặc định (50) khi mở lại Menu, không khôi phục giá trị cũ
+            // A96c: Audio chill luôn về mặc định (50) khi mở lại Menu. POPUP-RESET-01: núm âm lượng MIC 1 / MIC 2 (popup chuột phải) cũng về mặc định (90), không khôi phục giá trị cũ.
+            if (knob && knob.id !== "audioChillKnob" && knob.id !== "mic1VolKnob" && knob.id !== "mic2VolKnob") {
                 knob.value = saved.value;
                 updateKnob(knob);
                 // TASK A20 — đồng bộ ngay volume Clap/Laugh vào SoundEffectEngine khi khôi
@@ -2723,6 +2724,29 @@ setInterval(updateSongPosition, 1000);
     el.style.display = "none"; // chưa có bài -> ẩn
     host.appendChild(el);
 
+    // CLOCK-VERTICAL-01: bản thứ 2 của đồng hồ bài hát, đặt NỬA PHẢI thẻ TIME (thẻ TIME chia đôi: giờ hệ thống | thời lượng bài).
+    // Chỉ hiện ở chế độ dọc (CSS body.vertical-mode); chế độ ngang vẫn dùng bản cạnh tên bài như cũ. Tạo bằng JS, không sửa HTML.
+    const timeCard = document.querySelector("#clock")?.closest(".status-card");
+    let cardEl = null;
+    if (timeCard) {
+        const box = document.createElement("div");
+        box.id = "nowPlayingClockCard";
+        box.className = "status-left";
+        box.innerHTML = '<div><div class="status-title">THỜI LƯỢNG BÀI</div><div id="nowPlayingClockCardValue" class="status-sub status-sub-time">--:-- / --:--</div></div>';
+        timeCard.appendChild(box);
+        cardEl = box.querySelector("#nowPlayingClockCardValue");
+        // Kiểu cho nửa phải thẻ TIME đặt bằng JS (không sửa style.css/HTML, giống đồng hồ bên cạnh tên bài).
+        if (document.head) {
+            const st = document.createElement("style");
+            st.textContent = "#nowPlayingClockCard{display:none;}"
+                + "body.vertical-mode .status-card:has(#clock){justify-content:space-between;}"
+                + "body.vertical-mode .status-card:has(#clock)>.status-left{flex:1 1 0;min-width:0;}"
+                + "body.vertical-mode #nowPlayingClockCard{display:flex;justify-content:flex-end;text-align:right;}"
+                + "body.vertical-mode #nowPlayingClock{display:none !important;}";
+            document.head.appendChild(st);
+        }
+    }
+
     // 125 -> "02:05"; từ 1 giờ -> "1:02:05"; không hợp lệ -> "--:--" (cùng quy ước NowPlayingClock.formatClock bên main).
     function fmt(sec) {
         if (typeof sec !== "number" || !Number.isFinite(sec) || sec < 0) return "--:--";
@@ -2738,6 +2762,7 @@ setInterval(updateSongPosition, 1000);
         if (!data) {
             el.style.display = "none";
             el.textContent = "";
+            if (cardEl) { cardEl.textContent = "--:-- / --:--"; cardEl.style.opacity = "0.4"; } // CLOCK-VERTICAL-01: chưa có bài
             return;
         }
 
@@ -2747,12 +2772,14 @@ setInterval(updateSongPosition, 1000);
             el.textContent = "--:-- / --:--";
             el.style.opacity = "0.4"; // mờ: nguồn này không báo thời lượng
             el.title = "Nguồn nhạc này chưa báo thời lượng bài cho Windows";
+            if (cardEl) { cardEl.textContent = "--:-- / --:--"; cardEl.style.opacity = "0.4"; }
             return;
         }
 
         el.style.opacity = data.playing ? "1" : "0.6"; // tạm dừng: mờ nhẹ
         el.textContent = `${fmt(data.positionSec)} / ${fmt(data.durationSec)}`;
         el.title = data.playing ? "Thời gian bài đang phát / thời lượng" : "Đang tạm dừng";
+        if (cardEl) { cardEl.style.opacity = data.playing ? "1" : "0.6"; cardEl.textContent = el.textContent; } // CLOCK-VERTICAL-01
 
         // Kéo đồng hồ MOD theo vị trí thật (xem updateSongPosition ở trên).
         songSeconds = Math.floor(data.positionSec);
@@ -3389,6 +3416,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateCacheDot();
     checkAllSystems();
     applyAudioOutputSetting(); // TASK B72 — áp dụng thiết bị đầu ra đã lưu (nếu có) lúc khởi động
+    setSetting("fxAutoEnabled", true); // POPUP-RESET-01: ô tích "Auto bật FX khi có nhạc" (popup chuột phải FX) luôn về mặc định BẬT mỗi lần mở app
     loadData();
     ensurePresetLit(); // PRESET-LIT-01
     if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
