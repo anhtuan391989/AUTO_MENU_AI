@@ -73,13 +73,50 @@ const CSHARP = [
     '    foreach (var h in all) { var t = (IsWindowVisible(h) == wantVisible) ? okS : badS; if (t.Length > 0) t.Append(","); t.Append(h.ToInt64());',
     '      if (allS.Length > 0) allS.Append(","); allS.Append(h.ToInt64()); if (dS.Length > 0) dS.Append("~"); dS.Append(Diag(h)); }',
     '    return okS.ToString() + ";F:" + badS.ToString() + (hung ? ";HUNG" : "") + ";A:" + allS.ToString() + ";D:" + dS.ToString(); }',
-    '  public static string Hide(uint[] pids) {',
+    '  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint a, bool i, uint pid);',
+    '  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);',
+    '  [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr p, uint a, out IntPtr t);',
+    '  [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr t, int cls, IntPtr buf, int len, out int ret);',
+    '  [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);',
+    '  [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthority(IntPtr sid, uint n);',
+    '  static string St(IntPtr h) { return !IsWindow(h) ? "X" : (IsWindowVisible(h) ? "V" : "H"); }',
+    '  // A103 — chỉ CHẨN ĐOÁN quyền: Integrity Level + Elevation của 1 tiến trình (không suy luận gì từ kết quả; lỗi truy vấn được ghi nguyên văn).',
+    '  public static string Priv(uint pid) {',
+    '    if (pid == 0) return "0/NOPID";',
+    '    IntPtr hp = OpenProcess(0x1000, false, pid); if (hp == IntPtr.Zero) return pid + "/OpenProcessERR" + Marshal.GetLastWin32Error();',
+    '    try {',
+    '      IntPtr tok; if (!OpenProcessToken(hp, 0x8, out tok)) return pid + "/OpenProcessTokenERR" + Marshal.GetLastWin32Error();',
+    '      try {',
+    '        string il = "?", el = "?", err = ""; int n;',
+    '        IntPtr b = Marshal.AllocHGlobal(8);',
+    '        try { if (GetTokenInformation(tok, 20, b, 4, out n)) el = Marshal.ReadInt32(b).ToString(); else err += "/ElevERR" + Marshal.GetLastWin32Error(); } finally { Marshal.FreeHGlobal(b); }',
+    '        int need = 0; GetTokenInformation(tok, 25, IntPtr.Zero, 0, out need);',
+    '        if (need > 0) {',
+    '          IntPtr b2 = Marshal.AllocHGlobal(need);',
+    '          try {',
+    '            if (GetTokenInformation(tok, 25, b2, need, out need)) { IntPtr sid = Marshal.ReadIntPtr(b2); byte cnt = Marshal.ReadByte(GetSidSubAuthorityCount(sid)); uint rid = (uint)Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(cnt - 1))); il = "0x" + rid.ToString("X"); }',
+    '            else err += "/ILERR" + Marshal.GetLastWin32Error();',
+    '          } finally { Marshal.FreeHGlobal(b2); }',
+    '        } else err += "/ILSIZE0";',
+    '        return pid + "/IL=" + il + "/ELEV=" + el + err;',
+    '      } finally { CloseHandle(tok); }',
+    '    } finally { CloseHandle(hp); }',
+    '  }',
+    '  // Cơ chế ẨN KHÔNG đổi (ShowWindowAsync(h, 0) rồi chờ tối đa ~2 s); chỉ thêm ghi nhận: X: từng HWND (hwnd/pid/IsWindow/IsVisible/IsHung TRƯỚC / giá trị trả về của ShowWindowAsync / IsWindow/IsVisible NGAY SAU / cuối), T: dòng thời gian từng lần polling (ms:trạng thái V|H|X mỗi cửa sổ), P: quyền Menu + DAW, E: ngoại lệ.',
+    '  public static string Hide(uint[] pids, uint menuPid) {',
     '    var found = new List<IntPtr>(); var set = new HashSet<uint>(pids);',
     '    EnumWindows((h, l) => { uint pid; GetWindowThreadProcessId(h, out pid);',
     '      if (set.Contains(pid) && IsWindowVisible(h) && GetWindow(h, 4) == IntPtr.Zero && GetWindowTextLength(h) > 0 && (GetWindowLong(h, -20) & 0x80) == 0) found.Add(h); return true; }, IntPtr.Zero);',
-    '    bool hung = false; foreach (var h in found) { if (IsHungAppWindow(h)) hung = true; ShowWindowAsync(h, 0); }',
-    '    for (int i = 0; i < 20; i++) { System.Threading.Thread.Sleep(100); if (Settled(found, false)) break; }',
-    '    return Report(found, false, hung); }',
+    '    var pre = new List<string>(); var rets = new List<string>(); var post = new List<string>(); var T = new StringBuilder(); string err = "";',
+    '    foreach (var h in found) { try { uint pid; GetWindowThreadProcessId(h, out pid); pre.Add(h.ToInt64() + "/" + pid + "/" + (IsWindow(h) ? 1 : 0) + "/" + (IsWindowVisible(h) ? 1 : 0) + "/" + (IsHungAppWindow(h) ? 1 : 0)); } catch (Exception e) { pre.Add(h.ToInt64() + "/?"); err += "PRE:" + Clean(e.GetType().Name) + " "; } }',
+    '    var sw = System.Diagnostics.Stopwatch.StartNew();',
+    '    bool hung = false; foreach (var h in found) { if (IsHungAppWindow(h)) hung = true; string r = "E"; try { r = ShowWindowAsync(h, 0) ? "1" : "0"; } catch (Exception e) { err += "CALL:" + Clean(e.GetType().Name) + " "; } rets.Add(r); }',
+    '    foreach (var h in found) { post.Add((IsWindow(h) ? 1 : 0) + "/" + (IsWindowVisible(h) ? 1 : 0)); }',
+    '    var snap0 = new StringBuilder(); foreach (var h in found) snap0.Append(St(h)); T.Append(sw.ElapsedMilliseconds + ":" + snap0 + "@");',
+    '    for (int i = 0; i < 20; i++) { System.Threading.Thread.Sleep(100); var sn = new StringBuilder(); foreach (var h in found) sn.Append(St(h)); T.Append(sw.ElapsedMilliseconds + ":" + sn + "@"); if (Settled(found, false)) break; }',
+    '    var X = new StringBuilder(); for (int i = 0; i < found.Count; i++) { if (X.Length > 0) X.Append("~"); X.Append((i < pre.Count ? pre[i] : "?") + "/" + (i < rets.Count ? rets[i] : "?") + "/" + (i < post.Count ? post[i] : "?") + "/" + (IsWindow(found[i]) ? 1 : 0) + "/" + (IsWindowVisible(found[i]) ? 1 : 0)); }',
+    '    var P = new StringBuilder(); try { P.Append(Priv(menuPid)); foreach (var pid in pids) { P.Append("~"); P.Append(Priv(pid)); } } catch (Exception e) { err += "PRIV:" + Clean(e.GetType().Name) + " "; }',
+    '    return Report(found, false, hung) + ";X:" + X + ";T:" + T + ";P:" + P + (err.Length > 0 ? ";E:" + err.Trim() : ""); }',
     '  static string Bring(List<IntPtr> good, bool hung) {',
     '    foreach (var h in good) { if (IsHungAppWindow(h)) hung = true; ShowWindowAsync(h, IsIconic(h) ? 9 : 5); }',
     '    for (int i = 0; i < 20; i++) { System.Threading.Thread.Sleep(100); if (Settled(good, true)) break; }',
@@ -158,7 +195,51 @@ function parseOutcome(out, tag) {
     const body = String(out || '').replace(new RegExp('^[\\s\\S]*?' + tag + ':'), '');
     const parts = body.split(';');
     const pick = (p) => (parts.find((x) => x.indexOf(p) === 0) || '').slice(p.length);
-    return { ok: parseHandles(parts[0]), failed: parseHandles(pick('F:')), attempted: parseHandles(pick('A:')), diag: pick('D:'), hung: parts.includes('HUNG') };
+    return { ok: parseHandles(parts[0]), failed: parseHandles(pick('F:')), attempted: parseHandles(pick('A:')), diag: pick('D:'), hung: parts.includes('HUNG'), x: pick('X:'), t: pick('T:'), p: pick('P:'), e: pick('E:') };
+}
+
+// ---- A103: phân loại kết quả ẨN theo bằng chứng Win32 (không suy diễn UIPI; giá trị trả về của ShowWindowAsync khác 0 chỉ có nghĩa "đã khởi động yêu cầu") ----
+const HIDE_CODES = ['HWND_INVALID', 'WINDOW_ALREADY_HIDDEN', 'SHOW_REQUEST_NOT_STARTED', 'HIDE_REQUEST_STARTED_BUT_VISIBLE', 'WINDOW_HUNG', 'HIDE_CONFIRMED', 'DIAGNOSTIC_QUERY_FAILED', 'UNKNOWN'];
+// f = hwnd/pid/isWindow0/visible0/hung0/ret/isWindow1/visible1/isWindowFinal/visibleFinal
+function classifyHideWindow(entry) {
+    const f = String(entry || '').split('/');
+    const hwnd = Number(f[0]);
+    if (f.length < 10) return { hwnd: Number.isFinite(hwnd) ? hwnd : null, code: 'DIAGNOSTIC_QUERY_FAILED', detail: 'thiếu trường (' + f.length + '/10)' };
+    const n = (i) => (f[i] === '0' || f[i] === '1' ? Number(f[i]) : null);
+    const w0 = n(2), v0 = n(3), h0 = n(4), w1 = n(6), v1 = n(7), wf = n(8), vf = n(9), ret = f[5];
+    const out = { hwnd, pid: Number(f[1]), isWindowBefore: w0, visibleBefore: v0, hungBefore: h0, showWindowAsyncReturn: ret, isWindowAfter: w1, visibleAfter: v1, isWindowFinal: wf, visibleFinal: vf };
+    if ([w0, v0, h0, w1, v1, wf, vf].some((x) => x === null) || !(ret === '0' || ret === '1')) return { ...out, code: 'DIAGNOSTIC_QUERY_FAILED', detail: 'giá trị không đọc được: ' + String(entry) };
+    if (!w0) return { ...out, code: 'HWND_INVALID', detail: 'IsWindow=false TRƯỚC khi gọi' };
+    if (!v0) return { ...out, code: 'WINDOW_ALREADY_HIDDEN', detail: 'IsWindowVisible=false TRƯỚC khi gọi' };
+    if (!wf) return { ...out, code: 'HWND_INVALID', detail: 'HWND biến mất SAU khi gọi (IsWindow=false) — khác với HWND còn hợp lệ nhưng không ẩn' };
+    if (!vf) return { ...out, code: 'HIDE_CONFIRMED', detail: 'cuối cùng IsWindowVisible=false, HWND còn hợp lệ' };
+    if (h0) return { ...out, code: 'WINDOW_HUNG', detail: 'IsHungAppWindow=true trước khi gọi, cửa sổ vẫn hiện' };
+    if (ret === '0') return { ...out, code: 'SHOW_REQUEST_NOT_STARTED', detail: 'ShowWindowAsync trả 0 (không khởi động yêu cầu)' };
+    return { ...out, code: 'HIDE_REQUEST_STARTED_BUT_VISIBLE', detail: 'ShowWindowAsync trả khác 0 (yêu cầu đã khởi động) nhưng cửa sổ vẫn hiện sau polling; chưa đủ bằng chứng để nêu nguyên nhân' };
+}
+function parsePriv(str) {
+    return String(str || '').split('~').filter(Boolean).map((raw) => {
+        const f = raw.split('/'); const il = (/IL=([^/]+)/.exec(raw) || [])[1] || null; const el = (/ELEV=([^/]+)/.exec(raw) || [])[1] || null;
+        return { pid: Number(f[0]), il: il && il !== '?' ? il : null, elev: el && el !== '?' ? el : null, ok: !!(il && il !== '?'), raw };
+    });
+}
+function classifyHide(o) {
+    const entries = String(o.x || '').split('~').filter(Boolean);
+    const windows = entries.map(classifyHideWindow);
+    const priv = parsePriv(o.p);
+    let code = 'UNKNOWN', missing = [];
+    if (o.e) { code = 'DIAGNOSTIC_QUERY_FAILED'; missing.push('ngoại lệ C#: ' + o.e); }
+    else if (!entries.length) missing.push('không có dữ liệu X: (bản C# cũ hoặc không có cửa sổ)');
+    else {
+        const codes = windows.map((w) => w.code);
+        const order = ['DIAGNOSTIC_QUERY_FAILED', 'WINDOW_HUNG', 'HWND_INVALID', 'SHOW_REQUEST_NOT_STARTED', 'HIDE_REQUEST_STARTED_BUT_VISIBLE'];
+        const bad = order.find((c) => codes.includes(c));
+        code = bad || (codes.every((c) => c === 'WINDOW_ALREADY_HIDDEN') ? 'WINDOW_ALREADY_HIDDEN' : 'HIDE_CONFIRMED');
+    }
+    const menu = priv[0], daw = priv.slice(1);
+    const cmp = menu && menu.ok && daw.length && daw.every((d) => d.ok) ? (daw.every((d) => d.il === menu.il && d.elev === menu.elev) ? 'SAME' : 'DIFFERENT') : 'UNKNOWN';
+    const text = 'CLASS=' + code + ' | X=' + (o.x || '-') + ' | T=' + (o.t || '-') + ' | P=' + (o.p || '-') + ' | PRIV_COMPARE=' + cmp + (o.e ? ' | E=' + o.e : '') + (missing.length ? ' | THIẾU=' + missing.join('; ') : '');
+    return { code, windows, priv, privCompare: cmp, missing, text };
 }
 
 function parseHandles(out) {
@@ -169,15 +250,16 @@ function parseHandles(out) {
 function hide(exePath, cb, runner) {
     if (!validateExePath(exePath)) { cb({ ok: false, state: 'failed', handles: [], reason: 'INVALID_PATH' }); return; }
     const run = runner || defaultRunner;
-    const script = pidScript(exePath) + guarded(loadType() + '"H:" + [HW]::Hide([uint32[]]$pids)');
+    const script = pidScript(exePath) + guarded(loadType() + '"H:" + [HW]::Hide([uint32[]]$pids, [uint32]' + (Number.isSafeInteger(process.pid) ? process.pid : 0) + ')');
     run(script, (err, out) => {
         if (err) { cb({ ok: false, state: 'failed', handles: [], reason: err.message === 'UNSUPPORTED_PLATFORM' ? 'UNSUPPORTED_PLATFORM' : String(err.message || err) }); return; }
         const idf = identityFailure(parseInfo(out)); if (idf) { cb({ ok: false, handles: [], ...idf }); return; }
         const o = parseOutcome(out, 'H');
         const handles = o.ok;
         if (!/H:/.test(String(out)) || (!handles.length && !o.failed.length)) { cb({ ok: false, state: 'failed', handles: [], reason: 'NO_WINDOW_FOUND' }); return; }
-        if (!handles.length) { cb({ ok: false, state: 'failed', handles: [], failed: o.failed, attempted: o.attempted, diag: o.diag, reason: o.hung ? 'DAW_NOT_RESPONDING' : 'HIDE_NOT_APPLIED' }); return; } // gọi ẩn nhưng cửa sổ vẫn hiện -> KHÔNG báo thành công
-        cb({ ok: true, state: 'hidden', handles, failed: o.failed, attempted: o.attempted, diag: o.diag, reason: null });
+        const cls = classifyHide(o); const diagAll = (o.diag || '') + ' || ' + cls.text; // A103: bằng chứng Win32 theo từng HWND
+        if (!handles.length) { cb({ ok: false, state: 'failed', handles: [], failed: o.failed, attempted: o.attempted, diag: diagAll, classification: cls.code, windows: cls.windows, priv: cls.priv, privCompare: cls.privCompare, reason: o.hung ? 'DAW_NOT_RESPONDING' : 'HIDE_NOT_APPLIED' }); return; } // gọi ẩn nhưng cửa sổ vẫn hiện -> KHÔNG báo thành công
+        cb({ ok: true, state: 'hidden', handles, failed: o.failed, attempted: o.attempted, diag: diagAll, classification: cls.code, windows: cls.windows, priv: cls.priv, privCompare: cls.privCompare, reason: null });
     });
 }
 
@@ -251,4 +333,4 @@ function probe(exePath, cb, runner) {
     });
 }
 
-module.exports = { setTrace, hide, show, showAny, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo, PS_IMG_TYPE } };
+module.exports = { classifyHideWindow, classifyHide, HIDE_CODES, setTrace, hide, show, showAny, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo, PS_IMG_TYPE } };

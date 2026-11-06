@@ -76,7 +76,7 @@ function makeUi(m) {
 (async () => {
     console.log('== 1. Mã nguồn: xác minh chờ đủ lâu, có khôi phục, không đóng/kill DAW ==');
     const C = WH._scriptsForTest.CSHARP, src = rd('core/integration/WindowHider.js');
-    ok(/for \(int i = 0; i < 20; i\+\+\) \{ System\.Threading\.Thread\.Sleep\(100\); if \(Settled\(found, false\)\) break; \}/.test(C) && !/Sleep\(250\)/.test(C), 'ẨN: chờ tối đa ~2 s (không còn chỉ 0,25 s)');
+    ok(/for \(int i = 0; i < 20; i\+\+\) \{ System\.Threading\.Thread\.Sleep\(100\);[^\n]*if \(Settled\(found, false\)\) break; \}/.test(C) && !/Sleep\(250\)/.test(C), 'ẨN: chờ tối đa ~2 s (không còn chỉ 0,25 s) — A103 thêm ghi nhận trong vòng lặp nhưng cơ chế giữ nguyên');
     ok(/public static string ShowHidden/.test(C) && /GetWindowRect/.test(C), 'có ShowHidden (khôi phục theo cửa sổ đang ẩn)');
     ok(!/Stop-Process|CloseMainWindow|\.Kill\(|WM_CLOSE|TerminateProcess/.test(src.replace(/ps\.kill\(\)/g, '')), 'chỉ SW_HIDE/SW_SHOW — không đóng/kill DAW (tiến trình + audio/MIDI chạy tiếp) [kiểm tra mã]');
     ok(/ShowWindowAsync\(h, 0\)/.test(C), 'ẩn bằng SW_HIDE (không minimize/close)');
