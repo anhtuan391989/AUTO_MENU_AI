@@ -106,29 +106,44 @@ const CSHARP = [
 //   UNREADABLE : có tiến trình cùng tên nhưng KHÔNG đọc được đường dẫn (không được coi là "chưa chạy").
 //   MISMATCH   : có tiến trình cùng tên nhưng ở đường dẫn KHÁC đường dẫn đã cấu hình (không nhận nhầm DAW khác).
 //   ERR        : truy vấn tiến trình lỗi (cả CIM lẫn Get-Process).
+// A102 — nhận diện tiến trình DAW theo ĐƯỜNG DẪN (không bao giờ chỉ theo tên). Với mỗi tiến trình trùng tên, đường dẫn được lấy lần lượt từ:
+//   1) CIM Win32_Process.ExecutablePath  2) Get-Process .Path (MainModule)  3) QueryFullProcessImageName (quyền PROCESS_QUERY_LIMITED_INFORMATION — đọc được cả khi 1)/2) bị từ chối).
+// CIM thoát mã 0 KHÔNG có nghĩa là đã có đường dẫn (log thật: ST=UNREADABLE|U=19308|SRC=CIM). Tiến trình đã thoát (HasExited) không tính là đang chạy.
+// Vẫn chỉ nhận khi đường dẫn ĐẦY ĐỦ trùng đường dẫn đã chọn; hết cách đọc => UNREADABLE kèm PID + nguồn đã thử (T=), KHÔNG ép ẩn theo tên.
+const PS_IMG_TYPE = '[DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint a, bool i, uint pid); '
+    + '[DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr h, uint f, System.Text.StringBuilder s, ref uint n); '
+    + '[DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h); '
+    + 'public static string ImagePath(uint pid, out int err) { err = 0; IntPtr h = OpenProcess(0x1000, false, pid); if (h == IntPtr.Zero) { err = Marshal.GetLastWin32Error(); return ""; } '
+    + 'try { var sb = new System.Text.StringBuilder(1024); uint n = (uint)sb.Capacity; if (!QueryFullProcessImageName(h, 0, sb, ref n)) { err = Marshal.GetLastWin32Error(); return ""; } return sb.ToString(); } finally { CloseHandle(h); } }';
+
 function pidScript(exePath) {
     return '$target = [IO.Path]::GetFullPath(' + psq(exePath.trim()) + ').TrimEnd([char]92); $leaf = [IO.Path]::GetFileName($target); $src = "CIM"; $qerr = ""; $list = @(); '
+        + 'function Norm($v) { try { return [IO.Path]::GetFullPath([string]$v).TrimEnd([char]92) } catch { return ([string]$v).TrimEnd([char]92) } } '
+        + 'function Msg($e) { $m = ($e.Exception.Message -replace "[\\r\\n|;]+", " "); if ($m.Length -gt 50) { $m = $m.Substring(0, 50) }; return $m } '
         + 'try { $list = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | Where-Object { $_.Name -ieq $leaf } | ForEach-Object { [pscustomobject]@{ Id = [uint32]$_.ProcessId; Path = [string]$_.ExecutablePath } }) } '
         + 'catch { $src = "PS"; try { $list = @(Get-Process -ErrorAction Stop | Where-Object { ($_.ProcessName + ".exe") -ieq $leaf } | ForEach-Object { [pscustomobject]@{ Id = [uint32]$_.Id; Path = [string]$_.Path } }) } catch { $src = "NONE"; $qerr = ($_.Exception.Message -replace "[\\r\\n|]+", " ") } } '
-        + '$match = @(); $unread = @(); $other = @(); '
-        + 'foreach ($x in $list) { $p = $null; if ($x.Path) { try { $p = [IO.Path]::GetFullPath($x.Path).TrimEnd([char]92) } catch { $p = $x.Path.TrimEnd([char]92) } } '
-        + 'if (-not $p) { $unread += $x.Id } elseif ($p -ieq $target) { $match += $x.Id } else { $other += $p } } '
+        + '$match = @(); $unread = @(); $other = @(); $dead = @(); $tried = @(); $apiReady = 0; '
+        + 'foreach ($x in $list) { $p = $null; $how = $src; $notes = ""; if ($x.Path) { $p = Norm $x.Path } else { $notes = $src + "=empty" } '
+        + 'if (-not $p -and $src -ne "PS") { try { $gp = Get-Process -Id $x.Id -ErrorAction Stop; if ($gp.Path) { $p = Norm $gp.Path; $how = "PS" } else { $notes += ",PS=empty" }; try { if ($gp.HasExited) { $notes += ",EXITED"; $dead += $x.Id } } catch { $notes += ",HasExited=?" } } catch { $notes += ",PS=err:" + (Msg $_) } } '
+        + 'if (-not $p -and $dead -notcontains $x.Id) { try { if ($apiReady -eq 0) { Add-Type -Namespace Amw -Name ProcImg -MemberDefinition ' + psq(PS_IMG_TYPE) + ' -ErrorAction Stop; $apiReady = 1 }; $ec = 0; $q = [Amw.ProcImg]::ImagePath([uint32]$x.Id, [ref]$ec); if ($q) { $p = Norm $q; $how = "API" } else { $notes += ",API=err" + $ec } } catch { $notes += ",API=ex:" + (Msg $_) } } '
+        + 'if ($p) { if ($p -ieq $target) { $match += $x.Id; $tried += ("" + $x.Id + ":OK via " + $how) } else { $other += $p; $tried += ("" + $x.Id + ":OTHER via " + $how) } } '
+        + 'elseif ($dead -contains $x.Id) { $tried += ("" + $x.Id + ":" + $notes) } else { $unread += $x.Id; $tried += ("" + $x.Id + ":" + $notes) } } '
         + '$pids = [uint32[]]$match; '
         + 'if ($src -eq "NONE") { $st = "ERR" } elseif ($match.Count -gt 0) { $st = "OK" } elseif ($unread.Count -gt 0) { $st = "UNREADABLE" } elseif ($other.Count -gt 0) { $st = "MISMATCH" } else { $st = "NOPROC" } '
-        + '$info = "INFO|ST=" + $st + "|R=" + ($match -join ",") + "|U=" + ($unread -join ",") + "|O=" + ((@($other) | Select-Object -Unique) -join ";;") + "|SRC=" + $src + "|ERR=" + $qerr; ';
+        + '$info = "INFO|ST=" + $st + "|R=" + ($match -join ",") + "|U=" + ($unread -join ",") + "|O=" + ((@($other) | Select-Object -Unique) -join ";;") + "|SRC=" + $src + "|T=" + ($tried -join ";;") + "|ERR=" + $qerr; ';
 }
 // Đọc chuỗi chẩn đoán từ PowerShell. Tương thích bản cũ: "NOPROC" trơn = không có tiến trình.
 function parseInfo(out) {
     const t = String(out || '');
-    const m = /INFO\|ST=(OK|NOPROC|UNREADABLE|MISMATCH|ERR)\|R=([\d,]*)\|U=([\d,]*)\|O=([^|\r\n]*)\|SRC=(\w*)\|ERR=([^\r\n]*)/.exec(t);
-    if (!m) return /^\s*NOPROC\s*$/.test(t) ? { st: 'NOPROC', running: [], unreadable: [], others: [], src: '', err: '' } : null;
-    return { st: m[1], running: parseHandles(m[2]), unreadable: parseHandles(m[3]), others: m[4] ? m[4].split(';;').filter(Boolean) : [], src: m[5], err: m[6].trim() };
+    const m = /INFO\|ST=(OK|NOPROC|UNREADABLE|MISMATCH|ERR)\|R=([\d,]*)\|U=([\d,]*)\|O=([^|\r\n]*)\|SRC=(\w*)(?:\|T=([^|\r\n]*))?\|ERR=([^\r\n]*)/.exec(t);
+    if (!m) return /^\s*NOPROC\s*$/.test(t) ? { st: 'NOPROC', running: [], unreadable: [], others: [], src: '', tried: [], err: '' } : null;
+    return { st: m[1], running: parseHandles(m[2]), unreadable: parseHandles(m[3]), others: m[4] ? m[4].split(';;').filter(Boolean) : [], src: m[5], tried: m[6] ? m[6].split(';;').filter(Boolean) : [], err: m[7].trim() };
 }
 // Đổi kết quả nhận diện "không chạy tiếp được" thành mã lỗi thống nhất cho hide/show. Trả null nếu st === OK.
 function identityFailure(info) {
     if (!info) return null;
     if (info.st === 'NOPROC') return { state: 'not_found', reason: 'PROCESS_NOT_RUNNING' };
-    if (info.st === 'UNREADABLE') return { state: 'failed', reason: 'PROCESS_PATH_UNREADABLE', unreadable: info.unreadable };
+    if (info.st === 'UNREADABLE') return { state: 'failed', reason: 'PROCESS_PATH_UNREADABLE', unreadable: info.unreadable, tried: info.tried, src: info.src };
     if (info.st === 'MISMATCH') return { state: 'failed', reason: 'DAW_AT_DIFFERENT_PATH', others: info.others };
     if (info.st === 'ERR') return { state: 'failed', reason: 'PROCESS_QUERY_FAILED', detail: info.err };
     return null;
@@ -227,7 +242,7 @@ function probe(exePath, cb, runner) {
         if (/^RUN:\d+$/.test(t)) { cb({ ok: true, state: 'running', running: true, pids: [], unreadable: [], others: [], reason: null }); return; } // tương thích bản cũ
         const info = parseInfo(out);
         if (!info) { unk('UNKNOWN_OUTPUT'); return; }
-        const base = { pids: info.running, unreadable: info.unreadable, others: info.others };
+        const base = { pids: info.running, unreadable: info.unreadable, others: info.others, tried: info.tried, src: info.src };
         if (info.st === 'OK') cb({ ok: true, state: 'running', running: true, reason: null, ...base });
         else if (info.st === 'NOPROC') cb({ ok: true, state: 'not_running', running: false, reason: null, ...base });
         else if (info.st === 'MISMATCH') cb({ ok: true, state: 'path_mismatch', running: null, reason: 'DAW_AT_DIFFERENT_PATH', ...base });
@@ -236,4 +251,4 @@ function probe(exePath, cb, runner) {
     });
 }
 
-module.exports = { setTrace, hide, show, showAny, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo } };
+module.exports = { setTrace, hide, show, showAny, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo, PS_IMG_TYPE } };

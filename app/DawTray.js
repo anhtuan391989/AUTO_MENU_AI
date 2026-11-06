@@ -138,7 +138,7 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
     // Lời giải thích tiếng Việt cho các trường hợp KHÔNG xác minh được / lệch đường dẫn (hiện ở Setup, kèm bằng chứng để người dùng đối chiếu).
     function describeIdentity(reason, p, exe) {
         if (reason === 'DAW_AT_DIFFERENT_PATH') return 'Thấy tiến trình cùng tên đang chạy nhưng ở ĐƯỜNG DẪN KHÁC: ' + ((p && p.others) || []).join(' | ') + ' — khác với đường dẫn đã chọn (' + exe + '). Hãy chọn lại đúng file DAW ở AI > Đường dẫn & khởi động.';
-        if (reason === 'PROCESS_PATH_UNREADABLE') return 'Thấy tiến trình cùng tên nhưng Windows không cho đọc đường dẫn của nó (có thể DAW chạy quyền Administrator). Chưa xác minh được nên KHÔNG kết luận "chưa chạy".';
+        if (reason === 'PROCESS_PATH_UNREADABLE') return 'Thấy tiến trình cùng tên nhưng Windows không cho đọc đường dẫn của nó (PID ' + ((p && p.unreadable) || []).join(', ') + '; nguồn đã thử: ' + ((p && p.tried) || []).join(' | ') + '). Chưa xác minh được nên KHÔNG kết luận "chưa chạy" và KHÔNG ẩn theo tên.'; // A102: nêu PID + nguồn đã thử
         if (reason === 'PROCESS_QUERY_FAILED') return 'Không truy vấn được danh sách tiến trình của Windows' + (p && p.detail ? ': ' + p.detail : '') + '. Chưa xác minh được trạng thái DAW.';
         if (reason === 'UNSUPPORTED_PLATFORM') return 'Chức năng này chỉ chạy trên Windows.';
         return 'Chưa xác minh được trạng thái DAW (' + reason + ').';

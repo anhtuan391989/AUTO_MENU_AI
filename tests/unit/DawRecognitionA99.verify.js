@@ -55,7 +55,7 @@ const info = (st, o = {}) => 'INFO|ST=' + st + '|R=' + (o.r || '') + '|U=' + (o.
   const m = createDawTrayManager({ Tray: FakeTray, Menu, nativeImage, readSettings: () => ({ selectedDAWPath: EXE }), stateFile: 'S.json', fs: fakeFs, windowHider: hider, log: () => {} });
   r = await sync((cb) => m.statusAsync(cb)); ok(r.state === 'visible' && r.running === true, 'đang chạy -> visible', r);
   pr = { ok: false, state: 'unknown', running: null, reason: 'PROCESS_PATH_UNREADABLE', unreadable: [7] };
-  r = await sync((cb) => m.statusAsync(cb)); ok(r.state === 'unknown' && r.running === null && r.reason === 'PROCESS_PATH_UNREADABLE' && /quyền Administrator/.test(r.detail), 'không đọc được đường dẫn -> state unknown (không phải not_running) + giải thích', r);
+  r = await sync((cb) => m.statusAsync(cb)); ok(r.state === 'unknown' && r.running === null && r.reason === 'PROCESS_PATH_UNREADABLE' && /PID/.test(r.detail) && /KHÔNG kết luận/.test(r.detail), 'không đọc được đường dẫn -> state unknown (không phải not_running) + giải thích', r);
   pr = { ok: true, state: 'path_mismatch', running: null, reason: 'DAW_AT_DIFFERENT_PATH', others: ['D:\\Other\\Studio Pro.exe'] };
   r = await sync((cb) => m.statusAsync(cb)); ok(r.state === 'path_mismatch' && /D:\\Other\\Studio Pro\.exe/.test(r.detail), 'lệch đường dẫn -> path_mismatch + hiện đường dẫn đang thấy', r);
   pr = { ok: true, state: 'running', running: true }; await sync((cb) => m.hide(cb));
