@@ -39,7 +39,7 @@ const sync = (fn) => new Promise((r) => fn(r));
   const mk = () => createDawTrayManager({ Tray: FakeTray, Menu, nativeImage, readSettings: () => settings, stateFile: 'S.json', fs: fakeFs, windowHider: hider, log: () => {} });
   let m = mk();
   ok(Buffer.from(TRAY_ICON_PNG_BASE64, 'base64').slice(0, 4).toString('hex') === '89504e47', 'biểu tượng khay là PNG hợp lệ');
-  ok(JSON.stringify(m.status()) === JSON.stringify({ configured: true, exePath: EXE, hidden: false, trayVisible: false }), 'status ban đầu: có cấu hình, đang hiện, chưa có khay', m.status());
+  { const st0 = m.status(); ok(st0.configured === true && st0.exePath === EXE && st0.hidden === false && st0.trayVisible === false && st0.build === 'A101-DAW-TRACE', 'status ban đầu: có cấu hình, đang hiện, chưa có khay (+ dấu bản A101)', st0); }
   r = await sync((cb) => m.hide(cb)); ok(r.ok && r.state === 'hidden' && trays === 1 && calls.hideExe === EXE, 'hide: ẩn đúng DAW đã cấu hình + tạo khay', r);
   ok(JSON.parse(files['S.json']).handles.join() === '9,8', 'hide: ghi trạng thái ra file để hiện lại được sau khi mở lại Menu');
   ok(menuLabels.join() === 'Hiện DAW,Ẩn DAW,Mở AUTO MENU AI' && typeof clicks['Hiện DAW'] === 'function', 'menu khay có "Hiện DAW", "Ẩn DAW" và (A98) "Mở AUTO MENU AI"', menuLabels);

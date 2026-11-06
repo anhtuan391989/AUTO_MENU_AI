@@ -68,7 +68,7 @@ function makeUi(m) {
     ['toolsDawBadge', 'toolsDawPath', 'toolsDawMessage', 'btnToolsHideDaw', 'btnToolsShowDaw', 'sidebarNav'].forEach(el);
     const doc = { getElementById: (id) => el(id), addEventListener: (t, f) => { if (t === 'DOMContentLoaded') doc._ready = f; } };
     const api = { toolsDawStatus: () => call((cb) => m.statusAsync(cb)), toolsDawHide: () => call((cb) => m.hide(cb)), toolsDawShow: () => call((cb) => m.show(cb)) };
-    const ctx = { document: doc, window: { electronAPI: api }, console };
+    const ctx = { document: doc, window: { electronAPI: api }, console, setTimeout, clearTimeout };
     vm.createContext(ctx); vm.runInContext(rd('ui/js/setupTools.js'), ctx);
     return { els, ready: () => doc._ready(), click: async (id) => { els[id].listeners.click(); await new Promise((r) => setTimeout(r, 30)); } };
 }
@@ -87,7 +87,8 @@ function makeUi(m) {
         const w = makeWorld(); w.add(1001); const env = makeEnv(w); const ui = makeUi(env.m); ui.ready(); await new Promise((r) => setTimeout(r, 30));
         for (let i = 1; i <= 5; i++) {
             await ui.click('btnToolsHideDaw');
-            ok(w.wins[0].vis === false && ui.els.btnToolsShowDaw.disabled === false && ui.els.toolsDawBadge.textContent === 'ĐANG ẨN' && ui.els.btnToolsHideDaw.disabled === true, 'chu kỳ ' + i + ': sau Ẩn -> cửa sổ ẩn, badge ĐANG ẨN, nút Hiện SÁNG', { vis: w.wins[0].vis, show: ui.els.btnToolsShowDaw.disabled, badge: ui.els.toolsDawBadge.textContent });
+            ok(w.wins[0].vis === false && ui.els.btnToolsShowDaw.disabled === false && ui.els.toolsDawBadge.textContent === 'ĐANG ẨN' && ui.els.btnToolsHideDaw.disabled === false, // A101: nút Ẩn không bị khoá (không còn nút xám im lặng)
+             'chu kỳ ' + i + ': sau Ẩn -> cửa sổ ẩn, badge ĐANG ẨN, nút Hiện SÁNG', { vis: w.wins[0].vis, show: ui.els.btnToolsShowDaw.disabled, badge: ui.els.toolsDawBadge.textContent });
             ok(env.tray.created >= i && env.files['D:\\data\\hidden-daw-state.json'], 'chu kỳ ' + i + ': có khay + đã lưu handles');
             await ui.click('btnToolsShowDaw');
             ok(w.wins[0].vis === true && ui.els.toolsDawBadge.textContent === 'ĐANG HIỆN' && !env.files['D:\\data\\hidden-daw-state.json'] && ui.els.btnToolsHideDaw.disabled === false, 'chu kỳ ' + i + ': Hiện -> đúng cửa sổ trở lại, xoá trạng thái, nút Ẩn sáng lại');

@@ -20,16 +20,21 @@
 
 const { spawn, spawnSync } = require('child_process');
 
+// A101: nhật ký vết mọi lần chạy PowerShell (DawTray gắn vào bằng setTrace) — để biết chính xác bước nào thất bại.
+let trace = () => {};
+function setTrace(f) { trace = typeof f === 'function' ? f : () => {}; }
+const tr = (m) => { try { trace(m); } catch (e) { /* bỏ qua */ } };
+
 function defaultRunner(script, cb) {
-    if (process.platform !== 'win32') { cb(new Error('UNSUPPORTED_PLATFORM'), null); return; }
+    if (process.platform !== 'win32') { tr('PS bỏ qua: không phải Windows (' + process.platform + ')'); cb(new Error('UNSUPPORTED_PLATFORM'), null); return; }
     let done = false, out = '', errOut = '', ps;
-    try { ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true }); }
-    catch (e) { cb(e, null); return; }
-    const timer = setTimeout(() => { if (done) return; done = true; try { ps.kill(); } catch (e) { /* bỏ qua */ } cb(new Error('TIMEOUT'), null); }, 15000);
+    try { tr('PS spawn, độ dài script=' + script.length); ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true }); }
+    catch (e) { tr('PS spawn LỖI: ' + (e && e.message)); cb(e, null); return; }
+    const timer = setTimeout(() => { if (done) return; done = true; tr('PS QUÁ 15 s — kill. out=' + out.slice(0, 300) + ' err=' + errOut.slice(0, 300)); try { ps.kill(); } catch (e) { /* bỏ qua */ } cb(new Error('TIMEOUT'), null); }, 15000);
     ps.stdout.on('data', (d) => { out += d.toString(); });
     ps.stderr.on('data', (d) => { errOut += d.toString(); });
-    ps.on('error', (e) => { if (done) return; done = true; clearTimeout(timer); cb(e, null); });
-    ps.on('close', (code) => { if (done) return; done = true; clearTimeout(timer); if (code !== 0 && !out.trim()) cb(new Error(errOut.trim() || ('powershell exit ' + code)), null); else cb(null, out.trim()); });
+    ps.on('error', (e) => { if (done) return; done = true; clearTimeout(timer); tr('PS error: ' + (e && e.message)); cb(e, null); });
+    ps.on('close', (code) => { if (done) return; done = true; clearTimeout(timer); tr('PS xong code=' + code + ' out=' + out.trim().slice(0, 600).replace(/\s+/g, ' ') + ' | err=' + errOut.trim().slice(0, 600).replace(/\s+/g, ' ')); if (code !== 0 && !out.trim()) cb(new Error(errOut.trim() || ('powershell exit ' + code)), null); else cb(null, out.trim()); });
 }
 
 // Đường dẫn .exe phải là chuỗi Windows hợp lệ, không ký tự điều khiển / ký tự cấm — vì sẽ nằm trong chuỗi PowerShell (đã nhân đôi dấu ' nhưng vẫn chặn từ đầu).
@@ -231,4 +236,4 @@ function probe(exePath, cb, runner) {
     });
 }
 
-module.exports = { hide, show, showAny, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo } };
+module.exports = { setTrace, hide, show, showAny, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo } };

@@ -1,0 +1,230 @@
+diff --git a/app/DawTray.js b/app/DawTray.js
+index 3afc818..88736d7 100644
+--- a/app/DawTray.js
++++ b/app/DawTray.js
+@@ -9,7 +9,9 @@
+ 
+ const TRAY_ICON_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAQElEQVR4nGNgoAl4+v8/Vky2RqIMIlYzTkPQFLAJK6Fg/AYQ0EzYECI0YzVkmBpAXiBSHI1USUgUJ2ViDKIFAACAY4MoRAMNKgAAAABJRU5ErkJggg=='; // chấm tròn 16x16 (nền xanh, lõi tối) — không cần file ảnh ngoài
+ 
+-function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile, fs, windowHider, log, openMenu }) {
++const BUILD = 'A101-DAW-TRACE'; // dấu phiên bản: hiện ở Setup để biết Menu đang chạy ĐÚNG bản này (chống nhầm bản source / bản đóng gói cũ)
++
++function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile, fs, windowHider, log, openMenu, watchdogMs }) {
+     let tray = null;
+     let saved = null; // { exePath, handles:number[] } khi DAW đang bị ẩn
+     let busy = false; // A98: đang có 1 thao tác ẩn/hiện chạy => bấm dồn dập không chồng nhiều PowerShell lên nhau
+@@ -17,14 +19,32 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+     const say = (m, e) => { try { (log || console.log)('[DawTray] ' + m, e || ''); } catch (x) { /* bỏ qua */ } };
+     // A100 — nhật ký chẩn đoán (daw-hide-diagnostic.log cạnh file trạng thái): ghi mỗi lần ẩn/hiện/dò để lần chạy thật trên Windows có BẰNG CHỨNG. Lỗi ghi file bị bỏ qua.
+     const diagFile = (() => { try { return stateFile ? String(stateFile).replace(/[^\\/]*$/, '') + 'daw-hide-diagnostic.log' : ''; } catch (e) { return ''; } })();
++    // A101: ghi 2 nơi — cạnh file trạng thái (userData) VÀ thư mục tạm của Windows — để vẫn có vết dù userData khác chỗ đang tìm.
++    const tmpFile = (() => { try { return require('path').join(require('os').tmpdir(), 'automenu-daw-hide.log'); } catch (e) { return ''; } })();
++    const appendTo = (f, line) => {
++        if (!f) return;
++        try {
++            const w = fs && typeof fs.appendFileSync === 'function' ? fs : require('fs');
++            try { if (w.existsSync(f) && w.statSync(f).size > 200000) w.writeFileSync(f, '', 'utf8'); } catch (e) { /* bỏ qua */ }
++            w.appendFileSync(f, line, 'utf8');
++        } catch (e) { /* bỏ qua */ }
++    };
+     const diag = (m) => {
+         try {
+             say(m);
+-            if (!diagFile || !fs || typeof fs.appendFileSync !== 'function') return;
+-            try { if (fs.existsSync(diagFile) && fs.statSync(diagFile).size > 200000) fs.writeFileSync(diagFile, '', 'utf8'); } catch (e) { /* bỏ qua */ }
+-            fs.appendFileSync(diagFile, new Date().toISOString() + ' ' + m + '\n', 'utf8');
++            const line = new Date().toISOString() + ' ' + m + '\n';
++            appendTo(diagFile, line);
++            if (fs && typeof fs.appendFileSync === 'function' && fs === require('fs')) appendTo(tmpFile, line); // bản thật (fs thật) mới ghi thêm ra thư mục tạm
+         } catch (e) { /* bỏ qua */ }
+     };
++    try { if (typeof windowHider.setTrace === 'function') windowHider.setTrace((m) => diag('[PS] ' + m)); } catch (e) { /* bỏ qua */ }
++    // Chạy hàm gọi WindowHider; nếu không có phản hồi trong watchdogMs (mặc định 20 s, PowerShell tự timeout 15 s) thì trả lỗi thay vì treo vô hạn.
++    function withWatchdog(label, call, handler) {
++        let fin = false; const ms = watchdogMs || 20000;
++        const t = setTimeout(() => { if (fin) return; fin = true; diag(label + ': QUÁ HẠN ' + ms + ' ms — WindowHider không trả lời'); handler({ ok: false, state: 'failed', handles: [], reason: 'WATCHDOG_TIMEOUT' }); }, ms);
++        const done = (r) => { if (fin) { diag(label + ': kết quả đến muộn sau watchdog (bỏ qua)'); return; } fin = true; clearTimeout(t); handler(r); };
++        try { call(done); } catch (e) { done({ ok: false, state: 'failed', handles: [], reason: String((e && e.message) || e) }); }
++    }
+ 
+     function loadState() {
+         try {
+@@ -42,6 +62,7 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+         } catch (e) { say('ghi trạng thái lỗi (bỏ qua)', e && e.message); }
+     }
+     saved = loadState();
++    diag('DawTray KHỞI TẠO build=' + BUILD + ' pid=' + process.pid + ' platform=' + process.platform + ' stateFile=' + stateFile + ' diagFile=' + diagFile + ' tmpFile=' + tmpFile + ' đangẨnTừTrạngThái=' + !!saved);
+ 
+     function configuredExe() {
+         try {
+@@ -80,7 +101,7 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+ 
+     function status() {
+         const exe = configuredExe();
+-        return { configured: !!exe, exePath: exe, hidden: !!saved, trayVisible: !!tray };
++        return { configured: !!exe, exePath: exe, hidden: !!saved, trayVisible: !!tray, build: BUILD, stateFile: stateFile || '', diagFile: diagFile || '' };
+     }
+ 
+     // A98 — trạng thái 3 mức cho Menu: not_configured | not_running | visible | hidden (+ busy). Kiểm tra tiến trình DAW thật bằng probe();
+@@ -125,12 +146,13 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+ 
+     function hide(cb) {
+         try {
++            diag('HIDE nhận lệnh từ Setup: busy=' + busy + ' đangẨn=' + !!saved + ' exe=' + configuredExe());
+             if (busy) { cb({ ok: false, state: 'busy', message: 'Đang xử lý thao tác trước, thử lại sau giây lát.' }); return; }
+             if (saved) { cb({ ok: true, state: 'hidden', message: 'DAW đang được ẩn rồi.' }); return; }
+             const exe = configuredExe();
+             if (!exe) { cb({ ok: false, state: 'not_configured', message: 'Chưa chọn file chạy của DAW. Vào Setup > AI > "Đường dẫn & khởi động" để chọn.' }); return; }
+             busy = true;
+-            windowHider.hide(exe, (r) => {
++            withWatchdog('HIDE', (cb2) => windowHider.hide(exe, cb2), (r) => {
+                 busy = false;
+                 try {
+                     diag('HIDE kết quả: ok=' + r.ok + ' reason=' + (r.reason || '') + ' handles=[' + (r.handles || []).join(',') + '] failed=[' + (r.failed || []).join(',') + '] attempted=[' + (r.attempted || []).join(',') + '] diag=' + (r.diag || ''));
+@@ -146,6 +168,7 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+                     else if (r.reason === 'DAW_NOT_RESPONDING') cb({ ok: false, state: 'failed', message: 'DAW đang không phản hồi (Not Responding) nên chưa ẩn được. Chờ DAW xử lý xong rồi thử lại.' });
+                     else if (r.reason === 'PROCESS_PATH_UNREADABLE' || r.reason === 'DAW_AT_DIFFERENT_PATH' || r.reason === 'PROCESS_QUERY_FAILED') cb({ ok: false, state: 'failed', message: describeIdentity(r.reason, r, exe) });
+                     else if (r.reason === 'HIDE_NOT_APPLIED') cb({ ok: false, state: 'failed', message: 'Đã gửi lệnh ẩn nhưng cửa sổ DAW vẫn đang hiện — chưa ẩn được.' });
++                    else if (r.reason === 'WATCHDOG_TIMEOUT') cb({ ok: false, state: 'failed', message: 'Lệnh ẩn không có phản hồi sau 20 giây (PowerShell treo?). Xem daw-hide-diagnostic.log.' });
+                     else cb({ ok: false, state: 'failed', message: 'Không ẩn được DAW: ' + (r.reason || 'lỗi không rõ') });
+                 } catch (e) { cb({ ok: false, state: 'failed', message: String((e && e.message) || e) }); }
+             });
+@@ -159,6 +182,7 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+     }
+     function show(cb) {
+         try {
++            diag('SHOW nhận lệnh từ Setup: busy=' + busy + ' đangẨn=' + !!saved);
+             if (busy) { cb({ ok: false, state: 'busy', message: 'Đang xử lý thao tác trước, thử lại sau giây lát.' }); return; }
+             if (!saved) {
+                 const exe0 = configuredExe();
+@@ -177,7 +201,7 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+             }
+             const cur = saved;
+             busy = true;
+-            windowHider.show(cur.exePath, cur.handles, (r) => {
++            withWatchdog('SHOW', (cb2) => windowHider.show(cur.exePath, cur.handles, cb2), (r) => {
+                 try {
+                     diag('SHOW kết quả: ok=' + r.ok + ' state=' + r.state + ' reason=' + (r.reason || '') + ' handles=[' + (r.handles || []).join(',') + '] diag=' + (r.diag || ''));
+                     if (r.ok) { busy = false; saved = null; notRunStrikes = 0; saveState(); dropTray(); cb({ ok: true, state: 'visible', message: 'Đã hiện lại DAW.' }); return; }
+@@ -212,7 +236,10 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
+         } catch (e) { say('khôi phục khi thoát lỗi (bỏ qua)', e && e.message); }
+     }
+ 
+-    return { hide, show, status, statusAsync, restoreOnQuit, restoreTrayIfHidden, _internals: () => ({ saved, tray }) };
++    // A101: main.js gọi khi nhận IPC để có vết "lệnh đã tới main chưa, có từ cửa sổ Setup không".
++    function note(channel, fromSetup) { diag('IPC ' + channel + ' tới main: từ cửa sổ Setup=' + !!fromSetup); }
++
++    return { note, hide, show, status, statusAsync, restoreOnQuit, restoreTrayIfHidden, _internals: () => ({ saved, tray }) };
+ }
+ 
+ module.exports = { createDawTrayManager, TRAY_ICON_PNG_BASE64 };
+diff --git a/app/main.js b/app/main.js
+index 363ae64..7a9f5c7 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -1060,11 +1060,11 @@ ipcMain.handle("tools-daw-status", (event) => new Promise((resolve) => {
+     catch (err) { console.error("tools-daw-status lỗi:", err); resolve(EMPTY); }
+ }));
+ ipcMain.handle("tools-daw-hide", (event) => new Promise((resolve) => {
+-    try { if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().hide(resolve); }
++    try { getDawTray().note("tools-daw-hide", fromSetupWindow(event)); if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().hide(resolve); } // A101: có vết khi lệnh tới main
+     catch (err) { console.error("tools-daw-hide lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
+ }));
+ ipcMain.handle("tools-daw-show", (event) => new Promise((resolve) => {
+-    try { if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().show(resolve); }
++    try { getDawTray().note("tools-daw-show", fromSetupWindow(event)); if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().show(resolve); } // A101: có vết khi lệnh tới main
+     catch (err) { console.error("tools-daw-show lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
+ }));
+ app.on("before-quit", () => { try { if (dawTrayMgr) dawTrayMgr.restoreOnQuit(); } catch (err) { console.error("restoreOnQuit lỗi:", err); } });
+diff --git a/core/integration/WindowHider.js b/core/integration/WindowHider.js
+index 0a18e9a..eb8eeba 100644
+--- a/core/integration/WindowHider.js
++++ b/core/integration/WindowHider.js
+@@ -20,16 +20,21 @@
+ 
+ const { spawn, spawnSync } = require('child_process');
+ 
++// A101: nhật ký vết mọi lần chạy PowerShell (DawTray gắn vào bằng setTrace) — để biết chính xác bước nào thất bại.
++let trace = () => {};
++function setTrace(f) { trace = typeof f === 'function' ? f : () => {}; }
++const tr = (m) => { try { trace(m); } catch (e) { /* bỏ qua */ } };
++
+ function defaultRunner(script, cb) {
+-    if (process.platform !== 'win32') { cb(new Error('UNSUPPORTED_PLATFORM'), null); return; }
++    if (process.platform !== 'win32') { tr('PS bỏ qua: không phải Windows (' + process.platform + ')'); cb(new Error('UNSUPPORTED_PLATFORM'), null); return; }
+     let done = false, out = '', errOut = '', ps;
+-    try { ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true }); }
+-    catch (e) { cb(e, null); return; }
+-    const timer = setTimeout(() => { if (done) return; done = true; try { ps.kill(); } catch (e) { /* bỏ qua */ } cb(new Error('TIMEOUT'), null); }, 15000);
++    try { tr('PS spawn, độ dài script=' + script.length); ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true }); }
++    catch (e) { tr('PS spawn LỖI: ' + (e && e.message)); cb(e, null); return; }
++    const timer = setTimeout(() => { if (done) return; done = true; tr('PS QUÁ 15 s — kill. out=' + out.slice(0, 300) + ' err=' + errOut.slice(0, 300)); try { ps.kill(); } catch (e) { /* bỏ qua */ } cb(new Error('TIMEOUT'), null); }, 15000);
+     ps.stdout.on('data', (d) => { out += d.toString(); });
+     ps.stderr.on('data', (d) => { errOut += d.toString(); });
+-    ps.on('error', (e) => { if (done) return; done = true; clearTimeout(timer); cb(e, null); });
+-    ps.on('close', (code) => { if (done) return; done = true; clearTimeout(timer); if (code !== 0 && !out.trim()) cb(new Error(errOut.trim() || ('powershell exit ' + code)), null); else cb(null, out.trim()); });
++    ps.on('error', (e) => { if (done) return; done = true; clearTimeout(timer); tr('PS error: ' + (e && e.message)); cb(e, null); });
++    ps.on('close', (code) => { if (done) return; done = true; clearTimeout(timer); tr('PS xong code=' + code + ' out=' + out.trim().slice(0, 600).replace(/\s+/g, ' ') + ' | err=' + errOut.trim().slice(0, 600).replace(/\s+/g, ' ')); if (code !== 0 && !out.trim()) cb(new Error(errOut.trim() || ('powershell exit ' + code)), null); else cb(null, out.trim()); });
+ }
+ 
+ // Đường dẫn .exe phải là chuỗi Windows hợp lệ, không ký tự điều khiển / ký tự cấm — vì sẽ nằm trong chuỗi PowerShell (đã nhân đôi dấu ' nhưng vẫn chặn từ đầu).
+@@ -231,4 +236,4 @@ function probe(exePath, cb, runner) {
+     });
+ }
+ 
+-module.exports = { hide, show, showAny, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo } };
++module.exports = { setTrace, hide, show, showAny, showSync, probe, validateExePath, parseHandles, _scriptsForTest: { pidScript, CSHARP, parseInfo } };
+diff --git a/ui/js/setupTools.js b/ui/js/setupTools.js
+index b05c4aa..622451b 100644
+--- a/ui/js/setupTools.js
++++ b/ui/js/setupTools.js
+@@ -14,7 +14,7 @@
+     }
+     function paint(st) {
+         const badge = $("toolsDawBadge"), pathEl = $("toolsDawPath");
+-        if (pathEl) pathEl.textContent = st && st.configured ? "DAW: " + st.exePath : "❌ Chưa chọn file chạy của DAW (AI > Đường dẫn & khởi động)";
++        if (pathEl) pathEl.textContent = (st && st.configured ? "DAW: " + st.exePath : "❌ Chưa chọn file chạy của DAW (AI > Đường dẫn & khởi động)") + (st && st.build ? "  ·  bản " + st.build + "  ·  log: " + st.diagFile : ""); // A101: hiện bản + nơi ghi log
+         if (badge) {
+             if (st && st.state === "unknown") { badge.textContent = "CHƯA XÁC MINH"; badge.className = "badge badge-unwired"; } // A99: không đọc được tiến trình => KHÔNG báo "chưa chạy"
+             else if (st && st.state === "path_mismatch") { badge.textContent = "SAI ĐƯỜNG DẪN DAW"; badge.className = "badge badge-unwired"; }
+@@ -23,25 +23,33 @@
+             else { badge.textContent = "ĐANG HIỆN"; badge.className = "badge badge-soon"; }
+         }
+         const hideBtn = $("btnToolsHideDaw"), showBtn = $("btnToolsShowDaw");
+-        if (hideBtn) hideBtn.disabled = busy || !(st && st.configured) || !!(st && st.hidden) || !!(st && (st.state === "not_running" || st.state === "path_mismatch"));
++        // A101: nút Ẩn KHÔNG còn bị khoá theo trạng thái dò — nút xám bấm không phản hồi chính là "im lặng". Trạng thái không hợp lệ thì main trả lời bằng chữ rõ ràng.
++        if (hideBtn) hideBtn.disabled = busy;
+         // A100: nút Hiện chỉ bị khoá khi đang bận. KHÔNG khoá theo trạng thái dò (hidden/unknown/not_running...) — nếu trạng thái sai thì đây là đường khôi phục duy nhất; main tự tìm cửa sổ DAW đang ẩn.
+         if (showBtn) showBtn.disabled = busy;
+     }
+     async function refresh(keepMessage) {
+         const a = api();
+         if (!a || typeof a.toolsDawStatus !== "function") { setMessage("Chức năng này chỉ có trong app Menu (Electron).", false); paint({ configured: false, hidden: false }); return; }
+-        try { const st = await a.toolsDawStatus(); paint(st); if (st && st.detail && (st.state === "unknown" || st.state === "path_mismatch") && !keepMessage) setMessage(st.detail, false); } catch (e) { setMessage("Không đọc được trạng thái: " + (e && e.message || e), false); const sb = $("btnToolsShowDaw"); if (sb) sb.disabled = busy; }
++        try { const st = await a.toolsDawStatus(); paint(st); if (st && !st.build && !keepMessage) setMessage("⚠ Menu (main process) đang chạy bản CŨ — chưa có A101. Hãy THOÁT HẲN mọi cửa sổ/tiến trình AUTO MENU AI (kể cả dưới khay / Task Manager) rồi mở lại.", false); if (st && st.detail && (st.state === "unknown" || st.state === "path_mismatch") && !keepMessage) setMessage(st.detail, false); } catch (e) { setMessage("Không đọc được trạng thái: " + (e && e.message || e), false); const sb = $("btnToolsShowDaw"); if (sb) sb.disabled = busy; }
+     }
+     async function act(kind) {
++        const verb = kind === "hide" ? "ẩn" : "hiện";
++        setMessage("Đã nhận lệnh bấm " + (kind === "hide" ? "Ẩn" : "Hiện") + " DAW…"); // A101: phản hồi NGAY khi click, trước mọi kiểm tra — không còn đường im lặng
+         const a = api();
+-        if (busy || !a) return;
++        if (busy) { setMessage("Đang xử lý thao tác trước, đợi xong rồi bấm lại.", false); return; }
++        if (!a) { setMessage("Không có kênh nối tới Menu (window.electronAPI trống) — hãy mở Setup từ app Menu.", false); return; }
+         const fn = kind === "hide" ? a.toolsDawHide : a.toolsDawShow;
+-        if (typeof fn !== "function") { setMessage("Chức năng này chỉ có trong app Menu (Electron).", false); return; }
+-        busy = true; setMessage(kind === "hide" ? "Đang ẩn DAW…" : "Đang hiện DAW…");
++        if (typeof fn !== "function") { setMessage("Menu đang chạy là bản CŨ: thiếu kênh " + (kind === "hide" ? "toolsDawHide" : "toolsDawShow") + ". Thoát hẳn mọi tiến trình AUTO MENU AI rồi mở lại.", false); return; }
++        busy = true; setMessage("Đang " + verb + " DAW…");
++        let timer;
+         try {
+-            const r = await fn.call(a);
+-            setMessage((r && r.message) || (r && r.ok ? "Xong." : "Không thực hiện được."), !!(r && r.ok));
++            const timeout = new Promise((res) => { timer = setTimeout(() => res({ __timeout: true }), 30000); });
++            const r = await Promise.race([fn.call(a), timeout]);
++            if (r && r.__timeout) setMessage("Menu không trả lời sau 30 giây (kênh IPC treo hoặc đang chạy bản cũ). Xem daw-hide-diagnostic.log.", false);
++            else setMessage((r && r.message) || (r && r.ok ? "Xong." : "Không thực hiện được."), !!(r && r.ok));
+         } catch (e) { setMessage("Lỗi: " + (e && e.message || e), false); }
++        if (timer) clearTimeout(timer);
+         busy = false;
+         refresh(true); // giữ nguyên thông báo kết quả vừa thao tác
+     }

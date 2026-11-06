@@ -1060,11 +1060,11 @@ ipcMain.handle("tools-daw-status", (event) => new Promise((resolve) => {
     catch (err) { console.error("tools-daw-status lỗi:", err); resolve(EMPTY); }
 }));
 ipcMain.handle("tools-daw-hide", (event) => new Promise((resolve) => {
-    try { if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().hide(resolve); }
+    try { getDawTray().note("tools-daw-hide", fromSetupWindow(event)); if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().hide(resolve); } // A101: có vết khi lệnh tới main
     catch (err) { console.error("tools-daw-hide lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
 }));
 ipcMain.handle("tools-daw-show", (event) => new Promise((resolve) => {
-    try { if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().show(resolve); }
+    try { getDawTray().note("tools-daw-show", fromSetupWindow(event)); if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().show(resolve); } // A101: có vết khi lệnh tới main
     catch (err) { console.error("tools-daw-show lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
 }));
 app.on("before-quit", () => { try { if (dawTrayMgr) dawTrayMgr.restoreOnQuit(); } catch (err) { console.error("restoreOnQuit lỗi:", err); } });
