@@ -8,7 +8,8 @@
    - Checkbox "Luôn hiển thị" (Always on Top):
        BẬT  -> cửa sổ luôn nổi và VẪN HIỆN khi menu thu xuống taskbar.
        TẮT  -> cửa sổ thường; tự ẩn khi menu thu xuống taskbar, tự hiện lại khi menu mở lại.
-   - Trạng thái "Luôn hiển thị" chỉ sống trong phiên (không lưu file), giống Always on Top của menu.
+   - EFFECT-AOT-PERSIST: trạng thái "Luôn hiển thị" được GHI NHỚ qua các lần mở app (lần tích cuối cùng thắng). Việc đọc/ghi file do main.js
+     tiêm vào (loadAlwaysOnTop / saveAlwaysOnTop) — module này không chạm file. Lỗi đọc/ghi không bao giờ làm hỏng cửa sổ.
    - Module thuần Node (BrowserWindow/screen được truyền vào) để test được bằng đối tượng giả.
    ========================================================== */
 
@@ -38,11 +39,13 @@ function computeInitialPosition(mainBounds, workArea) {
     return { x: Math.round(x), y: Math.round(y) };
 }
 
-function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preloadPath, htmlPath, onStateChange }) {
+function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preloadPath, htmlPath, onStateChange, loadAlwaysOnTop, saveAlwaysOnTop }) {
     let win = null;
     // EFFECT-LIT-01 — báo trạng thái mở/đóng ra ngoài (menu dùng để sáng/tắt nút EFFECT). Lỗi ở callback không được làm hỏng cửa sổ.
     function emitState(open) { try { if (typeof onStateChange === "function") onStateChange(!!open); } catch (err) { console.error("effects onStateChange lỗi:", err); } }
+    // EFFECT-AOT-PERSIST: nạp trạng thái "Luôn Hiện" đã lưu ở lần tích cuối (chỉ nhận đúng true; mọi lỗi/thiếu => false như cũ).
     let alwaysOnTop = false;
+    try { if (typeof loadAlwaysOnTop === "function") alwaysOnTop = loadAlwaysOnTop() === true; } catch (err) { console.error("effects loadAlwaysOnTop lỗi (bỏ qua):", err); }
     let boundMain = null;
 
     function alive(w) {
@@ -188,6 +191,8 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
                 return { ok: false, value: alwaysOnTop, error: String((err && err.message) || err) };
             }
         }
+        // EFFECT-AOT-PERSIST: ghi nhớ lần tích cuối cùng (cả khi cửa sổ đang đóng). Ghi lỗi chỉ báo log, không ảnh hưởng kết quả.
+        try { if (typeof saveAlwaysOnTop === "function") saveAlwaysOnTop(enabled); } catch (err) { console.error("effects saveAlwaysOnTop lỗi (bỏ qua):", err); }
         return { ok: true, value: alwaysOnTop };
     }
 

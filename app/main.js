@@ -1004,7 +1004,16 @@ const effectsWindow = createEffectsWindowManager({
     preloadPath: path.join(__dirname, "preload.js"),
     htmlPath: path.join(__dirname, "..", "ui", "effects.html"),
     // EFFECT-LIT-01 — báo cho menu chính biết Bảng Hiệu Ứng đang mở/đóng để nút EFFECT sáng/tắt đúng.
-    onStateChange: (open) => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send("effects-state", !!open); }
+    onStateChange: (open) => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send("effects-state", !!open); },
+    // EFFECT-AOT-PERSIST — nhớ trạng thái "Luôn Hiện" của Bảng Hiệu Ứng ở lần tích cuối (app-settings.json > effectsWindow.alwaysOnTop).
+    // Đọc-rồi-ghi lại toàn bộ file bằng đúng readSettingsFile/writeSettingsFile có sẵn (ghi nguyên tử A55); chỉ đổi ĐÚNG key effectsWindow.alwaysOnTop, giữ nguyên mọi key khác.
+    loadAlwaysOnTop: () => { const s = readSettingsFile(); return !!(s && s.effectsWindow && s.effectsWindow.alwaysOnTop === true); },
+    saveAlwaysOnTop: (v) => {
+        const s = readSettingsFile() || {};
+        const cur = s.effectsWindow && typeof s.effectsWindow === "object" && !Array.isArray(s.effectsWindow) ? s.effectsWindow : {};
+        if (cur.alwaysOnTop === !!v) return true; // không đổi => khỏi ghi file
+        return writeSettingsFile({ ...s, effectsWindow: { ...cur, alwaysOnTop: !!v } });
+    }
 });
 
 ipcMain.on("effects-toggle", (event) => {

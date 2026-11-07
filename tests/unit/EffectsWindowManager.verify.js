@@ -137,6 +137,40 @@ const effectsOf = (main) => FakeWin.instances.find((w) => w !== main);
     check(fx2.aot === true, "đóng rồi mở lại -> AOT vẫn giữ");
 }
 
+// ---- EFFECT-AOT-PERSIST: nhớ "Luôn Hiện" qua các lần mở app (lần tích cuối cùng thắng) ----
+{
+    function setupPersist(initial, opts) {
+        FakeWin.instances.length = 0;
+        const store = { v: initial, saves: [] };
+        const main = new FakeWin({});
+        const mgr = createEffectsWindowManager({
+            BrowserWindow: FakeWin, screen: screenFake, getMainWin: () => main, preloadPath: "/p/preload.js", htmlPath: "/p/effects.html",
+            loadAlwaysOnTop: () => { if (opts && opts.loadThrows) throw new Error("đọc lỗi"); return store.v; },
+            saveAlwaysOnTop: (v) => { if (opts && opts.saveThrows) throw new Error("ghi lỗi"); store.saves.push(v); store.v = v; }
+        });
+        return { main, mgr, store };
+    }
+    // khởi động app lần đầu (chưa lưu gì) => mặc định TẮT như cũ
+    { const { mgr } = setupPersist(undefined); check(mgr.getAlwaysOnTop().value === false, "chưa lưu gì -> mặc định tắt (hành vi cũ)"); }
+    // lần trước tích BẬT -> app mở lại: bật sẵn, cửa sổ mở ra là luôn hiện
+    { const { main, mgr } = setupPersist(true); check(mgr.getAlwaysOnTop().value === true, "lần cuối tích BẬT -> mở app lại: trạng thái BẬT"); mgr.open(); check(effectsOf(main).aot === true, "lần cuối tích BẬT -> cửa sổ mở ra là luôn hiện"); }
+    // lần trước bỏ tích -> app mở lại: tắt
+    { const { main, mgr } = setupPersist(false); check(mgr.getAlwaysOnTop().value === false, "lần cuối bỏ tích -> mở app lại: trạng thái TẮT"); mgr.open(); check(effectsOf(main).aot === false, "lần cuối bỏ tích -> cửa sổ mở ra không luôn hiện"); }
+    // tích / bỏ tích -> ghi đúng giá trị mới nhất (cả khi cửa sổ đang đóng)
+    { const { mgr, store } = setupPersist(false); mgr.setAlwaysOnTop(true); check(store.v === true, "tích BẬT -> đã ghi true"); mgr.setAlwaysOnTop(false); check(store.v === false && store.saves.join() === "true,false", "bỏ tích -> đã ghi false (lần cuối thắng)"); }
+    // giá trị rác từ file (không phải đúng true) -> coi là tắt
+    { const { mgr } = setupPersist("true"); check(mgr.getAlwaysOnTop().value === false, "giá trị đã lưu không phải boolean true -> tắt"); }
+    // giá trị không hợp lệ bị từ chối -> không ghi
+    { const { mgr, store } = setupPersist(true); mgr.setAlwaysOnTop("yes"); check(store.saves.length === 0 && mgr.getAlwaysOnTop().value === true, "giá trị không hợp lệ -> không ghi, giữ nguyên"); }
+    // lỗi đọc / ghi không làm hỏng cửa sổ
+    { const { mgr } = setupPersist(true, { loadThrows: true }); check(mgr.getAlwaysOnTop().value === false, "đọc file lỗi -> mặc định tắt, không throw"); }
+    { const { main, mgr } = setupPersist(false, { saveThrows: true }); const r = mgr.setAlwaysOnTop(true); mgr.open(); check(r.ok === true && r.value === true && effectsOf(main).aot === true, "ghi file lỗi -> vẫn áp dụng trong phiên, không throw"); }
+    // thiếu hàm tiêm (cách dùng cũ) -> hoạt động như trước
+    { const { mgr } = setup(); check(mgr.getAlwaysOnTop().value === false && mgr.setAlwaysOnTop(true).ok === true, "không tiêm load/save -> chạy như bản cũ"); }
+    // nối dây main.js
+    { const m = fs.readFileSync(path.join(root, "app", "main.js"), "utf8"); check(m.includes("loadAlwaysOnTop") && m.includes("saveAlwaysOnTop") && m.includes("effectsWindow: {"), "main.js nối load/save AOT vào app-settings.json (effectsWindow.alwaysOnTop)"); }
+}
+
 // ---- giá trị không hợp lệ ----
 {
     const { mgr } = setup();
