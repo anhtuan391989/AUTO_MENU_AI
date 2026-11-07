@@ -1,4 +1,4 @@
-/* HIDE-DAW-01 — Setup > Công cụ & Sửa lỗi > Ẩn DAW xuống khay thông báo.
+/* HIDE-DAW-01 / A105 — Setup > AI > thẻ Hidden DAW > nút Ẩn DAW / Hiện DAW (đã gộp từ tab "Công cụ & Sửa lỗi" cũ; id phần tử giữ nguyên).
    Chỉ gọi 3 kênh IPC của main process (toolsDawStatus / toolsDawHide / toolsDawShow); không tự ẩn/hiện gì ở đây. Mọi lỗi hiện thành chữ, không throw. */
 (function () {
     "use strict";
@@ -56,7 +56,7 @@
     document.addEventListener("DOMContentLoaded", () => {
         $("btnToolsHideDaw")?.addEventListener("click", () => act("hide"));
         $("btnToolsShowDaw")?.addEventListener("click", () => act("show"));
-        $("sidebarNav")?.addEventListener("click", (e) => { const b = e.target.closest(".nav-item"); if (b && b.dataset.panel === "panel-tools") refresh(); });
+        $("sidebarNav")?.addEventListener("click", (e) => { const b = e.target.closest(".nav-item"); if (b && b.dataset.panel === "panel-ai") refresh(); });
         refresh();
     });
 })();

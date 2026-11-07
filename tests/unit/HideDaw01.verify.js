@@ -61,9 +61,10 @@ const sync = (fn) => new Promise((r) => fn(r));
   ok(['tools-daw-status', 'tools-daw-hide', 'tools-daw-show'].every((c) => main.includes('ipcMain.handle("' + c + '"')) && /fromSetupWindow\(event\)/.test(main), 'main.js: 3 kênh IPC, chỉ nhận từ cửa sổ Setup');
   ok(['toolsDawStatus', 'toolsDawHide', 'toolsDawShow'].every((n) => pre.includes(n + ': () => ipcRenderer.invoke')), 'preload.js: 3 hàm cầu nối');
   ok(/dawTrayMgr\.restoreOnQuit\(\)/.test(main) && /Tray, Menu, nativeImage/.test(main), 'main.js: khôi phục DAW khi thoát; import Tray/Menu/nativeImage');
-  ok(/data-panel="panel-tools"/.test(html) && /id="panel-tools"/.test(html) && /js\/setupTools\.js/.test(html), 'setup.html: có tab + panel + script Công cụ & Sửa lỗi');
-  const card = html.slice(html.indexOf('id="panel-tools"'), html.indexOf('id="panel-backup"'));
-  ok(/Ẩn DAW xuống khay thông báo/.test(card) && !/Plugin/i.test(card.replace(/<!--[\s\S]*?-->/g, '')), 'panel Công cụ: có thẻ Ẩn DAW riêng; KHÔNG gộp Ẩn Plugin vào');
+  // A105: tab "Công cụ & Sửa lỗi" đã bỏ; Ẩn/Hiện DAW nằm trong thẻ Hidden DAW của tab AI.
+  ok(!/panel-tools/.test(html) && /js\/setupTools\.js/.test(html), 'setup.html: tab/panel Công cụ đã bỏ (A105); script setupTools.js vẫn nạp');
+  const card = html.slice(html.indexOf('🎛 Hidden DAW'), html.indexOf('📁 Startup'));
+  ok(/id="btnToolsHideDaw"/.test(card) && /id="btnToolsShowDaw"/.test(card) && /id="toolsDawBadge"/.test(card) && /id="toolsDawMessage"/.test(card) && /id="toolsDawPath"/.test(card) && !/Ẩn Plugin/i.test(card), 'thẻ Hidden DAW (AI): có đủ nút Ẩn/Hiện + badge + đường dẫn + thông báo; KHÔNG có Ẩn Plugin');
   ok(/btnToolsHideDaw/.test(tools) && /toolsDawHide/.test(tools) && /toolsDawShow/.test(tools), 'setupTools.js: nút Ẩn/Hiện gọi đúng IPC');
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((x) => x[1]); ok(new Set(ids).size === ids.length, 'setup.html: không trùng id', ids.filter((x, i) => ids.indexOf(x) !== i));
   console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);

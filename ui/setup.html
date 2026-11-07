@@ -33,7 +33,6 @@
                 <button class="nav-item" data-panel="panel-calibration">🎯 <span>Calibration</span></button>
                 <button class="nav-item" data-panel="panel-backup">💾 <span>Backup</span></button>
                 <button class="nav-item" data-panel="panel-system">🖥 <span>System</span></button>
-                <button class="nav-item" data-panel="panel-tools">🛠 <span>Công cụ &amp; Sửa lỗi</span></button>
             </nav>
         </aside>
 
@@ -102,13 +101,21 @@
 
                 <div class="panel-card">
                     <div class="panel-card-title">🎛 Hidden DAW
-                        <span class="badge badge-unwired" id="hiddenDawStatusBadge">Pending backend</span>
+                        <span class="badge badge-unwired" id="toolsDawBadge">—</span>
+                        <span class="badge badge-unwired" id="hiddenDawStatusBadge">Cấu hình: Pending backend</span>
                     </div>
                     <p class="hint-text">Hidden <strong>không đồng nghĩa</strong> với minimize xuống Taskbar. DAW phải
                         là process thật, tiếp tục mở đúng project/session, tiếp tục nhận MIDI và xử lý audio/plugin
-                        khi ở trạng thái hidden. Backend kiểm tra process thật, System Tray/Notification Area, và
-                        Show/Hide DAW thật <strong>chưa tồn tại</strong> trong repo — khối dưới đây chỉ là khung cấu
-                        hình đúng khái niệm, chưa có hành vi runtime nào.</p>
+                        khi ở trạng thái hidden. Nút <strong>Ẩn DAW / Hiện DAW</strong> bên dưới là chức năng thật (ẩn xuống
+                        khay thông báo cạnh đồng hồ Windows; bấm đúp hoặc chuột phải &gt; "Hiện DAW" để hiện lại; thoát
+                        Menu khi DAW đang ẩn thì DAW tự hiện lại). DAW lấy từ file đã chọn ở <em>Startup &amp; Paths</em>.
+                        Các ô cấu hình dưới đây vẫn chỉ là khung, chưa có hành vi runtime.</p>
+                    <div class="status-text" id="toolsDawPath" style="margin-bottom:8px;">—</div>
+                    <div class="row-buttons">
+                        <button id="btnToolsHideDaw" class="setup-btn">🙈 Ẩn DAW</button>
+                        <button id="btnToolsShowDaw" class="setup-btn">👁 Hiện DAW</button>
+                    </div>
+                    <div class="status-text" id="toolsDawMessage" style="margin:8px 0 12px;"></div>
                     <div class="placeholder-grid">
                         <label class="ph-field">Enable Hidden DAW
                             <label class="setup-checkbox"><input type="checkbox" id="hiddenDawEnable" disabled> Bật</label>
@@ -137,8 +144,8 @@
                             </select>
                         </label>
                     </div>
-                    <p class="hint-text">Show DAW / Hide DAW chưa được tạo ở đây vì chưa có backend Tray/Background
-                        hỗ trợ (đúng nguyên tắc A54 — không tạo control khi chưa có implementation tương ứng).</p>
+                    <p class="hint-text">Các ô cấu hình ở trên chưa có backend nên vẫn khoá (đúng nguyên tắc A54).
+                        Ẩn/Hiện DAW đã có backend thật nên mới có nút (A105 — gộp từ tab "Công cụ &amp; Sửa lỗi" cũ).</p>
                 </div>
 
                 <div class="panel-card">
@@ -858,24 +865,6 @@
             </section>
 
             <!-- ===================== BACKUP (đổi hoàn toàn từ LinkPro) ===================== -->
-            <!-- HIDE-DAW-01 — Công cụ và sửa lỗi. Mỗi công cụ là MỘT thẻ riêng (Ẩn DAW / Ẩn Plugin không gộp chung). Ẩn Plugin sẽ thêm thẻ riêng sau. -->
-            <section class="setup-panel" id="panel-tools" data-title="Công cụ &amp; Sửa lỗi">
-
-                <div class="panel-card">
-                    <div class="panel-card-title">🙈 Ẩn DAW xuống khay thông báo <span class="badge badge-unwired" id="toolsDawBadge">—</span></div>
-                    <p class="hint-text">Ẩn cửa sổ DAW đang chạy (không còn trên Taskbar). DAW <strong>vẫn chạy bình thường</strong>, vẫn nhận MIDI và xử lý audio.
-                        Biểu tượng chấm tròn xanh hiện cạnh đồng hồ Windows: bấm đúp hoặc chuột phải &gt; "Hiện DAW" để hiện lại. Thoát Menu khi DAW đang ẩn thì DAW tự hiện lại.
-                        DAW lấy từ file đã chọn ở <em>AI &gt; Đường dẫn &amp; khởi động</em>.</p>
-                    <div class="status-text" id="toolsDawPath" style="margin-bottom:8px;">—</div>
-                    <div class="row-buttons">
-                        <button id="btnToolsHideDaw" class="setup-btn">🙈 Ẩn DAW</button>
-                        <button id="btnToolsShowDaw" class="setup-btn">👁 Hiện DAW</button>
-                    </div>
-                    <div class="status-text" id="toolsDawMessage" style="margin-top:8px;"></div>
-                </div>
-
-            </section>
-
             <section class="setup-panel" id="panel-backup" data-title="Backup">
                 <div class="panel-card">
                     <div class="panel-card-title">💾 Backup / Restore / Export / Import</div>
