@@ -845,7 +845,7 @@
                     <div class="panel-card-title">🎨 Theme / Language <span class="badge badge-unwired">Chưa có Engine</span></div>
                     <div class="placeholder-grid">
                         <label class="ph-field">Theme<select disabled><option>Tối (mặc định)</option></select></label>
-                        <label class="ph-field">Language<select disabled><option>Tiếng Việt</option></select></label>
+                        <label class="ph-field">Language<select id="languageSelect" data-i18n-skip><option value="vi">Tiếng Việt</option><option value="en">English</option></select></label>
                     </div>
                 </div>
 
@@ -886,6 +886,8 @@
     <!-- TASK A52 — dựng sẵn popup Admin Login + form Đổi Password (window.AdminAuthUI).
          Chưa được gắn vào bất kỳ tab/nút nào ở đây — việc gắn vào tab "AI 🔒" thuộc A53. -->
     <script src="js/adminAuthUI.js"></script>
+    <!-- I18N-01 — ngôn ngữ giao diện Việt/Anh; nạp CUỐI CÙNG để dịch mọi thứ các script trên đã dựng. -->
+    <script src="js/i18n.js"></script>
 </body>
 
 </html>
