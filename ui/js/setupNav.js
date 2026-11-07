@@ -30,7 +30,7 @@
             }
         }
 
-        if (panelId === "panel-plugins") {
+        if (panelId === "panel-daw") {
             const badge = document.getElementById("autoTuneStatusBadge");
             if (badge && typeof getSetting === "function") {
                 const v = getSetting("selectedAutoTune");

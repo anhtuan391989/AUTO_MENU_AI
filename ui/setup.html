@@ -28,7 +28,6 @@
                 <button class="nav-item" data-panel="panel-ai">🤖 <span>AI 🔒</span></button>
                 <button class="nav-item" data-panel="panel-midi">🎹 <span>MIDI</span></button>
                 <button class="nav-item" data-panel="panel-daw">🎛 <span>DAW</span></button>
-                <button class="nav-item" data-panel="panel-plugins">🧩 <span>Plugin</span></button>
                 <button class="nav-item" data-panel="panel-database">🗄 <span>Database</span></button>
                 <button class="nav-item" data-panel="panel-calibration">🎯 <span>Calibration</span></button>
                 <button class="nav-item" data-panel="panel-backup">💾 <span>Backup</span></button>
@@ -193,6 +192,27 @@
                     </div>
                     <!-- nút ẩn giữ để không phá initModal(..., "btnClosePj") của setup.js -->
                     <button id="btnClosePj" style="display:none;"></button>
+                </div>
+
+                <!-- Trình duyệt (chuyển từ System sang đây, xếp dưới cùng) — giữ nguyên id/handler -->
+                <div class="panel-card">
+                    <div class="panel-card-title">🌐 Browser <span class="badge badge-live">Đã hỗ trợ</span></div>
+                    <div class="daw-list-inline">
+                        <label><input type="radio" name="browser" value="Chrome"> Chrome</label>
+                        <label><input type="radio" name="browser" value="Brave"> Brave</label>
+                        <label><input type="radio" name="browser" value="Cốc Cốc"> Cốc Cốc</label>
+                        <label><input type="radio" name="browser" value="Edge"> Edge <span class="tag-unassigned">auto-dò: chưa hỗ trợ</span></label>
+                        <label><input type="radio" name="browser" value="Firefox"> Firefox <span class="tag-unassigned">auto-dò: chưa hỗ trợ</span></label>
+                    </div>
+                    <div class="group-title" style="margin-top:10px;">Youtube ID (PWA):</div>
+                    <input type="text" id="youtubeIdInput" style="width:100%; margin-bottom:10px;">
+                    <div class="group-title">Đường dẫn trình duyệt (.exe):</div>
+                    <div id="browserPathDisplay" class="status-text" style="margin-bottom:8px;">❌ Chưa thiết lập</div>
+                    <button id="btnSelectBrowserPath" class="setup-btn" style="width:100%; margin-bottom:10px;">📂 Chọn đường dẫn trình duyệt</button>
+                    <button id="saveBrowserBtn" class="setup-btn">💾 Lưu trình duyệt</button>
+                    <button id="btnInstallBrave" class="setup-btn">🌐 Cài Brave không quảng cáo</button>
+                    <button id="openBrowserModal" style="display:none;"></button>
+                    <button id="closeBrowserBtn" style="display:none;"></button>
                 </div>
             </section>
 
@@ -628,36 +648,7 @@
                     <button id="btnJbridge" class="setup-btn">⚙ Cài đặt jBridge cho Studio One</button>
                 </div>
 
-                <div class="panel-card">
-                    <div class="panel-card-title">🕑 DAW khác <span class="badge badge-soon">Coming Soon</span></div>
-                    <p class="hint-text">Vị trí đã đặt sẵn — chỉ cần bổ sung Driver, không cần sửa UI này.</p>
-                    <div class="soon-list">
-                        <div class="soon-row"><b>Cubase</b><span>Hồ sơ toạ độ có sẵn ở trên — chưa có Driver điều khiển</span></div>
-                        <div class="soon-row"><b>Nuendo</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
-                        <div class="soon-row"><b>Reaper</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
-                        <div class="soon-row"><b>Ableton</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
-                        <div class="soon-row"><b>FL Studio</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- ===================== PLUGIN ===================== -->
-            <!-- ===================== HIỆU ỨNG (quản lý nút của Bảng Hiệu Ứng) ===================== -->
-            <section class="setup-panel" id="panel-effects" data-title="Hiệu Ứng">
-                <div class="panel-card">
-                    <div class="panel-card-title">🎧 Quản lý Bảng Hiệu Ứng</div>
-                    <p class="hint-text">Thêm, đổi tên, thay file âm thanh hoặc xoá nút. Bảng Hiệu Ứng trên menu tự cập nhật ngay. Nhận file mp3, wav, ogg, m4a — file được sao chép vào ứng dụng nên không mất khi bạn xoá file gốc.</p>
-                    <div class="row-buttons">
-                        <button id="fxAddHieuUng" class="setup-btn">➕ Thêm vào HIỆU ỨNG</button>
-                        <button id="fxAddNhac" class="setup-btn">➕ Thêm vào NHẠC</button>
-                        <button id="fxResetLib" class="setup-btn">⟲ Khôi phục mặc định</button>
-                    </div>
-                    <div id="fxLibStatus" class="hint-text" style="min-height:16px"></div>
-                    <div id="fxLibRoot"></div>
-                </div>
-            </section>
-
-            <section class="setup-panel" id="panel-plugins" data-title="Plugin">
+                <!-- ===== Plugin (đã GỘP vào mục DAW) — giữ nguyên toàn bộ id/handler ===== -->
                 <div class="panel-card">
                     <div class="panel-card-title">🎤 Auto-Tune <span class="badge badge-soon" id="autoTuneStatusBadge">Not selected</span></div>
                     <div class="daw-list-inline">
@@ -711,7 +702,36 @@
                         <div class="soon-row"><b>Plugin Scan / Folder / Status</b><span>—</span></div>
                     </div>
                 </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🕑 DAW khác <span class="badge badge-soon">Coming Soon</span></div>
+                    <p class="hint-text">Vị trí đã đặt sẵn — chỉ cần bổ sung Driver, không cần sửa UI này.</p>
+                    <div class="soon-list">
+                        <div class="soon-row"><b>Cubase</b><span>Hồ sơ toạ độ có sẵn ở trên — chưa có Driver điều khiển</span></div>
+                        <div class="soon-row"><b>Nuendo</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
+                        <div class="soon-row"><b>Reaper</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
+                        <div class="soon-row"><b>Ableton</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
+                        <div class="soon-row"><b>FL Studio</b><span>Transport • Mixer • Track • Automation • Plugin • Marker</span></div>
+                    </div>
+                </div>
             </section>
+
+            <!-- ===================== PLUGIN ===================== -->
+            <!-- ===================== HIỆU ỨNG (quản lý nút của Bảng Hiệu Ứng) ===================== -->
+            <section class="setup-panel" id="panel-effects" data-title="Hiệu Ứng">
+                <div class="panel-card">
+                    <div class="panel-card-title">🎧 Quản lý Bảng Hiệu Ứng</div>
+                    <p class="hint-text">Thêm, đổi tên, thay file âm thanh hoặc xoá nút. Bảng Hiệu Ứng trên menu tự cập nhật ngay. Nhận file mp3, wav, ogg, m4a — file được sao chép vào ứng dụng nên không mất khi bạn xoá file gốc.</p>
+                    <div class="row-buttons">
+                        <button id="fxAddHieuUng" class="setup-btn">➕ Thêm vào HIỆU ỨNG</button>
+                        <button id="fxAddNhac" class="setup-btn">➕ Thêm vào NHẠC</button>
+                        <button id="fxResetLib" class="setup-btn">⟲ Khôi phục mặc định</button>
+                    </div>
+                    <div id="fxLibStatus" class="hint-text" style="min-height:16px"></div>
+                    <div id="fxLibRoot"></div>
+                </div>
+            </section>
+
 
             <!-- ===================== DATABASE ===================== -->
             <section class="setup-panel" id="panel-database" data-title="Database">
@@ -809,26 +829,6 @@
 
             <!-- ===================== SYSTEM (gộp Theme/Language/Update/Log/Version/License/Browser) ===================== -->
             <section class="setup-panel" id="panel-system" data-title="System">
-
-                <div class="panel-card">
-                    <div class="panel-card-title">🌐 Browser <span class="badge badge-live">Đã hỗ trợ</span></div>
-                    <div class="daw-list-inline">
-                        <label><input type="radio" name="browser" value="Chrome"> Chrome</label>
-                        <label><input type="radio" name="browser" value="Brave"> Brave</label>
-                        <label><input type="radio" name="browser" value="Cốc Cốc"> Cốc Cốc</label>
-                        <label><input type="radio" name="browser" value="Edge"> Edge <span class="tag-unassigned">auto-dò: chưa hỗ trợ</span></label>
-                        <label><input type="radio" name="browser" value="Firefox"> Firefox <span class="tag-unassigned">auto-dò: chưa hỗ trợ</span></label>
-                    </div>
-                    <div class="group-title" style="margin-top:10px;">Youtube ID (PWA):</div>
-                    <input type="text" id="youtubeIdInput" style="width:100%; margin-bottom:10px;">
-                    <div class="group-title">Đường dẫn trình duyệt (.exe):</div>
-                    <div id="browserPathDisplay" class="status-text" style="margin-bottom:8px;">❌ Chưa thiết lập</div>
-                    <button id="btnSelectBrowserPath" class="setup-btn" style="width:100%; margin-bottom:10px;">📂 Chọn đường dẫn trình duyệt</button>
-                    <button id="saveBrowserBtn" class="setup-btn">💾 Lưu trình duyệt</button>
-                    <button id="btnInstallBrave" class="setup-btn">🌐 Cài Brave không quảng cáo</button>
-                    <button id="openBrowserModal" style="display:none;"></button>
-                    <button id="closeBrowserBtn" style="display:none;"></button>
-                </div>
 
                 <div class="panel-card">
                     <div class="panel-card-title">🎨 Theme / Language <span class="badge badge-unwired">Chưa có Engine</span></div>
