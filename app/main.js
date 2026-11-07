@@ -846,6 +846,20 @@ ipcMain.handle("database-status", async () => {
     }
 });
 
+// APP-UPDATE-01 — Setup > System & Backup > Phiên bản / Cập nhật: đọc version, kiểm tra, cập nhật (git pull --ff-only), khởi động lại.
+let __appUpdater = null;
+function getAppUpdater() {
+    if (!__appUpdater) {
+        const { createAppUpdater, realExec } = require("./AppUpdater");
+        __appUpdater = createAppUpdater({ rootDir: path.join(__dirname, ".."), exec: realExec });
+    }
+    return __appUpdater;
+}
+ipcMain.handle("app-version", async () => { try { return await getAppUpdater().getVersion(); } catch (e) { return { ok: false, version: "?", message: String((e && e.message) || e) }; } });
+ipcMain.handle("app-update-check", async () => { try { return await getAppUpdater().check(); } catch (e) { return { ok: false, reason: "ERROR", message: String((e && e.message) || e) }; } });
+ipcMain.handle("app-update-apply", async () => { try { return await getAppUpdater().apply(); } catch (e) { return { ok: false, reason: "ERROR", message: String((e && e.message) || e) }; } });
+ipcMain.handle("app-relaunch", async () => { try { return getAppUpdater().relaunch(app); } catch (e) { return { ok: false, message: String((e && e.message) || e) }; } });
+
 ipcMain.handle("admin-auth-verify", async (event, password) => {
     try {
         return AdminAuth.verify(password);

@@ -30,8 +30,7 @@
                 <button class="nav-item" data-panel="panel-daw">🎛 <span>DAW</span></button>
                 <button class="nav-item" data-panel="panel-database">🗄 <span>Database</span></button>
                 <button class="nav-item" data-panel="panel-calibration">🎯 <span>Calibration</span></button>
-                <button class="nav-item" data-panel="panel-backup">💾 <span>Backup</span></button>
-                <button class="nav-item" data-panel="panel-system">🖥 <span>System</span></button>
+                <button class="nav-item" data-panel="panel-system">🖥 <span>System &amp; Backup</span></button>
             </nav>
         </aside>
 
@@ -802,8 +801,24 @@
                 </div>
             </section>
 
-            <!-- ===================== BACKUP (đổi hoàn toàn từ LinkPro) ===================== -->
-            <section class="setup-panel" id="panel-backup" data-title="Backup">
+            <!-- ===================== SYSTEM (gộp Theme/Language/Update/Log/Version/License/Browser) ===================== -->
+            <section class="setup-panel" id="panel-system" data-title="System &amp; Backup">
+
+                <div class="panel-card">
+                    <div class="panel-card-title">🎨 Theme / Language <span class="badge badge-unwired">Chưa có Engine</span></div>
+                    <div class="placeholder-grid">
+                        <label class="ph-field">Theme<select disabled><option>Tối (mặc định)</option></select></label>
+                        <label class="ph-field">Language<select id="languageSelect" data-i18n-skip><option value="vi">Tiếng Việt</option><option value="en">English</option></select></label>
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <div class="panel-card-title">📈 Log <span class="badge badge-live">Thật</span></div>
+                    <p class="hint-text">Log thật đang được ghi tại thư mục <code>/logs</code> (qua
+                        <code>electronAPI.sendTelemetry</code>). Chưa có trình xem log ngay trong Setup.</p>
+                </div>
+
+                <!-- Backup (đã GỘP vào mục System) — giữ nguyên toàn bộ id/handler -->
                 <div class="panel-card">
                     <div class="panel-card-title">💾 Backup / Restore / Export / Import</div>
                     <p class="hint-text">Sao lưu / phục hồi toàn bộ cài đặt hiện tại — đổi tên hoàn toàn khỏi "LinkPro"
@@ -825,30 +840,22 @@
                         <input type="checkbox" id="checkAutoRestore"> Tự động Restore khi mở DAW
                     </label>
                 </div>
-            </section>
-
-            <!-- ===================== SYSTEM (gộp Theme/Language/Update/Log/Version/License/Browser) ===================== -->
-            <section class="setup-panel" id="panel-system" data-title="System">
 
                 <div class="panel-card">
-                    <div class="panel-card-title">🎨 Theme / Language <span class="badge badge-unwired">Chưa có Engine</span></div>
-                    <div class="placeholder-grid">
-                        <label class="ph-field">Theme<select disabled><option>Tối (mặc định)</option></select></label>
-                        <label class="ph-field">Language<select id="languageSelect" data-i18n-skip><option value="vi">Tiếng Việt</option><option value="en">English</option></select></label>
+                    <div class="panel-card-title">🔄 Phiên bản / Cập nhật <span class="badge badge-live">Thật</span></div>
+                    <div class="status-text" id="appVersionText">Phiên bản: đang đọc…</div>
+                    <div class="row-buttons" style="margin-top:8px;">
+                        <button id="btnCheckUpdate" class="setup-btn">🔍 Kiểm tra cập nhật</button>
+                        <button id="btnApplyUpdate" class="setup-btn" style="display:none;">⬇ Cập nhật ngay</button>
+                        <button id="btnRelaunchApp" class="setup-btn" style="display:none;">🔁 Khởi động lại để dùng bản mới</button>
                     </div>
-                </div>
-
-                <div class="panel-card">
-                    <div class="panel-card-title">📈 Log <span class="badge badge-live">Thật</span></div>
-                    <p class="hint-text">Log thật đang được ghi tại thư mục <code>/logs</code> (qua
-                        <code>electronAPI.sendTelemetry</code>). Chưa có trình xem log ngay trong Setup.</p>
-                </div>
-
-                <div class="panel-card">
-                    <div class="panel-card-title">Version / Update / License <span class="badge badge-soon">Coming Soon</span></div>
-                    <p class="hint-text">Chưa có kênh IPC đọc version/build động, chưa có Engine kiểm tra cập nhật,
-                        chưa có hệ thống license/activation trong project. Để trống thay vì bịa số liệu — chỉ cần bổ
-                        sung Engine sau này, không cần sửa layout.</p>
+                    <div class="status-text" id="appUpdateMessage" style="margin-top:8px;"></div>
+                    <p class="hint-text">Cập nhật = lấy bản mới nhất của nhánh <code>main</code> trên GitHub về thư mục app (cần cài git
+                        và thư mục app là bản clone từ GitHub). Git chỉ nhận bản mới khi không đè lên thay đổi chưa lưu của bạn — nếu có
+                        xung đột sẽ báo lỗi và KHÔNG ghi đè gì.</p>
+                    <div class="soon-list" style="margin-top:8px;">
+                        <div class="soon-row"><b>License / kích hoạt</b><span>Sắp ra mắt — chưa có hệ thống license trong project</span></div>
+                    </div>
                 </div>
 
                 <div class="panel-card">
@@ -864,6 +871,7 @@
     <script src="js/setup.js"></script>
     <script src="js/setupNav.js"></script>
     <script src="js/setupTools.js"></script>
+    <script src="js/setupVersion.js"></script>
     <script src="js/setupEffects.js"></script>
     <script src="js/setupVuMeter.js"></script>
     <script src="js/midiHealth.js"></script>

@@ -150,6 +150,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // qua IPC, không tự so sánh password ở renderer.
     adminAuthVerify: (password) => ipcRenderer.invoke("admin-auth-verify", password),
     getDatabaseStatus: () => ipcRenderer.invoke("database-status"), // DB-STATUS-01
+    // APP-UPDATE-01 — Phiên bản / Cập nhật
+    getAppVersion: () => ipcRenderer.invoke("app-version"),
+    checkAppUpdate: () => ipcRenderer.invoke("app-update-check"),
+    applyAppUpdate: () => ipcRenderer.invoke("app-update-apply"),
+    relaunchApp: () => ipcRenderer.invoke("app-relaunch"),
     // HIDE-DAW-01 — Setup > Công cụ và sửa lỗi > Ẩn DAW xuống khay thông báo
     toolsDawStatus: () => ipcRenderer.invoke("tools-daw-status"),
     toolsDawHide: () => ipcRenderer.invoke("tools-daw-hide"),
