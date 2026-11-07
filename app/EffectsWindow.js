@@ -154,6 +154,15 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
         return { ok: true, open: true };
     }
 
+    // EFFECT-AOT-PERSIST (phần 2): lúc Menu khởi động xong, NẾU lần tích cuối là "Luôn Hiện" thì tự mở Bảng Hiệu Ứng cùng Menu.
+    // Lần cuối bỏ tích (hoặc chưa từng tích) => KHÔNG làm gì, Menu mở bình thường. Đã mở sẵn => không mở thêm, không giành focus.
+    function openIfPinned() {
+        if (alwaysOnTop !== true) return { ok: true, open: alive(win), auto: false };
+        if (alive(win)) return { ok: true, open: true, auto: false };
+        const r = open();
+        return { ...r, auto: true };
+    }
+
     function close() {
         const w = win;
         win = null;
@@ -207,7 +216,7 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
         return alive(main) && !!sender && sender === main.webContents;
     }
 
-    return { open, close, toggle, getAlwaysOnTop, setAlwaysOnTop, isFromEffects, isFromMain, isOpen: () => alive(win), getWebContents: () => (alive(win) ? win.webContents : null) };
+    return { open, openIfPinned, close, toggle, getAlwaysOnTop, setAlwaysOnTop, isFromEffects, isFromMain, isOpen: () => alive(win), getWebContents: () => (alive(win) ? win.webContents : null) };
 }
 
 module.exports = { createEffectsWindowManager, computeInitialPosition, WIDTH, HEIGHT };

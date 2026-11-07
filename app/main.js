@@ -101,6 +101,7 @@ function createMainWindow() {
         } catch (err) {
             console.error("setAlwaysOnTop (did-finish-load) lỗi:", err);
         }
+        autoOpenEffectsIfPinned(); // EFFECT-AOT-PERSIST: lần cuối tích "Luôn Hiện" => Bảng Hiệu Ứng tự mở cùng Menu (trang đã nạp xong nên nút EFFECT sáng đúng)
     });
 }
 
@@ -1015,6 +1016,11 @@ const effectsWindow = createEffectsWindowManager({
         return writeSettingsFile({ ...s, effectsWindow: { ...cur, alwaysOnTop: !!v } });
     }
 });
+
+// EFFECT-AOT-PERSIST: gọi 1 lần khi cửa sổ Menu nạp xong (xem createMainWindow). Lỗi ở đây không được làm hỏng việc khởi động Menu.
+function autoOpenEffectsIfPinned() {
+    try { effectsWindow.openIfPinned(); } catch (err) { console.error("effects tự mở theo trạng thái Luôn Hiện lỗi (bỏ qua):", err); }
+}
 
 ipcMain.on("effects-toggle", (event) => {
     try {

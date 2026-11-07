@@ -1,0 +1,1893 @@
+const { MenuKeyClient } = require('./menu-api-client.js');
+const keyServer = new MenuKeyClient("https://menu-key-server.matuotluuly.workers.dev");
+const { app, BrowserWindow, ipcMain, dialog, session, shell, screen, desktopCapturer, Tray, Menu, nativeImage } = require("electron");
+// A104 — Menu tự chạy Administrator (cùng mức quyền với FSP8) để ẨN/HIỆN DAW hoạt động; nếu người dùng từ chối UAC thì chạy quyền thường như cũ.
+const __elevation = require("./Elevation").ensureElevated({ log: console.log });
+if (__elevation.action === "relaunched") app.exit(0); // bản Administrator đã được mở -> bản quyền thường thoát ngay, không tạo cửa sổ nào
+const path = require("path");
+const fs = require("fs");
+const { execFile } = require("child_process");
+const https = require("https");
+const os = require("os");
+
+let mainWin = null;
+let setupWin = null;
+// MENU-UI-01B — true khi người dùng đã chủ động gạt Always on Top trong phiên này (không lưu qua phiên).
+let aotUserChanged = false;
+
+// ================================
+// LƯU TRỮ DÙNG CHUNG (thay cho localStorage vốn bị cô lập theo từng cửa sổ)
+// ================================
+const SETTINGS_FILE = path.join(app.getPath("userData"), "app-settings.json");
+
+function readSettingsFile() {
+    // TASK A78: file tồn tại nhưng KHÔNG dùng được (JSON hỏng, hoặc hợp lệ nhưng không phải object —
+    // vd `[]`, `"x"`, `null`) -> trả null (app dùng mặc định) và giữ 1 bản sao `.corrupt-*` để lần lưu
+    // kế tiếp không làm mất hẳn dữ liệu cũ. Việc sao lưu là best-effort, KHÔNG BAO GIỜ làm app lỗi/không khởi động.
+    let raw;
+    try {
+        if (!fs.existsSync(SETTINGS_FILE)) {
+            return null;
+        }
+        raw = fs.readFileSync(SETTINGS_FILE, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("app-settings.json không phải object");
+        }
+        return parsed;
+    } catch (err) {
+        console.error("readSettingsFile lỗi:", err);
+        if (typeof raw === "string") {
+            try {
+                // Không tạo bản sao trùng nội dung cho mỗi lần đọc (nhiều cửa sổ/module đọc lặp lại trước lần lưu kế tiếp).
+                const sep = Math.max(SETTINGS_FILE.lastIndexOf("/"), SETTINGS_FILE.lastIndexOf("\\"));
+                const dir = SETTINGS_FILE.slice(0, sep + 1);
+                const base = SETTINGS_FILE.slice(sep + 1) + ".corrupt-";
+                const dup = fs.readdirSync(dir || ".").some((n) => {
+                    if (n.indexOf(base) !== 0) return false;
+                    try { return fs.readFileSync(dir + n, "utf-8") === raw; } catch { return false; }
+                });
+                if (!dup) fs.writeFileSync(SETTINGS_FILE + ".corrupt-" + Date.now() + "-" + Math.floor(Math.random() * 1e6), raw, "utf-8");
+            } catch (e2) {
+                console.error("Không sao lưu được file settings hỏng (bỏ qua):", e2);
+            }
+        }
+        return null;
+    }
+}
+
+function writeSettingsFile(data) {
+    // TASK A55 — Atomic/Safe Write: ghi ra file tạm cùng thư mục rồi rename đè lên file
+    // chính. rename trên cùng ổ đĩa là thao tác gần như nguyên tử ở cấp hệ điều hành — nếu
+    // tiến trình bị crash/mất điện giữa chừng, file admin SETTINGS_FILE cũ vẫn nguyên vẹn
+    // (không bao giờ bị half-written/rỗng). Áp dụng cho MỌI lần ghi settings (không riêng
+    // Startup & Paths của A55) vì đây là hàm ghi DUY NHẤT của toàn bộ app-settings.json —
+    // chữ ký hàm và giá trị trả về (true/false) giữ nguyên 100%, không phá caller nào có sẵn.
+    // Lưu ý: hàm này được test bằng cách trích riêng source rồi chạy trong vm sandbox chỉ có
+    // {console, fs, SETTINGS_FILE} (xem tests/unit/SettingsFileIO.verify.js) — KHÔNG có
+    // `process`/`require` trong sandbox đó, nên chỉ dùng fs + JS built-in thuần (Date/Math).
+    const tmpFile = SETTINGS_FILE + ".tmp-" + Date.now() + "-" + Math.floor(Math.random() * 1e9);
+    try {
+        fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), "utf-8");
+        fs.renameSync(tmpFile, SETTINGS_FILE);
+        return true;
+    } catch (err) {
+        console.error("writeSettingsFile lỗi:", err);
+        try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch { /* dọn rác best-effort */ }
+        return false;
+    }
+}
+
+function createMainWindow() {
+    mainWin = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        webPreferences: {
+            preload: path.join(__dirname, "preload.js"),
+            contextIsolation: true,
+            nodeIntegration: false
+        }
+    });
+
+    mainWin.loadFile(path.join(__dirname, "..", "ui", "index.html"));
+
+    // MENU-UI-01B — Always on Top MẶC ĐỊNH ON mỗi lần khởi động (không lưu qua phiên).
+    // Đặt ngay sau khi tạo cửa sổ, rồi đặt lại ĐÚNG 1 LẦN khi trang tải xong (chỉ nếu người dùng
+    // chưa tự gạt) để chắc chắn Windows áp dụng. Trạng thái thật do isAlwaysOnTop() báo về UI.
+    try { mainWin.setAlwaysOnTop(true); } catch (err) { console.error("setAlwaysOnTop mặc định lỗi:", err); }
+    mainWin.webContents.once("did-finish-load", () => {
+        try {
+            if (mainWin && !mainWin.isDestroyed() && !aotUserChanged) mainWin.setAlwaysOnTop(true);
+        } catch (err) {
+            console.error("setAlwaysOnTop (did-finish-load) lỗi:", err);
+        }
+        autoOpenEffectsIfPinned(); // EFFECT-AOT-PERSIST: lần cuối tích "Luôn Hiện" => Bảng Hiệu Ứng tự mở cùng Menu (trang đã nạp xong nên nút EFFECT sáng đúng)
+    });
+}
+
+function createSetupWindow() {
+
+    if (setupWin && !setupWin.isDestroyed()) {
+        return;
+    }
+
+    setupWin = new BrowserWindow({
+        width: 900,
+        height: 700,
+        show: false,
+        parent: mainWin,
+        modal: false,
+        webPreferences: {
+            preload: path.join(__dirname, "preload.js"),
+            contextIsolation: true,
+            nodeIntegration: false
+        }
+    });
+
+    setupWin.loadFile(path.join(__dirname, "..", "ui", "setup.html"));
+
+    setupWin.on("closed", () => {
+        setupWin = null;
+    });
+}
+
+const AIBootstrap = require("../core/ai/AIBootstrap");
+const AIContext = require("../core/ai/AIContext");
+const EventBus = require("../core/events/EventBus");
+const Events = require("../core/events/Events");
+const ControlSource = require("../core/shared/ControlSource");
+const ManualState = require("../core/shared/ManualState");
+const TelemetryLogger = require("../core/shared/TelemetryLogger");
+// TASK A49 — IPC safety boundary cần Logger để log lỗi rõ ràng
+const Logger = require("../core/shared/Logger");
+// TASK A52 — Admin Authentication Backend cho khu vực "AI 🔒" trong Setup (SETUP OWNER: Claude A).
+// Toàn bộ logic hash/verify/change password nằm trong module này, main.js chỉ relay qua IPC.
+const AdminAuth = require("../core/shared/AdminAuth");
+const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
+const MpcHcSession = require("../core/integration/MpcHcSession"); // Task C — nguồn thứ 2 (MPC-HC), file có sẵn nhưng trước đây chưa được require/dùng ở đây
+const NowPlayingArbitrator = require("../core/integration/NowPlayingArbitrator"); // Task C — quyết định SMTC hay MPC-HC đang active
+const NowPlayingResolver = require("../core/reference/NowPlayingResolver");
+const SongMatcher = require("../core/reference/SongMatcher");
+// Task C — Key Server: HỎI server trước khi dò Key, và TỰ GỬI Key lên server sau khi dò xong.
+// Mặc định BẬT; tắt bằng cách đặt "keyServerAutoSync": false trong app-settings.json.
+const { KeyServerSync } = require("../core/integration/KeyServerSync");
+const KeyTimeline = require("../core/integration/KeyTimeline"); // MOD theo đoạn của Key Server (phút nào đổi tone gì)
+const NowPlayingClock = require("../core/integration/NowPlayingClock"); // đồng hồ bài đang phát (vị trí/thời lượng thật từ MPC-HC hoặc SMTC)
+const keyServerSync = new KeyServerSync({
+    isEnabled: () => {
+        const s = readSettingsFile();
+        return !(s && s.keyServerAutoSync === false);
+    }
+});
+// Bài đang phát (đã chuẩn hoá) do CHÍNH main process theo dõi — renderer không được tự khai tên bài khi gửi lên server.
+let currentNowPlayingForSync = null;
+// MIDI CONTROL CORE v1.0 — wiring MỚI, độc lập hoàn toàn với AIBootstrap/EventBus ở trên.
+// KHÔNG viết lại CommandEngine/capabilityRegistry (core/command-engine-js/), chỉ nối chúng
+// vào runtime thật. Toàn bộ lỗi bên trong CommandRuntime tự bắt, không throw ra ngoài.
+const CommandRuntime = require("../core/command-engine-js/runtime");
+
+app.whenReady().then(async () => {
+    // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
+    // App này cần quyền mic để liệt kê tên soundcard, và quyền midi để gửi MIDI sang DAW.
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+        if (permission === "media" || permission === "display-capture" || permission === "midi" || permission === "midiSysex") {
+            callback(true);
+            return;
+        }
+        callback(false);
+    });
+
+    session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+        return permission === "media" || permission === "display-capture" || permission === "midi" || permission === "midiSysex";
+    });
+
+    // TASK A78 — SYSTEM_AUDIO = "Speaker01 (loopback)": đọc đúng đường âm thanh PHÁT RA của Windows
+    // (thiết bị phát mặc định = Speaker01 / Mix01 của DAW) qua WASAPI loopback. Chỉ trả audio loopback,
+    // không đụng MIC. Video bị renderer bỏ ngay (audioSource.js).
+    session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+        desktopCapturer.getSources({ types: ["screen"] }).then((sources) => {
+            if (!sources || !sources.length) { callback({}); return; }
+            callback({ video: sources[0], audio: "loopback" });
+        }).catch(() => callback({}));
+    });
+
+    createMainWindow();
+    createSetupWindow();
+    await AIBootstrap.initialize();
+
+    // MIDI CONTROL CORE v1.0 — bọc try/catch riêng: nếu MIDI/Command Engine lỗi (thiếu
+    // easymidi lúc runtime, không có cổng MIDI nào, v.v.) thì app vẫn mở bình thường,
+    // không ảnh hưởng AIBootstrap/Key/BPM/MOD/EventBus ở trên hay bất kỳ chức năng cũ nào.
+    try {
+        CommandRuntime.start({ readSettingsFile });
+    } catch (err) {
+        console.error("CommandRuntime.start() lỗi (không ảnh hưởng phần còn lại của app):", err);
+    }
+
+    // ================================
+    // Now Playing — Data Acquisition Layer (Task C).
+    // ĐỘC LẬP HOÀN TOÀN với AIBootstrap/AIContext/EventBus/ai-result ở trên:
+    // không publish EventBus, không gọi AIContext, không ảnh hưởng Key/BPM/Mod
+    // Engine hay quyết định Lock trực tiếp — module này chỉ LÀM GIÀU dữ liệu
+    // (tra Song Database) rồi gửi qua IPC; renderer (Key Source Manager, mục
+    // 7B ui/js/renderer.js) mới là nơi quyết định áp dụng Key nào.
+    // Tự an toàn trên máy không phải Windows (start() tự phát hiện, không spawn
+    // gì, không throw, không crash app — xem core/integration/WindowsMediaSession.js
+    // và core/integration/MpcHcSession.js).
+    //
+    // 2 nguồn dữ liệu ĐỘC LẬP, chạy song song:
+    //   - windowsMediaSession (SMTC)  -> trình duyệt (Edge/Chrome/Brave...).
+    //   - mpcHcSession (MPC-HC Web Interface) -> MPC-HC (SMTC không nhận diện
+    //     được MPC-HC, đã kiểm chứng thật — xem báo cáo). TRƯỚC BẢN NÀY,
+    //     mpcHcSession/NowPlayingArbitrator đã có file sẵn trong core/integration/
+    //     nhưng CHƯA từng được require/khởi tạo ở đây — đó là lý do MPC-HC
+    //     đang phát thật (âm thanh VU vẫn nhận) nhưng NOW PLAYING luôn hiện
+    //     "Unavailable". Bản này nối 2 nguồn lại, KHÔNG đổi cơ chế WindowsMediaSession cũ.
+    // NowPlayingArbitrator.resolveActiveSource() quyết định lúc nào dùng nguồn
+    // nào theo quy tắc CỐ ĐỊNH (xem core/integration/NowPlayingArbitrator.js),
+    // rồi mới gửi 1 payload DUY NHẤT qua kênh IPC "now-playing-change" như cũ —
+    // renderer KHÔNG cần đổi gì (payload vẫn đúng shape {title, artist,
+    // databaseMatch, ...} như trước).
+    // ================================
+    const windowsMediaSession = new WindowsMediaSession();
+    const mpcHcSession = new MpcHcSession({ readSettingsFile });
+
+    let latestSmtcSnapshot = null;
+    let latestMpcHcSnapshot = null;
+    let smtcLayerAvailable = false;
+    let mpcHcLayerAvailable = false;
+
+    // Tra Song Database + chuẩn hoá Title/Artist theo ĐÚNG nguồn gốc dữ liệu
+    // (SMTC dùng resolver "smtc"; MPC-HC dùng lại resolver "file" có sẵn —
+    // đọc ID3 tag thật hoặc tách tên file — vì MPC-HC Web Interface cho biết
+    // đường dẫn file thật trên đĩa, không phải chuỗi tiêu đề thô cần regex).
+    function resolveTitleArtist(snapshot, source) {
+
+        if (!snapshot) return { title: null, artist: null };
+
+        if (source === "smtc") {
+            return NowPlayingResolver.resolve({ source: "smtc", title: snapshot.title, artist: snapshot.artist });
+        }
+
+        if (source === "mpc-hc" && snapshot.filePath) {
+            return NowPlayingResolver.resolve({ source: "file", filePath: snapshot.filePath });
+        }
+
+        return { title: snapshot.title || null, artist: snapshot.artist || null };
+
+    }
+
+    // ---- MOD theo đoạn Key Server (Claude C) ----
+    // Bài có >= 2 đoạn Key khác nhau trên server: gửi KẾ HOẠCH (phút - tone) cho renderer hiển thị, rồi canh phút hiện tại;
+    // tới đoạn mới thì bắn "key-timeline-fire" 1 lần. Renderer đưa sự kiện vào đường MOD sẵn có (Auto-Tune); SoundShifter không bị chạm.
+    // Phút hiện tại: MPC-HC có vị trí thật; trình duyệt (SMTC) chưa có vị trí -> tính từ lúc Menu thấy bài bắt đầu (giới hạn đã biết).
+    let timelineSongKey = null;          // "title|artist" của bài đang canh
+    let timelineArmedKey = null;         // bài đã lấy/đang lấy kế hoạch (tránh gọi server lặp lại)
+    let timelineSongStartedAtMs = Date.now();
+
+    function sendToRenderer(channel, payload) {
+        if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(channel, payload);
+    }
+
+    const keyTimelineRunner = new KeyTimeline.KeyTimelineRunner({
+        getPositionSec: () => {
+            const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
+            return KeyTimeline.estimatePositionSec({
+                source: active ? active.source : null,
+                mpcSnapshot: mpcHcSession.getLatestSnapshot(),
+                // Snapshot SMTC MỚI NHẤT của lần poll gần nhất (latestSmtcSnapshot chỉ cập nhật khi đổi bài nên không có vị trí tươi).
+                smtcSnapshot: windowsMediaSession.getLastSnapshot(),
+                songStartedAtMs: timelineSongStartedAtMs
+            });
+        },
+        onFire: (evt) => {
+            console.log(`[KeyTimeline] Tới ${evt.time}: ${evt.fromName} -> ${evt.toName} (gửi sang Key/Auto-Tune)`);
+            sendToRenderer("key-timeline-fire", evt);
+        }
+    });
+
+    function resetKeyTimeline(songKey) {
+        keyTimelineRunner.disarm();
+        sendToRenderer("key-timeline-plan", null);
+        timelineSongKey = songKey;
+        timelineArmedKey = null;
+        timelineSongStartedAtMs = Date.now();
+    }
+
+    async function ensureKeyTimeline(songId, title, artist) {
+        const songKey = title + "|" + artist;
+        if (!songId || timelineArmedKey === songKey) return;
+        timelineArmedKey = songKey;
+        const r = await keyServerSync.fetchSegments(songId);
+        if (timelineSongKey !== songKey) return; // bài đã đổi trong lúc chờ server
+        if (!r.ok) { timelineArmedKey = null; console.log(`[KeyTimeline] Không lấy được đoạn Key từ server (${r.error})`); return; }
+        const plan = KeyTimeline.buildPlan(r.segments);
+        if (!plan) return; // bài chỉ có 1 Key: không có gì để canh
+        console.log(`[KeyTimeline] "${title}": ${plan.changes.map((c) => c.label).join(" | ")}`);
+        sendToRenderer("key-timeline-plan", { changes: plan.changes });
+        keyTimelineRunner.arm(plan);
+    }
+
+    function dispatchUnifiedNowPlaying() {
+
+        const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
+
+        if (!active) {
+
+            currentNowPlayingForSync = null;
+            if (timelineSongKey !== null) resetKeyTimeline(null);
+
+            if (mainWin && !mainWin.isDestroyed()) {
+                mainWin.webContents.send("now-playing-change", null);
+            }
+            return;
+
+        }
+
+        const { snapshot, source } = active;
+        const resolved = resolveTitleArtist(snapshot, source);
+        {
+            const tlKey = resolved.title ? resolved.title + "|" + (resolved.artist || "") : null;
+            if (tlKey !== timelineSongKey) resetKeyTimeline(tlKey); // đổi bài / mất bài: bỏ kế hoạch cũ, đồng hồ bài tính lại từ đầu
+        }
+
+        // Tra Song Database — KHÔNG gọi AI/EventBus, chỉ đọc dữ liệu tĩnh có sẵn
+        // (SongDatabase/SongMatcher đã xây từ trước, không sửa API của chúng).
+        let databaseMatch = null;
+
+        if (resolved.title) {
+
+            const song = SongMatcher.findReference(resolved.title, resolved.artist);
+
+            if (song && song.key) {
+
+                databaseMatch = { key: song.key, bpm: song.bpm || null };
+                console.log(`[NowPlaying] Database Match (source=${source})`);
+
+            } else {
+
+                console.log(`[NowPlaying] Database Miss (source=${source})`);
+
+                // Task C — Database cục bộ không có bài: dùng Key đã biết từ Key Server nếu có
+                // (nhớ theo bài đang phát, hoặc còn trong cache) — KHÔNG gọi mạng ở bước này.
+                const sameSong = currentNowPlayingForSync
+                    && currentNowPlayingForSync.title === resolved.title
+                    && currentNowPlayingForSync.artist === (resolved.artist || "");
+                const knownServerKey = (sameSong && currentNowPlayingForSync.serverKey)
+                    || (keyServerSync.peek(resolved.title, resolved.artist) || {}).key
+                    || null;
+
+                if (knownServerKey) {
+                    databaseMatch = { key: knownServerKey, bpm: null, source: "server" };
+                    console.log(`[NowPlaying] Server Match (source=${source})`);
+                    const peekedSrv = keyServerSync.peek(resolved.title, resolved.artist);
+                    if (peekedSrv && peekedSrv.songId) ensureKeyTimeline(peekedSrv.songId, resolved.title, resolved.artist || "").catch(() => {});
+                }
+
+            }
+
+        }
+
+        // Task C — cập nhật "bài đang phát" cho lệnh gửi Key (giữ lại Key server đã biết nếu vẫn là bài đó).
+        {
+            const prev = currentNowPlayingForSync;
+            const keep = prev && resolved.title && prev.title === resolved.title && prev.artist === (resolved.artist || "");
+            currentNowPlayingForSync = resolved.title ? {
+                title: resolved.title,
+                artist: resolved.artist || "",
+                durationSec: snapshot && snapshot.durationMs > 0 ? snapshot.durationMs / 1000 : null,
+                serverKey: databaseMatch && databaseMatch.source === "server" ? databaseMatch.key : (keep ? prev.serverKey || null : null)
+            } : null;
+        }
+
+        const payload = {
+            ...snapshot,
+            title: resolved.title || snapshot.title,
+            artist: resolved.artist || snapshot.artist,
+            nowPlayingSource: source, // field MỚI, cộng thêm — renderer hiện tại không đọc field
+                                       // này nên không đổi hành vi cũ, nhưng sẵn có nếu UI sau này cần hiển thị nguồn.
+            databaseMatch
+        };
+
+        // Đẩy dữ liệu sang renderer qua IPC — CHỈ khi có event thật (không poll,
+        // không timer). Renderer tự gọi window.AutoMenuAI.updateNowPlaying() +
+        // Key Source Manager (dispatchNowPlayingPayload, mục 7B).
+        if (mainWin && !mainWin.isDestroyed()) {
+            mainWin.webContents.send("now-playing-change", payload);
+        }
+
+        // Task C — chưa biết Key từ Database cục bộ lẫn cache: HỎI KEY SERVER (không chặn luồng).
+        // Có Key -> gửi lại CÙNG payload kèm databaseMatch; renderer dùng đúng đường "Song Database"
+        // sẵn có (Key từ server được ưu tiên hơn AI Detect, Manual vẫn ưu tiên cao nhất).
+        if (!databaseMatch && resolved.title) {
+            const askedTitle = resolved.title;
+            const askedArtist = resolved.artist || "";
+            keyServerSync.lookup(askedTitle, askedArtist).then((r) => {
+                if (!r || !r.found || !r.key) return;
+                const cur = currentNowPlayingForSync;
+                // Kết quả đến muộn của bài cũ -> bỏ.
+                if (!cur || cur.title !== askedTitle || cur.artist !== askedArtist) return;
+                cur.serverKey = r.key;
+                console.log(`[NowPlaying] Server Match (source=${source})`);
+                if (r.songId) ensureKeyTimeline(r.songId, askedTitle, askedArtist).catch(() => {});
+                if (mainWin && !mainWin.isDestroyed()) {
+                    mainWin.webContents.send("now-playing-change", { ...payload, databaseMatch: { key: r.key, bpm: null, source: "server" } });
+                }
+            }).catch(() => { /* lookup không bao giờ throw; chặn thêm cho chắc */ });
+        }
+
+    }
+
+    // "Unavailable" (mất KHẢ NĂNG cơ chế, vd chạy trên máy không phải Windows)
+    // khác với "không có snapshot" (đã xử lý qua dispatchUnifiedNowPlaying ở
+    // trên, gửi now-playing-change với payload null). Chỉ báo unavailable cho
+    // renderer khi CẢ HAI nguồn đều không khả dụng — nếu 1 trong 2 vẫn chạy
+    // được thì luồng "now-playing-change" vẫn hoạt động bình thường.
+    function maybeBroadcastUnavailable(info) {
+
+        if (smtcLayerAvailable || mpcHcLayerAvailable) return;
+
+        if (mainWin && !mainWin.isDestroyed()) {
+            mainWin.webContents.send("now-playing-unavailable", info);
+        }
+
+    }
+
+    windowsMediaSession.on("ready", () => {
+        console.log("[WindowsMediaSession] READY");
+        smtcLayerAvailable = true;
+    });
+
+    windowsMediaSession.on("change", (snapshot) => {
+        console.log("[WindowsMediaSession] SNAPSHOT", snapshot);
+        latestSmtcSnapshot = snapshot;
+        dispatchUnifiedNowPlaying();
+    });
+
+    windowsMediaSession.on("unavailable", (info) => {
+        console.log("[WindowsMediaSession] UNAVAILABLE", info);
+        smtcLayerAvailable = false;
+        latestSmtcSnapshot = null;
+        maybeBroadcastUnavailable(info);
+        dispatchUnifiedNowPlaying();
+    });
+
+    windowsMediaSession.on("error", (err) => {
+        console.log("[WindowsMediaSession] ERROR", err.message);
+    });
+
+    windowsMediaSession.on("restart", (info) => {
+        console.log("[WindowsMediaSession] RESTART", info);
+    });
+
+    mpcHcSession.on("ready", () => {
+        console.log("[MpcHcSession] READY", { port: mpcHcSession.getPort() });
+        mpcHcLayerAvailable = true;
+    });
+
+    mpcHcSession.on("change", (snapshot) => {
+        console.log("[MpcHcSession] SNAPSHOT", snapshot);
+        latestMpcHcSnapshot = snapshot;
+        dispatchUnifiedNowPlaying();
+    });
+
+    mpcHcSession.on("unavailable", (info) => {
+        console.log("[MpcHcSession] UNAVAILABLE", info);
+        mpcHcLayerAvailable = false;
+        latestMpcHcSnapshot = null;
+        maybeBroadcastUnavailable(info);
+        dispatchUnifiedNowPlaying();
+    });
+
+    // ---- ĐỒNG HỒ BÀI ĐANG PHÁT (Claude C) ----
+    // Hiện "01:23 / 04:05" cạnh NOW PLAYING và giúp MOD canh đúng phút. Vị trí/thời lượng THẬT lấy từ nguồn đang active:
+    //   MPC-HC (Web Interface) hoặc trình duyệt (SMTC timeline, nếu trang web báo cho Windows). Nguồn không báo -> hasTimeline:false
+    //   (renderer hiện "--:--", KHÔNG bịa số). Tua bài trên web/MPC-HC -> lần đọc kế tiếp (<= ~2s) kéo đồng hồ + MOD theo đúng chỗ.
+    // Chỉ gửi khi giây hiển thị đổi (hoặc nhắc lại mỗi 3s phòng renderer vừa nạp lại). Kênh IPC mới "now-playing-position" CỘNG THÊM,
+    // không đổi kênh "now-playing-change" nào.
+    const NOW_PLAYING_CLOCK_TICK_MS = 500;
+    const NOW_PLAYING_CLOCK_RESEND_MS = 3000;
+    let lastClockSentKey = null;
+    let lastClockSentAt = 0;
+    let lastClockTimelineLog = null;
+
+    function tickNowPlayingClock() {
+
+        try {
+
+            const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
+            let payload = null;
+            let key = "null";
+
+            if (active && currentNowPlayingForSync) {
+
+                // Snapshot MỚI NHẤT của lần poll gần nhất (khác latestSmtcSnapshot/latestMpcHcSnapshot chỉ cập nhật khi đổi bài).
+                const live = active.source === "smtc" ? windowsMediaSession.getLastSnapshot() : mpcHcSession.getLatestSnapshot();
+                const clock = NowPlayingClock.compute(active.source, live);
+
+                payload = clock
+                    ? { hasTimeline: true, positionSec: Math.round(clock.positionSec * 1000) / 1000, durationSec: clock.durationSec, playing: clock.playing, source: active.source }
+                    : { hasTimeline: false, source: active.source };
+
+                key = clock
+                    ? `1|${Math.floor(clock.positionSec)}|${Math.floor(clock.durationSec)}|${clock.playing ? 1 : 0}|${active.source}`
+                    : `0|${active.source}`;
+
+                const logKey = `${currentNowPlayingForSync.title}|${active.source}|${clock ? "yes" : "no"}`;
+                if (logKey !== lastClockTimelineLog) {
+                    lastClockTimelineLog = logKey;
+                    console.log(`[NowPlayingClock] source=${active.source} timeline=${clock ? "CÓ (vị trí + thời lượng thật)" : "KHÔNG (nguồn không báo thời lượng)"}`);
+                }
+
+            } else {
+
+                lastClockTimelineLog = null;
+
+            }
+
+            const nowMs = Date.now();
+            if (key === lastClockSentKey && nowMs - lastClockSentAt < NOW_PLAYING_CLOCK_RESEND_MS) return;
+
+            lastClockSentKey = key;
+            lastClockSentAt = nowMs;
+            sendToRenderer("now-playing-position", payload);
+
+        } catch (err) {
+
+            // Đồng hồ chỉ là phần hiển thị phụ: lỗi ở đây không được ảnh hưởng Now Playing/Key/MOD.
+            console.error("[NowPlayingClock] tick lỗi (bỏ qua):", err.message);
+
+        }
+
+    }
+
+    const nowPlayingClockTimer = setInterval(tickNowPlayingClock, NOW_PLAYING_CLOCK_TICK_MS);
+    if (nowPlayingClockTimer && typeof nowPlayingClockTimer.unref === "function") nowPlayingClockTimer.unref();
+
+    console.log("[WindowsMediaSession] START");
+    windowsMediaSession.start();
+
+    console.log("[MpcHcSession] START");
+    mpcHcSession.start();
+
+    // TASK A51 — SHUTDOWN SAFETY cho Now Playing: trước đây windowsMediaSession.stop()/
+    // mpcHcSession.stop() KHÔNG BAO GIỜ được gọi lúc tắt app. windowsMediaSession.stop() giết
+    // tiến trình con PowerShell (daemon đọc SMTC, spawn qua spawn("powershell.exe", ...,
+    // {windowsHide:true}) — KHÔNG có {detached:true}) — thiếu bước này, tiến trình PowerShell
+    // có nguy cơ bị BỎ LẠI CHẠY MỒ CÔI sau khi Electron đã thoát, mỗi lần đóng app.
+    // mpcHcSession.stop() dừng đúng timer polling HTTP tới MPC-HC. Đăng ký handler RIÊNG ở
+    // đây (không sửa handler "before-quit" đã có sẵn cho CommandRuntime ở cuối file) vì
+    // windowsMediaSession/mpcHcSession chỉ tồn tại trong scope của closure này — Electron/
+    // Node cho phép nhiều listener cùng 1 event, cả 2 handler đều sẽ chạy khi app tắt. Tự bọc
+    // try/catch riêng (giống pattern CommandRuntime.stop()) — lỗi ở đây KHÔNG được chặn việc
+    // app thoát.
+    app.on("before-quit", () => {
+        try {
+            clearInterval(nowPlayingClockTimer);
+        } catch (err) { /* không được chặn việc thoát app */ }
+
+        try {
+            windowsMediaSession.stop();
+        } catch (err) {
+            console.error("windowsMediaSession.stop() lúc shutdown lỗi (bỏ qua, app vẫn thoát):", err.message);
+        }
+
+        try {
+            mpcHcSession.stop();
+        } catch (err) {
+            console.error("mpcHcSession.stop() lúc shutdown lỗi (bỏ qua, app vẫn thoát):", err.message);
+        }
+    });
+
+    // === TỰ ĐỘNG KHỞI ĐỘNG loopMIDI + Studio One ===
+const fs = require("fs");
+const path = require("path");
+const { spawn } = require("child_process");
+
+function loadAutoLaunchSettings() {
+  try {
+    const userDataPath = app.getPath("userData");
+    const settingsPath = path.join(userDataPath, "autoMenuSettings.json");
+    if (fs.existsSync(settingsPath)) {
+      return JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    }
+  } catch (e) { console.error("[AutoLaunch] Đọc cấu hình lỗi:", e); }
+  return {};
+}
+
+async function autoLaunchPrograms() {
+  const settings = loadAutoLaunchSettings();
+  if (settings.autoLaunchEnabled === false) {
+    console.log("[AutoLaunch] Đã tắt theo cài đặt");
+    return;
+  }
+  console.log("[AutoLaunch] Bắt đầu tự khởi động...");
+
+  // Mở loopMIDI
+  if (settings.loopMidiPath && fs.existsSync(settings.loopMidiPath)) {
+    console.log("[AutoLaunch] Mở loopMIDI...");
+    spawn(settings.loopMidiPath, [], { detached: true });
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  // Mở Studio One
+  if (settings.dawExePath && fs.existsSync(settings.dawExePath)) {
+    console.log("[AutoLaunch] Mở Studio One...");
+    spawn(settings.dawExePath, [], { detached: true });
+  }
+  console.log("[AutoLaunch] Hoàn thành!");
+}
+
+// Gọi sau khi app sẵn sàng
+setTimeout(() => { autoLaunchPrograms(); }, 2000);
+});
+
+ipcMain.on("open-setup", () => {
+
+    if (!setupWin || setupWin.isDestroyed()) {
+        createSetupWindow();
+    }
+
+    setupWin.show();
+    setupWin.focus();
+
+});
+
+ipcMain.on("close-setup", () => {
+
+    if (!setupWin || setupWin.isDestroyed()) {
+        return;
+    }
+
+    setupWin.hide();
+
+});
+
+ipcMain.on("setup-changed", () => {
+    mainWin?.webContents.send("setup-changed");
+    // Nạp lại mapping MIDI + mở lại Input đúng cổng mới nhất — không ảnh hưởng dòng relay ở trên.
+    try { CommandRuntime.reloadMappings(); } catch (err) { console.error("reloadMappings lỗi:", err); }
+});
+
+// TASK A71 — relay trạng thái RUNTIME của SYSTEM_AUDIO (NO_DEVICE/STARTING/RUNNING/ERROR/STOPPING)
+// từ cửa sổ chính (nơi object systemAudio thực sự sống, trong renderer.js) sang cửa sổ Setup.
+// Cache lại giá trị mới nhất để Setup có thể hỏi ngay khi vừa mở (trước khi có transition mới).
+let lastKnownSystemAudioState = { state: "NO_DEVICE" };
+ipcMain.on("system-audio-state-changed", (event, state) => {
+    lastKnownSystemAudioState = state;
+    setupWin?.webContents.send("system-audio-state-changed", state);
+});
+ipcMain.handle("get-system-audio-state", () => lastKnownSystemAudioState);
+
+// TASK B72 (gộp B72+B72.1) — MIC: cùng cơ chế relay với SYSTEM_AUDIO ở trên (renderer cửa sổ
+// Menu -> cache ở main -> relay sang setupWin), chỉ đổi tên kênh/biến cache, KHÔNG đụng 4 dòng trên.
+let lastKnownMicState = { state: "NO_DEVICE" };
+ipcMain.on("mic-state-changed", (event, state) => {
+    lastKnownMicState = state;
+    setupWin?.webContents.send("mic-state-changed", state);
+});
+ipcMain.handle("get-mic-state", () => lastKnownMicState);
+
+// TASK B72 — Audio Output: cùng cơ chế relay. Giá trị khởi tạo "UNKNOWN" (chưa có báo cáo nào từ
+// cửa sổ Menu) — KHÔNG mặc định là DEFAULT/APPLIED để không báo thành công khi chưa xác nhận.
+let lastKnownOutputState = { state: "UNKNOWN" };
+ipcMain.on("output-state-changed", (event, state) => {
+    lastKnownOutputState = state;
+    setupWin?.webContents.send("output-state-changed", state);
+});
+ipcMain.handle("get-output-state", () => lastKnownOutputState);
+
+// ================================
+// TASK B3-C — REAL MANUAL STATE IPC. Renderer gửi snapshot Manual Key/Mod THẬT (đúng lúc
+// state thay đổi thật, không polling) — main CHỈ chuyển tiếp nguyên văn vào ManualState.js,
+// KHÔNG tự gán lại timestamp, KHÔNG tự suy đoán/validate thêm ngoài những gì ManualState.js
+// đã làm. ManualPriorityGuard (A7b) sẽ đọc ManualState.getManualState() khi module đó tồn tại
+// — HIỆN CHƯA CÓ trong repo (xem báo cáo B3-C, mục Files/Remaining Risks) — nên chuỗi
+// "Guard đọc dữ liệu này để ALLOW/BLOCK" chưa nối được ở đầu ra, chỉ mới có đầu vào.
+// ================================
+ipcMain.on("report-manual-state", (event, snapshot) => {
+    const result = ManualState.setManualState(snapshot);
+    if (!result.ok) {
+        console.error("[ManualState] Bỏ qua snapshot không hợp lệ:", result.detail, snapshot);
+    }
+});
+
+// ================================
+// MIDI CONTROL CORE v1.0 — bridge cho preload.js:sendCommand(targetId, action, value),
+// đã khai báo sẵn từ trước nhưng CHƯA có handler (đúng như báo cáo v5.0 phát hiện).
+// Chỉ chuyển tiếp vào CommandRuntime.dispatch() — không tự xử lý/diễn giải gì thêm ở đây.
+// ================================
+ipcMain.handle("ai-command", async (event, payload) => {
+    try {
+        return await CommandRuntime.dispatch(payload);
+    } catch (err) {
+        return { ok: false, detail: err.message };
+    }
+});
+
+// ================================
+// MIDI-MASTER-01 Phase 1 — MIDI HEALTH (phía main process).
+// Chỉ đọc lại state nội bộ đã có sẵn trong CommandRuntime (getHealth(), thêm ở Phase 1),
+// KHÔNG tự suy đoán/thêm logic mới ở tầng IPC này. Renderer (ui/js/midiHealth.js) gọi hàm
+// này để hợp nhất với trạng thái Web MIDI phía renderer.
+// ================================
+ipcMain.handle("midi-health", async () => {
+    try {
+        return CommandRuntime.getHealth();
+    } catch (err) {
+        return { started: false, error: err.message };
+    }
+});
+
+// TASK B2 Mục 2/10 — nút "🔄 Auto Connect" trong Setup gọi tới đây. mode mặc định "manual"
+// (backward-compat) — renderer PHẢI truyền mode tường minh nếu muốn bật AUTO MENU AI priority.
+ipcMain.handle("midi-auto-connect", async (event, opts) => {
+    try {
+        return CommandRuntime.autoConnect(opts || {});
+    } catch (err) {
+        return { ok: false, resolved: false, status: "ERROR", connected: false, partial: false, detail: err.message };
+    }
+});
+
+// MIDI-RECOVERY-01 — danh sách cổng THẬT của backend gửi/nhận (easymidi, main process).
+ipcMain.handle("midi-list-ports", async () => {
+    try {
+        return CommandRuntime.listPorts();
+    } catch (err) {
+        return { ok: false, outputs: [], inputs: [], error: err.message };
+    }
+});
+
+// MIDI-RECOVERY-01 — gửi Note/CC bằng MidiDriver (easymidi) ở main process: đường gửi có thẩm quyền duy nhất
+// cho renderer. Không đổi mapping/giao thức; ok=true chỉ nghĩa output.send() không ném (delivery UNCONFIRMED).
+ipcMain.handle("midi-send", async (event, msg) => {
+    try {
+        return await CommandRuntime.sendMidi(msg || {});
+    } catch (err) {
+        return { ok: false, via: "main-midi-driver", reason: "IPC_ERROR", detail: err.message };
+    }
+});
+
+// TASK B2 Mục 6/9 — Verification thật (loopback), KHÔNG dùng console.log làm bằng chứng.
+ipcMain.handle("midi-verify", async () => {
+    try {
+        return await CommandRuntime.verifyMidiOutput();
+    } catch (err) {
+        return { verified: false, reason: "IPC_ERROR", detail: err.message };
+    }
+});
+
+// ================================
+// NHẬN KẾT QUẢ KEY/BPM/MOD TỪ ui/js/engines/* (renderer) -> cập nhật AIContext -> phát EventBus
+// Không đổi thuật toán, không đổi UI — chỉ chuyển tiếp dữ liệu sang Core.
+//
+// TASK A49 — IPC SAFETY: bọc try/catch quanh TOÀN BỘ handler. Lý do: EventBus.publish() ở
+// đây chỉ là wrapper mỏng quanh EventEmitter.emit() chuẩn (core/events/EventBus.js) — KHÔNG
+// có cách ly giữa các subscriber, và toàn bộ chuỗi phản ứng đồng bộ
+// (AIContext -> AnalysisState -> InferenceEngine -> ResultQueue.push) chạy chung 1 call stack
+// với handler này. Nếu BẤT KỲ đâu trong chuỗi đó throw, trước bản vá này lỗi sẽ lan thẳng lên
+// tiến trình main KHÔNG BỊ CHẶN (app/main.js không có process.on("uncaughtException") toàn
+// cục) — có thể làm crash toàn bộ app. try/catch dưới đây:
+//   - KHÔNG làm crash main process (chặn đúng tại đây).
+//   - KHÔNG đụng AI/Manual Key state (chỉ log, không gọi bất kỳ hàm ghi state nào).
+//   - KHÔNG biến lỗi thành lệnh AI (không publish PLUGIN_COMMAND hay bất kỳ event nào khác
+//     khi lỗi xảy ra — chỉ log rồi dừng).
+//   - CÓ log đủ để debug (Logger.error, kèm type + message lỗi thật).
+//   - GIỮ NGUYÊN contract: tên channel "ai-result", chữ ký callback không đổi.
+// Lưu ý: đây là 1 trong 2 boundary cần thiết — boundary thứ 2 (cho phần BẤT ĐỒNG BỘ của
+// chuỗi, do ResultQueue dùng setTimeout debounce) nằm ở core/ai/aggregation/ResultQueue.js,
+// xem comment tương ứng ở đó.
+// ================================
+// TASK A59.6 — theo dõi các type lạ đã log rồi, để chỉ log 1 lần/type/phiên (tránh spam log
+// nếu có nguồn lỗi liên tục gửi cùng 1 type sai) — xem chi tiết trong handler bên dưới.
+const seenUnknownAiResultTypes = new Set();
+
+ipcMain.on("ai-result", (event, { type, payload } = {}) => {
+
+    try {
+
+        if (type === "key") {
+            AIContext.updateKey(payload);
+            EventBus.publish(Events.KEY_UPDATED, payload);
+            return;
+        }
+
+        if (type === "bpm") {
+            AIContext.updateBpm(payload);
+            EventBus.publish(Events.BPM_UPDATED, payload);
+            return;
+        }
+
+        if (type === "mod") {
+            AIContext.updateMod(payload);
+            EventBus.publish(Events.MOD_UPDATED, payload);
+            return;
+        }
+
+        // TASK A59.6 — UNKNOWN ai-result OBSERVABILITY: A58 xác nhận type lạ/thiếu KHÔNG throw
+        // (an toàn) nhưng cũng KHÔNG để lại log nào — khác biệt so với các nhánh malformed khác
+        // trong cùng file (vd updateBpm(số thô) đã có Logger.error rõ ràng từ A49). Thêm đúng 1
+        // dòng log ở đây để nhất quán — KHÔNG đổi protocol IPC (không thêm field, không đổi
+        // hành vi 3 nhánh key/bpm/mod ở trên). Rate-limit đơn giản để không spam log nếu 1
+        // nguồn lỗi liên tục gửi type sai (vd renderer bị bug lặp) — chỉ log 1 lần mỗi loại
+        // type-lạ, không log lại type-lạ giống hệt đã thấy trước đó trong cùng phiên.
+        const unknownKey = typeof type === "string" ? type : `<${typeof type}>`;
+        if (!seenUnknownAiResultTypes.has(unknownKey)) {
+            seenUnknownAiResultTypes.add(unknownKey);
+            Logger.error(
+                "ai-result",
+                `Nhận type không xác định (${unknownKey}) — bỏ qua, không cập nhật AIContext. (Log này chỉ xuất hiện 1 lần cho mỗi type lạ trong phiên chạy hiện tại.)`
+            );
+        }
+
+    } catch (err) {
+
+        Logger.error("ai-result", `Lỗi khi xử lý type="${type}": ${err.message}`);
+
+    }
+
+});
+
+// ================================
+// TASK A52 — ADMIN AUTHENTICATION (mở khoá khu vực "AI 🔒" trong Setup, xem
+// core/shared/AdminAuth.js cho toàn bộ logic hash/verify/change password).
+// Handler ở đây CHỈ relay: không tự so sánh password, không trả về salt/hash cho
+// renderer — chỉ trả {ok, reason}. Đúng nguyên tắc "không bypass authentication từ
+// renderer" vì kết quả đúng/sai được QUYẾT ĐỊNH Ở ĐÂY (main process), renderer chỉ
+// hiển thị kết quả.
+// ================================
+// DB-STATUS-01 — ô "Database" trong Setup > Dashboard: hỏi Key Server có trả lời không (chỉ đọc, không gửi dữ liệu nào).
+ipcMain.handle("database-status", async () => {
+    try {
+        const { pingServer } = require("../core/integration/ServerHealth");
+        const { DEFAULT_SERVER_URL } = require("../core/integration/KeyServerSync");
+        return await pingServer({ url: DEFAULT_SERVER_URL, fetchImpl: (u, o) => fetch(u, o), timeoutMs: 3000 });
+    } catch (err) {
+        return { ok: false, status: null, ms: 0, error: String((err && err.message) || err) };
+    }
+});
+
+ipcMain.handle("admin-auth-verify", async (event, password) => {
+    try {
+        return AdminAuth.verify(password);
+    } catch (err) {
+        console.error("admin-auth-verify lỗi:", err.message);
+        return { ok: false, reason: "Lỗi hệ thống khi xác thực." };
+    }
+});
+
+ipcMain.handle("admin-auth-change-password", async (event, { currentPassword, newPassword } = {}) => {
+    try {
+        return AdminAuth.changePassword(currentPassword, newPassword);
+    } catch (err) {
+        console.error("admin-auth-change-password lỗi:", err.message);
+        return { ok: false, reason: "Lỗi hệ thống khi đổi password." };
+    }
+});
+
+// ================================
+// BRIDGE: CHỈ chuyển tiếp PLUGIN_COMMAND (từ core/ai/plugin/PluginController.js) sang
+// renderer qua IPC — không xử lý, không diễn giải, không tạo logic MIDI/AHK nào ở đây.
+// Nếu Core chưa bao giờ phát PLUGIN_COMMAND (vd BootLoader chưa gắn), đoạn này đơn giản
+// không bao giờ chạy tới — không ảnh hưởng gì tới hệ thống cũ đang hoạt động.
+// ================================
+EventBus.subscribe(Events.PLUGIN_COMMAND, (message) => {
+    mainWin?.webContents.send("plugin-command", message);
+});
+
+ipcMain.handle("ping", () => "pong");
+
+// Cho renderer biết đang ở LEGACY_CONTROL hay AI_CONTROL — nguồn duy nhất là
+// core/shared/ControlSource.js, renderer KHÔNG tự giữ bản sao riêng.
+ipcMain.handle("get-control-source", () => ControlSource.getControlSource());
+
+// Task C — Renderer báo Key vừa dò xong (đã khoá); main gửi lên Key Server.
+// Tên bài/ca sĩ/độ dài lấy từ CHÍNH main process (currentNowPlayingForSync), không tin renderer.
+// Không bao giờ throw: lỗi mạng chỉ trả { ok:false, reason } để renderer bỏ qua.
+let lastServerSubmitLogAt = 0; // chống spam log: vòng dò khóa Key gọi lặp lại liên tục
+ipcMain.handle("server-submit-key", async (event, data) => {
+    try {
+        const cur = currentNowPlayingForSync;
+        const d = data && typeof data === "object" ? data : {};
+        const nowMs = Date.now();
+        if (nowMs - lastServerSubmitLogAt > 60000) {
+            lastServerSubmitLogAt = nowMs;
+            const pct = Number.isFinite(Number(d.confidence)) ? Math.round(Number(d.confidence) * 100) + "%" : "không rõ";
+            console.log(`[KeyServer] AI đã khóa Key ${d.key} (${pct}) — bài: ${cur ? `"${cur.title}"` : "CHƯA BIẾT TÊN BÀI"}`);
+        }
+        if (!cur) return { ok: false, reason: "no-song" };
+        return await keyServerSync.submit({
+            title: cur.title,
+            artist: cur.artist,
+            key: d.key,
+            confidence: d.confidence,
+            durationSec: cur.durationSec
+        });
+    } catch (err) {
+        console.error("server-submit-key lỗi (không ảnh hưởng app):", err);
+        return { ok: false, reason: "error" };
+    }
+});
+
+// ================================
+// TELEMETRY (Phase 4A): CHỈ relay bản ghi từ renderer (keyEngine.js) sang TelemetryLogger
+// để ghi vào logs/*.jsonl — không xử lý, không diễn giải nội dung record.
+// ================================
+ipcMain.on("telemetry-record", (event, record) => {
+    try {
+        TelemetryLogger.write(record);
+    } catch (err) {
+        console.error("TelemetryLogger write lỗi:", err);
+    }
+});
+
+// ================================
+// UI FINAL v2.0 — "Menu ôm sát nội dung" (Phần II). CHỈ 1 việc duy nhất: đổi chiều CAO cửa sổ
+// chính theo đúng số đo renderer tự đo được từ DOM thật (KHÔNG đoán số ở main.js) — dùng khi
+// Collapse (menu ôm sát, không còn nền trống) / Expand (mở đúng đủ chỗ cho Control). Chiều RỘNG
+// LUÔN giữ nguyên 1200 (không đổi, đúng yêu cầu). Đây là kênh IPC MỚI, tách biệt hoàn toàn khỏi
+// mọi kênh IPC nghiệp vụ hiện có (Key/BPM/NowPlaying/AI...) — không đụng, không đổi bất kỳ kênh
+// nào khác.
+// ================================
+ipcMain.on("resize-window", (event, { height } = {}) => {
+    try {
+        if (!mainWin || mainWin.isDestroyed()) return;
+        if (typeof height !== "number" || !Number.isFinite(height)) return;
+
+        const [currentWidth] = mainWin.getContentSize();
+        const clampedHeight = Math.max(200, Math.min(1000, Math.round(height))); // chặn giá trị bất thường, không tin tưởng dữ liệu renderer 100%
+
+        mainWin.setContentSize(currentWidth, clampedHeight);
+    } catch (err) {
+        console.error("resize-window lỗi:", err);
+    }
+});
+
+// ================================
+// TASK B — MENU RUNTIME: nút Minimize (minBtn) trước đây chỉ console.log("MINIMIZE"),
+// không có tác dụng thật. Thêm kênh IPC thật để thu nhỏ cửa sổ chính (mainWin).
+// Không đụng Setup window, không đụng bất kỳ kênh IPC nào khác.
+// ================================
+ipcMain.on("minimize-window", () => {
+    try {
+        if (!mainWin || mainWin.isDestroyed()) return;
+        mainWin.minimize();
+    } catch (err) {
+        console.error("minimize-window lỗi:", err);
+    }
+});
+
+// ================================
+// MENU-UI-01B — ALWAYS ON TOP: 2 kênh invoke MỚI, tách biệt mọi kênh khác.
+// Main là nơi DUY NHẤT thao tác cửa sổ và trả về trạng thái THẬT (isAlwaysOnTop()).
+// Trả về { ok, value, error? } — value luôn là trạng thái thực tế, UI không được tự đoán.
+// ================================
+ipcMain.handle("get-always-on-top", () => {
+    try {
+        if (!mainWin || mainWin.isDestroyed()) return { ok: false, value: false, error: "Cửa sổ chính không khả dụng" };
+        return { ok: true, value: mainWin.isAlwaysOnTop() };
+    } catch (err) {
+        console.error("get-always-on-top lỗi:", err);
+        return { ok: false, value: false, error: String((err && err.message) || err) };
+    }
+});
+
+ipcMain.handle("set-always-on-top", (event, enabled) => {
+    try {
+        if (!mainWin || mainWin.isDestroyed()) return { ok: false, value: false, error: "Cửa sổ chính không khả dụng" };
+        if (typeof enabled !== "boolean") {
+            return { ok: false, value: mainWin.isAlwaysOnTop(), error: "Giá trị không hợp lệ" };
+        }
+        aotUserChanged = true;
+        mainWin.setAlwaysOnTop(enabled);
+        const actual = mainWin.isAlwaysOnTop();
+        if (actual !== enabled) {
+            return { ok: false, value: actual, error: "Hệ thống không áp dụng được trạng thái yêu cầu" };
+        }
+        return { ok: true, value: actual };
+    } catch (err) {
+        console.error("set-always-on-top lỗi:", err);
+        let actual = false;
+        try { actual = !!(mainWin && !mainWin.isDestroyed() && mainWin.isAlwaysOnTop()); } catch { /* giữ false */ }
+        return { ok: false, value: actual, error: String((err && err.message) || err) };
+    }
+});
+
+// ================================
+// BẢNG HIỆU ỨNG ĐỘC LẬP — cửa sổ riêng, kéo tự do, "Luôn hiển thị" vẫn hiện khi menu xuống taskbar.
+// Toàn bộ logic nằm trong app/EffectsWindow.js; ở đây chỉ nối 4 kênh IPC MỚI (tách biệt mọi kênh khác).
+// Mỗi kênh chỉ nhận lệnh từ đúng cửa sổ: toggle <- menu chính; close/get/set <- chính cửa sổ hiệu ứng.
+// ================================
+const { createEffectsWindowManager } = require("./EffectsWindow");
+const effectsWindow = createEffectsWindowManager({
+    BrowserWindow,
+    screen,
+    getMainWin: () => mainWin,
+    preloadPath: path.join(__dirname, "preload.js"),
+    htmlPath: path.join(__dirname, "..", "ui", "effects.html"),
+    // EFFECT-LIT-01 — báo cho menu chính biết Bảng Hiệu Ứng đang mở/đóng để nút EFFECT sáng/tắt đúng.
+    onStateChange: (open) => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send("effects-state", !!open); },
+    // EFFECT-AOT-PERSIST — nhớ trạng thái "Luôn Hiện" của Bảng Hiệu Ứng ở lần tích cuối (app-settings.json > effectsWindow.alwaysOnTop).
+    // Đọc-rồi-ghi lại toàn bộ file bằng đúng readSettingsFile/writeSettingsFile có sẵn (ghi nguyên tử A55); chỉ đổi ĐÚNG key effectsWindow.alwaysOnTop, giữ nguyên mọi key khác.
+    loadAlwaysOnTop: () => { const s = readSettingsFile(); return !!(s && s.effectsWindow && s.effectsWindow.alwaysOnTop === true); },
+    saveAlwaysOnTop: (v) => {
+        const s = readSettingsFile() || {};
+        const cur = s.effectsWindow && typeof s.effectsWindow === "object" && !Array.isArray(s.effectsWindow) ? s.effectsWindow : {};
+        if (cur.alwaysOnTop === !!v) return true; // không đổi => khỏi ghi file
+        return writeSettingsFile({ ...s, effectsWindow: { ...cur, alwaysOnTop: !!v } });
+    }
+});
+
+// EFFECT-AOT-PERSIST: gọi 1 lần khi cửa sổ Menu nạp xong (xem createMainWindow). Lỗi ở đây không được làm hỏng việc khởi động Menu.
+function autoOpenEffectsIfPinned() {
+    try { effectsWindow.openIfPinned(); } catch (err) { console.error("effects tự mở theo trạng thái Luôn Hiện lỗi (bỏ qua):", err); }
+}
+
+ipcMain.on("effects-toggle", (event) => {
+    try {
+        if (!effectsWindow.isFromMain(event.sender)) return;
+        effectsWindow.toggle();
+    } catch (err) {
+        console.error("effects-toggle lỗi:", err);
+    }
+});
+
+ipcMain.on("effects-close", (event) => {
+    try {
+        if (!effectsWindow.isFromEffects(event.sender)) return;
+        effectsWindow.close();
+    } catch (err) {
+        console.error("effects-close lỗi:", err);
+    }
+});
+
+// Nút phát hiệu ứng: chỉ nhận từ cửa sổ hiệu ứng, chỉ 2 id hợp lệ, rồi chuyển sang cửa sổ menu
+// (nơi SoundEffectEngine phát âm thanh với âm lượng của knob "Hiệu Ứng").
+ipcMain.on("effects-play", (event, effectId) => {
+    try {
+        if (!effectsWindow.isFromEffects(event.sender)) return;
+        if (effectId !== "CLAP" && effectId !== "LAUGH") return;
+        if (!mainWin || mainWin.isDestroyed()) return;
+        mainWin.webContents.send("effects-play", effectId);
+    } catch (err) {
+        console.error("effects-play lỗi:", err);
+    }
+});
+
+// ================================
+// HIDE-DAW-01 — "Công cụ và sửa lỗi" > Ẩn DAW xuống khay thông báo (system tray). Logic ở app/DawTray.js + core/integration/WindowHider.js.
+// 3 kênh IPC MỚI, CHỈ nhận từ cửa sổ Setup. Chỉ ẨN/HIỆN cửa sổ DAW đang chạy (tiến trình KHÔNG bị tắt, vẫn nhận MIDI/audio). Không đụng Hidden-DAW launcher cũ.
+// ================================
+const { createDawTrayManager } = require("./DawTray");
+const WindowHider = require("../core/integration/WindowHider");
+let dawTrayMgr = null;
+function getDawTray() {
+    if (!dawTrayMgr) {
+        dawTrayMgr = createDawTrayManager({
+            Tray, Menu, nativeImage, readSettings: readSettingsFile, fs, windowHider: WindowHider, log: console.log,
+            openMenu: () => { try { if (mainWin && !mainWin.isDestroyed()) { if (mainWin.isMinimized()) mainWin.restore(); mainWin.show(); mainWin.focus(); } } catch (err) { console.error("openMenu lỗi:", err); } }, // A98: mục "Mở AUTO MENU AI" trên khay
+            stateFile: path.join(app.getPath("userData"), "hidden-daw-state.json")
+        });
+    }
+    return dawTrayMgr;
+}
+const fromSetupWindow = (event) => !!(setupWin && !setupWin.isDestroyed() && event.sender === setupWin.webContents);
+const DENIED = { ok: false, state: "failed", message: "Không được phép" };
+ipcMain.handle("tools-daw-status", (event) => new Promise((resolve) => {
+    const EMPTY = { configured: false, exePath: "", hidden: false, trayVisible: false, running: null, state: "unknown" };
+    try { if (!fromSetupWindow(event)) { resolve(EMPTY); return; } getDawTray().statusAsync((st) => { let sh = null; try { sh = getDawReadyWatcher().phase(); } catch (e2) { /* bỏ qua */ } resolve({ ...st, startHidden: sh }); }); } // A106: thêm startHidden = {phase, detail, pid} // A98: thêm running + state (not_running | visible | hidden)
+    catch (err) { console.error("tools-daw-status lỗi:", err); resolve(EMPTY); }
+}));
+ipcMain.handle("tools-daw-hide", (event) => new Promise((resolve) => {
+    try { getDawTray().note("tools-daw-hide", fromSetupWindow(event)); if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().hide(resolve); } // A101: có vết khi lệnh tới main
+    catch (err) { console.error("tools-daw-hide lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
+}));
+ipcMain.handle("tools-daw-show", (event) => new Promise((resolve) => {
+    try { getDawTray().note("tools-daw-show", fromSetupWindow(event)); if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().show(resolve); } // A101: có vết khi lệnh tới main
+    catch (err) { console.error("tools-daw-show lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
+}));
+app.on("before-quit", () => { try { if (dawTrayMgr) dawTrayMgr.restoreOnQuit(); } catch (err) { console.error("restoreOnQuit lỗi:", err); } });
+app.whenReady().then(() => { try { getDawTray().restoreTrayIfHidden(); } catch (err) { console.error("restoreTrayIfHidden lỗi:", err); } });
+// A106 — Start Hidden: tự ẩn DAW SAU KHI DAW mở xong VST + project (xem core/integration/DawReadyWatcher.js). Chỉ chạy khi hiddenDaw.startHidden = true trong app-settings.json.
+const DawReadyWatcher = require("../core/integration/DawReadyWatcher");
+let dawReadyWatcher = null;
+function getDawReadyWatcher() {
+    if (!dawReadyWatcher) {
+        const dawExe = () => { try { const s = readSettingsFile() || {}; const a = typeof s.selectedDAWPath === "string" ? s.selectedDAWPath.trim() : ""; const b = s.startupPaths && typeof s.startupPaths.dawExecutable === "string" ? s.startupPaths.dawExecutable.trim() : ""; return a || b || ""; } catch (e) { return ""; } };
+        dawReadyWatcher = DawReadyWatcher.createDawReadyWatcher(DawReadyWatcher.realDeps({
+            windowHider: WindowHider, log: console.log, readSettings: readSettingsFile, getExe: dawExe,
+            hide: (cb) => getDawTray().hide(cb), isHidden: () => !!getDawTray().status().hidden
+        }));
+    }
+    return dawReadyWatcher;
+}
+app.whenReady().then(() => { try { getDawReadyWatcher().start(); } catch (err) { console.error("DawReadyWatcher lỗi (bỏ qua):", err); } });
+app.on("before-quit", () => { try { if (dawReadyWatcher) dawReadyWatcher.stop(); } catch (err) { /* bỏ qua */ } });
+
+ipcMain.handle("effects-get-aot", (event) => {
+    if (!effectsWindow.isFromEffects(event.sender)) return { ok: false, value: false, error: "Không được phép" };
+    return effectsWindow.getAlwaysOnTop();
+});
+
+ipcMain.handle("effects-set-aot", (event, enabled) => {
+    if (!effectsWindow.isFromEffects(event.sender)) return { ok: false, value: false, error: "Không được phép" };
+    return effectsWindow.setAlwaysOnTop(enabled);
+});
+
+// ================================
+// THƯ VIỆN HIỆU ỨNG — danh sách nút của Bảng Hiệu Ứng (HIỆU ỨNG / NHẠC), chỉnh trong Cài đặt.
+// Logic ở app/EffectsLibrary.js. Quyền: đọc danh sách <- menu / bảng hiệu ứng / cài đặt;
+// sửa danh sách <- chỉ cửa sổ Cài đặt; phát/dừng <- chỉ bảng hiệu ứng (chuyển sang menu để phát).
+// ================================
+const { createEffectsLibrary } = require("./EffectsLibrary");
+const { pathToFileURL } = require("url");
+const effectsLibrary = createEffectsLibrary({
+    fs: require("fs"),
+    path,
+    pathToFileURL,
+    bundledDir: path.join(__dirname, "..", "ui", "assets", "effects"),
+    userDir: app.getPath("userData")
+});
+
+function isEffectsLibReader(sender) {
+    return !!sender && (
+        (mainWin && !mainWin.isDestroyed() && sender === mainWin.webContents) ||
+        (setupWin && !setupWin.isDestroyed() && sender === setupWin.webContents) ||
+        effectsWindow.isFromEffects(sender)
+    );
+}
+
+function broadcastEffectsLibrary() {
+    const items = effectsLibrary.list();
+    const targets = [mainWin && !mainWin.isDestroyed() ? mainWin.webContents : null, setupWin && !setupWin.isDestroyed() ? setupWin.webContents : null, effectsWindow.getWebContents()];
+    for (const wc of targets) {
+        try { if (wc && !wc.isDestroyed()) wc.send("effects-lib-changed", items); } catch (err) { console.error("effects-lib-changed lỗi:", err); }
+    }
+}
+
+ipcMain.handle("effects-lib-get", (event) => {
+    if (!isEffectsLibReader(event.sender)) return { ok: false, items: [], error: "Không được phép" };
+    return { ok: true, items: effectsLibrary.list() };
+});
+
+ipcMain.handle("effects-lib-op", async (event, op) => {
+    try {
+        if (!setupWin || setupWin.isDestroyed() || event.sender !== setupWin.webContents) return { ok: false, error: "Không được phép" };
+        if (!op || typeof op.type !== "string") return { ok: false, error: "Lệnh không hợp lệ" };
+        let result;
+        if (op.type === "rename") result = effectsLibrary.rename(op.id, op.name);
+        else if (op.type === "move") result = effectsLibrary.move(op.id, op.group);
+        else if (op.type === "remove") result = effectsLibrary.remove(op.id);
+        else if (op.type === "reset") result = effectsLibrary.reset();
+        else if (op.type === "replace" || op.type === "add") {
+            const picked = await dialog.showOpenDialog(setupWin, {
+                title: op.type === "add" ? "Chọn file âm thanh để thêm" : "Chọn file âm thanh thay thế",
+                properties: op.type === "add" ? ["openFile", "multiSelections"] : ["openFile"],
+                filters: [{ name: "Âm thanh", extensions: ["mp3", "wav", "ogg", "m4a"] }]
+            });
+            if (picked.canceled || !picked.filePaths.length) return { ok: true, canceled: true };
+            if (op.type === "replace") {
+                result = effectsLibrary.replaceFile(op.id, picked.filePaths[0]);
+            } else {
+                result = { ok: true };
+                for (const fp of picked.filePaths) {
+                    const base = path.basename(fp, path.extname(fp));
+                    const r = effectsLibrary.add(op.group, base, fp);
+                    if (!r.ok) { result = r; break; }
+                }
+            }
+        } else return { ok: false, error: "Lệnh không hợp lệ" };
+        if (result && result.ok) broadcastEffectsLibrary();
+        return result;
+    } catch (err) {
+        console.error("effects-lib-op lỗi:", err);
+        return { ok: false, error: String((err && err.message) || err) };
+    }
+});
+
+ipcMain.on("effects-lib-play", (event, id) => {
+    try {
+        if (!effectsWindow.isFromEffects(event.sender)) return;
+        if (typeof id !== "string" || !effectsLibrary.find(id)) return;
+        if (!mainWin || mainWin.isDestroyed()) return;
+        mainWin.webContents.send("effects-lib-play", id);
+    } catch (err) {
+        console.error("effects-lib-play lỗi:", err);
+    }
+});
+
+ipcMain.on("effects-lib-stop", (event) => {
+    try {
+        if (!effectsWindow.isFromEffects(event.sender)) return;
+        if (!mainWin || mainWin.isDestroyed()) return;
+        mainWin.webContents.send("effects-lib-stop");
+    } catch (err) {
+        console.error("effects-lib-stop lỗi:", err);
+    }
+});
+
+// Nút EDIT trong Bảng Hiệu Ứng -> mở Cài đặt, nhảy thẳng tới mục "Hiệu Ứng".
+ipcMain.on("effects-open-editor", (event) => {
+    try {
+        if (!effectsWindow.isFromEffects(event.sender)) return;
+        if (!setupWin || setupWin.isDestroyed()) createSetupWindow();
+        const sendGoto = () => { try { setupWin.webContents.send("setup-goto-panel", "panel-effects"); } catch (err) { console.error("setup-goto-panel lỗi:", err); } };
+        setupWin.show();
+        setupWin.focus();
+        if (setupWin.webContents.isLoading()) setupWin.webContents.once("did-finish-load", () => setTimeout(sendGoto, 300));
+        else sendGoto();
+    } catch (err) {
+        console.error("effects-open-editor lỗi:", err);
+    }
+});
+
+// ================================
+// LẤY TỌA ĐỘ: dùng AutoHotkey v2 (di chuột thật tới vị trí + nhấn F8)
+// Không che màn hình, hoạt động đúng trên cả nhiều màn hình vì MouseGetPos
+// của AHK tự tính theo toàn bộ desktop ảo (ghép tất cả các màn hình).
+// ================================
+const CAPTURE_POINT_COUNTS = {
+    autokey1: 2,
+    autokey2: 2,
+    autotunekey: 1,
+    chromatic: 2
+};
+
+const AHK_PATH_CANDIDATES = [
+    "C:\\Program Files\\AutoHotkey\\v2\\AutoHotkey64.exe",
+    "C:\\Program Files\\AutoHotkey\\v2\\AutoHotkey32.exe",
+    "C:\\Program Files (x86)\\AutoHotkey\\v2\\AutoHotkey64.exe",
+    "C:\\Program Files\\AutoHotkey\\AutoHotkey64.exe",
+    "C:\\Program Files\\AutoHotkey\\AutoHotkey.exe",
+    "C:\\Program Files\\AutoHotkeyU64\\AutoHotkeyU64.exe"
+];
+
+function findAhkExecutable() {
+    for (const candidate of AHK_PATH_CANDIDATES) {
+        try {
+            if (candidate && fs.existsSync(candidate)) {
+                return candidate;
+            }
+        } catch {
+            // thử candidate tiếp theo
+        }
+    }
+    return null;
+}
+
+ipcMain.handle("find-ahk-path", () => findAhkExecutable());
+
+function runAhkCapture(totalPoints, ahkExePath) {
+    return new Promise((resolve, reject) => {
+        const scriptPath = path.join(__dirname, "..", "ahk", "AHK.ahk");
+        const outputFile = path.join(getDownloadTempDir(), `capture_${Date.now()}.txt`);
+        const cancelFile = outputFile + ".cancelled";
+
+        try { fs.unlinkSync(outputFile); } catch {}
+        try { fs.unlinkSync(cancelFile); } catch {}
+
+        execFile(ahkExePath, [scriptPath, String(totalPoints), outputFile], (err) => {
+            if (fs.existsSync(cancelFile)) {
+                try { fs.unlinkSync(cancelFile); } catch {}
+                reject(new Error("Bạn đã huỷ lấy tọa độ (nhấn ESC)."));
+                return;
+            }
+
+            if (err) {
+                reject(new Error("Không chạy được AutoHotkey: " + err.message));
+                return;
+            }
+
+            if (!fs.existsSync(outputFile)) {
+                reject(new Error("AutoHotkey không trả về tọa độ nào (script có thể đã bị đóng giữa chừng)."));
+                return;
+            }
+
+            try {
+                const raw = fs.readFileSync(outputFile, "utf-8").trim();
+                const lines = raw.split(/\r?\n/).filter(Boolean);
+                const points = lines.map((line) => {
+                    const [x, y] = line.split(",").map(Number);
+                    return { x, y };
+                });
+
+                try { fs.unlinkSync(outputFile); } catch {}
+
+                if (points.length < totalPoints) {
+                    reject(new Error("Số điểm nhận được không đủ (" + points.length + "/" + totalPoints + ")."));
+                    return;
+                }
+
+                resolve(points);
+            } catch (parseErr) {
+                reject(new Error("Không đọc được kết quả tọa độ: " + parseErr.message));
+            }
+        });
+    });
+}
+
+ipcMain.handle("setup-capture", async (event, { name, points }) => {
+    const totalPoints = points || CAPTURE_POINT_COUNTS[name] || 1;
+
+    const saved = readSettingsFile();
+    let ahkExePath = saved?.ahkExePath;
+    if (!ahkExePath || !fs.existsSync(ahkExePath)) {
+        ahkExePath = findAhkExecutable();
+    }
+
+    if (!ahkExePath) {
+        throw new Error('Không tìm thấy AutoHotkey v2 trên máy. Vào Setup > "Chọn đường dẫn AutoHotkey" để trỏ tay tới file AutoHotkey64.exe.');
+    }
+
+    const captured = await runAhkCapture(totalPoints, ahkExePath);
+    return totalPoints === 1 ? captured[0] : captured;
+});
+
+// ================================
+// CLICK THẬT LÚC RUNTIME (dùng tọa độ đã capture ở Setup)
+// Tách riêng với runAhkCapture: cái đó chỉ dùng lúc THIẾT LẬP để LẤY tọa độ,
+// còn hàm này dùng lúc VẬN HÀNH THẬT để CLICK vào tọa độ đã lưu, mỗi khi
+// Command Router không tìm được đường MIDI cho hành động đó.
+// ================================
+function runAhkClick(x, y, ahkExePath) {
+    return new Promise((resolve, reject) => {
+        const scriptPath = path.join(__dirname, "..", "ahk", "click.ahk");
+        execFile(ahkExePath, [scriptPath, String(x), String(y)], (err) => {
+            if (err) {
+                reject(new Error("Không click được qua AutoHotkey: " + err.message));
+                return;
+            }
+            resolve();
+        });
+    });
+}
+
+ipcMain.handle("click-at-point", async (event, { x, y }) => {
+    if (typeof x !== "number" || typeof y !== "number") {
+        return { ok: false, detail: "Thiếu toạ độ x/y hợp lệ" };
+    }
+
+    const saved = readSettingsFile();
+    let ahkExePath = saved?.ahkExePath;
+    if (!ahkExePath || !fs.existsSync(ahkExePath)) {
+        ahkExePath = findAhkExecutable();
+    }
+
+    if (!ahkExePath) {
+        return { ok: false, detail: 'Không tìm thấy AutoHotkey v2. Vào Setup > "Chọn đường dẫn AutoHotkey".' };
+    }
+
+    try {
+        await runAhkClick(x, y, ahkExePath);
+        return { ok: true };
+    } catch (err) {
+        return { ok: false, detail: err.message };
+    }
+});
+
+// ================================
+// TẢI FILE TỪ GOOGLE DRIVE + TỰ MỞ TRÌNH CÀI ĐẶT
+// ================================
+function mergeCookies(oldCookies, setCookieHeaders) {
+    if (!setCookieHeaders) return oldCookies;
+    const newPairs = setCookieHeaders.map((c) => c.split(";")[0]).join("; ");
+    return oldCookies ? `${oldCookies}; ${newPairs}` : newPairs;
+}
+
+function extractDriveFileId(url) {
+    const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    return m ? m[1] : null;
+}
+
+// Tải 1 file công khai từ Google Drive, tự xử lý trang "xác nhận virus scan" của file lớn.
+function downloadFromUrl(url, destPath, cookies = "") {
+    return new Promise((resolve, reject) => {
+        const req = https.get(url, { headers: cookies ? { Cookie: cookies } : {} }, (res) => {
+            // Chuyển hướng
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                const newCookies = mergeCookies(cookies, res.headers["set-cookie"]);
+                res.resume();
+                downloadFromUrl(res.headers.location, destPath, newCookies).then(resolve).catch(reject);
+                return;
+            }
+
+            if (res.statusCode !== 200) {
+                res.resume();
+                reject(new Error("Tải file thất bại, mã lỗi HTTP " + res.statusCode));
+                return;
+            }
+
+            const contentType = res.headers["content-type"] || "";
+
+            // Google Drive trả về trang HTML xác nhận thay vì file thật (thường với file lớn)
+            if (contentType.includes("text/html")) {
+                let html = "";
+                res.on("data", (chunk) => (html += chunk));
+                res.on("end", async () => {
+                    const confirmMatch = html.match(/confirm=([0-9A-Za-z_]+)/);
+                    const idMatch = url.match(/id=([a-zA-Z0-9_-]+)/);
+
+                    if (confirmMatch && idMatch) {
+                        const confirmUrl = `https://drive.google.com/uc?export=download&confirm=${confirmMatch[1]}&id=${idMatch[1]}`;
+                        try {
+                            await downloadFromUrl(confirmUrl, destPath, mergeCookies(cookies, res.headers["set-cookie"]));
+                            resolve();
+                        } catch (err) {
+                            reject(err);
+                        }
+                    } else {
+                        reject(new Error("Không lấy được file thật từ Google Drive (link sai, hết quyền truy cập công khai, hoặc Google đổi định dạng trang xác nhận)."));
+                    }
+                });
+                return;
+            }
+
+            const fileStream = fs.createWriteStream(destPath);
+            res.pipe(fileStream);
+            fileStream.on("finish", () => fileStream.close());
+            fileStream.on("close", () => resolve());
+            fileStream.on("error", reject);
+        });
+
+        req.on("error", reject);
+    });
+}
+
+function getDownloadTempDir() {
+    const dir = path.join(os.tmpdir(), "automenu-downloads");
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    return dir;
+}
+
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Sau khi tải xong, Windows Defender/Antivirus có thể khoá file vài giây để quét virus
+// trước khi cho phép mở -> thử mở lại vài lần có độ trễ thay vì báo lỗi ngay lần đầu.
+async function openPathWithRetry(filePath, retries = 4, delayMs = 1200) {
+    let lastErr = "";
+    for (let i = 0; i < retries; i++) {
+        const err = await shell.openPath(filePath);
+        if (!err) {
+            return null; // mở thành công
+        }
+        lastErr = err;
+        if (i < retries - 1) {
+            await delay(delayMs);
+        }
+    }
+    return lastErr;
+}
+
+// ================================
+// HỖ TRỢ TẢI TỪ MEGA.NZ (file mã hoá phía client, cần thư viện megajs)
+// ================================
+function isMegaUrl(url) {
+    return /mega\.nz\//i.test(url);
+}
+
+function isGoogleDriveUrl(url) {
+    return /drive\.google\.com\//i.test(url);
+}
+
+function getMegaFileClass() {
+    try {
+        return require("megajs").File;
+    } catch (err) {
+        return null;
+    }
+}
+
+function downloadFromMega(url, destPath) {
+    return new Promise((resolve, reject) => {
+        const File = getMegaFileClass();
+        if (!File) {
+            reject(new Error('Thiếu thư viện "megajs". Mở Terminal tại thư mục dự án, chạy: npm install megajs, rồi khởi động lại app.'));
+            return;
+        }
+
+        try {
+            const file = File.fromURL(url);
+            file.loadAttributes((err) => {
+                if (err) {
+                    reject(new Error("Không tải được thông tin file từ Mega (link sai hoặc file đã bị xoá): " + err.message));
+                    return;
+                }
+
+                const readStream = file.download();
+                const writeStream = fs.createWriteStream(destPath);
+
+                readStream.pipe(writeStream);
+                writeStream.on("close", () => resolve());
+                writeStream.on("error", reject);
+                readStream.on("error", reject);
+            });
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+// Tự nhận diện Mega / Google Drive / link tải trực tiếp thường, rồi tải bằng đúng cách tương ứng
+async function downloadAnyUrl(url, destPath) {
+    if (isMegaUrl(url)) {
+        return downloadFromMega(url, destPath);
+    }
+
+    if (isGoogleDriveUrl(url)) {
+        const fileId = extractDriveFileId(url);
+        if (!fileId) {
+            throw new Error("Không nhận diện được link Google Drive (cần là link file, không phải link folder).");
+        }
+        const driveUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+        return downloadFromUrl(driveUrl, destPath);
+    }
+
+    // Link tải trực tiếp thông thường (không phải Mega/Drive)
+    return downloadFromUrl(url, destPath);
+}
+
+// Tải 1 file (Mega hoặc Google Drive) rồi tự mở file cài đặt lên
+ipcMain.handle("download-and-install", async (event, { url, label }) => {
+    try {
+        const destPath = path.join(getDownloadTempDir(), `${label || "installer"}.exe`);
+
+        await downloadAnyUrl(url, destPath);
+
+        const openErr = await openPathWithRetry(destPath);
+        if (openErr) {
+            return { success: false, error: "Tải xong nhưng không mở được trình cài đặt (có thể do Antivirus đang khoá file): " + openErr, path: destPath };
+        }
+
+        return { success: true, path: destPath };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+// Tải trình cài đặt Brave chính chủ rồi tự mở lên
+// Mở 1 URL bất kỳ bằng trình duyệt mặc định (dùng cho các trang tải không có link trực tiếp ổn định)
+ipcMain.handle("open-external-url", async (event, url) => {
+    try {
+        await shell.openExternal(url);
+        return true;
+    } catch (err) {
+        console.error("open-external-url lỗi:", err);
+        return false;
+    }
+});
+
+ipcMain.handle("download-brave", async () => {
+    try {
+        const destPath = path.join(getDownloadTempDir(), "BraveBrowserSetup.exe");
+
+        // Link tải trực tiếp chính thức của Brave cho Windows
+        await downloadFromUrl("https://referrals.brave.com/latest/BraveBrowserSetup.exe", destPath);
+
+        const openErr = await openPathWithRetry(destPath);
+        if (openErr) {
+            return { success: false, error: "Tải xong nhưng không mở được trình cài đặt (có thể do Antivirus đang khoá file): " + openErr, path: destPath };
+        }
+
+        return { success: true, path: destPath };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+// Tải trình cài đặt AutoHotkey v2 chính chủ rồi tự mở lên (dùng cho tính năng Lấy tọa độ)
+ipcMain.handle("download-ahk", async () => {
+    try {
+        const destPath = path.join(getDownloadTempDir(), "AutoHotkeyV2Setup.exe");
+
+        // Link tải trực tiếp chính thức từ autohotkey.com (luôn là bản v2 mới nhất)
+        await downloadFromUrl("https://www.autohotkey.com/download/ahk-v2.exe", destPath);
+
+        const openErr = await openPathWithRetry(destPath);
+        if (openErr) {
+            return { success: false, error: "Tải xong nhưng không mở được trình cài đặt (có thể do Antivirus đang khoá file): " + openErr, path: destPath };
+        }
+
+        return { success: true, path: destPath };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+// ================================
+// VST2: tải file .zip từ Google Drive rồi giải nén vào C:\Program Files\VstPlugins
+// (thư mục hệ thống -> cần quyền Admin, tự bật UAC lúc giải nén)
+// ================================
+const VST2_TARGET_DIR = "C:\\Program Files\\VstPlugins";
+
+function extractZipElevated(zipPath, destDir) {
+    return new Promise((resolve, reject) => {
+        const scriptPath = path.join(getDownloadTempDir(), "extract-vst2.ps1");
+        const scriptContent =
+            `New-Item -ItemType Directory -Force -Path "${destDir}" | Out-Null\r\n` +
+            `Expand-Archive -Path "${zipPath}" -DestinationPath "${destDir}" -Force`;
+
+        fs.writeFileSync(scriptPath, scriptContent, "utf-8");
+
+        const launcher =
+            `Start-Process powershell -Verb RunAs -Wait -ArgumentList ` +
+            `'-NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"'`;
+
+        execFile("powershell.exe", ["-NoProfile", "-Command", launcher], (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        });
+    });
+}
+
+ipcMain.handle("download-vst2", async (event, url) => {
+    try {
+        const zipPath = path.join(getDownloadTempDir(), "VST2Plugins.zip");
+
+        await downloadAnyUrl(url, zipPath);
+
+        try {
+            await extractZipElevated(zipPath, VST2_TARGET_DIR);
+        } catch (err) {
+            return {
+                success: false,
+                error: "Giải nén vào " + VST2_TARGET_DIR + " thất bại (có thể bạn đã bấm Không ở popup xin quyền Admin, hoặc lỗi khác): " + err.message
+            };
+        }
+
+        return { success: true, path: VST2_TARGET_DIR };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+// ================================
+// TỰ ĐỘNG DÒ ĐƯỜNG DẪN TRÌNH DUYỆT (các vị trí cài đặt phổ biến trên Windows)
+// ================================
+const BROWSER_PATH_CANDIDATES = {
+    "Chrome": [
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        path.join(process.env.LOCALAPPDATA || "", "Google\\Chrome\\Application\\chrome.exe")
+    ],
+    "Brave": [
+        "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+        "C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+        path.join(process.env.LOCALAPPDATA || "", "BraveSoftware\\Brave-Browser\\Application\\brave.exe")
+    ],
+    "Cốc Cốc": [
+        "C:\\Program Files\\CocCoc\\Browser\\Application\\browser.exe",
+        "C:\\Program Files (x86)\\CocCoc\\Browser\\Application\\browser.exe",
+        path.join(process.env.LOCALAPPDATA || "", "CocCoc\\Browser\\Application\\browser.exe")
+    ]
+};
+
+ipcMain.handle("find-browser-path", (event, browserName) => {
+    const candidates = BROWSER_PATH_CANDIDATES[browserName] || [];
+
+    for (const candidate of candidates) {
+        try {
+            if (candidate && fs.existsSync(candidate)) {
+                return candidate;
+            }
+        } catch {
+            // bỏ qua, thử candidate tiếp theo
+        }
+    }
+
+    return null;
+});
+
+// TASK B30.2 — re-validate 1 đường dẫn file bất kỳ CÒN TỒN TẠI THẬT trên đĩa hay không, dùng lại
+// đúng fs.existsSync() đã dùng khắp file này (không thêm dependency mới). Trước đây renderer
+// KHÔNG có cách nào tự kiểm tra việc này (chỉ main process có quyền truy cập filesystem), khiến
+// selectedBrowserPath không bao giờ được re-validate sau khi lưu — xem B29/B30.2.
+ipcMain.handle("check-path-exists", (event, filePath) => {
+    try {
+        return !!filePath && fs.existsSync(filePath);
+    } catch {
+        return false;
+    }
+});
+
+// TASK A55 — Startup & Paths: phân biệt "path tồn tại nhưng là thư mục" với "path tồn tại và
+// là file thật" — checkPathExists (trên) không phân biệt được 2 trường hợp này, mà đặc tả A55
+// yêu cầu DAW Executable Path PHẢI là file, không được là thư mục. Không launch/execute file
+// trong handler này — chỉ fs.statSync() để đọc metadata.
+ipcMain.handle("check-path-is-file", (event, filePath) => {
+    try {
+        if (!filePath) return null; // rỗng -> không phải lỗi, để renderer tự hiểu là "chưa cấu hình"
+        if (!fs.existsSync(filePath)) return false;
+        return fs.statSync(filePath).isFile();
+    } catch {
+        return false;
+    }
+});
+
+// Kênh ĐỒNG BỘ (sendSync) để appSettings.js giữ nguyên API get/set đồng bộ như trước,
+// chỉ đổi nơi lưu trữ thực sự từ localStorage (bị cô lập theo cửa sổ) sang 1 file dùng chung.
+ipcMain.on("load-settings-sync", (event) => {
+    event.returnValue = readSettingsFile();
+});
+
+ipcMain.on("save-settings-sync", (event, data) => {
+    event.returnValue = writeSettingsFile(data);
+});
+
+ipcMain.handle("select-file", async (event, options = {}) => {
+    const result = await dialog.showOpenDialog({
+        properties: ["openFile"],
+        filters: options.filters || [{ name: "All Files", extensions: ["*"] }]
+    });
+
+    if (result.canceled || !result.filePaths.length) {
+        return null;
+    }
+
+    return result.filePaths[0];
+});
+
+ipcMain.handle("export-backup", async (event, data) => {
+    const result = await dialog.showSaveDialog({
+        defaultPath: "automenu-backup.json",
+        filters: [{ name: "JSON", extensions: ["json"] }]
+    });
+
+    if (result.canceled || !result.filePath) {
+        return null;
+    }
+
+    fs.writeFileSync(result.filePath, JSON.stringify(data, null, 2), "utf-8");
+    return result.filePath;
+});
+
+ipcMain.handle("import-backup", async () => {
+    const result = await dialog.showOpenDialog({
+        properties: ["openFile"],
+        filters: [{ name: "JSON", extensions: ["json"] }]
+    });
+
+    if (result.canceled || !result.filePaths.length) {
+        return null;
+    }
+
+    try {
+        const raw = fs.readFileSync(result.filePaths[0], "utf-8");
+        return JSON.parse(raw);
+    } catch (err) {
+        console.error("import-backup: không đọc/parse được file:", err);
+        return null;
+    }
+});
+
+// ================================
+// MỞ KÈM PROJECT / YOUTUBE
+// ================================
+function buildCopyPath(originalPath) {
+    const dir = path.dirname(originalPath);
+    const ext = path.extname(originalPath);
+    const base = path.basename(originalPath, ext);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    return path.join(dir, `${base}_copy_${stamp}${ext}`);
+}
+
+ipcMain.handle("open-project-bundle", async (event, options = {}) => {
+    const {
+        launchDAW,
+        dawPath,
+        projectPath,
+        openProject,
+        makeCopy,
+        openYoutube,
+        browserPath,
+        youtubeUrl
+    } = options;
+
+    const result = { openedProjectPath: null, errors: [] };
+
+    // 1) Mở DAW (nếu bật "Mở DAW cùng Menu")
+    if (launchDAW) {
+        if (!dawPath || !fs.existsSync(dawPath)) {
+            result.errors.push("Chưa thiết lập đường dẫn DAW hoặc file không còn tồn tại.");
+        } else {
+            try {
+                const openErr = await shell.openPath(dawPath);
+                if (openErr) {
+                    result.errors.push("Không mở được DAW: " + openErr);
+                }
+            } catch (err) {
+                result.errors.push("Không mở được DAW: " + err.message);
+            }
+        }
+    }
+
+    // 2) Mở Project (có thể tạo bản copy trước)
+    if (openProject) {
+        if (!projectPath || !fs.existsSync(projectPath)) {
+            result.errors.push("Chưa chọn Project hoặc file không còn tồn tại.");
+        } else {
+            let pathToOpen = projectPath;
+
+            if (makeCopy) {
+                try {
+                    const copyPath = buildCopyPath(projectPath);
+                    fs.copyFileSync(projectPath, copyPath);
+                    pathToOpen = copyPath;
+                } catch (err) {
+                    result.errors.push("Không tạo được bản copy: " + err.message);
+                }
+            }
+
+            try {
+                const openErr = await shell.openPath(pathToOpen);
+                if (openErr) {
+                    result.errors.push("Không mở được project: " + openErr);
+                } else {
+                    result.openedProjectPath = pathToOpen;
+                }
+            } catch (err) {
+                result.errors.push("Không mở được project: " + err.message);
+            }
+        }
+    }
+
+    // 3) Mở Youtube — ưu tiên mở bằng ĐÚNG trình duyệt đã chọn ở Setup, nếu có đường dẫn hợp lệ
+    if (openYoutube) {
+        const url = youtubeUrl || "https://www.youtube.com";
+
+        if (browserPath && fs.existsSync(browserPath)) {
+            try {
+                await new Promise((resolve, reject) => {
+                    execFile(browserPath, [url], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
+            } catch (err) {
+                result.errors.push("Không mở được trình duyệt đã chọn: " + err.message);
+            }
+        } else {
+            // Chưa thiết lập đường dẫn trình duyệt cụ thể -> dùng trình duyệt mặc định của Windows
+            try {
+                await shell.openExternal(url);
+            } catch (err) {
+                result.errors.push("Không mở được Youtube: " + err.message);
+            }
+        }
+    }
+
+    return result;
+});
+
+app.on("window-all-closed", () => {
+
+    if (process.platform !== "darwin") {
+        app.quit();
+    }
+
+});
+
+// TASK B2 Mục 12 — SHUTDOWN SAFETY: đóng MIDI Input/Output trước khi process thoát hẳn,
+// tránh để RtMidi/easymidi port treo (đặc biệt quan trọng cho port ảo dùng chung — port
+// không đóng sạch có thể khiến lần mở app SAU không mở lại được, tuỳ driver/OS).
+app.on("before-quit", () => {
+    try {
+        CommandRuntime.stop();
+    } catch (err) {
+        console.error("CommandRuntime.stop() lúc shutdown lỗi (bỏ qua, app vẫn thoát):", err.message);
+    }
+});
+
+app.on("activate", () => {
+
+    if (BrowserWindow.getAllWindows().length === 0) {
+        createMainWindow();
+        createSetupWindow();
+    }
+
+});

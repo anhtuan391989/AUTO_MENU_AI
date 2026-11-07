@@ -167,8 +167,17 @@ const effectsOf = (main) => FakeWin.instances.find((w) => w !== main);
     { const { main, mgr } = setupPersist(false, { saveThrows: true }); const r = mgr.setAlwaysOnTop(true); mgr.open(); check(r.ok === true && r.value === true && effectsOf(main).aot === true, "ghi file lỗi -> vẫn áp dụng trong phiên, không throw"); }
     // thiếu hàm tiêm (cách dùng cũ) -> hoạt động như trước
     { const { mgr } = setup(); check(mgr.getAlwaysOnTop().value === false && mgr.setAlwaysOnTop(true).ok === true, "không tiêm load/save -> chạy như bản cũ"); }
+    // phần 2: lần cuối tích BẬT -> Menu khởi động xong thì Bảng Hiệu Ứng TỰ MỞ cùng Menu (và luôn hiện)
+    { const { main, mgr } = setupPersist(true); const before = FakeWin.instances.filter((w) => w !== main).length; const r = mgr.openIfPinned(); const fx = effectsOf(main); check(before === 0 && r.ok && r.auto === true && mgr.isOpen() && fx && fx.aot === true, "lần cuối tích BẬT -> Menu khởi động: Bảng Hiệu Ứng tự mở, luôn hiện"); }
+    // lần cuối bỏ tích / chưa lưu -> KHÔNG tự mở, Menu mở bình thường
+    { const { main, mgr } = setupPersist(false); const r = mgr.openIfPinned(); check(r.auto === false && !mgr.isOpen() && FakeWin.instances.filter((w) => w !== main).length === 0, "lần cuối bỏ tích -> không tự mở Bảng Hiệu Ứng"); }
+    { const { main, mgr } = setupPersist(undefined); mgr.openIfPinned(); check(!mgr.isOpen() && FakeWin.instances.filter((w) => w !== main).length === 0, "chưa lưu gì -> không tự mở (hành vi cũ)"); }
+    // gọi 2 lần (vd. Menu nạp lại) -> không mở cửa sổ thứ hai
+    { const { main, mgr } = setupPersist(true); mgr.openIfPinned(); const r2 = mgr.openIfPinned(); check(r2.auto === false && FakeWin.instances.filter((w) => w !== main && !w.destroyed).length === 1, "gọi lại -> không mở thêm cửa sổ thứ hai"); }
+    // báo trạng thái cho nút EFFECT sáng khi tự mở
+    { FakeWin.instances.length = 0; const states = []; const main = new FakeWin({}); const mgr = createEffectsWindowManager({ BrowserWindow: FakeWin, screen: screenFake, getMainWin: () => main, preloadPath: "/p", htmlPath: "/p", onStateChange: (o) => states.push(o), loadAlwaysOnTop: () => true, saveAlwaysOnTop: () => {} }); mgr.openIfPinned(); check(states.join() === "true", "tự mở -> báo effects-state=true để nút EFFECT sáng"); }
     // nối dây main.js
-    { const m = fs.readFileSync(path.join(root, "app", "main.js"), "utf8"); check(m.includes("loadAlwaysOnTop") && m.includes("saveAlwaysOnTop") && m.includes("effectsWindow: {"), "main.js nối load/save AOT vào app-settings.json (effectsWindow.alwaysOnTop)"); }
+    { const m = fs.readFileSync(path.join(root, "app", "main.js"), "utf8"); check(m.includes("loadAlwaysOnTop") && m.includes("saveAlwaysOnTop") && m.includes("effectsWindow: {"), "main.js nối load/save AOT vào app-settings.json (effectsWindow.alwaysOnTop)"); check(/did-finish-load[\s\S]{0,700}autoOpenEffectsIfPinned\(\)/.test(m) && m.includes("effectsWindow.openIfPinned()"), "main.js: Menu nạp xong (did-finish-load) -> gọi tự mở theo trạng thái Luôn Hiện"); }
 }
 
 // ---- giá trị không hợp lệ ----
