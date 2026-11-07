@@ -1,0 +1,42 @@
+// A104 — MENU-AUTO-ELEVATE-01. TEST MÔ PHỎNG (spawnSync giả). KHÔNG chứng minh UAC/Administrator thật trên Windows.
+const fs = require('fs'), path = require('path');
+const E = require('../../app/Elevation.js');
+let pass = 0, fail = 0; const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m, x === undefined ? '' : JSON.stringify(x)); } };
+const base = { platform: 'win32', argv: ['C:\\app\\electron.exe', '.'], env: {}, execPath: 'C:\\app\\node_modules\\electron\\dist\\electron.exe', cwd: 'G:\\AUTO_MENU_AI' };
+const mk = (fltmcStatus, psStatus, calls) => (cmd, args) => { calls.push({ cmd, args }); if (cmd === 'fltmc') return fltmcStatus === 'throw' ? (() => { throw new Error('ENOENT'); })() : { status: fltmcStatus, error: fltmcStatus === 'err' ? new Error('x') : undefined }; return { status: psStatus, stderr: psStatus ? 'The operation was canceled by the user.' : '' }; };
+
+console.log('== 1. Quy tắc quyết định ==');
+let c = []; let r = E.ensureElevated({ ...base, platform: 'linux', spawnSync: mk(1, 0, c) });
+ok(r.action === 'skip' && r.reason === 'NOT_WINDOWS' && c.length === 0, 'không phải Windows -> bỏ qua, không chạy lệnh nào');
+c = []; r = E.ensureElevated({ ...base, spawnSync: mk(0, 0, c) });
+ok(r.action === 'already' && c.length === 1 && c[0].cmd === 'fltmc', 'đã Administrator (fltmc exit 0) -> không xin lại');
+c = []; r = E.ensureElevated({ ...base, spawnSync: mk(1, 0, c) });
+ok(r.action === 'relaunched' && c.length === 2 && c[1].cmd === 'powershell.exe', 'quyền thường -> xin UAC, báo relaunched (caller thoát)', r);
+const script = c[1].args[c[1].args.length - 1];
+ok(/Start-Process -FilePath 'C:\\app\\node_modules\\electron\\dist\\electron\.exe'/.test(script) && /-Verb RunAs/.test(script) && /-WorkingDirectory 'G:\\AUTO_MENU_AI'/.test(script) && /@\('\.', '--automenu-elevated'\)/.test(script), 'lệnh mở lại: cùng electron.exe + cùng tham số + cwd + RunAs + cờ --automenu-elevated', script);
+c = []; r = E.ensureElevated({ ...base, spawnSync: mk(1, 3, c) });
+ok(r.action === 'denied' && /canceled/.test(r.detail), 'bấm No ở UAC -> denied, Menu vẫn chạy quyền thường (không thoát)', r);
+c = []; r = E.ensureElevated({ ...base, argv: [...base.argv, '--automenu-elevated'], spawnSync: mk(1, 0, c) });
+ok(r.action === 'skip' && r.reason === 'ALREADY_RELAUNCHED' && c.length === 0, 'có cờ --automenu-elevated -> KHÔNG BAO GIỜ xin lần 2 (chống vòng lặp)');
+c = []; r = E.ensureElevated({ ...base, env: { AUTOMENU_NO_ELEVATE: '1' }, spawnSync: mk(1, 0, c) });
+ok(r.action === 'skip' && r.reason === 'DISABLED_BY_USER' && c.length === 0, 'AUTOMENU_NO_ELEVATE=1 -> tắt');
+c = []; r = E.ensureElevated({ ...base, argv: [...base.argv, '--no-elevate'], spawnSync: mk(1, 0, c) });
+ok(r.action === 'skip' && r.reason === 'DISABLED_BY_USER', 'tham số --no-elevate -> tắt');
+c = []; r = E.ensureElevated({ ...base, spawnSync: mk('throw', 0, c) });
+ok(r.action === 'relaunched' || r.action === 'denied', 'fltmc lỗi -> coi là chưa elevated, vẫn có cờ chống lặp (không ném ngoại lệ)', r);
+r = E.ensureElevated({ ...base, spawnSync: () => { throw new Error('boom'); } });
+ok(['denied', 'error', 'relaunched'].includes(r.action) && r.action !== 'relaunched', 'spawnSync ném lỗi -> không sập app', r);
+ok(E.isElevated(() => ({ status: 0 })) === true && E.isElevated(() => ({ status: 1 })) === false && E.isElevated(() => ({ error: new Error('x') })) === false, 'isElevated: chỉ exit 0 mới là Administrator');
+c = []; E.ensureElevated({ ...base, argv: ['x', "it's a path"], spawnSync: mk(1, 0, c) });
+ok(/'it''s a path'/.test(c[1].args[c[1].args.length - 1]), 'tham số có dấu nháy đơn được escape đúng');
+
+console.log('== 2. main.js: gắn đúng chỗ, an toàn ==');
+const main = fs.readFileSync(path.join(__dirname, '../../app/main.js'), 'utf8');
+const iEl = main.indexOf('require("./Elevation").ensureElevated'), iWin = main.indexOf('new BrowserWindow'), iMainWin = main.indexOf('let mainWin');
+ok(iEl > 0 && iEl < iMainWin && iEl < iWin, 'ensureElevated chạy TRƯỚC khi tạo bất kỳ cửa sổ/handler nào');
+ok(/if \(__elevation\.action === "relaunched"\) app\.exit\(0\)/.test(main), 'chỉ thoát khi đã mở được bản Administrator');
+ok((main.match(/ensureElevated\(/g) || []).length === 1 && !/app\.relaunch\(/.test(main), 'chỉ một lời gọi, không dùng app.relaunch');
+const D = fs.readFileSync(path.join(__dirname, '../../app/DawTray.js'), 'utf8');
+ok(/SHOW_REQUEST_NOT_STARTED' && r\.privCompare === 'DIFFERENT'/.test(D) && /Run as administrator/.test(D), 'DawTray: nếu vẫn chênh quyền (vd từ chối UAC) -> thông báo rõ cách khắc phục');
+console.log('\n' + pass + ' PASS / ' + fail + ' FAIL (MÔ PHỎNG — chưa phải UAC/Windows thật)');
+process.exit(fail ? 1 : 0);

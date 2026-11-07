@@ -1,6 +1,9 @@
 const { MenuKeyClient } = require('./menu-api-client.js');
 const keyServer = new MenuKeyClient("https://menu-key-server.matuotluuly.workers.dev");
 const { app, BrowserWindow, ipcMain, dialog, session, shell, screen, desktopCapturer, Tray, Menu, nativeImage } = require("electron");
+// A104 — Menu tự chạy Administrator (cùng mức quyền với FSP8) để ẨN/HIỆN DAW hoạt động; nếu người dùng từ chối UAC thì chạy quyền thường như cũ.
+const __elevation = require("./Elevation").ensureElevated({ log: console.log });
+if (__elevation.action === "relaunched") app.exit(0); // bản Administrator đã được mở -> bản quyền thường thoát ngay, không tạo cửa sổ nào
 const path = require("path");
 const fs = require("fs");
 const { execFile } = require("child_process");
