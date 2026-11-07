@@ -3676,3 +3676,29 @@ function bridgeSemitoneDelta(fromKeyName, toKeyName) {
     new MutationObserver(fitKeyFont).observe(keyValueEl, { characterData: true, childList: true, subtree: true });
     fitKeyFont(); // áp dụng luôn cho giá trị mặc định lúc mở app
 })();
+
+
+/* MENU-LAYOUT-MEMORY-01 BEGIN
+   Ghi nhớ chế độ DỌC / NGANG của Menu ở lần dùng cuối (app-settings.json > menuVerticalMode, qua đúng getSetting/setSetting có sẵn).
+   KHÔNG sửa HTML: nút 📐 vẫn gọi toggleVerticalMode() như cũ (chỉ đổi class "vertical-mode" trên <body>). Ở đây chỉ (1) lúc mở app áp lại class đã lưu,
+   (2) theo dõi class của <body> để lưu mỗi khi người dùng đổi. Lần cuối ở chế độ NGANG (hoặc chưa lưu gì) => giữ nguyên như cũ, không thêm gì.
+   Mọi lỗi chỉ bị bỏ qua, không làm hỏng Menu. */
+(function setupMenuLayoutMemory() {
+    try {
+        const body = document.body;
+        if (!body || typeof getSetting !== "function" || typeof setSetting !== "function") return;
+        const KEY = "menuVerticalMode";
+        if (getSetting(KEY, false) === true) body.classList.add("vertical-mode");
+        let last = body.classList.contains("vertical-mode");
+        if (typeof MutationObserver !== "function") return;
+        new MutationObserver(() => {
+            try {
+                const now = body.classList.contains("vertical-mode");
+                if (now === last) return; // class khác đổi (không liên quan) => khỏi ghi file
+                last = now;
+                setSetting(KEY, now);
+            } catch (err) { console.error("MENU-LAYOUT-MEMORY-01: lưu chế độ dọc/ngang lỗi (bỏ qua):", err); }
+        }).observe(body, { attributes: true, attributeFilter: ["class"] });
+    } catch (err) { console.error("MENU-LAYOUT-MEMORY-01 lỗi (bỏ qua):", err); }
+})();
+/* MENU-LAYOUT-MEMORY-01 END */
