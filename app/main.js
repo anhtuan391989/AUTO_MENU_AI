@@ -1090,11 +1090,15 @@ app.whenReady().then(() => { try { getDawTray().restoreTrayIfHidden(); } catch (
 // A106 — Start Hidden: tự ẩn DAW SAU KHI DAW mở xong VST + project (xem core/integration/DawReadyWatcher.js). Chỉ chạy khi hiddenDaw.startHidden = true trong app-settings.json.
 const DawReadyWatcher = require("../core/integration/DawReadyWatcher");
 let dawReadyWatcher = null;
+// A110 — nhật ký Start Hidden ghi CÙNG file với Ẩn/Hiện DAW (daw-hide-diagnostic.log cạnh app-settings.json) để người dùng gửi được; trước đó chỉ in ra console (không ai xem được).
+function startHiddenLog(m) {
+    try { console.log(m); fs.appendFileSync(path.join(app.getPath("userData"), "daw-hide-diagnostic.log"), new Date().toISOString() + " " + m + "\n", "utf8"); } catch (e) { /* bỏ qua */ }
+}
 function getDawReadyWatcher() {
     if (!dawReadyWatcher) {
         const dawExe = () => { try { const s = readSettingsFile() || {}; const a = typeof s.selectedDAWPath === "string" ? s.selectedDAWPath.trim() : ""; const b = s.startupPaths && typeof s.startupPaths.dawExecutable === "string" ? s.startupPaths.dawExecutable.trim() : ""; return a || b || ""; } catch (e) { return ""; } };
         dawReadyWatcher = DawReadyWatcher.createDawReadyWatcher(DawReadyWatcher.realDeps({
-            windowHider: WindowHider, log: console.log, readSettings: readSettingsFile, getExe: dawExe,
+            windowHider: WindowHider, log: startHiddenLog, readSettings: readSettingsFile, getExe: dawExe,
             hide: (cb) => getDawTray().hide(cb), isHidden: () => !!getDawTray().status().hidden
         }));
     }

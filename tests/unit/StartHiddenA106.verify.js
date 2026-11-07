@@ -89,5 +89,9 @@ ok(!/require\(["']electron["']\)/.test(src), 'module Node thuần (không requir
 const mainJs = fs.readFileSync(path.join(__dirname, '../../app/main.js'), 'utf8');
 ok(/getDawReadyWatcher\(\)\.start\(\)/.test(mainJs) && /startHidden: sh/.test(mainJs), 'main.js: khởi động watcher + trả startHidden trong tools-daw-status');
 ok(W.realDeps({ windowHider: {}, log() {}, readSettings() {}, getExe() {}, hide() {}, isHidden() {} }).taskPids.length === 2, 'realDeps dựng được');
+console.log('== 9. A110: bằng chứng cho người dùng ==');
+{ const r = rig(); r.world.pids = [11]; r.world.title = 'Fender Studio Pro 8'; r.world.cpuPerSec = 2; r.w.start(); r.run(12000);
+  const d = r.w.phase().detail; ok(r.w.phase().phase === 'waiting_ready' && /TITLE_MISSING_PROJECT/.test(d) && /Fender Studio Pro 8/.test(d) && /Live Set/.test(d), 'dòng trạng thái ở Setup nói rõ: tiêu đề DAW hiện là gì + cần chữ gì', d); }
+ok(/function startHiddenLog/.test(mainJs) && /log: startHiddenLog/.test(mainJs) && /daw-hide-diagnostic\.log/.test(mainJs.slice(mainJs.indexOf('function startHiddenLog'), mainJs.indexOf('function startHiddenLog') + 400)), 'main.js: nhật ký Start Hidden ghi vào daw-hide-diagnostic.log (không chỉ console)');
 if (process.platform !== 'win32') { let got = 'x'; W.realDeps({ windowHider: {}, log() {} }).taskPids(EXE, (p) => { got = p; }); ok(got === null, 'không phải Windows => taskPids trả null, không throw'); }
 console.log(pass + ' PASS / ' + fail + ' FAIL (MÔ PHỎNG — chưa phải Windows thật / chưa thử với FSP8)'); process.exit(fail ? 1 : 0);

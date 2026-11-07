@@ -122,7 +122,7 @@ function createDawReadyWatcher(deps) {
                 const why = ev.reason + (ev.cpuPct != null ? ' cpu=' + ev.cpuPct.toFixed(1) + '%' : '') + ' tiêu đề="' + String(s.title || '').slice(0, 80) + '"';
                 if (ev.reason !== lastReason) log('pid=' + pid + ' chưa/đã sẵn sàng: ' + why);
                 lastReason = ev.reason;
-                if (!ev.ready) { tk.readySince = null; setPhase('waiting_ready', 'Đang chờ DAW nạp xong VST/project (' + ev.reason + ').', pid); once(cfg.pollReadyMs); return; }
+                if (!ev.ready) { tk.readySince = null; setPhase('waiting_ready', 'Đang chờ DAW nạp xong VST/project (' + ev.reason + (ev.reason === 'TITLE_MISSING_PROJECT' ? ': tiêu đề DAW hiện là "' + String(s.title || '').slice(0, 60) + '", cần có chữ "' + projectName(c.project) + '"' : '') + (ev.cpuPct != null ? '; CPU ' + ev.cpuPct.toFixed(0) + '%' : '') + ').', pid); once(cfg.pollReadyMs); return; }
                 if (tk.readySince == null) tk.readySince = now();
                 if (now() - tk.readySince < cfg.stableMs) { setPhase('waiting_ready', 'DAW có vẻ đã xong, đang xác nhận ổn định…', pid); once(cfg.pollReadyMs); return; }
                 if (d.isHidden && d.isHidden()) { handled = pid; tracked = null; setPhase('done', 'DAW đã được ẩn sẵn.', pid); once(cfg.pollIdleMs); return; }
