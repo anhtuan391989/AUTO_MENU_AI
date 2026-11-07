@@ -63,7 +63,7 @@ const sync = (fn) => new Promise((r) => fn(r));
   ok(/dawTrayMgr\.restoreOnQuit\(\)/.test(main) && /Tray, Menu, nativeImage/.test(main), 'main.js: khôi phục DAW khi thoát; import Tray/Menu/nativeImage');
   // A105: tab "Công cụ & Sửa lỗi" đã bỏ; Ẩn/Hiện DAW nằm trong thẻ Hidden DAW của tab AI.
   ok(!/panel-tools/.test(html) && /js\/setupTools\.js/.test(html), 'setup.html: tab/panel Công cụ đã bỏ (A105); script setupTools.js vẫn nạp');
-  const card = html.slice(html.indexOf('🎛 Hidden DAW'), html.indexOf('📁 Startup'));
+  const card = html.slice(html.indexOf('🎛 Hidden DAW'), html.indexOf('🧠 AI Configuration'));
   ok(/id="hiddenDawEnable"/.test(card) && /id="hiddenDawStartHidden"/.test(card) && /id="toolsDawBadge"/.test(card) && /id="toolsDawMessage"/.test(card) && /id="toolsDawPath"/.test(card) && !/Ẩn Plugin/i.test(card), 'thẻ Hidden DAW (AI): có ô tick Enable (Ẩn/Hiện) + Start Hidden + badge + đường dẫn + thông báo; KHÔNG có Ẩn Plugin');
   ok(/hiddenDawEnable/.test(tools) && /toolsDawHide/.test(tools) && /toolsDawShow/.test(tools), 'setupTools.js: ô tick Enable gọi đúng IPC Ẩn/Hiện');
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((x) => x[1]); ok(new Set(ids).size === ids.length, 'setup.html: không trùng id', ids.filter((x, i) => ids.indexOf(x) !== i));

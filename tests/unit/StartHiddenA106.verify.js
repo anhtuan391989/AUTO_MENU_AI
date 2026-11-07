@@ -33,6 +33,8 @@ ok(W.evaluateSample({ sample: base, prev: null, project: '' }).reason === 'MEASU
 ok(W.evaluateSample({ sample: { ...base, title: '  ', t: 1000 }, prev: base, project: '' }).reason === 'NO_WINDOW_TITLE', 'tiêu đề rỗng (splash) => chưa sẵn sàng');
 ok(W.evaluateSample({ sample: { ...base, title: 'Studio Pro', t: 1000 }, prev: base, project: '' }).ready === true, 'chưa chọn project: chỉ cần có tiêu đề');
 
+ok(W.pickProject({ projectPath: 'D:\\Show\\A.song' }, { dawProject: 'D:\\X\\B.song' }) === 'D:\\Show\\A.song', 'A107: project lấy từ ô "Mở kèm Project" (projectPath) trước');
+ok(W.pickProject({ projectPath: 'Chưa chọn project' }, { dawProject: 'D:\\X\\B.song' }) === 'D:\\X\\B.song' && W.pickProject({}, {}) === '', 'A107: trống/chưa chọn => dự phòng startupPaths cũ, rồi rỗng');
 console.log('== 2. Tắt / chưa có DAW ==');
 { const r = rig({ settings: { hiddenDaw: { startHidden: false } } }); r.world.pids = [11]; r.world.title = 'Studio Pro - Live Set'; r.w.start(); r.run(60000);
   ok(r.world.hideCalls === 0 && r.w.phase().phase === 'off', 'Start Hidden TẮT => không bao giờ ẩn'); }

@@ -65,8 +65,8 @@ console.log('\n== PHẦN 2: DAW Path/Startup — đã có mặt trong panel-ai =
     }
     // A55 Startup & Paths (spDawExePath/spDawProjectPath/spAutoStart) đã có sẵn trong panel-ai
     // TRƯỚC C60 — C60 không đụng, chỉ xác nhận vẫn còn nguyên (không bị move nhầm/xoá nhầm).
-    assert(/id="spDawExePath"/.test(panelAi), 'panel-ai vẫn còn spDawExePath (A55, không bị C60 đụng tới)');
-    assert(/id="spAutoStart"/.test(panelAi), 'panel-ai vẫn còn spAutoStart (A55, không bị C60 đụng tới)');
+    assert(!/id="spDawExePath"/.test(panelAi), 'panel-ai: spDawExePath đã bỏ ở A107 (thẻ Startup & Paths trùng chức năng)');
+    assert(!/id="spAutoStart"/.test(panelAi), 'panel-ai: spAutoStart đã bỏ ở A107');
 }
 
 console.log('\n== PHẦN 3: Setup (panel cũ) KHÔNG còn bản duplicate ==');

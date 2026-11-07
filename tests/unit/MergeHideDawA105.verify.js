@@ -5,7 +5,7 @@ const html = fs.readFileSync(path.join(root, 'ui/setup.html'), 'utf8');
 const js = fs.readFileSync(path.join(root, 'ui/js/setupTools.js'), 'utf8');
 let p = 0, f = 0; const ok = (c, m) => { c ? p++ : f++; console.log((c ? '  OK   ' : '  FAIL ') + m); };
 const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
-const card = html.slice(html.indexOf('🎛 Hidden DAW'), html.indexOf('📁 Startup'));
+const card = html.slice(html.indexOf('🎛 Hidden DAW'), html.indexOf('🧠 AI Configuration'));
 ok(!/panel-tools/.test(html) && !/<span>Công cụ/.test(html), 'tab + panel "Công cụ & Sửa lỗi" đã bỏ hẳn');
 ['toolsDawBadge', 'toolsDawPath', 'toolsDawMessage', 'hiddenDawEnable', 'hiddenDawStartHidden'].forEach((i) => ok(ids.filter((x) => x === i).length === 1 && card.includes('id="' + i + '"'), i + ': đúng 1 lần, nằm trong thẻ Hidden DAW'));
 ok(ids.length === new Set(ids).size, 'không trùng id nào trong setup.html');

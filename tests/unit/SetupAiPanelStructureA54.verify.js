@@ -31,7 +31,7 @@ console.log('== PHẦN 1: UI Structure — có panel-ai, có đủ 3 nhóm ==');
 {
     assert(panelStart !== -1, 'ui/setup.html có section id="panel-ai"');
     assert(/🎛 Hidden DAW/.test(panelAiSection), 'panel-ai có nhóm "Hidden DAW"');
-    assert(/Startup &amp; Paths|Startup & Paths/.test(panelAiSection), 'panel-ai có nhóm "Startup & Paths"');
+    assert(!/Startup &amp; Paths|Startup & Paths/.test(panelAiSection.replace(/<!--[\s\S]*?-->/g, '')), 'A107: thẻ "Startup & Paths" (A55, trùng với "Đường dẫn & khởi động" + "Mở kèm Project") đã bỏ');
     assert(/AI Configuration \/ Readiness/.test(panelAiSection), 'panel-ai có nhóm "AI Configuration / Readiness"');
 }
 
@@ -39,8 +39,6 @@ console.log('\n== PHẦN 2: Mỗi field có label + id ổn định, không trù
 {
     const requiredIds = [
         'hiddenDawEnable', 'hiddenDawStartHidden', // A106: 5 ô khoá còn lại (App/ExePath/ProjectPath/AutoLaunch/Lifecycle) đã bỏ theo yêu cầu của chủ dự án
-        'spAutoStart', 'spDawExePath', 'spDawProjectPath', 'spPluginPaths',
-        'spMidiConfigPath', 'spAudioConfigPath', 'spLogsPath',
         'aiReadyKeyPill', 'aiReadyBpmPill', 'aiReadyModPill', 'aiReadyAudioSourcePill',
         'aiReadyWasapiPill', 'aiReadyOverallPill',
     ];
@@ -70,8 +68,7 @@ console.log('\n== PHẦN 3: Hidden DAW / AI Readiness vẫn "chưa có backend" 
 {
     // Cắt riêng từng card để không lẫn giữa "vẫn pending" (Hidden DAW, AI Readiness) và
     // "đã có backend thật" (Startup & Paths, TASK A55).
-    const hiddenDawSection = panelAiSection.slice(panelAiSection.indexOf('🎛 Hidden DAW'), panelAiSection.indexOf('📁 Startup'));
-    const startupPathsSection = panelAiSection.slice(panelAiSection.indexOf('📁 Startup'), panelAiSection.indexOf('🧠 AI Configuration'));
+    const hiddenDawSection = panelAiSection.slice(panelAiSection.indexOf('🎛 Hidden DAW'), panelAiSection.indexOf('🧠 AI Configuration'));
     const aiReadySection = panelAiSection.slice(panelAiSection.indexOf('🧠 AI Configuration'));
 
     assert(!/>Show DAW</.test(hiddenDawSection) && !/>Hide DAW</.test(hiddenDawSection),
@@ -90,19 +87,8 @@ console.log('\n== PHẦN 3: Hidden DAW / AI Readiness vẫn "chưa có backend" 
     }
     assert(checkedHiddenDaw === 2, `Đã kiểm tra ${checkedHiddenDaw} control Hidden DAW (A106: kỳ vọng 2 — Enable + Start Hidden)`);
 
-    // Startup & Paths (TASK A55): NGƯỢC LẠI — các field PHẢI không còn disabled (có backend
-    // thật), và PHẢI có đúng 1 nút Save (Apply/Verify/Launch vẫn không được thêm — A55 chỉ cần
-    // Save, không cam kết các hành vi Apply/Verify/Launch riêng).
-    const spFieldsRegex = /<(input|textarea)\b[^>]*id="sp[A-Z][^"]*"[^>]*>/g;
-    let checkedSp = 0;
-    while ((m = spFieldsRegex.exec(startupPathsSection))) {
-        checkedSp++;
-        assert(!/disabled/.test(m[0]), `Startup & Paths control "${m[0].slice(0, 60)}..." KHÔNG còn disabled (A55: đã có backend thật)`);
-    }
-    assert(checkedSp === 7, `Đã kiểm tra ${checkedSp} control Startup & Paths đều đã bật (kỳ vọng 7)`);
-    assert(/id="spSaveBtn"/.test(startupPathsSection), 'Startup & Paths có nút Save thật (id="spSaveBtn") — đúng vì A55 đã nối backend');
-    assert(!/>Apply</.test(startupPathsSection) && !/>Verify</.test(startupPathsSection) && !/>Launch</.test(startupPathsSection),
-        'Startup & Paths: không có nút Apply/Verify/Launch nào được thêm ngoài Save (đúng phạm vi A55)');
+    // A107: thẻ Startup & Paths đã bỏ khỏi panel-ai.
+    assert(!/id="sp[A-Z]/.test(panelAiSection), 'A107: không còn control sp* (Startup & Paths) trong panel-ai');
 
     assert(!/\d{1,3}\s*%/.test(aiReadySection.slice(0, 400)),
         'AI Readiness overall KHÔNG dùng số phần trăm giả');
@@ -123,7 +109,7 @@ console.log('\n== PHẦN 4: Key/BPM/Mod ghi đúng nguồn System Audio/WASAPI, 
 
 console.log('\n== PHẦN 5: (A106) ô Lifecycle Policy đã bỏ — không còn lựa chọn nào có thể kill DAW ==');
 {
-    assert(!/hiddenDawLifecyclePolicy/.test(panelAiSection) && !/kill/i.test(panelAiSection.slice(panelAiSection.indexOf('🎛 Hidden DAW'), panelAiSection.indexOf('📁 Startup'))), 'Hidden DAW: không còn ô Lifecycle và không có lựa chọn kill DAW');
+    assert(!/hiddenDawLifecyclePolicy/.test(panelAiSection) && !/kill/i.test(panelAiSection.slice(panelAiSection.indexOf('🎛 Hidden DAW'), panelAiSection.indexOf('🧠 AI Configuration'))), 'Hidden DAW: không còn ô Lifecycle và không có lựa chọn kill DAW');
 }
 
 console.log('\n== PHẦN 6: Config safety — không password, không localStorage/sessionStorage, không hard-code path máy Claude ==');
@@ -135,8 +121,7 @@ console.log('\n== PHẦN 6: Config safety — không password, không localStora
     assert(!/\/home\/claude|\/mnt\/user-data|C:\\\\Users\\\\[A-Za-z]+\\\\(?!.*Program Files)/.test(panelAiSection),
         'Không hard-code đường dẫn máy Claude (sandbox path) trong placeholder');
     // placeholder ví dụ path phải là ví dụ chung chung, không phải path thật của máy nào
-    assert(/placeholder="Ví dụ: C:\\Program Files\\DAW\\daw.exe"|placeholder="Path selection backend pending"/.test(panelAiSection),
-        'Placeholder path là ví dụ chung chung hoặc ghi rõ "Path selection backend pending", không phải path thật');
+    // (A107) thẻ có placeholder path mẫu đã bỏ — không còn gì để kiểm.
 }
 
 console.log('\n== PHẦN 7: Lock regression — A53 vẫn nguyên vẹn sau khi A54 thêm nội dung ==');

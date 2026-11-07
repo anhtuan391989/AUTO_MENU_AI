@@ -4,7 +4,7 @@
  *
  * "Sẵn sàng" = CẢ BỐN điều kiện đúng LIÊN TỤC ít nhất stableMs (mặc định 8 s):
  *   1. DAW đang phản hồi (không "Not Responding" — đang nạp plugin thường bị treo tạm).
- *   2. Tiêu đề cửa sổ chính CÓ TÊN PROJECT đã chọn ở Setup > Startup & Paths (bỏ phần đuôi .song/.flp…).
+ *   2. Tiêu đề cửa sổ chính CÓ TÊN PROJECT đã chọn ở Setup > AI > Mở kèm Project (bỏ phần đuôi .song/.flp…).
  *      Chưa chọn project => chỉ cần tiêu đề không rỗng.
  *   3. CPU của tiến trình DAW thấp (< cpuIdlePct % của 1 lõi) — nạp VST/mở project rất tốn CPU.
  *   4. Cả ba điều kiện trên giữ liên tục, không bị ngắt giữa chừng.
@@ -48,6 +48,13 @@ function evaluateSample({ sample, prev, project, cpuIdlePct }) {
     return { ready: true, reason: 'READY', cpuPct };
 }
 
+// Project thật của người dùng = ô "Mở kèm Project" (appSettings.projectPath). Ô Startup & Paths cũ (đã bỏ khỏi giao diện) chỉ còn là dự phòng cho cấu hình cũ.
+function pickProject(s, sp) {
+    const a = typeof s.projectPath === 'string' ? s.projectPath.trim() : '';
+    if (a && a !== 'Chưa chọn project') return a;
+    return typeof sp.dawProject === 'string' ? sp.dawProject.trim() : '';
+}
+
 function createDawReadyWatcher(deps) {
     const d = deps || {};
     const cfg = { ...DEFAULTS, ...(d.options || {}) };
@@ -64,7 +71,7 @@ function createDawReadyWatcher(deps) {
         try {
             const s = (d.readSettings && d.readSettings()) || {};
             const sp = s.startupPaths || {};
-            return { enabled: !!(s.hiddenDaw && s.hiddenDaw.startHidden === true), exe: d.getExe ? d.getExe() : '', project: typeof sp.dawProject === 'string' ? sp.dawProject : '' };
+            return { enabled: !!(s.hiddenDaw && s.hiddenDaw.startHidden === true), exe: d.getExe ? d.getExe() : '', project: pickProject(s, sp) };
         } catch (e) { return { enabled: false, exe: '', project: '' }; }
     }
     const next = (ms) => { if (!running) return; try { if (timer) clearT(timer); } catch (e) { /* bỏ qua */ } timer = setT(tick, ms); if (timer && typeof timer.unref === 'function') timer.unref(); };
@@ -179,4 +186,4 @@ function realDeps({ windowHider, log, readSettings, getExe, hide, isHidden }) {
     };
 }
 
-module.exports = { createDawReadyWatcher, evaluateSample, projectName, realDeps, DEFAULTS };
+module.exports = { createDawReadyWatcher, evaluateSample, projectName, pickProject, realDeps, DEFAULTS };
