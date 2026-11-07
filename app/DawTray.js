@@ -1,6 +1,6 @@
 /**
  * app/DawTray.js — HIDE-DAW-01
- * Quản lý "Ẩn DAW xuống khay thông báo": ẩn cửa sổ DAW đang chạy (WindowHider) + biểu tượng khay hệ thống (Tray) có menu Hiện DAW / Ẩn DAW.
+ * Quản lý "Ẩn DAW xuống khay thông báo": ẩn cửa sổ DAW đang chạy (WindowHider) + biểu tượng khay hệ thống (Tray) chỉ để BÁO DAW đang ẩn (HIDE-DAW-LOCK: bấm đúp / menu khay KHÔNG hiện được DAW; chỉ bỏ tick Hidden DAW trong Setup mới hiện).
  * Không require("electron") ở đây: Tray/Menu/nativeImage được tiêm vào => test được bằng đối tượng giả. KHÔNG BAO GIỜ throw ra ngoài.
  * DAW cần ẩn = file .exe đã cấu hình trong Setup (selectedDAWPath, nếu trống thì startupPaths.dawExecutable). Các cửa sổ đã ẩn được ghi vào
  * file trạng thái trong thư mục dữ liệu app để vẫn "Hiện DAW" được sau khi mở lại Menu. Thoát Menu khi DAW đang ẩn => tự hiện lại DAW (không bỏ DAW vô hình).
@@ -75,8 +75,6 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
 
     function buildMenu() {
         return Menu.buildFromTemplate([
-            { label: 'Hiện DAW', click: () => { show(() => {}); } },
-            { label: 'Ẩn DAW', click: () => { hide(() => {}); } },
             { label: 'Mở AUTO MENU AI', click: () => { try { if (typeof openMenu === 'function') openMenu(); } catch (e) { say('mở Menu lỗi', e && e.message); } } }
         ]);
     }
@@ -87,9 +85,13 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
             try { if (img && typeof img.isEmpty === 'function' && img.isEmpty()) { diag('icon khay rỗng — dùng icon dự phòng'); img = nativeImage.createFromDataURL('data:image/png;base64,' + TRAY_ICON_PNG_BASE64); } } catch (e) { /* bỏ qua */ }
             tray = new Tray(img);
             diag('đã tạo biểu tượng khay');
-            tray.setToolTip('AUTO MENU AI — DAW đang ẩn (bấm đúp để hiện)');
+            tray.setToolTip('AUTO MENU AI — DAW đang ẩn (chỉ hiện lại được bằng cách bỏ tick Hidden DAW trong Setup)');
             tray.setContextMenu(buildMenu());
-            tray.on('double-click', () => { show(() => {}); });
+            // HIDE-DAW-LOCK: khi Menu còn tick ẨN DAW thì bấm đúp biểu tượng khay bị BÁC BỎ (không gọi show()). Chỉ bỏ tick trong Setup mới hiện DAW.
+            tray.on('double-click', () => {
+                diag('LOCK: bấm đúp biểu tượng khay bị bác bỏ — Menu còn tick ẨN DAW (muốn hiện: bỏ tick Hidden DAW trong Setup)');
+                try { if (tray && typeof tray.displayBalloon === 'function') tray.displayBalloon({ title: 'AUTO MENU AI', content: 'DAW đang được khoá ẩn. Muốn hiện: bỏ tick Hidden DAW trong Setup.' }); } catch (e) { /* bỏ qua */ }
+            });
         } catch (e) { say('tạo khay lỗi', e && e.message); tray = null; }
     }
     function dropTray() {
@@ -160,8 +162,8 @@ function createDawTrayManager({ Tray, Menu, nativeImage, readSettings, stateFile
                         saved = { exePath: exe, handles: r.handles };
                         notRunStrikes = 0;
                         saveState(); ensureTray();
-                        try { if (tray && typeof tray.displayBalloon === 'function') tray.displayBalloon({ title: 'AUTO MENU AI', content: 'DAW đã ẩn xuống khay. Bấm đúp biểu tượng này hoặc nút "Hiện DAW" trong Setup để hiện lại.' }); } catch (e) { /* bỏ qua */ }
-                        cb({ ok: true, state: 'hidden', message: 'Đã ẩn DAW xuống khay thông báo (biểu tượng chấm tròn xanh cạnh đồng hồ). Bấm đúp biểu tượng để hiện lại.' });
+                        try { if (tray && typeof tray.displayBalloon === 'function') tray.displayBalloon({ title: 'AUTO MENU AI', content: 'DAW đã ẩn xuống khay. Muốn hiện lại: bỏ tick Hidden DAW trong Setup (bấm đúp biểu tượng này không hiện được DAW).' }); } catch (e) { /* bỏ qua */ }
+                        cb({ ok: true, state: 'hidden', message: 'Đã ẩn DAW xuống khay thông báo (biểu tượng chấm tròn xanh cạnh đồng hồ). Muốn hiện lại: bỏ tick Hidden DAW trong Setup (bấm đúp biểu tượng không hiện được DAW).' });
                     } else if (r.state === 'not_found') cb({ ok: false, state: 'not_found', message: 'Không thấy DAW đang chạy (đúng file đã chọn). Hãy mở DAW trước.' });
                     else if (r.reason === 'UNSUPPORTED_PLATFORM') cb({ ok: false, state: 'unsupported', message: 'Chức năng này chỉ chạy trên Windows.' });
                     else if (r.reason === 'NO_WINDOW_FOUND') cb({ ok: false, state: 'failed', message: 'Thấy DAW đang chạy nhưng không có cửa sổ nào để ẩn (có thể đã ẩn sẵn).' });

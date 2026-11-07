@@ -31,7 +31,8 @@ const sync = (fn) => new Promise((r) => fn(r));
   // --- DawTray manager (giả)
   const files = {}; const fakeFs = { existsSync: (f) => f in files, readFileSync: (f) => files[f], writeFileSync: (f, d) => { files[f] = d; }, unlinkSync: (f) => { delete files[f]; } };
   let trays = 0, destroyed = 0, menuLabels = [], clicks = {};
-  class FakeTray { constructor() { trays++; this.h = {}; } setToolTip() {} setContextMenu() {} on(e, f) { this.h[e] = f; } destroy() { destroyed++; } }
+  let lastTray = null, balloons = 0;
+  class FakeTray { constructor() { trays++; this.h = {}; lastTray = this; } displayBalloon() { balloons++; } setToolTip() {} setContextMenu() {} on(e, f) { this.h[e] = f; } destroy() { destroyed++; } }
   const Menu = { buildFromTemplate: (t) => { menuLabels = t.map((x) => x.label); t.forEach((x) => { clicks[x.label] = x.click; }); return {}; } };
   const nativeImage = { createFromBuffer: (b) => ({ size: b.length }) };
   let settings = { selectedDAWPath: EXE }; const calls = { hide: 0, show: 0, showSync: 0 }; let hideRes = { ok: true, state: 'hidden', handles: [9, 8], reason: null }, showRes = { ok: true, state: 'visible', handles: [9, 8], reason: null };
@@ -42,7 +43,8 @@ const sync = (fn) => new Promise((r) => fn(r));
   { const st0 = m.status(); ok(st0.configured === true && st0.exePath === EXE && st0.hidden === false && st0.trayVisible === false && st0.build === 'A101-DAW-TRACE', 'status ban đầu: có cấu hình, đang hiện, chưa có khay (+ dấu bản A101)', st0); }
   r = await sync((cb) => m.hide(cb)); ok(r.ok && r.state === 'hidden' && trays === 1 && calls.hideExe === EXE, 'hide: ẩn đúng DAW đã cấu hình + tạo khay', r);
   ok(JSON.parse(files['S.json']).handles.join() === '9,8', 'hide: ghi trạng thái ra file để hiện lại được sau khi mở lại Menu');
-  ok(menuLabels.join() === 'Hiện DAW,Ẩn DAW,Mở AUTO MENU AI' && typeof clicks['Hiện DAW'] === 'function', 'menu khay có "Hiện DAW", "Ẩn DAW" và (A98) "Mở AUTO MENU AI"', menuLabels);
+  ok(menuLabels.join() === 'Mở AUTO MENU AI' && !('Hiện DAW' in clicks) && !('Ẩn DAW' in clicks), 'HIDE-DAW-LOCK: menu khay chỉ còn "Mở AUTO MENU AI" (không còn "Hiện DAW"/"Ẩn DAW")', menuLabels);
+  { const sh0 = calls.show, b0 = balloons; ok(typeof lastTray.h['double-click'] === 'function', 'HIDE-DAW-LOCK: khay vẫn nhận sự kiện bấm đúp (để bác bỏ + nhắc)'); lastTray.h['double-click'](); lastTray.h['double-click'](); ok(calls.show === sh0 && m.status().hidden === true && trays === 1, 'HIDE-DAW-LOCK: bấm đúp 2 lần vào khay bị BÁC BỎ — không gọi show(), DAW vẫn ẩn, khay còn', { show: calls.show, hidden: m.status().hidden }); ok(balloons === b0 + 2, 'HIDE-DAW-LOCK: bấm đúp có bóng nhắc cách hiện (bỏ tick trong Setup)'); }
   r = await sync((cb) => m.hide(cb)); ok(r.ok && calls.hide === 1 && trays === 1, 'hide lần 2: không ẩn lại, không tạo khay thứ hai', r);
   const m2 = mk(); ok(m2.status().hidden === true, 'mở lại Menu: nhớ DAW đang ẩn (đọc từ file)'); m2.restoreTrayIfHidden(); ok(trays === 2, 'mở lại Menu: dựng lại khay khi DAW còn ẩn');
   r = await sync((cb) => m.show(cb)); ok(r.ok && r.state === 'visible' && calls.showArgs[1].join() === '9,8' && destroyed >= 1 && !('S.json' in files), 'show: hiện lại, bỏ khay, xoá file trạng thái', r);
