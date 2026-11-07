@@ -38,8 +38,7 @@ console.log('== PHẦN 1: UI Structure — có panel-ai, có đủ 3 nhóm ==');
 console.log('\n== PHẦN 2: Mỗi field có label + id ổn định, không trùng id ==');
 {
     const requiredIds = [
-        'hiddenDawEnable', 'hiddenDawApp', 'hiddenDawExePath', 'hiddenDawProjectPath',
-        'hiddenDawAutoLaunch', 'hiddenDawStartHidden', 'hiddenDawLifecyclePolicy',
+        'hiddenDawEnable', 'hiddenDawStartHidden', // A106: 5 ô khoá còn lại (App/ExePath/ProjectPath/AutoLaunch/Lifecycle) đã bỏ theo yêu cầu của chủ dự án
         'spAutoStart', 'spDawExePath', 'spDawProjectPath', 'spPluginPaths',
         'spMidiConfigPath', 'spAudioConfigPath', 'spLogsPath',
         'aiReadyKeyPill', 'aiReadyBpmPill', 'aiReadyModPill', 'aiReadyAudioSourcePill',
@@ -87,9 +86,9 @@ console.log('\n== PHẦN 3: Hidden DAW / AI Readiness vẫn "chưa có backend" 
     let m; let checkedHiddenDaw = 0;
     while ((m = hiddenDawFieldsRegex.exec(hiddenDawSection))) {
         checkedHiddenDaw++;
-        assert(/disabled/.test(m[0]), `Hidden DAW control "${m[0].slice(0, 60)}..." vẫn disabled (A55 không đụng nhóm này)`);
+        assert(!/disabled/.test(m[0]), `Hidden DAW control "${m[0].slice(0, 60)}..." dùng được (A106: đã có backend Ẩn/Hiện + Start Hidden)`);
     }
-    assert(checkedHiddenDaw === 7, `Đã kiểm tra ${checkedHiddenDaw} control Hidden DAW đều còn disabled (kỳ vọng 7, không đổi từ A54)`);
+    assert(checkedHiddenDaw === 2, `Đã kiểm tra ${checkedHiddenDaw} control Hidden DAW (A106: kỳ vọng 2 — Enable + Start Hidden)`);
 
     // Startup & Paths (TASK A55): NGƯỢC LẠI — các field PHẢI không còn disabled (có backend
     // thật), và PHẢI có đúng 1 nút Save (Apply/Verify/Launch vẫn không được thêm — A55 chỉ cần
@@ -122,14 +121,9 @@ console.log('\n== PHẦN 4: Key/BPM/Mod ghi đúng nguồn System Audio/WASAPI, 
         'Không có <button>...SEND...</button> nào trong panel-ai (không đụng Manual Key SEND flow) — (lưu ý: chữ "SEND" có thể xuất hiện trong câu giải thích dạng "không có nút SEND", đó không phải vi phạm)');
 }
 
-console.log('\n== PHẦN 5: Hidden DAW lifecycle policy không có lựa chọn "kill on close" ==');
+console.log('\n== PHẦN 5: (A106) ô Lifecycle Policy đã bỏ — không còn lựa chọn nào có thể kill DAW ==');
 {
-    const policyMatch = panelAiSection.match(/id="hiddenDawLifecyclePolicy"[\s\S]*?<\/select>/);
-    assert(!!policyMatch, 'Tìm thấy select DAW Lifecycle Policy');
-    const policyHtml = policyMatch ? policyMatch[0] : '';
-    assert(/Leave DAW running when Menu closes/.test(policyHtml), 'Có option "Leave DAW running when Menu closes"');
-    assert(/Close DAW only when explicitly requested/.test(policyHtml), 'Có option "Close DAW only when explicitly requested"');
-    assert(!/kill/i.test(policyHtml), 'KHÔNG có lựa chọn nào mang nghĩa "kill DAW" tự động khi đóng Menu');
+    assert(!/hiddenDawLifecyclePolicy/.test(panelAiSection) && !/kill/i.test(panelAiSection.slice(panelAiSection.indexOf('🎛 Hidden DAW'), panelAiSection.indexOf('📁 Startup'))), 'Hidden DAW: không còn ô Lifecycle và không có lựa chọn kill DAW');
 }
 
 console.log('\n== PHẦN 6: Config safety — không password, không localStorage/sessionStorage, không hard-code path máy Claude ==');

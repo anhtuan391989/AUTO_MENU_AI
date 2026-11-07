@@ -70,7 +70,7 @@ const sync = (fn) => new Promise((r) => fn(r));
   ok(allOk && trays - t0 === 20 && !('S.json' in files) && !m.status().hidden, 'ẩn/hiện 20 vòng (mô phỏng): đều OK, mỗi lần 1 khay, cuối cùng sạch trạng thái');
   console.log('== nối dây ==');
   const main = rd('app/main.js'), tools = rd('ui/js/setupTools.js');
-  ok(/getDawTray\(\)\.statusAsync\(resolve\)/.test(main) && /openMenu: \(\) =>/.test(main), 'main.js: tools-daw-status dùng statusAsync; truyền openMenu');
+  ok(/getDawTray\(\)\.statusAsync\(\(st\) =>/.test(main) && /openMenu: \(\) =>/.test(main), 'main.js: tools-daw-status dùng statusAsync; truyền openMenu');
   ok(/DAW CHƯA CHẠY/.test(tools) && /state === "not_running"/.test(tools), 'setupTools.js: hiện 3 trạng thái thật');
   console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })();

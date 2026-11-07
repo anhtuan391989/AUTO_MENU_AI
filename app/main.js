@@ -1059,7 +1059,7 @@ const fromSetupWindow = (event) => !!(setupWin && !setupWin.isDestroyed() && eve
 const DENIED = { ok: false, state: "failed", message: "Không được phép" };
 ipcMain.handle("tools-daw-status", (event) => new Promise((resolve) => {
     const EMPTY = { configured: false, exePath: "", hidden: false, trayVisible: false, running: null, state: "unknown" };
-    try { if (!fromSetupWindow(event)) { resolve(EMPTY); return; } getDawTray().statusAsync(resolve); } // A98: thêm running + state (not_running | visible | hidden)
+    try { if (!fromSetupWindow(event)) { resolve(EMPTY); return; } getDawTray().statusAsync((st) => { let sh = null; try { sh = getDawReadyWatcher().phase(); } catch (e2) { /* bỏ qua */ } resolve({ ...st, startHidden: sh }); }); } // A106: thêm startHidden = {phase, detail, pid} // A98: thêm running + state (not_running | visible | hidden)
     catch (err) { console.error("tools-daw-status lỗi:", err); resolve(EMPTY); }
 }));
 ipcMain.handle("tools-daw-hide", (event) => new Promise((resolve) => {
@@ -1072,6 +1072,21 @@ ipcMain.handle("tools-daw-show", (event) => new Promise((resolve) => {
 }));
 app.on("before-quit", () => { try { if (dawTrayMgr) dawTrayMgr.restoreOnQuit(); } catch (err) { console.error("restoreOnQuit lỗi:", err); } });
 app.whenReady().then(() => { try { getDawTray().restoreTrayIfHidden(); } catch (err) { console.error("restoreTrayIfHidden lỗi:", err); } });
+// A106 — Start Hidden: tự ẩn DAW SAU KHI DAW mở xong VST + project (xem core/integration/DawReadyWatcher.js). Chỉ chạy khi hiddenDaw.startHidden = true trong app-settings.json.
+const DawReadyWatcher = require("../core/integration/DawReadyWatcher");
+let dawReadyWatcher = null;
+function getDawReadyWatcher() {
+    if (!dawReadyWatcher) {
+        const dawExe = () => { try { const s = readSettingsFile() || {}; const a = typeof s.selectedDAWPath === "string" ? s.selectedDAWPath.trim() : ""; const b = s.startupPaths && typeof s.startupPaths.dawExecutable === "string" ? s.startupPaths.dawExecutable.trim() : ""; return a || b || ""; } catch (e) { return ""; } };
+        dawReadyWatcher = DawReadyWatcher.createDawReadyWatcher(DawReadyWatcher.realDeps({
+            windowHider: WindowHider, log: console.log, readSettings: readSettingsFile, getExe: dawExe,
+            hide: (cb) => getDawTray().hide(cb), isHidden: () => !!getDawTray().status().hidden
+        }));
+    }
+    return dawReadyWatcher;
+}
+app.whenReady().then(() => { try { getDawReadyWatcher().start(); } catch (err) { console.error("DawReadyWatcher lỗi (bỏ qua):", err); } });
+app.on("before-quit", () => { try { if (dawReadyWatcher) dawReadyWatcher.stop(); } catch (err) { /* bỏ qua */ } });
 
 ipcMain.handle("effects-get-aot", (event) => {
     if (!effectsWindow.isFromEffects(event.sender)) return { ok: false, value: false, error: "Không được phép" };

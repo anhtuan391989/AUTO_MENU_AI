@@ -16,7 +16,9 @@ function mk(hider, o = {}) {
 
 function makeUi(api, timers) {
     const els = {}; const el = (id) => (els[id] = els[id] || { id, textContent: '', className: '', disabled: false, style: {}, listeners: {}, addEventListener(t, f) { this.listeners[t] = f; } });
-    ['toolsDawBadge', 'toolsDawPath', 'toolsDawMessage', 'btnToolsHideDaw', 'btnToolsShowDaw', 'sidebarNav'].forEach(el);
+    ['toolsDawBadge', 'toolsDawPath', 'toolsDawMessage', 'hiddenDawEnable', 'hiddenDawStartHidden', 'sidebarNav'].forEach(el);
+    // A106: 2 nút Ẩn/Hiện đã gộp thành 1 ô tick (hiddenDawEnable). Hai "nút" dưới đây chỉ là lớp giả lập cho test: bấm Ẩn = tick, bấm Hiện = bỏ tick; .disabled = ô tick bị khoá.
+    ['btnToolsHideDaw', 'btnToolsShowDaw'].forEach((id) => { const want = id === 'btnToolsHideDaw'; els[id] = { id, listeners: { click() { els.hiddenDawEnable.checked = want; els.hiddenDawEnable.listeners.change(); } }, get disabled() { return els.hiddenDawEnable.disabled; } }; });
     const doc = { getElementById: (id) => el(id), addEventListener: (t, f) => { if (t === 'DOMContentLoaded') doc._ready = f; } };
     const ctx = { document: doc, window: { electronAPI: api }, console, setTimeout: timers ? timers.set : setTimeout, clearTimeout: timers ? timers.clear : clearTimeout };
     vm.createContext(ctx); vm.runInContext(rd('ui/js/setupTools.js'), ctx);
@@ -76,7 +78,7 @@ function makeUi(api, timers) {
         const main = rd('app/main.js'), pre = rd('app/preload.js'), html = rd('ui/setup.html');
         for (const ch of ['tools-daw-status', 'tools-daw-hide', 'tools-daw-show']) ok(main.includes('ipcMain.handle("' + ch + '"') && pre.includes('"' + ch + '"'), 'IPC ' + ch + ' có ở main + preload');
         ok(/getDawTray\(\)\.note\("tools-daw-hide"/.test(main) && /getDawTray\(\)\.note\("tools-daw-show"/.test(main), 'main ghi vết khi nhận hide/show');
-        ok(/id="btnToolsHideDaw"/.test(html) && /<script src="js\/setupTools\.js"><\/script>/.test(html), 'setup.html có nút + nạp setupTools.js');
+        ok(/id="hiddenDawEnable"/.test(html) && /<script src="js\/setupTools\.js"><\/script>/.test(html), 'setup.html có ô tick Enable Hidden DAW + nạp setupTools.js');
         ok(!/requestSingleInstanceLock/.test(main), 'GHI NHẬN: main.js KHÔNG có khoá một-phiên => có thể chạy 2 Menu song song, Menu cũ trả lời click bằng code cũ (xem báo cáo)');
     }
     console.log('\n' + pass + ' PASS / ' + fail + ' FAIL (MÔ PHỎNG — chưa phải Windows thật)');

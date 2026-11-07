@@ -1,4 +1,4 @@
-/* HIDE-DAW-01 / A105 — Setup > AI > thẻ Hidden DAW > nút Ẩn DAW / Hiện DAW (đã gộp từ tab "Công cụ & Sửa lỗi" cũ; id phần tử giữ nguyên).
+/* HIDE-DAW-01 / A105 — Setup > AI > thẻ Hidden DAW: ô tick "Enable Hidden DAW" (tick = ẨN DAW, bỏ tick = HIỆN DAW) + ô "Start Hidden" (A106: tự ẩn sau khi DAW mở xong VST + project; lưu hiddenDaw.startHidden).
    Chỉ gọi 3 kênh IPC của main process (toolsDawStatus / toolsDawHide / toolsDawShow); không tự ẩn/hiện gì ở đây. Mọi lỗi hiện thành chữ, không throw. */
 (function () {
     "use strict";
@@ -14,7 +14,7 @@
     }
     function paint(st) {
         const badge = $("toolsDawBadge"), pathEl = $("toolsDawPath");
-        if (pathEl) pathEl.textContent = (st && st.configured ? "DAW: " + st.exePath : "❌ Chưa chọn file chạy của DAW (AI > Đường dẫn & khởi động)") + (st && st.build ? "  ·  bản " + st.build + "  ·  log: " + st.diagFile : ""); // A101: hiện bản + nơi ghi log
+        if (pathEl) pathEl.textContent = (st && st.configured ? "DAW: " + st.exePath : "❌ Chưa chọn file chạy của DAW (AI > Đường dẫn & khởi động)") + (st && st.build ? "  ·  bản " + st.build + "  ·  log: " + st.diagFile : "") + (st && st.startHidden && st.startHidden.phase && st.startHidden.phase !== "off" ? "  ·  Start Hidden: " + st.startHidden.detail : ""); // A101/A106: hiện bản + nơi ghi log
         if (badge) {
             if (st && st.state === "unknown") { badge.textContent = "CHƯA XÁC MINH"; badge.className = "badge badge-unwired"; } // A99: không đọc được tiến trình => KHÔNG báo "chưa chạy"
             else if (st && st.state === "path_mismatch") { badge.textContent = "SAI ĐƯỜNG DẪN DAW"; badge.className = "badge badge-unwired"; }
@@ -22,11 +22,9 @@
             else if (st && st.hidden) { badge.textContent = "ĐANG ẨN"; badge.className = "badge badge-live"; }
             else { badge.textContent = "ĐANG HIỆN"; badge.className = "badge badge-soon"; }
         }
-        const hideBtn = $("btnToolsHideDaw"), showBtn = $("btnToolsShowDaw");
-        // A101: nút Ẩn KHÔNG còn bị khoá theo trạng thái dò — nút xám bấm không phản hồi chính là "im lặng". Trạng thái không hợp lệ thì main trả lời bằng chữ rõ ràng.
-        if (hideBtn) hideBtn.disabled = busy;
-        // A100: nút Hiện chỉ bị khoá khi đang bận. KHÔNG khoá theo trạng thái dò (hidden/unknown/not_running...) — nếu trạng thái sai thì đây là đường khôi phục duy nhất; main tự tìm cửa sổ DAW đang ẩn.
-        if (showBtn) showBtn.disabled = busy;
+        // A106: 1 ô tick duy nhất thay 2 nút. Luôn phản ánh trạng thái THẬT (đang ẩn => tick). Chỉ khoá khi đang bận; KHÔNG khoá theo trạng thái dò (giữ đường khôi phục như A100).
+        const en = $("hiddenDawEnable");
+        if (en) { en.checked = !!(st && st.hidden); en.disabled = busy; }
     }
     async function refresh(keepMessage) {
         const a = api();
@@ -42,6 +40,7 @@
         const fn = kind === "hide" ? a.toolsDawHide : a.toolsDawShow;
         if (typeof fn !== "function") { setMessage("Menu đang chạy là bản CŨ: thiếu kênh " + (kind === "hide" ? "toolsDawHide" : "toolsDawShow") + ". Thoát hẳn mọi tiến trình AUTO MENU AI rồi mở lại.", false); return; }
         busy = true; setMessage("Đang " + verb + " DAW…");
+        { const en0 = $("hiddenDawEnable"); if (en0) en0.disabled = true; } // A106: khoá ô tick trong lúc đang xử lý
         let timer;
         try {
             const timeout = new Promise((res) => { timer = setTimeout(() => res({ __timeout: true }), 30000); });
@@ -51,12 +50,32 @@
         } catch (e) { setMessage("Lỗi: " + (e && e.message || e), false); }
         if (timer) clearTimeout(timer);
         busy = false;
+        { const en1 = $("hiddenDawEnable"); if (en1) en1.disabled = false; }
         refresh(true); // giữ nguyên thông báo kết quả vừa thao tác
     }
+    // A106 — Start Hidden: lưu qua đúng cơ chế setSetting/getSetting của app (appSettings.js) => main đọc được ở app-settings.json (hiddenDaw.startHidden).
+    function loadStartHidden() {
+        const sh = $("hiddenDawStartHidden"); if (!sh) return;
+        try { if (typeof refreshFromSharedFile === "function") refreshFromSharedFile(); } catch (e) { /* dùng bản đang có */ }
+        try { const cur = typeof getSetting === "function" ? getSetting("hiddenDaw", {}) : {}; sh.checked = !!(cur && cur.startHidden === true); } catch (e) { sh.checked = false; }
+    }
+    function saveStartHidden() {
+        const sh = $("hiddenDawStartHidden"); if (!sh) return;
+        const want = !!sh.checked;
+        try {
+            if (typeof getSetting !== "function" || typeof setSetting !== "function") throw new Error("không có cơ chế lưu cấu hình (chỉ chạy trong app Menu)");
+            const cur = getSetting("hiddenDaw", {});
+            const ok = setSetting("hiddenDaw", { ...(cur && typeof cur === "object" ? cur : {}), startHidden: want });
+            if (ok !== true) throw new Error("ghi cấu hình thất bại");
+            setMessage(want ? "Đã lưu: Start Hidden BẬT — lần mở DAW tới, Menu sẽ tự ẩn DAW sau khi DAW nạp xong VST + project." : "Đã lưu: Start Hidden TẮT.", true);
+        } catch (e) { sh.checked = !want; setMessage("Không lưu được Start Hidden: " + (e && e.message || e), false); }
+    }
     document.addEventListener("DOMContentLoaded", () => {
-        $("btnToolsHideDaw")?.addEventListener("click", () => act("hide"));
-        $("btnToolsShowDaw")?.addEventListener("click", () => act("show"));
-        $("sidebarNav")?.addEventListener("click", (e) => { const b = e.target.closest(".nav-item"); if (b && b.dataset.panel === "panel-ai") refresh(); });
+        const en = $("hiddenDawEnable");
+        en?.addEventListener("change", () => act(en.checked ? "hide" : "show"));
+        loadStartHidden();
+        $("hiddenDawStartHidden")?.addEventListener("change", saveStartHidden);
+        $("sidebarNav")?.addEventListener("click", (e) => { const b = e.target.closest(".nav-item"); if (b && b.dataset.panel === "panel-ai") { loadStartHidden(); refresh(); } });
         refresh();
     });
 })();

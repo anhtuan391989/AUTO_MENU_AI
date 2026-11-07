@@ -7,10 +7,12 @@ let p = 0, f = 0; const ok = (c, m) => { c ? p++ : f++; console.log((c ? '  OK  
 const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
 const card = html.slice(html.indexOf('🎛 Hidden DAW'), html.indexOf('📁 Startup'));
 ok(!/panel-tools/.test(html) && !/<span>Công cụ/.test(html), 'tab + panel "Công cụ & Sửa lỗi" đã bỏ hẳn');
-['toolsDawBadge', 'toolsDawPath', 'toolsDawMessage', 'btnToolsHideDaw', 'btnToolsShowDaw'].forEach((i) => ok(ids.filter((x) => x === i).length === 1 && card.includes('id="' + i + '"'), i + ': đúng 1 lần, nằm trong thẻ Hidden DAW'));
+['toolsDawBadge', 'toolsDawPath', 'toolsDawMessage', 'hiddenDawEnable', 'hiddenDawStartHidden'].forEach((i) => ok(ids.filter((x) => x === i).length === 1 && card.includes('id="' + i + '"'), i + ': đúng 1 lần, nằm trong thẻ Hidden DAW'));
 ok(ids.length === new Set(ids).size, 'không trùng id nào trong setup.html');
 const f7 = [...card.matchAll(/<(?:input|select)\b[^>]*id="hiddenDaw[^"]*"[^>]*>/g)];
-ok(f7.length === 7 && f7.every((m) => /disabled/.test(m[0])), '7 ô cấu hình Hidden DAW giữ nguyên và vẫn khoá');
+ok(f7.length === 2 && f7.every((m) => !/disabled/.test(m[0])), 'A106: thẻ Hidden DAW chỉ còn 2 ô (Enable, Start Hidden), đều dùng được');
+const gone = ['hiddenDawApp','hiddenDawExePath','hiddenDawProjectPath','hiddenDawAutoLaunch','hiddenDawLifecyclePolicy','btnToolsHideDaw','btnToolsShowDaw'];
+ok(gone.every((g) => !html.includes('id="' + g + '"')), 'A106: 5 ô khoá + 2 nút cũ đã bỏ');
 ok(!/Ẩn Plugin/i.test(card), 'không có Ẩn Plugin');
 ok(/js\/setupTools\.js/.test(html), 'setupTools.js vẫn được nạp');
 ok(/"panel-ai"/.test(js) && !/panel-tools/.test(js), 'setupTools.js làm mới trạng thái khi mở tab AI');

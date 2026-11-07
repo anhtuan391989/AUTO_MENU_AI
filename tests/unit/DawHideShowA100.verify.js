@@ -65,7 +65,9 @@ const call = (fn) => new Promise((r) => fn(r));
 // ---- Giao diện setupTools chạy trong vm với DOM giả ----
 function makeUi(m) {
     const els = {}; const el = (id) => (els[id] = els[id] || { id, textContent: '', className: '', disabled: false, style: {}, listeners: {}, addEventListener(t, f) { this.listeners[t] = f; } });
-    ['toolsDawBadge', 'toolsDawPath', 'toolsDawMessage', 'btnToolsHideDaw', 'btnToolsShowDaw', 'sidebarNav'].forEach(el);
+    ['toolsDawBadge', 'toolsDawPath', 'toolsDawMessage', 'hiddenDawEnable', 'hiddenDawStartHidden', 'sidebarNav'].forEach(el);
+    // A106: 2 nút Ẩn/Hiện đã gộp thành 1 ô tick (hiddenDawEnable). Hai "nút" dưới đây chỉ là lớp giả lập cho test: bấm Ẩn = tick, bấm Hiện = bỏ tick; .disabled = ô tick bị khoá.
+    ['btnToolsHideDaw', 'btnToolsShowDaw'].forEach((id) => { const want = id === 'btnToolsHideDaw'; els[id] = { id, listeners: { click() { els.hiddenDawEnable.checked = want; els.hiddenDawEnable.listeners.change(); } }, get disabled() { return els.hiddenDawEnable.disabled; } }; });
     const doc = { getElementById: (id) => el(id), addEventListener: (t, f) => { if (t === 'DOMContentLoaded') doc._ready = f; } };
     const api = { toolsDawStatus: () => call((cb) => m.statusAsync(cb)), toolsDawHide: () => call((cb) => m.hide(cb)), toolsDawShow: () => call((cb) => m.show(cb)) };
     const ctx = { document: doc, window: { electronAPI: api }, console, setTimeout, clearTimeout };
@@ -80,7 +82,7 @@ function makeUi(m) {
     ok(/public static string ShowHidden/.test(C) && /GetWindowRect/.test(C), 'có ShowHidden (khôi phục theo cửa sổ đang ẩn)');
     ok(!/Stop-Process|CloseMainWindow|\.Kill\(|WM_CLOSE|TerminateProcess/.test(src.replace(/ps\.kill\(\)/g, '')), 'chỉ SW_HIDE/SW_SHOW — không đóng/kill DAW (tiến trình + audio/MIDI chạy tiếp) [kiểm tra mã]');
     ok(/ShowWindowAsync\(h, 0\)/.test(C), 'ẩn bằng SW_HIDE (không minimize/close)');
-    ok(/if \(showBtn\) showBtn\.disabled = busy;/.test(rd('ui/js/setupTools.js')), 'setupTools: nút Hiện chỉ khoá khi đang bận');
+    ok(/en\.disabled = busy;/.test(rd('ui/js/setupTools.js')), 'setupTools (A106): ô tick Ẩn/Hiện chỉ khoá khi đang bận');
 
     console.log('== 2. 5 chu kỳ Hide → Show → Hide → Show (mô phỏng), kiểm nút Hiện sau mỗi lần Ẩn ==');
     {

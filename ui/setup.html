@@ -102,50 +102,24 @@
                 <div class="panel-card">
                     <div class="panel-card-title">🎛 Hidden DAW
                         <span class="badge badge-unwired" id="toolsDawBadge">—</span>
-                        <span class="badge badge-unwired" id="hiddenDawStatusBadge">Cấu hình: Pending backend</span>
                     </div>
-                    <p class="hint-text">Hidden <strong>không đồng nghĩa</strong> với minimize xuống Taskbar. DAW phải
-                        là process thật, tiếp tục mở đúng project/session, tiếp tục nhận MIDI và xử lý audio/plugin
-                        khi ở trạng thái hidden. Nút <strong>Ẩn DAW / Hiện DAW</strong> bên dưới là chức năng thật (ẩn xuống
-                        khay thông báo cạnh đồng hồ Windows; bấm đúp hoặc chuột phải &gt; "Hiện DAW" để hiện lại; thoát
-                        Menu khi DAW đang ẩn thì DAW tự hiện lại). DAW lấy từ file đã chọn ở <em>Startup &amp; Paths</em>.
-                        Các ô cấu hình dưới đây vẫn chỉ là khung, chưa có hành vi runtime.</p>
+                    <p class="hint-text">Hidden <strong>không đồng nghĩa</strong> với minimize xuống Taskbar. DAW vẫn là process thật,
+                        tiếp tục mở đúng project/session, nhận MIDI và xử lý audio/plugin khi đang ẩn. Khi ẩn, biểu tượng chấm tròn
+                        xanh hiện cạnh đồng hồ Windows: bấm đúp hoặc chuột phải &gt; "Hiện DAW" để hiện lại. Thoát Menu khi DAW đang ẩn
+                        thì DAW tự hiện lại. DAW lấy từ file đã chọn ở <em>Startup &amp; Paths</em>.</p>
                     <div class="status-text" id="toolsDawPath" style="margin-bottom:8px;">—</div>
-                    <div class="row-buttons">
-                        <button id="btnToolsHideDaw" class="setup-btn">🙈 Ẩn DAW</button>
-                        <button id="btnToolsShowDaw" class="setup-btn">👁 Hiện DAW</button>
-                    </div>
-                    <div class="status-text" id="toolsDawMessage" style="margin:8px 0 12px;"></div>
                     <div class="placeholder-grid">
                         <label class="ph-field">Enable Hidden DAW
-                            <label class="setup-checkbox"><input type="checkbox" id="hiddenDawEnable" disabled> Bật</label>
-                        </label>
-                        <label class="ph-field">DAW Application
-                            <select id="hiddenDawApp" class="ph-select" disabled>
-                                <option value="">Chưa chọn</option>
-                            </select>
-                        </label>
-                        <label class="ph-field">DAW Executable Path
-                            <input type="text" id="hiddenDawExePath" placeholder="Ví dụ: C:\Program Files\DAW\daw.exe" disabled>
-                        </label>
-                        <label class="ph-field">Project/Session Path
-                            <input type="text" id="hiddenDawProjectPath" placeholder="Đường dẫn file project/session" disabled>
-                        </label>
-                        <label class="ph-field">Auto Launch on Startup
-                            <label class="setup-checkbox"><input type="checkbox" id="hiddenDawAutoLaunch" disabled> Bật</label>
+                            <label class="setup-checkbox"><input type="checkbox" id="hiddenDawEnable"> Bật = ẨN DAW ngay · Tắt = HIỆN DAW</label>
                         </label>
                         <label class="ph-field">Start Hidden
-                            <label class="setup-checkbox"><input type="checkbox" id="hiddenDawStartHidden" disabled> Bật</label>
-                        </label>
-                        <label class="ph-field">DAW Lifecycle Policy
-                            <select id="hiddenDawLifecyclePolicy" class="ph-select" disabled>
-                                <option value="leave_running">Leave DAW running when Menu closes</option>
-                                <option value="close_on_request">Close DAW only when explicitly requested</option>
-                            </select>
+                            <label class="setup-checkbox"><input type="checkbox" id="hiddenDawStartHidden"> Bật</label>
                         </label>
                     </div>
-                    <p class="hint-text">Các ô cấu hình ở trên chưa có backend nên vẫn khoá (đúng nguyên tắc A54).
-                        Ẩn/Hiện DAW đã có backend thật nên mới có nút (A105 — gộp từ tab "Công cụ &amp; Sửa lỗi" cũ).</p>
+                    <div class="status-text" id="toolsDawMessage" style="margin:8px 0 8px;"></div>
+                    <p class="hint-text"><strong>Start Hidden</strong>: khi bật, Menu tự ẨN DAW <em>sau khi DAW mở xong</em> — tức là đã nạp xong VST
+                        và đã mở xong project (tiêu đề cửa sổ có tên project đã chọn, DAW phản hồi, CPU thấp ổn định ~8 giây). Chưa chắc DAW xong
+                        thì KHÔNG ẩn; quá 5 phút chưa xong thì bỏ cuộc và để DAW hiện bình thường.</p>
                 </div>
 
                 <div class="panel-card">
