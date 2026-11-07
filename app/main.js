@@ -1776,6 +1776,53 @@ function buildCopyPath(originalPath) {
     return path.join(dir, `${base}_copy_${stamp}${ext}`);
 }
 
+// ================================
+// A108 — Mở Youtube/URL bền vững (xem handler "open-project-bundle" bên dưới). Mỗi cách trả {ok, detail}; dừng ở cách đầu tiên ok.
+// ================================
+const OPEN_BUNDLE_LOG = () => path.join(app.getPath("userData"), "open-bundle.log");
+function openBundleLog(m) {
+    try { console.log("[OpenBundle] " + m); fs.appendFileSync(OPEN_BUNDLE_LOG(), new Date().toISOString() + " " + m + "\n", "utf8"); } catch (e) { /* bỏ qua */ }
+}
+let __menuElevated = null;
+function menuIsElevated() {
+    if (__menuElevated === null) { try { __menuElevated = process.platform === "win32" && require("./Elevation").isElevated(); } catch (e) { __menuElevated = false; } }
+    return __menuElevated;
+}
+// Chạy 1 lệnh tách rời (detached). ok = không lỗi spawn VÀ (thoát mã 0 trong 2 s, hoặc vẫn đang chạy sau 2 s). anyExit: coi mọi mã thoát là ok (explorer.exe hay trả 1 dù đã mở).
+function spawnOpen(cmd, args, o) {
+    return new Promise((resolve) => {
+        let done = false; const fin = (r) => { if (done) return; done = true; resolve(r); };
+        try {
+            const ch = spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: !!(o && o.hide), windowsVerbatimArguments: !!(o && o.verbatim) });
+            ch.on("error", (e) => fin({ ok: false, detail: "lỗi spawn: " + e.message }));
+            ch.on("exit", (code) => fin({ ok: code === 0 || !!(o && o.anyExit), detail: "thoát mã " + code }));
+            setTimeout(() => { try { ch.unref(); } catch (e) { /* bỏ qua */ } fin({ ok: true, detail: "vẫn đang chạy sau 2 s" }); }, 2000);
+        } catch (e) { fin({ ok: false, detail: "ngoại lệ: " + e.message }); }
+    });
+}
+async function openYoutubeRobust(url, browserPath) {
+    const elevated = menuIsElevated();
+    const haveBrowser = !!(browserPath && fs.existsSync(browserPath));
+    openBundleLog("MỞ YOUTUBE url=" + url + " trìnhDuyệt=" + (browserPath || "(mặc định)") + " tồnTại=" + haveBrowser + " MenuAdministrator=" + elevated);
+    const attempts = [];
+    if (haveBrowser) {
+        // Menu quyền cao => hạ xuống quyền thường (runas /trustlevel) để trình duyệt mở được như người dùng bình thường.
+        if (elevated) attempts.push(["trình duyệt đã chọn (hạ quyền)", () => spawnOpen("runas", ["/trustlevel:0x20000", '"\\"' + browserPath + '\\" ' + url + '"'], { verbatim: true, hide: true })]);
+        attempts.push(["trình duyệt đã chọn", () => spawnOpen(browserPath, [url], {})]);
+    }
+    const viaExplorer = ["explorer.exe mở URL", () => spawnOpen("explorer.exe", [url], { anyExit: true })];
+    const viaShell = ["shell.openExternal", async () => { try { await shell.openExternal(url); return { ok: true, detail: "đã gọi" }; } catch (e) { return { ok: false, detail: e.message }; } }];
+    if (elevated) attempts.push(viaExplorer, viaShell); else attempts.push(viaShell, viaExplorer);
+    const tried = [];
+    for (const [name, fn] of attempts) {
+        let r; try { r = await fn(); } catch (e) { r = { ok: false, detail: "ngoại lệ: " + e.message }; }
+        tried.push(name + (r.ok ? " ✓" : " ✗"));
+        openBundleLog("  thử [" + name + "] => " + (r.ok ? "OK" : "LỖI") + " — " + r.detail);
+        if (r.ok) return { ok: true, via: name, tried };
+    }
+    return { ok: false, via: null, tried };
+}
+
 ipcMain.handle("open-project-bundle", async (event, options = {}) => {
     const {
         launchDAW,
@@ -1836,29 +1883,12 @@ ipcMain.handle("open-project-bundle", async (event, options = {}) => {
         }
     }
 
-    // 3) Mở Youtube — ưu tiên mở bằng ĐÚNG trình duyệt đã chọn ở Setup, nếu có đường dẫn hợp lệ
+    // 3) Mở Youtube — A108: mở BỀN hơn. Menu hiện chạy Administrator (A104) nên việc mở trình duyệt từ tiến trình quyền cao dễ "báo thành công mà không hiện cửa sổ".
+    //    Thử lần lượt nhiều cách, dừng ở cách đầu tiên thành công; ghi từng bước vào open-bundle.log (cạnh app-settings.json) để có bằng chứng.
     if (openYoutube) {
-        const url = youtubeUrl || "https://www.youtube.com";
-
-        if (browserPath && fs.existsSync(browserPath)) {
-            try {
-                await new Promise((resolve, reject) => {
-                    execFile(browserPath, [url], (err) => {
-                        if (err) reject(err);
-                        else resolve();
-                    });
-                });
-            } catch (err) {
-                result.errors.push("Không mở được trình duyệt đã chọn: " + err.message);
-            }
-        } else {
-            // Chưa thiết lập đường dẫn trình duyệt cụ thể -> dùng trình duyệt mặc định của Windows
-            try {
-                await shell.openExternal(url);
-            } catch (err) {
-                result.errors.push("Không mở được Youtube: " + err.message);
-            }
-        }
+        const r = await openYoutubeRobust(youtubeUrl || "https://www.youtube.com", browserPath);
+        result.youtube = { via: r.via, tried: r.tried, log: OPEN_BUNDLE_LOG() };
+        if (!r.ok) result.errors.push("Không mở được Youtube bằng cách nào (đã thử: " + r.tried.join(" → ") + "). Xem " + OPEN_BUNDLE_LOG());
     }
 
     return result;

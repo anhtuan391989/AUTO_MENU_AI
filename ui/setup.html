@@ -168,8 +168,20 @@
                      getSetting/saveSetting + window.electronAPI.selectFile/openProjectBundle) — KHÔNG
                      đổi backend/IPC/persistence, chỉ đổi vị trí DOM. Đây là MOVE, không phải LOCK: các
                      control bên dưới KHÔNG bị thêm disabled/readonly nào so với trước. -->
+                <!-- A108 — GỘP 2 thẻ "🚀 Mở kèm Project / Youtube" + "📁 Đường dẫn & khởi động" thành 1 thẻ. KHÔNG bỏ thành phần nào:
+                     giữ nguyên toàn bộ id/handler (currentDawPath, browseDawBtn, launchDawOnStartup, checkOpenPj, checkCopyPj, checkOpenYt,
+                     pjPathDisplay, btnSelectPj, btnSaveCurrentPj, btnOpenProjectBundle, btnClosePj) — chỉ đổi vị trí DOM. -->
                 <div class="panel-card">
                     <div class="panel-card-title">🚀 Mở kèm Project / Youtube</div>
+                    <div class="setting-row">
+                        <label>📁 Đường dẫn DAW</label>
+                        <div id="currentDawPath" class="status-text">❌ Chưa thiết lập</div>
+                        <button id="browseDawBtn" class="setup-btn">📂 Chọn đường dẫn DAW</button>
+                    </div>
+                    <label class="setup-checkbox" style="margin-bottom:12px;">
+                        <input type="checkbox" id="launchDawOnStartup">
+                        🚀 Mở DAW cùng Menu
+                    </label>
                     <div class="row-buttons" style="margin-bottom:10px;">
                         <label class="setup-checkbox"><input type="checkbox" id="checkOpenPj"> Mở Project</label>
                         <label class="setup-checkbox"><input type="checkbox" id="checkCopyPj"> Tạo bản COPY</label>
@@ -183,27 +195,6 @@
                     </div>
                     <!-- nút ẩn giữ để không phá initModal(..., "btnClosePj") của setup.js -->
                     <button id="btnClosePj" style="display:none;"></button>
-                </div>
-
-                <!-- TASK C60 — CHUYỂN nguyên khối từ panel-daw (Setup > DAW) sang đây. Cùng id, cùng
-                     handler thật (trong initSetupPage() của setup.js, dùng getSetting/setSetting +
-                     window.electronAPI.selectFile) — KHÔNG đổi backend/IPC/persistence, chỉ đổi vị trí
-                     DOM. LƯU Ý (ghi trong C60-REPORT.md): khối này dùng key riêng
-                     "selectedDAWPath"/"launchDAW" (getSetting/setSetting, lưu cục bộ renderer) — KHÁC
-                     với "Startup & Paths" (spDawExePath/spAutoStart, TASK A55, lưu qua
-                     app-settings.json + DawLauncher thật, xem card phía trên) — C60 chỉ MOVE, không
-                     gộp/sửa 2 cơ chế này vì đó là thay đổi kiến trúc ngoài phạm vi task. -->
-                <div class="panel-card">
-                    <div class="panel-card-title">📁 Đường dẫn &amp; khởi động</div>
-                    <div class="setting-row">
-                        <label>📁 Đường dẫn DAW</label>
-                        <div id="currentDawPath" class="status-text">❌ Chưa thiết lập</div>
-                        <button id="browseDawBtn" class="setup-btn">📂 Chọn đường dẫn DAW</button>
-                    </div>
-                    <label class="setup-checkbox">
-                        <input type="checkbox" id="launchDawOnStartup">
-                        🚀 Mở DAW cùng Menu
-                    </label>
                 </div>
             </section>
 

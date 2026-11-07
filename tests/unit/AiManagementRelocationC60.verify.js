@@ -49,7 +49,7 @@ const panelDaw = extractPanel('panel-daw');
 console.log('== PHẦN 1: Project / YouTube — đã có mặt trong panel-ai ==');
 {
     assert(panelAi !== null, 'ui/setup.html có section id="panel-ai"');
-    assert(/panel-card-title">🚀 Mở kèm Project \/ Youtube/.test(panelAi), 'panel-ai có CARD thật "Mở kèm Project / Youtube"');
+    assert(/panel-card-title">🚀 Mở kèm Project \/ Youtube</.test(panelAi), 'A108: panel-ai có 1 CARD gộp "Mở kèm Project / Youtube" (tên giữ nguyên để bản dịch i18n vẫn khớp)');
     const projectIds = ['checkOpenPj', 'checkCopyPj', 'checkOpenYt', 'pjPathDisplay', 'btnSelectPj', 'btnSaveCurrentPj', 'btnOpenProjectBundle', 'btnClosePj'];
     for (const id of projectIds) {
         assert(new RegExp(`id="${id}"`).test(panelAi), `panel-ai có control id="${id}" (Project/Youtube)`);
@@ -58,7 +58,7 @@ console.log('== PHẦN 1: Project / YouTube — đã có mặt trong panel-ai ==
 
 console.log('\n== PHẦN 2: DAW Path/Startup — đã có mặt trong panel-ai ==');
 {
-    assert(/panel-card-title">📁 Đường dẫn &amp; khởi động/.test(panelAi), 'panel-ai có CARD thật "Đường dẫn & khởi động"');
+    { const ids = ['currentDawPath','browseDawBtn','launchDawOnStartup','checkOpenPj','checkCopyPj','checkOpenYt','pjPathDisplay','btnSelectPj','btnSaveCurrentPj','btnOpenProjectBundle','btnClosePj']; const start = panelAi.indexOf('panel-card-title">🚀 Mở kèm Project / Youtube<'); const end = panelAi.indexOf('<div class="panel-card">', start + 10); const body = panelAi.slice(start, end > 0 ? end : undefined); assert(ids.every((id) => body.includes('id="' + id + '"')), 'A108: CARD gộp chứa ĐỦ 11 thành phần của 2 thẻ cũ (không bỏ cái nào)'); assert(!/panel-card-title">📁 Đường dẫn &amp; khởi động/.test(panelAi), 'A108: thẻ "Đường dẫn & khởi động" riêng đã gộp vào thẻ trên'); }
     const dawIds = ['currentDawPath', 'browseDawBtn', 'launchDawOnStartup'];
     for (const id of dawIds) {
         assert(new RegExp(`id="${id}"`).test(panelAi), `panel-ai có control id="${id}" (DAW Path/Startup)`);

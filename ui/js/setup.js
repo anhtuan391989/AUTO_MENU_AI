@@ -1279,7 +1279,7 @@ function initProjectSection() {
         if (result?.errors?.length) {
             alert("Có lỗi xảy ra:\n" + result.errors.join("\n"));
         } else if (!result?.skipped) {
-            alert("Đã mở kèm Project/Youtube");
+            alert("Đã mở kèm Project/Youtube" + (result?.youtube?.via ? "\n(Youtube mở bằng: " + result.youtube.via + " — chi tiết: " + result.youtube.log + ")" : ""));  // A108
         }
     });
 }
