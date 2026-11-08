@@ -4,9 +4,11 @@
  *
  * "Sẵn sàng" = CẢ BỐN điều kiện đúng LIÊN TỤC ít nhất stableMs (mặc định 8 s):
  *   1. DAW đang phản hồi (không "Not Responding" — đang nạp plugin thường bị treo tạm).
- *   2. Tiêu đề cửa sổ chính CÓ TÊN PROJECT đã chọn ở Setup > AI > Mở kèm Project (bỏ phần đuôi .song/.flp…).
- *      Chưa chọn project => chỉ cần tiêu đề không rỗng.
- *   3. CPU của tiến trình DAW thấp (< cpuIdlePct % của 1 lõi) — nạp VST/mở project rất tốn CPU.
+ *   2. Tiêu đề cửa sổ chính CÓ TÊN PROJECT: đã chọn project ở Setup > AI > Mở kèm Project => tiêu đề phải chứa tên đó (bỏ đuôi .song/.flp…);
+ *      chưa chọn => tiêu đề phải KHÁC tên chương trình trần (FSP8 hiện "Studio Pro" khi chưa mở project và "Studio Pro - <tên project>" khi đã mở).
+ *   3. CPU của DAW đã "lắng": hoặc thấp (< cpuIdlePct % của 1 lõi), HOẶC ổn định tương đối (5 lần đo gần nhất chênh nhau ≤ 50%).
+ *      (A111 — log thật 07/11: FSP8 chạy 113–167% CPU ngay cả khi đã mở project xong, KHÔNG BAO GIỜ xuống dưới 15% => không thể dùng ngưỡng tuyệt đối.
+ *      Nạp VST thì CPU nhảy lên xuống rất mạnh; khi xong thì mức tải đều.)
  *   4. Cả ba điều kiện trên giữ liên tục, không bị ngắt giữa chừng.
  * Quá timeoutMs (mặc định 5 phút) mà chưa sẵn sàng => BỎ CUỘC, KHÔNG ẩn (DAW vẫn hiện bình thường), ghi lý do vào nhật ký.
  * Mỗi tiến trình DAW (PID) chỉ được tự ẩn đúng 1 lần: người dùng tự Hiện lại thì KHÔNG bị ẩn lại. DAW tắt rồi mở lại => lượt mới.
@@ -19,7 +21,7 @@
 const path = require('path');
 const { execFile } = require('child_process');
 
-const DEFAULTS = Object.freeze({ pollIdleMs: 5000, pollReadyMs: 2000, stableMs: 8000, timeoutMs: 300000, cpuIdlePct: 15, hideRetries: 3, retryGapMs: 5000 });
+const DEFAULTS = Object.freeze({ pollIdleMs: 5000, pollReadyMs: 2000, stableMs: 10000, timeoutMs: 300000, cpuIdlePct: 15, cpuWindow: 5, cpuSpread: 0.5, hideRetries: 3, retryGapMs: 5000 });
 
 const norm = (s) => String(s == null ? '' : s).normalize('NFC').toLowerCase();
 
@@ -33,20 +35,30 @@ function projectName(projectPath) {
     } catch (e) { return ''; }
 }
 
-// Đánh giá 1 lần đo. sample = { title, responding, cpuMs, t }. prev = lần đo trước (hoặc null).
-function evaluateSample({ sample, prev, project, cpuIdlePct }) {
+// Đánh giá 1 lần đo. sample = { title, responding, cpuMs, t }. prev = lần đo trước (hoặc null). hist = các %CPU đo trước đó. appName = tên chương trình trần (vd "Studio Pro").
+function evaluateSample({ sample, prev, project, cpuIdlePct, appName, hist, cpuWindow, cpuSpread }) {
     const lim = cpuIdlePct == null ? DEFAULTS.cpuIdlePct : cpuIdlePct;
-    if (!sample) return { ready: false, reason: 'NO_SAMPLE', cpuPct: null };
+    const win = cpuWindow || DEFAULTS.cpuWindow, spread = cpuSpread == null ? DEFAULTS.cpuSpread : cpuSpread;
+    const prevH = Array.isArray(hist) ? hist : [];
+    if (!sample) return { ready: false, reason: 'NO_SAMPLE', cpuPct: null, hist: prevH, cpuStable: false };
     let cpuPct = null;
     if (prev && sample.t > prev.t && Number.isFinite(sample.cpuMs) && Number.isFinite(prev.cpuMs)) cpuPct = Math.max(0, (sample.cpuMs - prev.cpuMs) / (sample.t - prev.t) * 100);
-    if (sample.responding === false) return { ready: false, reason: 'NOT_RESPONDING', cpuPct };
+    const h2 = cpuPct === null ? prevH : prevH.concat([cpuPct]).slice(-win);
+    let cpuStable = false;
+    if (h2.length >= win) { const mx = Math.max(...h2), mn = Math.min(...h2), mean = h2.reduce((x, y) => x + y, 0) / h2.length; cpuStable = mean > 0 && (mx - mn) / mean <= spread; }
+    const out = (ready, reason) => ({ ready, reason, cpuPct, hist: h2, cpuStable });
+    if (sample.responding === false) return out(false, 'NOT_RESPONDING');
     const title = String(sample.title || '').trim();
-    if (!title) return { ready: false, reason: 'NO_WINDOW_TITLE', cpuPct };
-    if (project && !norm(title).includes(norm(project))) return { ready: false, reason: 'TITLE_MISSING_PROJECT', cpuPct };
-    if (cpuPct === null) return { ready: false, reason: 'MEASURING_CPU', cpuPct };
-    if (cpuPct >= lim) return { ready: false, reason: 'CPU_BUSY', cpuPct };
-    return { ready: true, reason: 'READY', cpuPct };
+    if (!title) return out(false, 'NO_WINDOW_TITLE');
+    if (project) { if (!norm(title).includes(norm(project))) return out(false, 'TITLE_MISSING_PROJECT'); }
+    else if (appName && norm(title) === norm(appName)) return out(false, 'TITLE_NO_PROJECT');
+    if (cpuPct === null) return out(false, 'MEASURING_CPU');
+    if (cpuPct >= lim && !cpuStable) return out(false, 'CPU_BUSY');
+    return out(true, 'READY');
 }
+
+// Tên chương trình trần từ đường dẫn exe: "C:\\...\\Studio Pro.exe" -> "Studio Pro"
+function appNameOf(exe) { try { return path.win32.basename(String(exe || '')).replace(/\.exe$/i, ''); } catch (e) { return ''; } }
 
 // Project thật của người dùng = ô "Mở kèm Project" (appSettings.projectPath). Ô Startup & Paths cũ (đã bỏ khỏi giao diện) chỉ còn là dự phòng cho cấu hình cũ.
 function pickProject(s, sp) {
@@ -99,8 +111,8 @@ function createDawReadyWatcher(deps) {
                         try {
                             const pid = (Array.isArray(ids) ? ids : []).find((p) => p !== handled);
                             if (pid == null) { setPhase('waiting_daw', 'Chờ DAW được mở (đúng file đã chọn).'); once(cfg.pollIdleMs); return; }
-                            tracked = { pid, firstSeen: now(), prev: null, readySince: null, tries: 0 };
-                            log('thấy DAW pid=' + pid + ' — bắt đầu chờ nạp xong VST + mở project' + (c.project ? ' "' + projectName(c.project) + '"' : ' (chưa chọn project: chỉ cần có tiêu đề)'));
+                            tracked = { pid, firstSeen: now(), prev: null, readySince: null, tries: 0, hist: [], lastLog: 0 };
+                            log('thấy DAW pid=' + pid + ' — bắt đầu chờ nạp xong VST + mở project' + (c.project ? ' "' + projectName(c.project) + '"' : ' (chưa chọn project: tiêu đề phải khác tên chương trình trần "' + appNameOf(c.exe) + '")'));
                             measure(c, once);
                         } catch (e) { log('lỗi identify: ' + (e && e.message)); once(cfg.pollIdleMs); }
                     });
@@ -117,12 +129,12 @@ function createDawReadyWatcher(deps) {
                 if (s === 'GONE') { tracked = null; once(cfg.pollIdleMs); return; }
                 if (now() - tk.firstSeen > cfg.timeoutMs) { giveUp(pid, 'quá ' + Math.round(cfg.timeoutMs / 1000) + ' giây; lý do cuối: ' + (lastReason || 'không đo được')); once(cfg.pollIdleMs); return; }
                 if (!s) { once(cfg.pollReadyMs); return; }
-                const ev = evaluateSample({ sample: s, prev: tk.prev, project: projectName(c.project), cpuIdlePct: cfg.cpuIdlePct });
-                tk.prev = s;
+                const ev = evaluateSample({ sample: s, prev: tk.prev, project: projectName(c.project), cpuIdlePct: cfg.cpuIdlePct, appName: appNameOf(c.exe), hist: tk.hist, cpuWindow: cfg.cpuWindow, cpuSpread: cfg.cpuSpread });
+                tk.prev = s; tk.hist = ev.hist;
                 const why = ev.reason + (ev.cpuPct != null ? ' cpu=' + ev.cpuPct.toFixed(1) + '%' : '') + ' tiêu đề="' + String(s.title || '').slice(0, 80) + '"';
-                if (ev.reason !== lastReason) log('pid=' + pid + ' chưa/đã sẵn sàng: ' + why);
+                if (ev.reason !== lastReason || now() - tk.lastLog >= 10000) { tk.lastLog = now(); log('pid=' + pid + ' chưa/đã sẵn sàng: ' + why + (ev.cpuStable ? ' (CPU ổn định)' : '')); }
                 lastReason = ev.reason;
-                if (!ev.ready) { tk.readySince = null; setPhase('waiting_ready', 'Đang chờ DAW nạp xong VST/project (' + ev.reason + (ev.reason === 'TITLE_MISSING_PROJECT' ? ': tiêu đề DAW hiện là "' + String(s.title || '').slice(0, 60) + '", cần có chữ "' + projectName(c.project) + '"' : '') + (ev.cpuPct != null ? '; CPU ' + ev.cpuPct.toFixed(0) + '%' : '') + ').', pid); once(cfg.pollReadyMs); return; }
+                if (!ev.ready) { tk.readySince = null; setPhase('waiting_ready', 'Đang chờ DAW nạp xong VST/project (' + ev.reason + (ev.reason === 'TITLE_NO_PROJECT' ? ': tiêu đề DAW chỉ là "' + String(s.title || '').slice(0, 60) + '" — chưa thấy project nào được mở' : '') + (ev.reason === 'TITLE_MISSING_PROJECT' ? ': tiêu đề DAW hiện là "' + String(s.title || '').slice(0, 60) + '", cần có chữ "' + projectName(c.project) + '"' : '') + (ev.cpuPct != null ? '; CPU ' + ev.cpuPct.toFixed(0) + '%' : '') + ').', pid); once(cfg.pollReadyMs); return; }
                 if (tk.readySince == null) tk.readySince = now();
                 if (now() - tk.readySince < cfg.stableMs) { setPhase('waiting_ready', 'DAW có vẻ đã xong, đang xác nhận ổn định…', pid); once(cfg.pollReadyMs); return; }
                 if (d.isHidden && d.isHidden()) { handled = pid; tracked = null; setPhase('done', 'DAW đã được ẩn sẵn.', pid); once(cfg.pollIdleMs); return; }
@@ -186,4 +198,4 @@ function realDeps({ windowHider, log, readSettings, getExe, hide, isHidden }) {
     };
 }
 
-module.exports = { createDawReadyWatcher, evaluateSample, projectName, pickProject, realDeps, DEFAULTS };
+module.exports = { createDawReadyWatcher, evaluateSample, projectName, pickProject, appNameOf, realDeps, DEFAULTS };

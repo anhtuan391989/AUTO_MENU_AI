@@ -12,7 +12,7 @@ function rig(over = {}) {
         setTimer: (fn, ms) => { const o = { at: t + ms, fn }; timers.push(o); return o; }, clearTimer: (o) => { const i = timers.indexOf(o); if (i >= 0) timers.splice(i, 1); },
         readSettings: () => world.settings, getExe: () => world.exe,
         taskPids: (e, cb) => cb(world.pids.slice()), identify: (e, cb) => cb(world.identified.length ? world.identified.slice() : world.pids.slice()),
-        sample: (pid, cb) => { if (!world.pids.includes(pid)) { cb('GONE'); return; } const dt = t - (world.lastT || t); world.cpuMs += world.cpuPerSec * dt / 1000 * 10; world.lastT = t; cb({ title: world.title, responding: world.responding, cpuMs: world.cpuMs, t }); },
+        sample: (pid, cb) => { if (!world.pids.includes(pid)) { cb('GONE'); return; } const dt = t - (world.lastT || t); world.cpuMs += (typeof world.cpuPerSec === 'function' ? world.cpuPerSec(t) : world.cpuPerSec) * dt / 100; world.lastT = t; cb({ title: world.title, responding: world.responding, cpuMs: world.cpuMs, t }); },
         isHidden: () => world.hidden, hide: (cb) => { world.hideCalls++; if (world.hideResult.ok) world.hidden = true; cb(world.hideResult); },
     };
     const w = W.createDawReadyWatcher(deps);
@@ -41,15 +41,24 @@ console.log('== 2. Tắt / chưa có DAW ==');
 { const r = rig(); r.w.start(); r.run(20000); ok(r.world.hideCalls === 0 && r.w.phase().phase === 'waiting_daw', 'DAW chưa mở => chờ, không ẩn'); }
 { const r = rig({ exe: '' }); r.world.pids = [11]; r.w.start(); r.run(20000); ok(r.world.hideCalls === 0 && r.w.phase().phase === 'off', 'chưa chọn file DAW => không làm gì'); }
 
-console.log('== 3. Kịch bản thật: mở DAW -> splash -> nạp VST (CPU cao) -> mở project -> yên -> ẩn ==');
-{ const r = rig(); r.w.start(); r.run(3000);
-  r.world.pids = [11]; r.world.title = ''; r.world.cpuPerSec = 100; r.run(15000);
-  ok(r.world.hideCalls === 0 && r.w.phase().phase === 'waiting_ready', 'splash (tiêu đề rỗng, CPU cao) => KHÔNG ẩn');
+console.log('== 3. Kịch bản: mở DAW -> splash -> nạp VST (CPU nhảy mạnh) -> mở project -> tải đều -> ẩn ==');
+{ const burst = (t) => (Math.floor(t / 2500) % 2 ? 350 : 40);
+  const r = rig(); r.w.start(); r.run(3000);
+  r.world.pids = [11]; r.world.title = ''; r.world.cpuPerSec = burst; r.run(15000);
+  ok(r.world.hideCalls === 0 && r.w.phase().phase === 'waiting_ready', 'splash (tiêu đề rỗng, CPU nhảy) => KHÔNG ẩn');
   r.world.title = 'Studio Pro'; r.run(15000); ok(r.world.hideCalls === 0, 'cửa sổ chính chưa có tên project => KHÔNG ẩn');
-  r.world.title = 'Studio Pro - Live Set'; r.run(15000); ok(r.world.hideCalls === 0, 'có project nhưng CPU vẫn cao (đang nạp VST) => KHÔNG ẩn');
-  r.world.cpuPerSec = 3; r.run(5000); ok(r.world.hideCalls === 0, 'CPU vừa hạ, chưa đủ 8 s ổn định => chưa ẩn');
-  r.run(8000); ok(r.world.hideCalls === 1 && r.w.phase().phase === 'done', 'ổn định đủ 8 s => ẨN đúng 1 lần', r.w.phase());
+  r.world.title = 'Studio Pro - Live Set'; r.run(15000); ok(r.world.hideCalls === 0, 'có project nhưng CPU còn nhảy lên xuống (đang nạp VST) => KHÔNG ẩn');
+  r.world.cpuPerSec = 150; r.run(8000); ok(r.world.hideCalls === 0, 'tải vừa đều lại, chưa đủ cửa sổ đo + 10 s ổn định => chưa ẩn');
+  r.run(30000); ok(r.world.hideCalls === 1 && r.w.phase().phase === 'done', 'tải đều đủ lâu => ẨN đúng 1 lần', r.w.phase());
   r.run(60000); ok(r.world.hideCalls === 1, 'sau đó không ẩn lại'); }
+
+console.log('== 3b. Tái hiện LOG THẬT 07/11 (FSP8: CPU ~110-170% mãi mãi, tiêu đề "Studio Pro - 22102026", CHƯA chọn project) ==');
+{ const real = (t) => 110 + ((t / 1000) % 7) * 9; // 110..164 %, dao động nhẹ như log thật
+  const r = rig({ settings: { hiddenDaw: { startHidden: true }, startupPaths: {} } }); r.world.pids = [19892]; r.world.cpuPerSec = real; r.w.start();
+  r.world.title = ''; r.run(3000); ok(r.world.hideCalls === 0, 'log thật: tiêu đề rỗng lúc mới mở => chưa ẩn');
+  r.world.title = 'Studio Pro'; r.run(20000); ok(r.world.hideCalls === 0 && /TITLE_NO_PROJECT/.test(r.w.phase().detail), 'log thật: tiêu đề trần "Studio Pro" (chưa mở project) => chưa ẩn, nói rõ lý do', r.w.phase().detail);
+  r.world.title = 'Studio Pro - 22102026'; r.run(45000);
+  ok(r.world.hideCalls === 1 && r.w.phase().phase === 'done', 'log thật: có "Studio Pro - 22102026" + tải đều ~150% => ẨN (trước A111 KHÔNG BAO GIỜ ẩn vì CPU > 15%)', r.w.phase()); }
 
 console.log('== 4. Bị ngắt giữa chừng thì đếm lại từ đầu ==');
 { const r = rig(); r.world.pids = [11]; r.world.title = 'Studio Pro - Live Set'; r.world.cpuPerSec = 2; r.w.start(); r.run(9000);
@@ -58,6 +67,7 @@ console.log('== 4. Bị ngắt giữa chừng thì đếm lại từ đầu ==')
   r.run(12000); ok(r.world.hideCalls === 1, 'yên lại đủ lâu => ẩn'); }
 { const r = rig(); r.world.pids = [11]; r.world.title = 'Studio Pro - Live Set'; r.world.cpuPerSec = 2; r.world.responding = false; r.w.start(); r.run(60000);
   ok(r.world.hideCalls === 0, 'DAW Not Responding => không ẩn'); }
+ok(W.appNameOf('C:\\Program Files\\Fender\\Studio Pro 8\\Studio Pro.exe') === 'Studio Pro', 'appNameOf lấy tên chương trình trần từ đường dẫn exe');
 
 console.log('== 5. Quá hạn => bỏ cuộc, KHÔNG ẩn ==');
 { const r = rig(); r.world.pids = [11]; r.world.title = 'Studio Pro'; r.world.cpuPerSec = 2; r.w.start(); r.run(320000);
