@@ -90,6 +90,7 @@ body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-fa
 .active-source-label { color: var(--cyan); font-weight: 700; letter-spacing: .3px; }
 #keyInfo, #manualOverrideStatus { display: none; }
 #aiKeyDetectLine { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#currentKey { order: 1; } #aiKeyDetectLine { order: 2; } #activeSourceLabel { order: 3; } /* Doi thu tu: Key -> AI Detect -> ACTIVE (chi CSS, khong doi HTML) */
 
 /* =====================================
 4. MIXER (KNOB CARD)
