@@ -930,7 +930,17 @@
     ["Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.", "No suggested CC set for this DAW — configure the mapping manually."],
     ["Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)", "Delete the 8 ON/OFF mappings (revert to legacy toggle commands)"],
     ["Số", "Number"],
-    ["Đã lưu — chỉ gửi lệnh, DAW chưa xác nhận", "Saved — command only, DAW has not confirmed"]
+    ["Đã lưu — chỉ gửi lệnh, DAW chưa xác nhận", "Saved — command only, DAW has not confirmed"],
+    ["🔄 Đồng bộ", "🔄 Sync"],
+    ["Đang đồng bộ với server…", "Syncing with the server…"],
+    ["Đồng bộ server: chưa chạy lần nào (tự chạy sau khi mở app và mỗi 10 phút).", "Server sync: has not run yet (runs automatically after the app opens and every 10 minutes)."],
+    ["Đồng bộ server lúc {0}: kéo về {1} bài, điền Key {2}, đẩy lên {3}.", "Server sync at {0}: pulled {1} songs, filled {2} Keys, pushed {3}."],
+    ["Đồng bộ server lúc {0} lỗi: {1}", "Server sync at {0} failed: {1}"],
+    ["Đồng bộ xong: kéo về {0} bài, điền Key {1}, đẩy lên {2}.", "Sync done: pulled {0} songs, filled {1} Keys, pushed {2}."],
+    ["Đồng bộ đang TẮT (keyServerAutoSync=false).", "Sync is OFF (keyServerAutoSync=false)."],
+    ["Không kết nối được server ({0}).", "Cannot reach the server ({0})."],
+    ["Đang đồng bộ, vui lòng chờ.", "Sync in progress, please wait."],
+    ["không rõ", "unknown"]
     ];
 
     // renderer.js đọc đúng các chữ này từ textContent để làm logic -> không được dịch.

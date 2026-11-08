@@ -81,7 +81,7 @@ class SongMatcher {
         const found = songs.find((s) => {
 
             if (normalizeForMatch(s.title) !== normTitle) return false;
-            if (normArtist && normalizeForMatch(s.artist) !== normArtist) return false;
+            if (normArtist && s.artist && normalizeForMatch(s.artist) !== normArtist) return false; // bản ghi kéo từ server chưa có ca sĩ (artist rỗng) vẫn khớp theo tên
             return true;
 
         });

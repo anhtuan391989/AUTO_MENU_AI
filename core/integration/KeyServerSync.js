@@ -113,6 +113,9 @@ class KeyServerSync {
         this.logger = opts.logger || console;
         this.lookupTimeoutMs = opts.lookupTimeoutMs || LOOKUP_TIMEOUT_MS;
         this.submitTimeoutMs = opts.submitTimeoutMs || SUBMIT_TIMEOUT_MS;
+        // DB-ID-01: (title, artist) => [songId đã biết ở máy]. Không bắt buộc; lỗi trong hàm này bị bỏ qua.
+        this.idResolver = typeof opts.idResolver === 'function' ? opts.idResolver : null;
+        this.idLookup = opts.idLookup === true; // true = dò theo ID bài hát trước, theo tên sau (main.js bật); mặc định tắt để giữ nguyên hành vi cũ
 
         this._cache = new Map();           // cacheKey -> { at, ttl, value }
         this._lookupInflight = new Map();  // cacheKey -> Promise
@@ -190,6 +193,35 @@ class KeyServerSync {
         }
     }
 
+    // Các ID thử theo thứ tự: ID đã lưu ở máy (vd ID server/YouTube kéo về) rồi tới ID app tự sinh từ tên bài.
+    _candidateIds(title, artist) {
+        const ids = [];
+        if (this.idResolver) {
+            try { (this.idResolver(title, artist) || []).forEach((x) => { if (x && ids.indexOf(String(x)) < 0) ids.push(String(x)); }); } catch (e) { /* bỏ qua */ }
+        }
+        const own = makeSongId(title, artist);
+        if (ids.indexOf(own) < 0) ids.push(own);
+        return ids.slice(0, 3);
+    }
+
+    // { found:true,... } | { found:false,error } (lỗi mạng: dừng ngay, không thử tiếp) | null (không ID nào có bài)
+    async _lookupById(title, artist) {
+        for (const id of this._candidateIds(title, artist)) {
+            const r = await this._request('/song-full?id=' + encodeURIComponent(id), { method: 'GET' }, this.lookupTimeoutMs);
+            if (!r.ok) {
+                if (r.error === 'timeout') return { found: false, error: 'timeout' }; // server chậm: không chờ thêm, báo lỗi như cũ
+                return null; // lỗi khác (route cũ 404, 5xx...) -> hỏi theo tên như cũ
+            }
+            const d = r.json && Array.isArray(r.json.doans) ? r.json.doans : [];
+            if (!d.length) continue;
+            const appKey = serverKeyToAppKey(d[0].khoa, d[0].mode);
+            if (!appKey) continue;
+            const info = r.json.thongTin || {};
+            return { found: true, key: appKey, songId: id, title: info.title || String(title), source: 'server' };
+        }
+        return null;
+    }
+
     /**
      * Hỏi server Key của bài. Luôn resolve (không throw):
      *   { found:true, key:"C Major", songId, title, source:"server" }
@@ -209,6 +241,10 @@ class KeyServerSync {
         if (this._lookupInflight.has(ck)) return this._lookupInflight.get(ck);
 
         const p = (async () => {
+            // DB-ID-01: DÒ THEO ID BÀI HÁT trước (chính xác, không đoán tên). Hỏng/không có -> hỏi theo tên như cũ.
+            const byId = this.idLookup ? await this._lookupById(title, artist) : null;
+            if (byId && byId.found) { this._cacheSet(ck, byId, HIT_TTL_MS); this._log('lookup-id|' + ck, 'Server CÓ bài theo ID ' + byId.songId + ' -> ' + byId.key); return byId; }
+            if (byId && byId.error) { this._cacheSet(ck, byId, ERROR_TTL_MS); return byId; }
             const q = '/find?title=' + encodeURIComponent(String(title)) + '&artist=' + encodeURIComponent(String(artist || ''));
             const r = await this._request(q, { method: 'GET' }, this.lookupTimeoutMs);
 

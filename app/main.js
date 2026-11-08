@@ -154,6 +154,15 @@ const { KeyServerSync } = require("../core/integration/KeyServerSync");
 const KeyTimeline = require("../core/integration/KeyTimeline"); // MOD theo đoạn của Key Server (phút nào đổi tone gì)
 const NowPlayingClock = require("../core/integration/NowPlayingClock"); // đồng hồ bài đang phát (vị trí/thời lượng thật từ MPC-HC hoặc SMTC)
 const keyServerSync = new KeyServerSync({
+    idLookup: true, // DB-ID-01: dò theo ID bài hát trước, theo tên sau
+    // DB-ID-01: ID bài hát đã lưu ở máy (songs.json, trường songId) -> Menu dò theo ID trước, theo tên sau.
+    idResolver: (title, artist) => {
+        const { normalizeTitle } = require("../core/integration/KeyServerSync");
+        const nt = normalizeTitle(title), na = normalizeTitle(artist);
+        return require("../core/reference/SongDatabase").load()
+            .filter((s) => s && s.songId && normalizeTitle(s.title) === nt && (!na || !s.artist || normalizeTitle(s.artist) === na))
+            .map((s) => s.songId);
+    },
     isEnabled: () => {
         const s = readSettingsFile();
         return !(s && s.keyServerAutoSync === false);
@@ -1172,13 +1181,33 @@ function broadcastEffectsLibrary() {
     }
 }
 
+// DB-SYNC-01 — đồng bộ 2 chiều songs.json <-> Key Server. Tự chạy sau khi mở app (15 giây) rồi mỗi 10 phút; nút "Đồng bộ" trong Setup chạy ngay.
+let __songDbSync = null;
+function getSongDbSync() {
+    if (!__songDbSync) {
+        const { createSongDbServerSync } = require("../core/integration/SongDbServerSync");
+        __songDbSync = createSongDbServerSync({
+            keyServerSync,
+            isEnabled: () => { const st = readSettingsFile(); return !(st && st.keyServerAutoSync === false); }
+        });
+    }
+    return __songDbSync;
+}
+app.whenReady().then(() => {
+    const auto = () => { getSongDbSync().run().catch((e) => console.error("DB-SYNC-01 tự đồng bộ lỗi:", e)); };
+    setTimeout(auto, 15000);
+    const t = setInterval(auto, 10 * 60 * 1000);
+    if (t && t.unref) t.unref();
+});
+
 // DB-SETUP-01 — Setup > Database: thống kê / nhập / xuất / dựng lại / xoá đệm. Chỉ cửa sổ Setup được gọi.
 ipcMain.handle("song-db-op", async (event, op) => {
     try {
         if (!setupWin || setupWin.isDestroyed() || event.sender !== setupWin.webContents) return { ok: false, error: "Không được phép" };
         const Admin = require("../core/reference/SongDbAdmin");
         const type = op && op.type;
-        if (type === "stats") return Admin.stats();
+        if (type === "stats") return Object.assign(Admin.stats(), { sync: getSongDbSync().getLast(), syncing: getSongDbSync().isRunning() });
+        if (type === "sync") return Object.assign({ ok: true }, await getSongDbSync().run());
         if (type === "clearCache") return Admin.clearCache();
         if (type === "rebuild") return Admin.rebuild();
         if (type === "import") {

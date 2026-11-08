@@ -2114,6 +2114,15 @@ function loadPreset() {
         var vals = panel.querySelectorAll(".status-card .status-value");
         var btns = panel.querySelectorAll(".row-buttons .setup-btn"); // Import, Export, Rebuild, Cache
         if (vals.length < 6 || btns.length < 4) return;
+        var syncBtn = document.createElement("button"); // DB-SYNC-01: nút thứ 5 (tạo bằng JS, không sửa HTML)
+        syncBtn.className = "setup-btn";
+        syncBtn.textContent = "🔄 Đồng bộ";
+        btns[0].parentNode.appendChild(syncBtn);
+        btns = panel.querySelectorAll(".row-buttons .setup-btn");
+        var syncLine = document.createElement("div");
+        syncLine.className = "hint-text";
+        syncLine.style.minHeight = "16px";
+        btns[0].parentNode.parentNode.appendChild(syncLine);
         var out = document.createElement("div");
         out.className = "hint-text";
         out.style.minHeight = "16px";
@@ -2133,8 +2142,18 @@ function loadPreset() {
         function dash() { for (var i = 0; i < 6; i++) setVal(i, "—", false); }
         function fmt(t, a) { return t.replace(/\{(\d+)\}/g, function (m, n) { return a[+n]; }); }
 
+        function paintSync(r) {
+            var y = r && r.sync;
+            if (r && r.syncing) { syncLine.textContent = "Đang đồng bộ với server…"; return; }
+            if (!y) { syncLine.textContent = "Đồng bộ server: chưa chạy lần nào (tự chạy sau khi mở app và mỗi 10 phút)."; return; }
+            var t = new Date(y.at).toLocaleTimeString();
+            syncLine.textContent = y.ok
+                ? fmt("Đồng bộ server lúc {0}: kéo về {1} bài, điền Key {2}, đẩy lên {3}.", [t, y.pulled, y.filled, y.pushed]) + (y.pending ? fmt(" Còn {0} bài chờ lượt sau.", [y.pending]) : "")
+                : fmt("Đồng bộ server lúc {0} lỗi: {1}", [t, y.error || "không rõ"]);
+        }
         function paint(r) {
             if (!r || !r.ok) { dash(); say(fmt("Lỗi: {0}", [(r && r.error) || "Không đọc được dữ liệu."])); return; }
+            paintSync(r);
             setVal(0, String(r.count), true);
             setVal(1, String(r.artists), true);
             setVal(2, r.count ? fmt("{0}/{1} có Key", [r.withKey, r.count]) : "0", true);
@@ -2176,6 +2195,11 @@ function loadPreset() {
         });
         btns[3].addEventListener("click", function () {
             run("clearCache", function (r) { return fmt("Đã xóa {0} mục bộ nhớ đệm.", [r.cleared]); });
+        });
+        btns[4].addEventListener("click", function () {
+            run("sync", function (r) {
+                return r.ok === false ? fmt("Lỗi: {0}", [r.error]) : fmt("Đồng bộ xong: kéo về {0} bài, điền Key {1}, đẩy lên {2}.", [r.pulled, r.filled, r.pushed]);
+            });
         });
 
         Array.prototype.forEach.call(btns, function (b) { b.disabled = !wired; });
