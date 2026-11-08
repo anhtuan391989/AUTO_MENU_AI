@@ -61,6 +61,7 @@ const KeyEngine = (() => {
     // Đo (126 ca, xem báo cáo): ca KHÔNG có Key (nhiễu/ù/hợp âm rỗng) có confidence tối đa 0.52 (p90 0.50); ca đúng p10=0.69. 0.35 không còn ý nghĩa (để lọt ù 60 Hz) => 0.55.
     // ModEngine dùng chung hằng này qua KeyEngine.MIN_CONFIDENCE (không sửa modEngine.js).
     const MIN_CONFIDENCE_BASE = KEY_SCORING_PEARSON_ENABLED ? 0.55 : 0.35;
+    let LOCK_HOLD = true; // A117: Dò khóa BẬT = Key đã khoá cần ≥ LONG_CHANGE_TICKS tick mới đổi (gốc); TẮT = đổi sau 1 tick
     let REACTION_SCALE = 1; // A116: Tốc độ phản ứng (nhân thời gian chờ chốt Key: 0.6 nhanh / 1 vừa / 1.6 chậm)
     let MIN_CONFIDENCE = MIN_CONFIDENCE_BASE; // A114: chỉnh được qua setTuning() (Setup > Lõi AI > Ngưỡng); không gọi setTuning => đúng bằng giá trị gốc
     const STABLE_CHECKS = 4;
@@ -716,7 +717,7 @@ const KeyEngine = (() => {
             // ĐỔI Key đã khoá: cần Key dài hạn dẫn đầu ổn định + hơn Key đang khoá đủ biên (chống dao động theo hợp âm)
             // Cặp relative (vd C Major <-> A Minor) có cùng bộ nốt: bằng chứng rất sát nhau nên cần biên + thời gian lớn hơn để không dao động.
             const isRel = (() => { const [ra, ma] = String(candidateFullKey).split("-"), [rb, mb] = String(lockedKey).split("-"); if (ma === mb) return false; const maj = ma === "Major" ? +ra : +rb, min = ma === "Major" ? +rb : +ra; return (maj + 9) % 12 === min; })();
-            if (longState.streak < LONG_CHANGE_TICKS * (isRel ? LONG_REL_FACTOR : 1)) return { ok: false, reason: "long-streak" };
+            if (longState.streak < (LOCK_HOLD ? LONG_CHANGE_TICKS : 1) * (isRel ? LONG_REL_FACTOR : 1)) return { ok: false, reason: "long-streak" };
             const sNew = longScoreOf(candidateFullKey), sOld = longScoreOf(lockedKey);
             if (sNew !== null && sOld !== null && sNew - sOld < LONG_CHANGE_GAP * (isRel ? LONG_REL_FACTOR : 1)) return { ok: false, reason: "long-gap" };
         }
@@ -1139,9 +1140,10 @@ const KeyEngine = (() => {
         ADAPTIVE_LOCK_CONFIDENCE = l === null ? ADAPTIVE_LOCK_CONFIDENCE_BASE : Math.min(0.92, Math.max(0.70, l));
         FAST_PATH_MIN_CONFIDENCE = ADAPTIVE_LOCK_CONFIDENCE;
         FAST_PATH_ENABLED = !(t && t.fastPath === false);
+        LOCK_HOLD = !(t && t.holdLock === false);
         const rs = num(t && t.reactionScale);
         REACTION_SCALE = rs === null ? 1 : Math.min(2, Math.max(0.5, rs));
-        return { minConfidence: MIN_CONFIDENCE, lockConfidence: ADAPTIVE_LOCK_CONFIDENCE, fastPath: FAST_PATH_ENABLED, reactionScale: REACTION_SCALE };
+        return { minConfidence: MIN_CONFIDENCE, lockConfidence: ADAPTIVE_LOCK_CONFIDENCE, fastPath: FAST_PATH_ENABLED, reactionScale: REACTION_SCALE, holdLock: LOCK_HOLD };
     }
 
     return {
