@@ -1086,6 +1086,16 @@ function getDawTray() {
 }
 const fromSetupWindow = (event) => !!(setupWin && !setupWin.isDestroyed() && event.sender === setupWin.webContents);
 const DENIED = { ok: false, state: "failed", message: "Không được phép" };
+// A112 — "Mức sẵn sàng AI" (CHỈ ĐỌC): Setup hỏi main, main đọc vài nhãn chữ trên cửa sổ Menu chính bằng 1 đoạn script CỐ ĐỊNH (không nhận dữ liệu từ ngoài, không ghi/đổi gì, không gọi hàm của Menu).
+const AI_READINESS_PROBE = "(function(){var g=function(i){var e=document.getElementById(i);return e?String(e.textContent||'').trim().slice(0,40):'';};return {src:g('aiSourceState'),key:g('currentKey'),bpm:g('currentBpm'),mod:g('modStatus')};})()";
+ipcMain.handle("ai-readiness-snapshot", async (event) => {
+    const EMPTY = { available: false };
+    try {
+        if (!fromSetupWindow(event) || !mainWin || mainWin.isDestroyed()) return EMPTY;
+        const r = await Promise.race([mainWin.webContents.executeJavaScript(AI_READINESS_PROBE, false), new Promise((res) => setTimeout(() => res(null), 2000))]);
+        return r && typeof r === "object" ? { available: true, src: String(r.src || ""), key: String(r.key || ""), bpm: String(r.bpm || ""), mod: String(r.mod || "") } : EMPTY;
+    } catch (err) { return EMPTY; }
+});
 ipcMain.handle("tools-daw-status", (event) => new Promise((resolve) => {
     const EMPTY = { configured: false, exePath: "", hidden: false, trayVisible: false, running: null, state: "unknown" };
     try { if (!fromSetupWindow(event)) { resolve(EMPTY); return; } getDawTray().statusAsync((st) => { let sh = null; try { sh = getDawReadyWatcher().phase(); } catch (e2) { /* bỏ qua */ } resolve({ ...st, startHidden: sh }); }); } // A106: thêm startHidden = {phase, detail, pid} // A98: thêm running + state (not_running | visible | hidden)

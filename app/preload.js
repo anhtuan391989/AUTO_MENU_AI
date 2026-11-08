@@ -157,6 +157,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     relaunchApp: () => ipcRenderer.invoke("app-relaunch"),
     // HIDE-DAW-01 — Setup > Công cụ và sửa lỗi > Ẩn DAW xuống khay thông báo
     toolsDawStatus: () => ipcRenderer.invoke("tools-daw-status"),
+    aiReadinessSnapshot: () => ipcRenderer.invoke("ai-readiness-snapshot"), // A112: chỉ-đọc (Setup -> main -> đọc nhãn từ Menu chính)
     toolsDawHide: () => ipcRenderer.invoke("tools-daw-hide"),
     toolsDawShow: () => ipcRenderer.invoke("tools-daw-show"),
     adminAuthChangePassword: (currentPassword, newPassword) =>
