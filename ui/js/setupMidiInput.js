@@ -99,6 +99,27 @@
         return { text: `MIDI [${[...data].join(",")}]`, kind: "raw", number: data[1] ?? 0, value: data[2] ?? 0, channel };
     }
 
+    // MIDI-CHANNEL-01 — ô "Channel (Input)": 0 = Omni, 1–16. Lưu ở appSettings.midiInputChannel; Command Engine (main) đọc lại khi Setup báo đổi.
+    function getChannelFilter() {
+        try {
+            const n = Number(typeof getSetting === "function" ? getSetting("midiInputChannel") : 0);
+            return Number.isInteger(n) && n >= 1 && n <= 16 ? n : 0;
+        } catch { return 0; }
+    }
+    function initChannelSelect() {
+        const sel = [...document.querySelectorAll("#panel-midi .ph-field select")].find((s) => /Omni/.test(s.textContent));
+        if (!sel) return;
+        sel.id = sel.id || "midiInputChannelSelect";
+        sel.innerHTML = '<option value="0">Tất cả (Omni)</option>' + Array.from({ length: 16 }, (_, i) => `<option value="${i + 1}">Kênh ${i + 1}</option>`).join("");
+        sel.value = String(getChannelFilter());
+        sel.disabled = false;
+        sel.addEventListener("change", () => {
+            const n = Number(sel.value) || 0;
+            if (typeof setSetting === "function") setSetting("midiInputChannel", n);
+            if (typeof notifySetupChanged === "function") notifySetupChanged();
+        });
+    }
+
     async function startLearn() {
         const { inputSelect, learnResult, learnBtn } = els();
         if (!inputSelect?.value) {
@@ -118,6 +139,9 @@
 
             learnHandler = (event) => {
                 if (!learnActive) return;
+                if (event.data[0] >= 0xf0) return; // MIDI-CHANNEL-01: bỏ qua Clock/Active Sensing/System — không phải thao tác của người dùng
+                const chFilter = getChannelFilter();
+                if (chFilter && ((event.data[0] & 0x0f) + 1) !== chFilter) return; // đang lọc kênh: bỏ qua tín hiệu kênh khác
                 const parsed = midiBytesToText(event.data);
                 if (parsed.kind === "noteoff") return; // bỏ qua note-off khi Learn, chỉ bắt note-on/cc/...
                 learnActive = false;
@@ -297,6 +321,7 @@ inputSelect?.addEventListener("change", () => { cancelLearn(); persistSelectedIn
 
     window.addEventListener("load", () => {
         setTimeout(() => {
+            initChannelSelect();
             refreshInputs();
             renderMappingList();
         }, 400);

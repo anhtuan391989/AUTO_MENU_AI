@@ -51,6 +51,12 @@ class MidiDriver extends BaseDriver {
           velocity: params.velocity ?? 0,
           channel: (params.channel ?? 1) - 1,
         });
+      } else if (params.program !== undefined) {
+        // MIDI-PCPB-01 — Program Change (0xC0): chọn preset/chương trình 0–127.
+        this.output.send('program', { number: params.program & 0x7f, channel: (params.channel ?? 1) - 1 });
+      } else if (params.pitch !== undefined) {
+        // MIDI-PCPB-01 — Pitch Bend (0xE0): 14-bit 0–16383, 8192 = giữa.
+        this.output.send('pitch', { value: Math.max(0, Math.min(16383, params.pitch | 0)), channel: (params.channel ?? 1) - 1 });
       } else {
         return { ok: false, detail: 'Thiếu cc hoặc note trong params' };
       }

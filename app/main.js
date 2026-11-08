@@ -1865,6 +1865,16 @@ function buildCopyPath(originalPath) {
 // ================================
 // A108 — Mở Youtube/URL bền vững (xem handler "open-project-bundle" bên dưới). Mỗi cách trả {ok, detail}; dừng ở cách đầu tiên ok.
 // ================================
+// COMPANION-01 — nhớ phiên "Menu đã mở YouTube" để KHÔNG mở lại YouTube khi mở lại Menu; đóng DAW/YouTube cùng Menu (tuỳ chọn).
+const Companion = require("./companion");
+function companionRun(cmd, args, opt) {
+    return new Promise((resolve) => {
+        require("child_process").execFile(cmd, args, { windowsHide: true, timeout: (opt && opt.timeoutMs) || 15000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+            resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, stdout: String(stdout || "") });
+        });
+    });
+}
+
 const OPEN_BUNDLE_LOG = () => path.join(app.getPath("userData"), "open-bundle.log");
 function openBundleLog(m) {
     try { console.log("[OpenBundle] " + m); fs.appendFileSync(OPEN_BUNDLE_LOG(), new Date().toISOString() + " " + m + "\n", "utf8"); } catch (e) { /* bỏ qua */ }
@@ -1918,7 +1928,8 @@ ipcMain.handle("open-project-bundle", async (event, options = {}) => {
         makeCopy,
         openYoutube,
         browserPath,
-        youtubeUrl
+        youtubeUrl,
+        autoStartup
     } = options;
 
     const result = { openedProjectPath: null, errors: [] };
@@ -1971,13 +1982,34 @@ ipcMain.handle("open-project-bundle", async (event, options = {}) => {
 
     // 3) Mở Youtube — A108: mở BỀN hơn. Menu hiện chạy Administrator (A104) nên việc mở trình duyệt từ tiến trình quyền cao dễ "báo thành công mà không hiện cửa sổ".
     //    Thử lần lượt nhiều cách, dừng ở cách đầu tiên thành công; ghi từng bước vào open-bundle.log (cạnh app-settings.json) để có bằng chứng.
-    if (openYoutube) {
+    let skipYt = { skip: false };
+    if (openYoutube && autoStartup) { // chỉ lúc Menu tự mở; nút "Mở kèm ngay" (thủ công) luôn mở
+        try { skipYt = await Companion.shouldSkipYoutube({ state: Companion.readState(app.getPath("userData")), dawPath, browserPath, run: companionRun }); } catch (e) { skipYt = { skip: false }; }
+        if (skipYt.skip) { result.youtube = { skipped: true, reason: skipYt.reason }; openBundleLog("BỎ QUA mở YouTube: " + skipYt.reason); }
+    }
+    if (openYoutube && !skipYt.skip) {
         const r = await openYoutubeRobust(youtubeUrl || "https://www.youtube.com", browserPath);
+        if (r.ok) Companion.writeState(app.getPath("userData"), { youtubeOpenedAt: Date.now(), dawExe: Companion.exeOf(dawPath) });
         result.youtube = { via: r.via, tried: r.tried, log: OPEN_BUNDLE_LOG() };
         if (!r.ok) result.errors.push("Không mở được Youtube bằng cách nào (đã thử: " + r.tried.join(" → ") + "). Xem " + OPEN_BUNDLE_LOG());
     }
 
     return result;
+});
+
+// COMPANION-01 — "Đóng DAW và Youtube cùng Menu": chặn thoát 1 lần, đóng DAW (hộp thoại lưu project -> chọn No) + tab YouTube, rồi thoát thật.
+let __companionClosing = false, __companionDone = false;
+app.on("before-quit", (event) => {
+    if (__companionDone) return;
+    const st = readSettingsFile() || {};
+    if (!(st.closeCompanionWithMenu === true || st.closeCompanionWithMenu === "true")) return;
+    event.preventDefault();
+    if (__companionClosing) return;
+    __companionClosing = true;
+    const guard = setTimeout(() => { __companionDone = true; app.quit(); }, 70000); // chốt chặn: không để Menu treo vì DAW
+    Companion.closeCompanions({ dawPath: st.selectedDAWPath, closeDawToo: !!st.selectedDAWPath, closeYoutubeToo: st.projectOpenYoutube === true || st.projectOpenYoutube === "true", run: companionRun, log: openBundleLog })
+        .catch((e) => openBundleLog("đóng DAW/YouTube lỗi: " + e.message))
+        .then(() => { clearTimeout(guard); Companion.clearState(app.getPath("userData")); __companionDone = true; app.quit(); });
 });
 
 app.on("window-all-closed", () => {
@@ -1992,6 +2024,7 @@ app.on("window-all-closed", () => {
 // tránh để RtMidi/easymidi port treo (đặc biệt quan trọng cho port ảo dùng chung — port
 // không đóng sạch có thể khiến lần mở app SAU không mở lại được, tuỳ driver/OS).
 app.on("before-quit", () => {
+    if (__companionClosing && !__companionDone) return; // COMPANION-01: đang đợi đóng DAW/YouTube — chưa tắt MIDI vội
     try {
         CommandRuntime.stop();
     } catch (err) {

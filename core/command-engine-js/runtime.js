@@ -261,7 +261,16 @@ function normalizeMidiMessage(bytes) {
  * vẫn giữ giá trị RỖNG mặc định (hoặc giá trị hợp lệ gần nhất nếu đây là 1 lần reload) — không
  * có khoảng hở "dùng tạm mapping cũ không qua D1" nào.
  */
+// MIDI-CHANNEL-01 — lọc kênh MIDI Input: 0 = Omni (nhận mọi kênh, mặc định), 1–16 = chỉ nhận đúng kênh đó.
+// Đặt từ settings.midiInputChannel (ô "Channel (Input)" trong Setup > MIDI). Giá trị lạ -> Omni.
+let inputChannelFilter = 0;
+function normalizeChannelFilter(v) {
+    const n = Number(v);
+    return Number.isInteger(n) && n >= 1 && n <= 16 ? n : 0;
+}
+
 async function loadD1AndRebuild(settings) {
+    inputChannelFilter = normalizeChannelFilter(settings?.midiInputChannel);
     const result = await d1Loader.loadD1FromDisk();
     if (!result.ok) {
         log(`[D1] Validate THẤT BẠI (stage=${result.stage}) — mapping D1-gated bị RỖNG (fail-closed, không dispatch qua MIDI cho tới khi D1 hợp lệ trở lại).`, result.errors);
@@ -276,6 +285,7 @@ async function loadD1AndRebuild(settings) {
 }
 
 async function dispatchFromMidi(msg) {
+    if (inputChannelFilter && msg.channel !== inputChannelFilter) return; // MIDI-CHANNEL-01: sai kênh -> bỏ qua
     const key = `${msg.type}:${msg.channel}:${msg.number}`;
     // TASK B38 — nguồn dispatch thật DUY NHẤT: d1GatedMappingIndex (xây từ D1 XML đã qua
     // XSD+Semantic). Không có bảng hard-code nào chạy song song nữa (đã xoá ở B38-FIX).
@@ -656,11 +666,11 @@ function autoConnect({ mode = "manual" } = {}) {
 async function sendMidi({ kind, number, value = 127, channel = 0 } = {}) {
     const via = "main-midi-driver";
     if (!started || !engine) return { ok: false, via, reason: "NOT_STARTED", detail: "CommandRuntime chưa start()." };
-    if (!["cc", "noteon", "noteoff"].includes(kind) || !Number.isFinite(number) || !Number.isFinite(value) || !Number.isFinite(channel)) {
+    if (!["cc", "noteon", "noteoff", "program", "pitch"].includes(kind) || !Number.isFinite(number) || !Number.isFinite(value) || !Number.isFinite(channel)) {
         return { ok: false, via, reason: "INVALID_PARAMS", detail: "Cần kind ∈ {cc,noteon,noteoff}, number/value/channel là số." };
     }
     const num = number & 0x7f;
-    const val = value & 0x7f;
+    const val = kind === "pitch" ? Math.max(0, Math.min(16383, value | 0)) : (value & 0x7f); // MIDI-PCPB-01: Pitch Bend 14-bit
     const ch = channel & 0x0f;
 
     // Output chưa mở (vd loopMIDI khởi động sau app) -> thử mở theo cổng ĐÃ LƯU, 1 lần cho mỗi lệnh gửi.
@@ -676,8 +686,14 @@ async function sendMidi({ kind, number, value = 127, channel = 0 } = {}) {
         ? { cc: num, value: val, channel: ch + 1 }
         : kind === "noteon"
             ? { note: num, velocity: val, channel: ch + 1 }
-            : { noteoff: num, velocity: val, channel: ch + 1 };
-    const bytes = [(kind === "cc" ? 0xb0 : kind === "noteon" ? 0x90 : 0x80) | ch, num, val];
+            : kind === "program"
+                ? { program: num, channel: ch + 1 }
+                : kind === "pitch"
+                    ? { pitch: val, channel: ch + 1 }
+                    : { noteoff: num, velocity: val, channel: ch + 1 };
+    const bytes = kind === "program" ? [0xc0 | ch, num]
+        : kind === "pitch" ? [0xe0 | ch, val & 0x7f, (val >> 7) & 0x7f]
+            : [(kind === "cc" ? 0xb0 : kind === "noteon" ? 0x90 : 0x80) | ch, num, val];
     const r = await midiDriverInstance.execute(params);
     if (!r || r.ok !== true) {
         return { ok: false, via, reason: "SEND_FAILED", port: openOutputPortName, bytes, detail: r && r.detail, delivery: "NOT_SENT" };
@@ -746,7 +762,7 @@ module.exports = {
     start, stop, dispatch, reloadMappings, getHealth, autoConnect, verifyMidiOutput, sendMidi, listPorts, deriveBackendStatus,
     // Xuất thêm các hàm THUẦN (không I/O) để LOGIC-TEST trực tiếp, không cần mock easymidi
     // cho riêng phần policy — xem tests/unit/PortSelectionPolicy.verify.js.
-    resolvePortSelection, resolveInputPortName,
+    resolvePortSelection, resolveInputPortName, normalizeChannelFilter,
     AUTO_MENU_AI_PORT_NAME,
     // TASK B20 — normalizeMidiMessage() (hàm thuần, không I/O) vẫn export để test trực tiếp
     // (tests/unit/MidiLearnDispatch.verify.js SECTION 4). buildMappingIndex()/ACTION_TO_CAPABILITY

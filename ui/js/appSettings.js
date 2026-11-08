@@ -477,6 +477,26 @@ async function sendMidiCC(ccNumber, value, channel = 0) {
     return __midiSend(output, [0xb0 | (channel & 0x0f), ccNumber & 0x7f, value & 0x7f], "CC");
 }
 
+// MIDI-PCPB-01 — Program Change (0–127) và Pitch Bend (14-bit 0–16383, 8192 = giữa), cùng đường gửi main (easymidi) như CC/Note.
+async function sendMidiProgramChange(program, channel = 0) {
+    const viaMain = await __midiSendViaMain("program", program, 0, channel);
+    if (viaMain !== undefined) return viaMain;
+    __lastMidiSendResult = { sender: "web-midi (fallback, không có main IPC)", kind: "program" };
+    const output = await getSelectedMidiOutput();
+    if (!output) return false;
+    return __midiSend(output, [0xc0 | (channel & 0x0f), program & 0x7f], "PROGRAM");
+}
+
+async function sendMidiPitchBend(value14, channel = 0) {
+    const v = Math.max(0, Math.min(16383, value14 | 0));
+    const viaMain = await __midiSendViaMain("pitch", 0, v, channel);
+    if (viaMain !== undefined) return viaMain;
+    __lastMidiSendResult = { sender: "web-midi (fallback, không có main IPC)", kind: "pitch" };
+    const output = await getSelectedMidiOutput();
+    if (!output) return false;
+    return __midiSend(output, [0xe0 | (channel & 0x0f), v & 0x7f, (v >> 7) & 0x7f], "PITCH");
+}
+
 /* ==========================================================
    HỒ SƠ TỌA ĐỘ RIÊNG THEO TỪNG DAW
    (Cubase/Studio One/... có layout giao diện khác nhau -> mỗi DAW cần 1 bộ tọa độ riêng,
@@ -662,7 +682,8 @@ async function runAutoStartupSequence() {
         makeCopy,
         openYoutube,
         browserPath: getSetting("selectedBrowserPath"),
-        youtubeUrl: "https://www.youtube.com"
+        youtubeUrl: "https://www.youtube.com",
+        autoStartup: true // COMPANION-01: lần Menu tự mở -> main bỏ qua YouTube nếu phiên trước còn sống
     });
 }
 

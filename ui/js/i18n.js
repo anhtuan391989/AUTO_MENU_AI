@@ -942,7 +942,17 @@
     ["Đồng bộ đang TẮT (keyServerAutoSync=false).", "Sync is OFF (keyServerAutoSync=false)."],
     ["Không kết nối được server ({0}).", "Cannot reach the server ({0})."],
     ["Đang đồng bộ, vui lòng chờ.", "Sync in progress, please wait."],
-    ["không rõ", "unknown"]
+    ["không rõ", "unknown"],
+    ["Kênh {0}", "Channel {0}"],
+    ["Gửi Program", "Send Program"],
+    ["Gửi Pitch Bend", "Send Pitch Bend"],
+    ["NOTE ON, CC, Program Change và Pitch Bend đều có nút gửi thật ở trên (echo thật khi bấm). Gửi thành công chỉ có nghĩa lệnh đã được đưa tới cổng MIDI — chưa xác nhận DAW đã nhận.", "NOTE ON, CC, Program Change and Pitch Bend all have real send buttons above (real echo when pressed). A successful send only means the command reached the MIDI port — it does not confirm the DAW received it."],
+    ["Điền + lưu preset toàn bộ gợi ý", "Fill + save the full suggested preset"],
+    ["Điền + lưu preset toàn bộ — {0} ({1} mapping)", "Fill + save the full preset — {0} ({1} mappings)"],
+    ["Xoá toàn bộ preset {0}", "Delete the whole {0} preset"],
+    ["Chưa có mapping nào của preset này để xoá.", "No mapping from this preset to delete."],
+    ["Xoá {0} mapping của preset {1}? Mapping khác (PLAY/STOP/RECORD...) không bị đụng.", "Delete {0} mappings of the {1} preset? Other mappings (PLAY/STOP/RECORD...) are not touched."],
+    ["Đóng DAW và Youtube cùng Menu (DAW hỏi lưu project → tự chọn No, không lưu)", "Close the DAW and YouTube together with the Menu (if the DAW asks to save the project → automatically choose No, do not save)"]
     ];
 
     // renderer.js đọc đúng các chữ này từ textContent để làm logic -> không được dịch.

@@ -1,4 +1,4 @@
-// QUICKFILL-ALL-01 — MỘT nút "Fender Studio Pro 8 MIDI" gộp LIVE + KNOB + CHỌN TRACK + MIC VOLUME + KEY/SCALE (logic thật từ ui/js/setup.js, mô phỏng phần mềm).
+// QUICKFILL-ALL-01 — MỘT nút "Fender Studio Pro 8 MIDI" gộp TOÀN BỘ 9 bộ: LIVE + KNOB + CHỌN TRACK + TUNE BYPASS + LOFI + MIC VOLUME + PRESET + FX BUS + KEY/SCALE (logic thật từ ui/js/setup.js, mô phỏng phần mềm).
 const fs = require('fs'), path = require('path');
 const setup = fs.readFileSync(path.join(__dirname, '../../ui/js/setup.js'), 'utf8');
 let pass = 0, fail = 0;
@@ -19,21 +19,21 @@ function env(initial) {
   };
   return { st, api, A, click };
 }
-console.log('== 1. Một lần bấm lưu đủ cả 5 bộ ==');
+console.log('== 1. Một lần bấm lưu đủ cả 9 bộ ==');
 {
   const e = env({ selectedDAW: 'Studio Pro 8' }); const r = e.click(); const m = e.st.dawMidiOutMappings['Studio Pro 8'] || {};
   const base = e.api.resolveDawProfile('Studio Pro 8');
   const expect = Object.values(base.bundles).reduce((n, b) => n + Object.keys(b.mappings).length, 0);
-  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 2 + 3, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 2 MIC VOLUME + 3 KEY/SCALE)', Object.keys(m).length);
-  ok(m.MUSIC_ON && m.BEAT_INPUT_VOLUME && m.MUSIC_SELECT && m.MIC1_VOLUME && m.KEY_SCALE_MINOR && m.KEY_ROOT, 'có mặt đủ đại diện từng bộ');
+  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 4 + 1 + 2 + 6 + 4 + 12, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 4 TUNE + 1 LOFI + 2 MIC VOLUME + 6 PRESET + 4 FX BUS + 12 KEY/SCALE)', Object.keys(m).length);
+  ok(m.MUSIC_ON && m.BEAT_INPUT_VOLUME && m.MUSIC_SELECT && m.MIC1_VOLUME && m.KEY_SCALE_MINOR && m.KEY_ROOT && m.TUNE_BYPASS && m.LOFI_STATE && m.PRESET_NORM && m.FX_BUS_DELAY_VOLUME && m.KEY_ROOT_AT4, 'có mặt đủ đại diện từng bộ');
   ok(Object.values(m).every((x) => x.source === 'USER_DEFINED'), 'đều đánh dấu USER_DEFINED');
   ok(base.quickFillLabel === 'Fender Studio Pro 8 MIDI', 'tên nút = "Fender Studio Pro 8 MIDI"');
 }
-console.log('== 2. Studio One 7 cũng dùng cùng bộ; Cubase chỉ LIVE+KNOB; DAW lạ bị chặn ==');
+console.log('== 2. Studio One 7 cũng dùng cùng bộ; Cubase giữ các nút riêng (hàm gộp vẫn dùng được); DAW lạ bị chặn ==');
 {
   ok(env({ selectedDAW: 'Studio One 7' }).click().done === true, 'Studio One 7 -> lưu được');
   const c = env({ selectedDAW: 'Cubase 13' }); const r = c.click();
-  ok(r.done && Object.keys(c.st.dawMidiOutMappings['Cubase 13']).length === 12, 'Cubase -> 12 mapping (8 LIVE + 4 KNOB)');
+  ok(r.done && Object.keys(c.st.dawMidiOutMappings['Cubase 13']).length === 17, 'Cubase (hàm gộp) -> 17 mapping (8 LIVE + 4 KNOB + 4 TUNE + 1 LOFI)');
   ok(env({ selectedDAW: 'Logic' }).click().blocked === 'no-profile', 'DAW không có bộ -> chặn');
 }
 console.log('== 3. All-or-nothing, không đụng mapping khác, idempotent ==');
@@ -49,7 +49,8 @@ console.log('== 3. All-or-nothing, không đụng mapping khác, idempotent ==')
 }
 console.log('== 4. Giao diện: chỉ còn 1 nút gộp (JS, không sửa HTML) ==');
 {
-  ok(/id="btnFillAllCc"/.test(setup) && !/id="btnFill(Live|Knob|Select|MicVol|Scale)Cc"/.test(setup), 'chỉ còn btnFillAllCc, 5 nút cũ đã bỏ');
+  ok(/id="btnFillAllCc"/.test(setup) && /profile\.quickFillLabel \? `<br><button class="setup-btn" id="btnFillAllCc"/.test(setup) && /btnFillAllCcOff" disabled/.test(setup), 'Fender Studio Pro 8: chỉ hiện btnFillAllCc (9 nút cũ chỉ còn cho DAW khác như Cubase)');
+  ok(/quickFillLabel: "Fender Studio Pro 8 MIDI"/.test(setup) && /id="btnClearAllCc"/.test(setup), 'có nhãn preset + nút Xoá toàn bộ preset');
   ok(/id="btnClearLiveCc"/.test(setup), 'nút "Xoá 8 mapping ON/OFF" giữ nguyên');
   ok(!/sendMidi|midi-send/.test(/function runQuickFill[\s\S]*?\n        }\n/.exec(setup)[0]), 'điền nhanh vẫn chỉ LƯU mapping, không gửi MIDI');
 }

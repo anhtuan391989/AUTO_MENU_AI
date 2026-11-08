@@ -800,6 +800,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
     "studio-one": Object.freeze({
         id: "studio-one",
         name: "Studio One / Fender Studio Pro",
+        quickFillLabel: "Fender Studio Pro 8 MIDI", // QUICKFILL-ALL-01: có nhãn này => chỉ hiện 1 nút điền toàn bộ (gộp mọi bộ CC)
         match: /^(studio one|studio pro|fender)/i,
         origin: "Bộ CC gợi ý của AUTO_MENU_AI (LIVE-MIDI-FSP8-02 / MENU-KNOB-MIDI-COMPLETION-01). Cần gán CC vào macro/fader trong Control Surface (MIDI Learn).",
         versionStatus: Object.freeze({
@@ -861,6 +862,15 @@ const DAW_MIDI_PROFILES = Object.freeze({
         }),
     }),
 });
+// QUICKFILL-ALL-01 — gộp MỌI bộ CC của 1 profile thành 1 preset duy nhất (id "all"). Không tạo CC mới: chỉ hợp các bộ có sẵn.
+const DAW_QF_ALL = "all";
+function dawProfileAllInOne(profile) {
+    if (!profile || !profile.bundles) return profile;
+    const mappings = {};
+    for (const b of Object.values(profile.bundles)) for (const [a, m] of Object.entries(b.mappings || {})) mappings[a] = m;
+    const all = Object.freeze({ title: profile.quickFillLabel || profile.name, count: Object.keys(mappings).length, mappings: Object.freeze(mappings) });
+    return Object.freeze({ ...profile, bundles: Object.freeze({ [DAW_QF_ALL]: all }) });
+}
 // Nhận diện profile từ nhãn DAW đã lưu ("Studio One 7", "Studio Pro 8", "Cubase 13"...). DAW khác -> null (không dùng profile của DAW khác).
 function resolveDawProfile(dawLabel, profiles) {
     const reg = profiles || DAW_MIDI_PROFILES;
@@ -942,7 +952,7 @@ function initDawMidiOutputMappingSection() {
         }
         if (!daw) {
             container.innerHTML = '<p class="hint-text">Chưa chọn DAW ở tab "Chọn DAW" — chưa thể cấu hình MIDI Output.</p>'
-                + '<p class="hint-text"><button class="setup-btn" id="btnFillLiveCcOff" disabled>Điền + lưu bộ LIVE gợi ý</button> <button class="setup-btn" id="btnFillKnobCcOff" disabled>Điền + lưu bộ KNOB gợi ý</button> Cần chọn DAW trước khi điền bộ CC gợi ý.</p>';
+                + '<p class="hint-text"><button class="setup-btn" id="btnFillAllCcOff" disabled>Điền + lưu preset toàn bộ gợi ý</button> Cần chọn DAW trước khi điền bộ CC gợi ý.</p>';
             return;
         }
 
@@ -957,7 +967,8 @@ function initDawMidiOutputMappingSection() {
             <b>8 lệnh ON/OFF điều khiển DAW (MUSIC / MIC 1 / MIC 2 / FX):</b> ở cuối danh sách. Mỗi nút Menu gửi lệnh theo <b>trạng thái đích sau cú bấm</b>.
             Menu chỉ <b>gửi</b> lệnh — <b>không đọc được trạng thái thật</b> của DAW, nên lúc mở app hoặc khi bạn đổi trực tiếp trong DAW, nút Menu có thể lệch DAW.
             <br>${profile ? `<span id="quickFillProfile">Bộ gợi ý: <b>${profile.name}</b>${verStatus ? ` — ${verStatus}` : ""}. ${profile.origin} Điền ở đây chỉ LƯU mapping của Menu — DAW chưa được điều khiển cho đến khi bạn gán trong DAW.</span>
-            <br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ LIVE gợi ý — ${profile.name}</button>
+            ${profile.quickFillLabel ? `<br><button class="setup-btn" id="btnFillAllCc">Điền + lưu preset toàn bộ — ${profile.quickFillLabel} (${dawProfileAllInOne(profile).bundles[DAW_QF_ALL].count} mapping)</button>
+            <button class="setup-btn" id="btnClearAllCc">Xoá toàn bộ preset ${profile.quickFillLabel}</button>` : `<br><button class="setup-btn" id="btnFillLiveCc">Điền + lưu bộ LIVE gợi ý — ${profile.name}</button>
             <button class="setup-btn" id="btnFillKnobCc">Điền + lưu bộ KNOB gợi ý — ${profile.name}</button>
             ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.tune ? `<button class="setup-btn" id="btnFillTuneCc">Điền + lưu bộ TUNE BYPASS gợi ý — ${profile.name}</button>` : ""}
@@ -965,7 +976,7 @@ function initDawMidiOutputMappingSection() {
             ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.preset ? `<button class="setup-btn" id="btnFillPresetCc">Điền + lưu bộ PRESET (NORM/LOFI/RAP/REMIX) gợi ý — ${profile.name}</button>` : ""}
             ${profile.bundles.fxbus ? `<button class="setup-btn" id="btnFillFxBusCc">Điền + lưu bộ FX BUS VOLUME gợi ý — ${profile.name}</button>` : ""}
-            ${profile.bundles.scale ? `<button class="setup-btn" id="btnFillScaleCc">Điền + lưu bộ KEY + SCALE gợi ý — ${profile.name}</button>` : ""}`
+            ${profile.bundles.scale ? `<button class="setup-btn" id="btnFillScaleCc">Điền + lưu bộ KEY + SCALE gợi ý — ${profile.name}</button>` : ""}`}`
                 : `<span id="quickFillProfile">Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công.</span>`}
             <button class="setup-btn" id="btnClearLiveCc">Xoá 8 mapping ON/OFF (quay về lệnh toggle cũ)</button>
             <span id="liveCcStatus"></span>`;
@@ -976,11 +987,12 @@ function initDawMidiOutputMappingSection() {
             if (!dawNow) { alert("Cần chọn DAW trước khi điền bộ CC gợi ý."); return; }
             const prof = resolveDawProfile(dawNow);
             if (!prof) { alert("Chưa có bộ CC gợi ý cho DAW này — hãy cấu hình mapping thủ công."); return; }
-            const plan = planDawProfileFill(prof, bundleId, getDawMidiOutMapping, DAW_MIDI_ACTIONS.map((x) => x.action));
+            const useProf = bundleId === DAW_QF_ALL ? dawProfileAllInOne(prof) : prof;
+            const plan = planDawProfileFill(useProf, bundleId, getDawMidiOutMapping, DAW_MIDI_ACTIONS.map((x) => x.action));
             if (plan.errors.length) { alert("Không lưu bộ gợi ý (bộ CC lỗi): " + plan.errors.join("; ")); return; }
             const liveClash = plan.conflicts;
             if (liveClash.length) { alert("Không lưu bộ gợi ý: CC/Note đã dùng cho action khác — " + liveClash.map(([a, o]) => `${a} ↔ ${o}`).join(", ") + ". Đổi mapping của action kia trước."); return; }
-            const b = prof.bundles[bundleId];
+            const b = useProf.bundles[bundleId];
             const msg = `Lưu ${plan.writes.length} mapping ${b.title} gợi ý cho ${dawNow} (${prof.name})? Chỉ lưu mapping Menu MIDI Output — bạn vẫn phải gán từng CC trong DAW.`
                 + (plan.overwrite.length ? `\nSẽ GHI ĐÈ ${plan.overwrite.length} mapping đã lưu: ${plan.overwrite.join(", ")}.` : "");
             if (!confirm(msg)) return;
@@ -989,7 +1001,20 @@ function initDawMidiOutputMappingSection() {
             render();
             renderMappingOverview();
         }
-        if (profile) {
+        if (profile && profile.quickFillLabel) {
+            liveBox.querySelector("#btnFillAllCc").addEventListener("click", () => runQuickFill(DAW_QF_ALL));
+            // Xoá CHỈ các mapping thuộc preset này (đúng danh sách action của preset); mapping khác không bị đụng.
+            liveBox.querySelector("#btnClearAllCc").addEventListener("click", () => {
+                const names = Object.keys(dawProfileAllInOne(profile).bundles[DAW_QF_ALL].mappings);
+                const saved = names.filter((a) => { const m = getDawMidiOutMapping(a); return m && m.source === "USER_DEFINED"; });
+                if (!saved.length) { alert("Chưa có mapping nào của preset này để xoá."); return; }
+                if (!confirm(`Xoá ${saved.length} mapping của preset ${profile.quickFillLabel}? Mapping khác (PLAY/STOP/RECORD...) không bị đụng.`)) return;
+                saved.forEach((a) => setDawMidiOutMapping(a, null));
+                notifySetupChanged();
+                render();
+                renderMappingOverview();
+            });
+        } else if (profile) {
             liveBox.querySelector("#btnFillLiveCc").addEventListener("click", () => runQuickFill("live"));
             liveBox.querySelector("#btnFillKnobCc").addEventListener("click", () => runQuickFill("knob"));
             const selBtn = liveBox.querySelector("#btnFillSelectCc");
@@ -1226,6 +1251,17 @@ function initProjectSection() {
     checkOpenPj?.addEventListener("change", () => saveSetting("projectOpenEnabled", checkOpenPj.checked));
     checkCopyPj?.addEventListener("change", () => saveSetting("projectCopyEnabled", checkCopyPj.checked));
     checkOpenYt?.addEventListener("change", () => saveSetting("projectOpenYoutube", checkOpenYt.checked));
+
+    // COMPANION-01 — ô "Đóng DAW và Youtube cùng Menu" (tạo bằng JS, không sửa HTML). Mặc định TẮT; DAW hỏi lưu project luôn chọn No.
+    if (checkOpenYt && !document.getElementById("checkCloseWithMenu")) {
+        const lbl = document.createElement("label");
+        lbl.className = "setup-checkbox";
+        lbl.innerHTML = '<input type="checkbox" id="checkCloseWithMenu"> Đóng DAW và Youtube cùng Menu (DAW hỏi lưu project → tự chọn No, không lưu)';
+        checkOpenYt.closest(".row-buttons").appendChild(lbl);
+        const cb = lbl.querySelector("input");
+        cb.checked = getSetting("closeCompanionWithMenu") === true || getSetting("closeCompanionWithMenu") === "true";
+        cb.addEventListener("change", () => saveSetting("closeCompanionWithMenu", cb.checked));
+    }
 
     document.getElementById("btnSelectPj")?.addEventListener("click", async () => {
         if (!window.electronAPI?.selectFile) {
@@ -1510,6 +1546,44 @@ function initMidiSection() {
             alert("Không gửi được" + (r && r.reason ? ` (${r.reason}${r.detail ? ": " + r.detail : ""})` : "") + " — xem dòng log trong Monitor để biết tầng lỗi.");
         }
     });
+
+    // MIDI-PCPB-01 — Pitch Bend + Program Change: tạo thêm 2 hàng test (bằng JS, không sửa HTML) và bật 2 badge "Sắp ra mắt".
+    (function initPcPbTest() {
+        const ccBtn = document.getElementById("btnTestMidiCC");
+        const ccRow = ccBtn && ccBtn.closest(".midi-test-row");
+        if (!ccRow || document.getElementById("btnTestMidiPC")) return;
+        const mk = (html) => { const d = document.createElement("div"); d.className = "midi-test-row"; d.innerHTML = html; return d; };
+        const pcRow = mk('<label>Program Change (0-127)</label><input type="number" id="midiTestPC" min="0" max="127" value="0"><button id="btnTestMidiPC" class="setup-btn">Gửi Program</button>');
+        const pbRow = mk('<label>Pitch Bend (-8192…8191)</label><input type="number" id="midiTestPB" min="-8192" max="8191" value="0" style="width:90px;"><button id="btnTestMidiPB" class="setup-btn">Gửi Pitch Bend</button>');
+        ccRow.after(pcRow); pcRow.after(pbRow);
+        const card = ccRow.closest(".panel-card");
+        if (card) {
+            card.querySelectorAll(".badge-soon").forEach((b) => {
+                if (/Pitch Bend|Program Change/.test(b.textContent)) b.className = b.className.replace("badge-soon", "badge-live");
+            });
+            const hint = card.querySelector("p.hint-text");
+            if (hint) hint.textContent = "NOTE ON, CC, Program Change và Pitch Bend đều có nút gửi thật ở trên (echo thật khi bấm). Gửi thành công chỉ có nghĩa lệnh đã được đưa tới cổng MIDI — chưa xác nhận DAW đã nhận.";
+        }
+        async function sendTest(label, fn, shown) {
+            if (!select.value) { alert("Chọn cổng MIDI trước khi test."); return; }
+            saveSetting("midiOutputPort", select.value);
+            notifySetupChanged();
+            const ok = await fn();
+            window.MidiMonitor?.logTestResult(label, shown, ok, ok ? null : "kiểm tra lại cổng MIDI đã chọn");
+            if (!ok) {
+                const r = window.getLastMidiSendResult?.();
+                alert("Không gửi được" + (r && r.reason ? ` (${r.reason}${r.detail ? ": " + r.detail : ""})` : "") + " — xem dòng log trong Monitor để biết tầng lỗi.");
+            }
+        }
+        document.getElementById("btnTestMidiPC").addEventListener("click", () => {
+            const p = Math.max(0, Math.min(127, parseInt(document.getElementById("midiTestPC").value, 10) || 0));
+            sendTest("PROGRAM", () => sendMidiProgramChange(p, 0), p);
+        });
+        document.getElementById("btnTestMidiPB").addEventListener("click", () => {
+            const v = Math.max(-8192, Math.min(8191, parseInt(document.getElementById("midiTestPB").value, 10) || 0));
+            sendTest("PITCH", () => sendMidiPitchBend(v + 8192, 0), v);
+        });
+    })();
 
     // --- Auto-refresh khi cắm/rút thiết bị MIDI (Web MIDI statechange) ---
     if (typeof getMidiAccess === "function") {
