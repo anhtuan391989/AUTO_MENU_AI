@@ -1172,6 +1172,35 @@ function broadcastEffectsLibrary() {
     }
 }
 
+// DB-SETUP-01 — Setup > Database: thống kê / nhập / xuất / dựng lại / xoá đệm. Chỉ cửa sổ Setup được gọi.
+ipcMain.handle("song-db-op", async (event, op) => {
+    try {
+        if (!setupWin || setupWin.isDestroyed() || event.sender !== setupWin.webContents) return { ok: false, error: "Không được phép" };
+        const Admin = require("../core/reference/SongDbAdmin");
+        const type = op && op.type;
+        if (type === "stats") return Admin.stats();
+        if (type === "clearCache") return Admin.clearCache();
+        if (type === "rebuild") return Admin.rebuild();
+        if (type === "import") {
+            const picked = await dialog.showOpenDialog(setupWin, { properties: ["openFile"], filters: [{ name: "JSON", extensions: ["json"] }] });
+            if (picked.canceled || !picked.filePaths.length) return { ok: true, canceled: true };
+            let list;
+            try { list = JSON.parse(fs.readFileSync(picked.filePaths[0], "utf-8")); }
+            catch (err) { return { ok: false, error: "Không đọc được file (không phải JSON hợp lệ)." }; }
+            return Admin.importSongs(list);
+        }
+        if (type === "export") {
+            const saved = await dialog.showSaveDialog(setupWin, { defaultPath: "songs-export.json", filters: [{ name: "JSON", extensions: ["json"] }] });
+            if (saved.canceled || !saved.filePath) return { ok: true, canceled: true };
+            return Admin.exportSongs(saved.filePath);
+        }
+        return { ok: false, error: "Lệnh không hợp lệ" };
+    } catch (err) {
+        console.error("song-db-op lỗi:", err);
+        return { ok: false, error: err.message || "Lỗi không xác định" };
+    }
+});
+
 ipcMain.handle("effects-lib-get", (event) => {
     if (!isEffectsLibReader(event.sender)) return { ok: false, items: [], error: "Không được phép" };
     return { ok: true, items: effectsLibrary.list() };

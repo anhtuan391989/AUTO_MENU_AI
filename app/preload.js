@@ -111,6 +111,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- THƯ VIỆN HIỆU ỨNG (bảng nhiều nút + mục "Hiệu Ứng" trong Cài đặt, xem app/EffectsLibrary.js) ----
     getEffectsLibrary: () => ipcRenderer.invoke("effects-lib-get"),
     effectsLibraryOp: (op) => ipcRenderer.invoke("effects-lib-op", op),
+    // ---- DB-SETUP-01: Setup > Database (xem core/reference/SongDbAdmin.js) ----
+    songDbOp: (op) => ipcRenderer.invoke("song-db-op", op),
     playLibEffect: (id) => ipcRenderer.send("effects-lib-play", id),
     stopLibEffects: () => ipcRenderer.send("effects-lib-stop"),
     openEffectsEditor: () => ipcRenderer.send("effects-open-editor"),

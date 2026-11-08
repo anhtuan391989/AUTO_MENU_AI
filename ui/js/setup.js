@@ -2101,6 +2101,93 @@ function loadPreset() {
 }
 
 /* ==========================================================
+   DB-SETUP-01 — Setup > Database: nối thẻ có sẵn với kênh IPC thật (song-db-op).
+   Không đổi HTML: tìm phần tử theo thứ tự trong #panel-database. Logic thật ở core/reference/SongDbAdmin.js.
+   ========================================================== */
+(function setupDatabasePanel() {
+    function init() {
+        var panel = document.getElementById("panel-database");
+        if (!panel) return;
+        var api = window.electronAPI || {};
+        var badge = panel.querySelector(".panel-card-title .badge");
+        var hint = panel.querySelector(".hint-text");
+        var vals = panel.querySelectorAll(".status-card .status-value");
+        var btns = panel.querySelectorAll(".row-buttons .setup-btn"); // Import, Export, Rebuild, Cache
+        if (vals.length < 6 || btns.length < 4) return;
+        var out = document.createElement("div");
+        out.className = "hint-text";
+        out.style.minHeight = "16px";
+        btns[0].parentNode.parentNode.appendChild(out);
+        var wired = typeof api.songDbOp === "function";
+
+        function setBadge(ok) {
+            if (!badge) return;
+            badge.className = "badge " + (ok ? "badge-live" : "badge-unwired");
+            badge.textContent = ok ? "Đã nối IPC" : "Chưa có IPC";
+        }
+        function say(t) { out.textContent = t || ""; }
+        function setVal(i, text, real) {
+            vals[i].textContent = text;
+            vals[i].classList.toggle("status-value--dim", !real);
+        }
+        function dash() { for (var i = 0; i < 6; i++) setVal(i, "—", false); }
+        function fmt(t, a) { return t.replace(/\{(\d+)\}/g, function (m, n) { return a[+n]; }); }
+
+        function paint(r) {
+            if (!r || !r.ok) { dash(); say(fmt("Lỗi: {0}", [(r && r.error) || "Không đọc được dữ liệu."])); return; }
+            setVal(0, String(r.count), true);
+            setVal(1, String(r.artists), true);
+            setVal(2, r.count ? fmt("{0}/{1} có Key", [r.withKey, r.count]) : "0", true);
+            setVal(3, r.withBpm ? fmt("{0}/{1} · TB {2}", [r.withBpm, r.count, r.bpmAvg]) : (r.count ? fmt("0/{0} có BPM", [r.count]) : "0"), true);
+            setVal(4, fmt("{0} mục trong bộ nhớ đệm", [r.cache]), true);
+            setVal(5, r.topKeys && r.topKeys.length ? fmt("Key nhiều nhất: {0} ({1} bài)", [r.topKeys[0].key, r.topKeys[0].count]) : "Chưa có dữ liệu", true);
+        }
+        function refresh() {
+            if (!wired) { setBadge(false); dash(); return Promise.resolve(); }
+            return Promise.resolve(api.songDbOp({ type: "stats" })).then(function (r) { setBadge(!!(r && r.ok)); paint(r); })
+                .catch(function () { setBadge(false); dash(); });
+        }
+        function run(type, after) {
+            if (!wired) { say("Không kết nối được với app (thiếu IPC)."); return; }
+            Array.prototype.forEach.call(btns, function (b) { b.disabled = true; });
+            Promise.resolve(api.songDbOp({ type: type })).then(function (r) {
+                if (!r || !r.ok) say(fmt("Lỗi: {0}", [(r && r.error) || "Không thực hiện được."]));
+                else if (r.canceled) say("Đã hủy.");
+                else say(after(r));
+                return refresh();
+            }).catch(function () { say("Không thực hiện được."); }).then(function () {
+                Array.prototype.forEach.call(btns, function (b) { b.disabled = !wired; });
+            });
+        }
+
+        if (hint) hint.textContent = "Dữ liệu thật nằm ở data/songs.json. Số liệu đọc trực tiếp từ file — chưa có bài thì hiện 0, không bịa số.";
+        btns[0].addEventListener("click", function () {
+            run("import", function (r) { return fmt("Đã nhập: thêm {0}, trùng {1}, lỗi {2}.", [r.added, r.duplicates, r.invalid]); });
+        });
+        btns[1].addEventListener("click", function () {
+            run("export", function (r) { return fmt("Đã xuất {0} bài ra file.", [r.count]); });
+        });
+        btns[2].addEventListener("click", function () {
+            if (!confirm("Dựng lại Database? App sẽ bỏ bản ghi sai/trùng và lưu bản sao songs.json.bak.")) return;
+            run("rebuild", function (r) {
+                return r.changed ? fmt("Dựng lại xong: {0} → {1} bài (bỏ {2} bản sai, {3} bản trùng).", [r.before, r.after, r.invalid, r.duplicates])
+                    : "Dữ liệu đã sạch, không có gì cần dựng lại.";
+            });
+        });
+        btns[3].addEventListener("click", function () {
+            run("clearCache", function (r) { return fmt("Đã xóa {0} mục bộ nhớ đệm.", [r.cleared]); });
+        });
+
+        Array.prototype.forEach.call(btns, function (b) { b.disabled = !wired; });
+        refresh();
+        window.addEventListener("focus", refresh);
+        var nav = document.querySelector('[data-panel="panel-database"]');
+        if (nav) nav.addEventListener("click", function () { setTimeout(refresh, 30); });
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
+})();
+
+/* ==========================================================
    KHỞI TẠO KHI DOM SẴN SÀNG
    (thay vì chạy toàn bộ ở top-level, phụ thuộc vào vị trí <script>)
    ========================================================== */
