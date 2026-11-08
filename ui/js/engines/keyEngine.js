@@ -60,7 +60,8 @@ const KeyEngine = (() => {
     // AI-KEY-SCORING-A-01: ngưỡng tối thiểu để một ước lượng được coi là "có Key". Thang cũ (điểm cosine+bass, có thể >1) dùng 0.35; thang mới confidence=0.5·fit+0.5·separation ∈ [0,1].
     // Đo (126 ca, xem báo cáo): ca KHÔNG có Key (nhiễu/ù/hợp âm rỗng) có confidence tối đa 0.52 (p90 0.50); ca đúng p10=0.69. 0.35 không còn ý nghĩa (để lọt ù 60 Hz) => 0.55.
     // ModEngine dùng chung hằng này qua KeyEngine.MIN_CONFIDENCE (không sửa modEngine.js).
-    const MIN_CONFIDENCE = KEY_SCORING_PEARSON_ENABLED ? 0.55 : 0.35;
+    const MIN_CONFIDENCE_BASE = KEY_SCORING_PEARSON_ENABLED ? 0.55 : 0.35;
+    let MIN_CONFIDENCE = MIN_CONFIDENCE_BASE; // A114: chỉnh được qua setTuning() (Setup > Lõi AI > Ngưỡng); không gọi setTuning => đúng bằng giá trị gốc
     const STABLE_CHECKS = 4;
     const CHECK_INTERVAL_MS = 1500;
     const VOTE_WINDOW = 8;
@@ -639,13 +640,14 @@ const KeyEngine = (() => {
 
     const MIN_ELAPSED_BEFORE_LOCK_MS = 15000;
     const FAST_LOCK_MIN_ELAPSED_MS = 3000;
-    const ADAPTIVE_LOCK_CONFIDENCE = PEARSON_ON ? 0.80 : 0.80; // AI-KEY-SCORING-A-01: ngưỡng trên decisionScore (confidenceV2.combined) — định nghĩa lại ở thang mới, xem hiệu chỉnh trong báo cáo
+    const ADAPTIVE_LOCK_CONFIDENCE_BASE = PEARSON_ON ? 0.80 : 0.80;
+    let ADAPTIVE_LOCK_CONFIDENCE = ADAPTIVE_LOCK_CONFIDENCE_BASE; // AI-KEY-SCORING-A-01: ngưỡng trên decisionScore (confidenceV2.combined) — định nghĩa lại ở thang mới, xem hiệu chỉnh trong báo cáo
     const ADAPTIVE_LOCK_STREAK_REQUIRED = 3;
 
     const FAST_PATH_INTERVAL_MS = PROVISIONAL_INTERVAL_MS;
     const FAST_PATH_MIN_ELAPSED_MS = 1200;
     const FAST_PATH_STREAK_REQUIRED = 3;
-    const FAST_PATH_MIN_CONFIDENCE = ADAPTIVE_LOCK_CONFIDENCE;
+    let FAST_PATH_MIN_CONFIDENCE = ADAPTIVE_LOCK_CONFIDENCE;
 
     // === TASK AI-ALG-05 — ước lượng Key dài hạn + cổng đồng thuận ===
     function estimateKeyLong() { return estimateKeyFromChroma(chromaVectorLong, { bassWeight: LONG_BASS_WEIGHT, withAll: true }); }
@@ -1124,9 +1126,20 @@ const KeyEngine = (() => {
         };
     }
 
+    // A114 — chỉnh 2 ngưỡng từ Setup (Lõi AI). Chỉ nhận số hợp lệ, kẹp trong khoảng an toàn (đo thực tế: ca KHÔNG có Key
+    // tối đa 0.52, ca đúng p10 0.69 => không cho ngưỡng thấp hơn 0.45). null/undefined/NaN => về giá trị gốc.
+    function setTuning(t) {
+        const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+        const m = num(t && t.minConfidence), l = num(t && t.lockConfidence);
+        MIN_CONFIDENCE = m === null ? MIN_CONFIDENCE_BASE : Math.min(0.70, Math.max(0.45, m));
+        ADAPTIVE_LOCK_CONFIDENCE = l === null ? ADAPTIVE_LOCK_CONFIDENCE_BASE : Math.min(0.92, Math.max(0.70, l));
+        FAST_PATH_MIN_CONFIDENCE = ADAPTIVE_LOCK_CONFIDENCE;
+        return { minConfidence: MIN_CONFIDENCE, lockConfidence: ADAPTIVE_LOCK_CONFIDENCE };
+    }
+
     return {
-        init, stop, detectOnce, watchContinuous, estimateKeyFromChroma, estimateKeyLong, estimateKeyMid, outOfScaleRatio,
-        shortestSemitoneDelta, onLevel, onProvisionalEstimate, NOTE_NAMES, MIN_CONFIDENCE, getDebugSnapshot, getInputState,
+        init, stop, detectOnce, setTuning, watchContinuous, estimateKeyFromChroma, estimateKeyLong, estimateKeyMid, outOfScaleRatio,
+        shortestSemitoneDelta, onLevel, onProvisionalEstimate, NOTE_NAMES, get MIN_CONFIDENCE() { return MIN_CONFIDENCE; }, getDebugSnapshot, getInputState,
     };
 })();
 

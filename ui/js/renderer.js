@@ -1621,22 +1621,41 @@ function refreshKeySourceDisplay() {
 // Áp dụng key của nguồn ĐANG có hiệu lực (theo đúng thứ tự ưu tiên) xuống Plugin + UI.
 // KHÔNG gọi hàm này cho bước "xem trước" khi mới chọn Manual (chưa bấm SEND) — đó là
 // hành vi riêng trong keySelector "change" bên dưới, đúng yêu cầu giữ nguyên Logic Send.
-// A113 — "Lõi AI" (Setup): chỉ 2 núm nối thật — aiCore.autoApply (mặc định BẬT = hành vi cũ) và aiCore.debug
+// A113/A114 — "Lõi AI" (Setup): 4 núm nối thật — aiCore.autoApply (mặc định BẬT = hành vi cũ), aiCore.debug, aiCore.threshold + aiCore.confidence (0..100, 50 = mặc định = KHÔNG đổi KeyEngine)
 // (mặc định TẮT: chỉ tắt 3 dòng console debug tạm; aiDiag/file log KHÔNG đổi). Menu không tự đồng bộ appSettings
 // với Setup, nên đọc lại file dùng chung (loadSettingsSync, chỉ đọc) tối đa 2 giây/lần. Lỗi => dùng mặc định.
-let __aiCoreCache = { t: 0, v: { autoApply: true, debug: false } };
+let __aiCoreCache = { t: 0, v: { autoApply: true, debug: false, threshold: 50, confidence: 50 } };
+let __aiCoreTuned = null; // "m|l" đã áp xuống KeyEngine lần cuối (null = chưa chỉnh gì)
+// A114 — vị trí thanh 0..100 (50 = mặc định = đúng giá trị gốc của KeyEngine) -> ngưỡng thật.
+function __aiThresholdToMinConf(v) { v = Math.min(100, Math.max(0, v)); return v >= 50 ? 0.55 + (v - 50) / 50 * 0.15 : 0.55 - (50 - v) / 50 * 0.10; }  // 0.45 .. 0.55 .. 0.70
+function __aiConfidenceToLock(v) { v = Math.min(100, Math.max(0, v)); return v >= 50 ? 0.80 + (v - 50) / 50 * 0.12 : 0.80 - (50 - v) / 50 * 0.10; }       // 0.70 .. 0.80 .. 0.92
+function __aiCoreApplyTuning(v) {
+    try {
+        if (typeof KeyEngine === "undefined" || typeof KeyEngine.setTuning !== "function") return;
+        const key = v.threshold + "|" + v.confidence;
+        if (key === (__aiCoreTuned === null ? "50|50" : __aiCoreTuned)) return; // không đổi (hoặc vẫn mặc định) -> không đụng KeyEngine
+        __aiCoreTuned = key;
+        const r = (v.threshold === 50 && v.confidence === 50) ? KeyEngine.setTuning(null) : KeyEngine.setTuning({ minConfidence: __aiThresholdToMinConf(v.threshold), lockConfidence: __aiConfidenceToLock(v.confidence) });
+        console.log("[AI-Core] Ngưỡng/Độ tin cậy đã áp:", JSON.stringify(r));
+    } catch (e) {}
+}
 function __aiCoreCfg() {
     const now = Date.now();
     if (now - __aiCoreCache.t < 2000) return __aiCoreCache.v;
-    let v = { autoApply: true, debug: false };
+    let v = { autoApply: true, debug: false, threshold: 50, confidence: 50 };
     try {
         const st = window.electronAPI?.loadSettingsSync?.();
         const c = st && typeof st === "object" ? st.aiCore : null;
-        if (c && typeof c === "object") v = { autoApply: c.autoApply !== false, debug: c.debug === true };
+        if (c && typeof c === "object") {
+            const n = (x) => (typeof x === "number" && isFinite(x) ? Math.round(Math.min(100, Math.max(0, x))) : 50);
+            v = { autoApply: c.autoApply !== false, debug: c.debug === true, threshold: n(c.threshold), confidence: n(c.confidence) };
+        }
     } catch (e) {}
     __aiCoreCache = { t: now, v };
+    __aiCoreApplyTuning(v);
     return v;
 }
+try { setInterval(__aiCoreCfg, 2000); } catch (e) {} // A114: áp Ngưỡng/Độ tin cậy ngay cả khi Debug tắt
 
 function applyActiveKeyToPlugin(sourceLabel) {
 

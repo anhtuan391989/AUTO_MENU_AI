@@ -3,10 +3,10 @@ const fs=require('fs'),path=require('path'),vm=require('vm');const root=path.joi
 let p=0,f=0;const ok=(c,m,x)=>{if(c){p++;console.log('  OK  ',m)}else{f++;console.log('  FAIL',m,x===undefined?'':JSON.stringify(x))}};
 const r=rd('ui/js/renderer.js');
 console.log('== Menu (renderer.js) ==');
-const m=/let __aiCoreCache[\s\S]*?\n}\n/.exec(r); ok(!!m,'có __aiCoreCfg');
+const m=/let __aiCoreCache[\s\S]*?try \{ setInterval/.exec(r);m&&(m[0]=m[0].replace(/try \{ setInterval$/,'')); ok(!!m,'có __aiCoreCfg');
 let st=null,calls=0;const mk=(now)=>{const sb={Date:{now:()=>now.t},window:{electronAPI:{loadSettingsSync:()=>{calls++;if(st==='throw')throw new Error('x');return st}}}};vm.createContext(sb);vm.runInContext(m[0]+';this.cfg=__aiCoreCfg;',sb);return sb.cfg;};
 const now={t:10000};const cfg=mk(now);
-st=null;ok(JSON.stringify(cfg())==='{"autoApply":true,"debug":false}','không có aiCore => mặc định: tự áp dụng BẬT, debug TẮT (giữ hành vi cũ)');
+st=null;ok(JSON.stringify(cfg())==='{"autoApply":true,"debug":false,"threshold":50,"confidence":50}','không có aiCore => mặc định: tự áp dụng BẬT, debug TẮT (giữ hành vi cũ)');
 now.t+=3000;st={aiCore:{autoApply:false,debug:true}};let v=cfg();ok(v.autoApply===false&&v.debug===true,'đọc đúng giá trị Setup đã lưu',v);
 const c0=calls;cfg();cfg();ok(calls===c0,'cache 2 giây: không đọc file mỗi frame');
 now.t+=3000;st='throw';v=cfg();ok(v.autoApply===true&&v.debug===false,'đọc lỗi => mặc định an toàn');
@@ -31,8 +31,8 @@ const grid=aa.closest('.placeholder-grid');const locked=[...grid.querySelectorAl
 const badge=[...document.querySelectorAll('.panel-card-title')].filter(e=>/AI Core|Lõi AI/.test(e.textContent)).map(e=>e.querySelector('.badge')&&e.querySelector('.badge').textContent).join('|');
 return {st1,saved,locked,badge,total:grid.querySelectorAll('input,select,button').length};});
 ok(res.st1.aaDis===false&&res.st1.dbgDis===false&&res.st1.aaChk===false&&res.st1.dbgChk===true,'2 ô mở khoá và hiện đúng giá trị đã lưu',res.st1);
-ok(res.saved.length>=2&&JSON.stringify(res.saved[res.saved.length-1])==='{"autoApply":true,"debug":false}','tích/bỏ tích => lưu aiCore đúng',res.saved);
-ok(res.locked===10&&res.total===12,'10 núm còn lại vẫn khoá (tổng 12)',res);
-ok(/2\/12/.test(res.badge),'huy hiệu nói rõ 2/12 đã nối: '+res.badge);
+ok(res.saved.length>=2&&JSON.stringify(res.saved[res.saved.length-1])==='{"autoApply":true,"debug":false,"threshold":50,"confidence":50}','tích/bỏ tích => lưu aiCore đúng',res.saved);
+ok(res.locked===8&&res.total===12,"8 núm còn lại vẫn khoá (tổng 12)",res);
+ok(/4\/12/.test(res.badge),"huy hiệu nói rõ 4/12 đã nối: "+res.badge);
 ok(errs.length===0,'không lỗi JS',errs);await b.close();
 console.log(p+' PASS / '+f+' FAIL (MÔ PHỎNG)');process.exit(f?1:0)})();
