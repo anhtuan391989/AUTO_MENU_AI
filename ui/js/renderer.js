@@ -1621,34 +1621,37 @@ function refreshKeySourceDisplay() {
 // Áp dụng key của nguồn ĐANG có hiệu lực (theo đúng thứ tự ưu tiên) xuống Plugin + UI.
 // KHÔNG gọi hàm này cho bước "xem trước" khi mới chọn Manual (chưa bấm SEND) — đó là
 // hành vi riêng trong keySelector "change" bên dưới, đúng yêu cầu giữ nguyên Logic Send.
-// A113/A114 — "Lõi AI" (Setup): 4 núm nối thật — aiCore.autoApply (mặc định BẬT = hành vi cũ), aiCore.debug, aiCore.threshold + aiCore.confidence (0..100, 50 = mặc định = KHÔNG đổi KeyEngine)
+// A113/A114 — "Lõi AI" (Setup): 7 núm nối thật — aiCore.autoApply (mặc định BẬT = hành vi cũ), aiCore.debug, aiCore.threshold + aiCore.confidence (0..100, 50 = mặc định = KHÔNG đổi KeyEngine) + realtime/instant/speed (A116; mặc định BẬT/BẬT/medium = như cũ)
 // (mặc định TẮT: chỉ tắt 3 dòng console debug tạm; aiDiag/file log KHÔNG đổi). Menu không tự đồng bộ appSettings
 // với Setup, nên đọc lại file dùng chung (loadSettingsSync, chỉ đọc) tối đa 2 giây/lần. Lỗi => dùng mặc định.
-let __aiCoreCache = { t: 0, v: { autoApply: true, debug: false, threshold: 50, confidence: 50 } };
-let __aiCoreTuned = null; // "m|l" đã áp xuống KeyEngine lần cuối (null = chưa chỉnh gì)
+const __AI_CORE_DEFAULT = { autoApply: true, debug: false, threshold: 50, confidence: 50, realtime: true, instant: true, speed: "medium" };
+let __aiCoreCache = { t: 0, v: __AI_CORE_DEFAULT };
+let __aiCoreTuned = null; // chữ ký tuning đã áp xuống KeyEngine lần cuối (null = chưa chỉnh gì)
+const __AI_SPEED_SCALE = { fast: 0.6, medium: 1, slow: 1.6 }; // A116: Tốc độ phản ứng -> hệ số nhân thời gian chờ chốt Key
 // A114 — vị trí thanh 0..100 (50 = mặc định = đúng giá trị gốc của KeyEngine) -> ngưỡng thật.
 function __aiThresholdToMinConf(v) { v = Math.min(100, Math.max(0, v)); return v >= 50 ? 0.55 + (v - 50) / 50 * 0.15 : 0.55 - (50 - v) / 50 * 0.10; }  // 0.45 .. 0.55 .. 0.70
 function __aiConfidenceToLock(v) { v = Math.min(100, Math.max(0, v)); return v >= 50 ? 0.80 + (v - 50) / 50 * 0.12 : 0.80 - (50 - v) / 50 * 0.10; }       // 0.70 .. 0.80 .. 0.92
 function __aiCoreApplyTuning(v) {
     try {
         if (typeof KeyEngine === "undefined" || typeof KeyEngine.setTuning !== "function") return;
-        const key = v.threshold + "|" + v.confidence;
-        if (key === (__aiCoreTuned === null ? "50|50" : __aiCoreTuned)) return; // không đổi (hoặc vẫn mặc định) -> không đụng KeyEngine
-        __aiCoreTuned = key;
-        const r = (v.threshold === 50 && v.confidence === 50) ? KeyEngine.setTuning(null) : KeyEngine.setTuning({ minConfidence: __aiThresholdToMinConf(v.threshold), lockConfidence: __aiConfidenceToLock(v.confidence) });
-        console.log("[AI-Core] Ngưỡng/Độ tin cậy đã áp:", JSON.stringify(r));
+        const isDefault = v.threshold === 50 && v.confidence === 50 && v.instant === true && v.speed === "medium";
+        const sig = isDefault ? "default" : [v.threshold, v.confidence, v.instant, v.speed].join("|");
+        if (sig === (__aiCoreTuned === null ? "default" : __aiCoreTuned)) return; // không đổi (hoặc vẫn mặc định) -> không đụng KeyEngine
+        __aiCoreTuned = sig;
+        const r = isDefault ? KeyEngine.setTuning(null) : KeyEngine.setTuning({ minConfidence: __aiThresholdToMinConf(v.threshold), lockConfidence: __aiConfidenceToLock(v.confidence), fastPath: v.instant, reactionScale: __AI_SPEED_SCALE[v.speed] });
+        console.log("[AI-Core] Đã áp tuning:", JSON.stringify(r));
     } catch (e) {}
 }
 function __aiCoreCfg() {
     const now = Date.now();
     if (now - __aiCoreCache.t < 2000) return __aiCoreCache.v;
-    let v = { autoApply: true, debug: false, threshold: 50, confidence: 50 };
+    let v = __AI_CORE_DEFAULT;
     try {
         const st = window.electronAPI?.loadSettingsSync?.();
         const c = st && typeof st === "object" ? st.aiCore : null;
         if (c && typeof c === "object") {
             const n = (x) => (typeof x === "number" && isFinite(x) ? Math.round(Math.min(100, Math.max(0, x))) : 50);
-            v = { autoApply: c.autoApply !== false, debug: c.debug === true, threshold: n(c.threshold), confidence: n(c.confidence) };
+            v = { autoApply: c.autoApply !== false, debug: c.debug === true, threshold: n(c.threshold), confidence: n(c.confidence), realtime: c.realtime !== false, instant: c.instant !== false, speed: (c.speed === "fast" || c.speed === "slow") ? c.speed : "medium" };
         }
     } catch (e) {}
     __aiCoreCache = { t: now, v };
@@ -1700,7 +1703,7 @@ function applyActiveKeyToPlugin(sourceLabel) {
 
     }
 
-    if (source === "ai" && !__aiCoreCfg().autoApply) { // A113: Setup > Lõi AI > "Tự áp dụng" TẮT -> hiển thị Key nhưng KHÔNG tự gửi Plugin (không ghi lastPluginKey => bật lại là gửi)
+    if (source === "ai" && typeof __aiCoreCfg === "function" && !__aiCoreCfg().autoApply) { // A113: Setup > Lõi AI > "Tự áp dụng" TẮT -> hiển thị Key nhưng KHÔNG tự gửi Plugin (không ghi lastPluginKey => bật lại là gửi)
         console.log("[AI-Core] Tự áp dụng TẮT — không gửi Key AI xuống Plugin.");
         return;
     }
@@ -2034,7 +2037,7 @@ function startAiRealtimeLoop() {
 
         }
 
-        startAiRealtimeLoop(); // luôn chạy tiếp — kể cả khi AI KHÔNG phải nguồn active lúc này
+        if (typeof __aiCoreCfg !== "function" || __aiCoreCfg().realtime) startAiRealtimeLoop(); // luôn chạy tiếp — kể cả khi AI KHÔNG phải nguồn active lúc này. A116: Setup > Lõi AI > "Chế độ thời gian thực" TẮT => dò 1 lần rồi dừng (bài mới/nút Auto vẫn dò lại)
 
     });
 
@@ -2854,7 +2857,7 @@ let __lastKnownMicDeviceId = null; // TASK B72 (gộp B72+B72.1) — theo dõi �
 // Xoá 2 hàm này sau khi đã xác định app chạy ổn định lâu dài.
 let __debugLastLog = 0;
 function __debugLogAudioLevel(bassEnergy, localAvg, maxByte) {
-    if (!__aiCoreCfg().debug) return; // A113: Setup > Lõi AI > "Gỡ lỗi"
+    if (typeof __aiCoreCfg !== "function" || !__aiCoreCfg().debug) return; // A113: Setup > Lõi AI > "Gỡ lỗi"
     const now = Date.now();
     if (now - __debugLastLog < 1000) return;
     __debugLastLog = now;
@@ -2867,7 +2870,7 @@ function __debugLogAudioLevel(bassEnergy, localAvg, maxByte) {
 // để không gây nhầm lẫn 2 metric khi đọc console lúc calibrate.
 let __debugLastVuLog = 0;
 function __debugLogVuLevel(rms, dbfs, vuPercent, peak) {
-    if (!__aiCoreCfg().debug) return; // A113: Setup > Lõi AI > "Gỡ lỗi"
+    if (typeof __aiCoreCfg !== "function" || !__aiCoreCfg().debug) return; // A113: Setup > Lõi AI > "Gỡ lỗi"
     const now = Date.now();
     if (now - __debugLastVuLog < 1000) return; // throttle 1s — đủ để đọc, không spam console
     __debugLastVuLog = now;
@@ -2878,7 +2881,7 @@ function __debugLogVuLevel(rms, dbfs, vuPercent, peak) {
 
 let __debugLastKeyLog = 0;
 function __debugLogKeyConfidence() {
-    if (!__aiCoreCfg().debug) return; // A113: Setup > Lõi AI > "Gỡ lỗi"
+    if (typeof __aiCoreCfg !== "function" || !__aiCoreCfg().debug) return; // A113: Setup > Lõi AI > "Gỡ lỗi"
     const now = Date.now();
     if (now - __debugLastKeyLog < 3000) return; // giãn ra 3s/lần cho dễ đọc (trước: 1s)
     __debugLastKeyLog = now;

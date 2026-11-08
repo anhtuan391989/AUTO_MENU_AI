@@ -20,7 +20,7 @@ const T=sb.__aiThresholdToMinConf,C=sb.__aiConfidenceToLock,eq=(a,b)=>Math.abs(a
 ok(eq(T(50),0.55)&&eq(C(50),0.80),'thanh=50 => đúng giá trị gốc 0.55 / 0.80');
 ok(eq(T(0),0.45)&&eq(T(100),0.70)&&eq(C(0),0.70)&&eq(C(100),0.92),'đầu/cuối thanh: 0.45–0.70 và 0.70–0.92');
 ok(T(30)<T(50)&&T(50)<T(80)&&C(30)<C(50)&&C(50)<C(80),'đơn điệu tăng (kéo phải = nghiêm hơn)');
-const m=/let __aiCoreCache[\s\S]*?try \{ setInterval/.exec(src);let calls=[];let st2={aiCore:{threshold:80,confidence:20}};
+const m=/const __AI_CORE_DEFAULT[\s\S]*?try \{ setInterval/.exec(src);let calls=[];let st2={aiCore:{threshold:80,confidence:20}};
 const ctx={Date:{now:()=>ctx.t},t:10000,console:{log(){}},window:{electronAPI:{loadSettingsSync:()=>st2}},KeyEngine:{setTuning:(x)=>{calls.push(x);return x||{}}}};vm.createContext(ctx);
 vm.runInContext(pick('__aiThresholdToMinConf')+'\n'+pick('__aiConfidenceToLock')+'\n'+m[0].replace(/try \{ setInterval$/,'')+';this.cfg=__aiCoreCfg;',ctx);
 ctx.cfg();ok(calls.length===1&&Math.abs(calls[0].minConfidence-(0.55+30/50*0.15))<1e-9&&Math.abs(calls[0].lockConfidence-(0.80-30/50*0.10))<1e-9,'Setup lưu 80/20 => Menu áp xuống KeyEngine đúng số',calls);
@@ -34,14 +34,14 @@ await pg.goto('file://'+path.join(root,'ui/setup.html'));await pg.waitForTimeout
 const res=await pg.evaluate(()=>{const store={aiCore:{threshold:70,confidence:30}},saved=[];window.getSetting=(k,d)=>k in store?store[k]:d;window.setSetting=(k,v)=>{store[k]=v;saved.push(JSON.parse(JSON.stringify(v)))};window.setupAiCore.init();
 const grid=document.querySelector('.placeholder-grid:has(input[type=range])');const rg=[...grid.querySelectorAll('input[type=range]')];const before=rg.map(x=>[x.disabled,x.value]);
 const ro0=[...grid.querySelectorAll('.ai-core-readout')].map(o=>o.textContent);rg[0].value=90;rg[0].dispatchEvent(new Event('input'));rg[0].dispatchEvent(new Event('change'));rg[1].value=50;rg[1].dispatchEvent(new Event('input'));rg[1].dispatchEvent(new Event('change'));
-return {ro0,before,saved:saved[saved.length-1],locked:[...grid.querySelectorAll('input,select,button')].filter(i=>i.disabled).length,ro:[...grid.querySelectorAll('.ai-core-readout')].map(o=>o.textContent),hint:document.querySelector('#panel-ai .hint-text, .hint-text').textContent.slice(0,40),hintAll:[...document.querySelectorAll('.hint-text')].some(h=>/Đã nối thật 4 núm/.test(h.textContent)),noOld:![...document.querySelectorAll('.hint-text')].some(h=>/chưa expose IPC/.test(h.textContent))};});
+return {ro0,before,saved:saved[saved.length-1],locked:[...grid.querySelectorAll('input,select,button')].filter(i=>i.disabled).length,ro:[...grid.querySelectorAll('.ai-core-readout')].map(o=>o.textContent),hint:document.querySelector('#panel-ai .hint-text, .hint-text').textContent.slice(0,40),hintAll:[...document.querySelectorAll('.hint-text')].some(h=>/Đã nối thật 7 núm/.test(h.textContent)),noOld:![...document.querySelectorAll('.hint-text')].some(h=>/chưa expose IPC/.test(h.textContent))};});
 ok(JSON.stringify(res.before)==='[[false,"30"],[false,"70"]]','2 thanh mở khoá, hiện đúng giá trị đã lưu (HTML: Độ tin cậy trước, Ngưỡng sau)',res.before);
 ok(res.saved&&res.saved.threshold===50&&res.saved.confidence===90,'kéo thanh => lưu đúng vào aiCore',res.saved);
 ok(JSON.stringify(res.ro0)==='["30 / 100  →  0.76","70 / 100  →  0.61"]','A115: hiện số cạnh thanh (Độ tin cậy 30 → 0.76; Ngưỡng 70 → 0.61)',res.ro0);
 ok(JSON.stringify(res.ro)==='["90 / 100  →  0.90","50 / 100  →  0.55  (mặc định)"]','A115: số cập nhật khi kéo; 50 ghi "(mặc định)"',res.ro);
-ok(res.locked===8,'8 núm còn lại vẫn khoá ( Realtime/Instant/Locked/Reaction/Prediction/Learning/Memory/Calibration)',res.locked);
+ok(res.locked===5,'5 núm còn lại vẫn khoá ( Realtime/Instant/Locked/Reaction/Prediction/Learning/Memory/Calibration)',res.locked);
 ok(res.hintAll&&res.noOld,'dòng chữ giải thích đã cập nhật, câu cũ "chưa expose IPC" không còn');
 ok(/js\/setupAiCore\.js/.test(rd('ui/setup.html')),'setup.html vẫn nạp setupAiCore.js');
 ok(errs.length===0,'không lỗi JS',errs);await b.close();
-const i18n=rd('ui/js/i18n.js');ok(/Đã nối thật 4 núm[^"]*", "4 controls are wired for real/.test(i18n),'i18n có cặp dịch EN cho dòng mới');
+const i18n=rd('ui/js/i18n.js');ok(/Đã nối thật 7 núm[^"]*", "7 controls are wired for real/.test(i18n),'i18n có cặp dịch EN cho dòng mới');
 console.log(p+' PASS / '+f+' FAIL (MÔ PHỎNG)');process.exit(f?1:0)})();

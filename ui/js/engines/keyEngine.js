@@ -61,6 +61,7 @@ const KeyEngine = (() => {
     // Đo (126 ca, xem báo cáo): ca KHÔNG có Key (nhiễu/ù/hợp âm rỗng) có confidence tối đa 0.52 (p90 0.50); ca đúng p10=0.69. 0.35 không còn ý nghĩa (để lọt ù 60 Hz) => 0.55.
     // ModEngine dùng chung hằng này qua KeyEngine.MIN_CONFIDENCE (không sửa modEngine.js).
     const MIN_CONFIDENCE_BASE = KEY_SCORING_PEARSON_ENABLED ? 0.55 : 0.35;
+    let REACTION_SCALE = 1; // A116: Tốc độ phản ứng (nhân thời gian chờ chốt Key: 0.6 nhanh / 1 vừa / 1.6 chậm)
     let MIN_CONFIDENCE = MIN_CONFIDENCE_BASE; // A114: chỉnh được qua setTuning() (Setup > Lõi AI > Ngưỡng); không gọi setTuning => đúng bằng giá trị gốc
     const STABLE_CHECKS = 4;
     const CHECK_INTERVAL_MS = 1500;
@@ -648,6 +649,8 @@ const KeyEngine = (() => {
     const FAST_PATH_MIN_ELAPSED_MS = 1200;
     const FAST_PATH_STREAK_REQUIRED = 3;
     let FAST_PATH_MIN_CONFIDENCE = ADAPTIVE_LOCK_CONFIDENCE;
+    let FAST_PATH_ENABLED = true; // A116
+
 
     // === TASK AI-ALG-05 — ước lượng Key dài hạn + cổng đồng thuận ===
     function estimateKeyLong() { return estimateKeyFromChroma(chromaVectorLong, { bassWeight: LONG_BASS_WEIGHT, withAll: true }); }
@@ -708,7 +711,7 @@ const KeyEngine = (() => {
     function longEvidenceAllows(candidateFullKey, lockedKey) {
         if (!LONG_EVIDENCE_ENABLED || longSeconds < LONG_WARM_S || !longState.key) return { ok: true, reason: "long-not-warm" };
         if (longState.key !== candidateFullKey) return { ok: false, reason: "long-disagrees" };
-        if (!lockedKey && longSeconds < LONG_FIRST_LOCK_S && !(longState.stationary && longSeconds >= LONG_STATIONARY_MIN_S)) return { ok: false, reason: "long-first-lock-wait" }; // nhạc đang thay đổi hợp âm: chưa đủ để nói Key của cả đoạn
+        if (!lockedKey && longSeconds < LONG_FIRST_LOCK_S * REACTION_SCALE && !(longState.stationary && longSeconds >= LONG_STATIONARY_MIN_S * REACTION_SCALE)) return { ok: false, reason: "long-first-lock-wait" }; // nhạc đang thay đổi hợp âm: chưa đủ để nói Key của cả đoạn
         if (lockedKey && lockedKey !== candidateFullKey) {
             // ĐỔI Key đã khoá: cần Key dài hạn dẫn đầu ổn định + hơn Key đang khoá đủ biên (chống dao động theo hợp âm)
             // Cặp relative (vd C Major <-> A Minor) có cùng bộ nốt: bằng chứng rất sát nhau nên cần biên + thời gian lớn hơn để không dao động.
@@ -858,7 +861,7 @@ const KeyEngine = (() => {
             // TASK AI-ALG-05 — cập nhật Key dài hạn; nếu nó dẫn đầu ổn định mà Key chưa khoá/khác Key đang khoá -> khoá theo bằng chứng dài hạn
             // (cần khi hợp âm đang chơi không bao giờ trùng Key của cả đoạn — nếu không sẽ không bao giờ khoá được).
             updateLongState();
-            if (LONG_EVIDENCE_ENABLED && hasMusicalContent && longState.key && longState.streak >= LONG_LOCK_TICKS && longSeconds >= LONG_LOCK_MIN_S
+            if (LONG_EVIDENCE_ENABLED && hasMusicalContent && longState.key && longState.streak >= LONG_LOCK_TICKS && longSeconds >= LONG_LOCK_MIN_S * REACTION_SCALE
                 && longState.key !== lastLockedKey && longState.key !== longLockFiredKey && longState.result.confidence >= MIN_CONFIDENCE
                 && longState.result.modalEvidence && longState.result.modalEvidence.modalConfidence >= LONG_LOCK_MIN_MODAL) {
                 const gate = longEvidenceAllows(longState.key, lastLockedKey);
@@ -896,6 +899,7 @@ const KeyEngine = (() => {
                 fastPathStreak = 1;
             }
 
+            if (!FAST_PATH_ENABLED) return; // A116: Setup > Lõi AI > Dò tức thì TẮT => không khoá qua đường nhanh (vẫn khoá bằng bằng chứng dài hạn/bỏ phiếu)
             if (fastPathStreak < FAST_PATH_STREAK_REQUIRED) return;
 
             const fastStability = computeStability(Math.min(fastPathStreak, FAST_PATH_STREAK_REQUIRED), FAST_PATH_STREAK_REQUIRED);
@@ -1134,7 +1138,10 @@ const KeyEngine = (() => {
         MIN_CONFIDENCE = m === null ? MIN_CONFIDENCE_BASE : Math.min(0.70, Math.max(0.45, m));
         ADAPTIVE_LOCK_CONFIDENCE = l === null ? ADAPTIVE_LOCK_CONFIDENCE_BASE : Math.min(0.92, Math.max(0.70, l));
         FAST_PATH_MIN_CONFIDENCE = ADAPTIVE_LOCK_CONFIDENCE;
-        return { minConfidence: MIN_CONFIDENCE, lockConfidence: ADAPTIVE_LOCK_CONFIDENCE };
+        FAST_PATH_ENABLED = !(t && t.fastPath === false);
+        const rs = num(t && t.reactionScale);
+        REACTION_SCALE = rs === null ? 1 : Math.min(2, Math.max(0.5, rs));
+        return { minConfidence: MIN_CONFIDENCE, lockConfidence: ADAPTIVE_LOCK_CONFIDENCE, fastPath: FAST_PATH_ENABLED, reactionScale: REACTION_SCALE };
     }
 
     return {
