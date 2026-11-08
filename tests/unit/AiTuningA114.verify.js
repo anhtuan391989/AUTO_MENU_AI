@@ -33,10 +33,12 @@ await pg.addInitScript(()=>{window.electronAPI=new Proxy({},{get:(t,k)=>k==='loa
 await pg.goto('file://'+path.join(root,'ui/setup.html'));await pg.waitForTimeout(400);
 const res=await pg.evaluate(()=>{const store={aiCore:{threshold:70,confidence:30}},saved=[];window.getSetting=(k,d)=>k in store?store[k]:d;window.setSetting=(k,v)=>{store[k]=v;saved.push(JSON.parse(JSON.stringify(v)))};window.setupAiCore.init();
 const grid=document.querySelector('.placeholder-grid:has(input[type=range])');const rg=[...grid.querySelectorAll('input[type=range]')];const before=rg.map(x=>[x.disabled,x.value]);
-rg[0].value=90;rg[0].dispatchEvent(new Event('change'));rg[1].value=10;rg[1].dispatchEvent(new Event('change'));
-return {before,saved:saved[saved.length-1],locked:[...grid.querySelectorAll('input,select,button')].filter(i=>i.disabled).length,hint:document.querySelector('#panel-ai .hint-text, .hint-text').textContent.slice(0,40),hintAll:[...document.querySelectorAll('.hint-text')].some(h=>/Đã nối thật 4 núm/.test(h.textContent)),noOld:![...document.querySelectorAll('.hint-text')].some(h=>/chưa expose IPC/.test(h.textContent))};});
+const ro0=[...grid.querySelectorAll('.ai-core-readout')].map(o=>o.textContent);rg[0].value=90;rg[0].dispatchEvent(new Event('input'));rg[0].dispatchEvent(new Event('change'));rg[1].value=50;rg[1].dispatchEvent(new Event('input'));rg[1].dispatchEvent(new Event('change'));
+return {ro0,before,saved:saved[saved.length-1],locked:[...grid.querySelectorAll('input,select,button')].filter(i=>i.disabled).length,ro:[...grid.querySelectorAll('.ai-core-readout')].map(o=>o.textContent),hint:document.querySelector('#panel-ai .hint-text, .hint-text').textContent.slice(0,40),hintAll:[...document.querySelectorAll('.hint-text')].some(h=>/Đã nối thật 4 núm/.test(h.textContent)),noOld:![...document.querySelectorAll('.hint-text')].some(h=>/chưa expose IPC/.test(h.textContent))};});
 ok(JSON.stringify(res.before)==='[[false,"30"],[false,"70"]]','2 thanh mở khoá, hiện đúng giá trị đã lưu (HTML: Độ tin cậy trước, Ngưỡng sau)',res.before);
-ok(res.saved&&res.saved.threshold===10&&res.saved.confidence===90,'kéo thanh => lưu đúng vào aiCore',res.saved);
+ok(res.saved&&res.saved.threshold===50&&res.saved.confidence===90,'kéo thanh => lưu đúng vào aiCore',res.saved);
+ok(JSON.stringify(res.ro0)==='["30 / 100  →  0.76","70 / 100  →  0.61"]','A115: hiện số cạnh thanh (Độ tin cậy 30 → 0.76; Ngưỡng 70 → 0.61)',res.ro0);
+ok(JSON.stringify(res.ro)==='["90 / 100  →  0.90","50 / 100  →  0.55  (mặc định)"]','A115: số cập nhật khi kéo; 50 ghi "(mặc định)"',res.ro);
 ok(res.locked===8,'8 núm còn lại vẫn khoá ( Realtime/Instant/Locked/Reaction/Prediction/Learning/Memory/Calibration)',res.locked);
 ok(res.hintAll&&res.noOld,'dòng chữ giải thích đã cập nhật, câu cũ "chưa expose IPC" không còn');
 ok(/js\/setupAiCore\.js/.test(rd('ui/setup.html')),'setup.html vẫn nạp setupAiCore.js');

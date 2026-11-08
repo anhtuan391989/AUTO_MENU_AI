@@ -28,10 +28,19 @@
         if (!aa || !dbg) return;
         var th = field(["Threshold", "Ngưỡng"], "input[type=range]"), cf = field(["Confidence", "Độ tin cậy"], "input[type=range]");
         var c = cfg();
-        [[th, "threshold"], [cf, "confidence"]].forEach(function (p) {
+        // A115 — hiện SỐ cạnh mỗi thanh: vị trí 0–100 và giá trị thật đang áp vào KeyEngine (cùng công thức với renderer.js).
+        var toMin = function (v) { return v >= 50 ? 0.55 + (v - 50) / 50 * 0.15 : 0.55 - (50 - v) / 50 * 0.10; };
+        var toLock = function (v) { return v >= 50 ? 0.80 + (v - 50) / 50 * 0.12 : 0.80 - (50 - v) / 50 * 0.10; };
+        [[th, "threshold", toMin], [cf, "confidence", toLock]].forEach(function (p) {
             var el = p[0]; if (!el) return;
             el.disabled = false; el.value = c[p[1]];
-            el.addEventListener("change", function () { var patch = {}; patch[p[1]] = Math.round(Number(el.value)); save(patch); });
+            var old = el.parentNode.querySelector(".ai-core-readout"); if (old) old.parentNode.removeChild(old);
+            var out = document.createElement("span"); out.className = "ai-core-readout"; out.style.cssText = "display:block;font-size:12px;opacity:.85;margin-top:2px;";
+            el.parentNode.appendChild(out);
+            var show = function () { var v = Math.round(Number(el.value)); out.textContent = v + " / 100  →  " + p[2](v).toFixed(2) + (v === 50 ? "  (mặc định)" : ""); };
+            show();
+            el.addEventListener("input", show);
+            el.addEventListener("change", function () { show(); var patch = {}; patch[p[1]] = Math.round(Number(el.value)); save(patch); });
         });
         aa.disabled = false; aa.checked = c.autoApply;
         dbg.disabled = false; dbg.checked = c.debug;
