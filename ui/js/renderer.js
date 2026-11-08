@@ -1621,6 +1621,23 @@ function refreshKeySourceDisplay() {
 // Áp dụng key của nguồn ĐANG có hiệu lực (theo đúng thứ tự ưu tiên) xuống Plugin + UI.
 // KHÔNG gọi hàm này cho bước "xem trước" khi mới chọn Manual (chưa bấm SEND) — đó là
 // hành vi riêng trong keySelector "change" bên dưới, đúng yêu cầu giữ nguyên Logic Send.
+// A113 — "Lõi AI" (Setup): chỉ 2 núm nối thật — aiCore.autoApply (mặc định BẬT = hành vi cũ) và aiCore.debug
+// (mặc định TẮT: chỉ tắt 3 dòng console debug tạm; aiDiag/file log KHÔNG đổi). Menu không tự đồng bộ appSettings
+// với Setup, nên đọc lại file dùng chung (loadSettingsSync, chỉ đọc) tối đa 2 giây/lần. Lỗi => dùng mặc định.
+let __aiCoreCache = { t: 0, v: { autoApply: true, debug: false } };
+function __aiCoreCfg() {
+    const now = Date.now();
+    if (now - __aiCoreCache.t < 2000) return __aiCoreCache.v;
+    let v = { autoApply: true, debug: false };
+    try {
+        const st = window.electronAPI?.loadSettingsSync?.();
+        const c = st && typeof st === "object" ? st.aiCore : null;
+        if (c && typeof c === "object") v = { autoApply: c.autoApply !== false, debug: c.debug === true };
+    } catch (e) {}
+    __aiCoreCache = { t: now, v };
+    return v;
+}
+
 function applyActiveKeyToPlugin(sourceLabel) {
 
     const value = getActiveKeyValue();
@@ -1662,6 +1679,11 @@ function applyActiveKeyToPlugin(sourceLabel) {
         lastPluginKey = sendValue;
         return;
 
+    }
+
+    if (source === "ai" && !__aiCoreCfg().autoApply) { // A113: Setup > Lõi AI > "Tự áp dụng" TẮT -> hiển thị Key nhưng KHÔNG tự gửi Plugin (không ghi lastPluginKey => bật lại là gửi)
+        console.log("[AI-Core] Tự áp dụng TẮT — không gửi Key AI xuống Plugin.");
+        return;
     }
 
     if (typeof pluginSendShouldSkip === "function" && pluginSendShouldSkip(value)) return; // TASK AI-KEY-FAST-08: MOUSE_DISABLED cùng Key, setting chưa đổi
@@ -2813,6 +2835,7 @@ let __lastKnownMicDeviceId = null; // TASK B72 (gộp B72+B72.1) — theo dõi �
 // Xoá 2 hàm này sau khi đã xác định app chạy ổn định lâu dài.
 let __debugLastLog = 0;
 function __debugLogAudioLevel(bassEnergy, localAvg, maxByte) {
+    if (!__aiCoreCfg().debug) return; // A113: Setup > Lõi AI > "Gỡ lỗi"
     const now = Date.now();
     if (now - __debugLastLog < 1000) return;
     __debugLastLog = now;
@@ -2825,6 +2848,7 @@ function __debugLogAudioLevel(bassEnergy, localAvg, maxByte) {
 // để không gây nhầm lẫn 2 metric khi đọc console lúc calibrate.
 let __debugLastVuLog = 0;
 function __debugLogVuLevel(rms, dbfs, vuPercent, peak) {
+    if (!__aiCoreCfg().debug) return; // A113: Setup > Lõi AI > "Gỡ lỗi"
     const now = Date.now();
     if (now - __debugLastVuLog < 1000) return; // throttle 1s — đủ để đọc, không spam console
     __debugLastVuLog = now;
@@ -2835,6 +2859,7 @@ function __debugLogVuLevel(rms, dbfs, vuPercent, peak) {
 
 let __debugLastKeyLog = 0;
 function __debugLogKeyConfidence() {
+    if (!__aiCoreCfg().debug) return; // A113: Setup > Lõi AI > "Gỡ lỗi"
     const now = Date.now();
     if (now - __debugLastKeyLog < 3000) return; // giãn ra 3s/lần cho dễ đọc (trước: 1s)
     __debugLastKeyLog = now;
