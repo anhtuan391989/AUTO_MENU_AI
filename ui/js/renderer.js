@@ -1742,7 +1742,8 @@ function refreshKeySourceDisplay() {
     const activeSourceLabelEl = document.getElementById("activeSourceLabel");
     if (activeSourceLabelEl) {
         const labelMap = { manual: "MANUAL", songDb: "DATABASE", ai: "AI DETECT" };
-        activeSourceLabelEl.textContent = "ACTIVE: " + (labelMap[getActiveSourceName()] || "AI DETECT");
+        activeSourceLabelEl.textContent = "ACTIVE: " + (labelMap[getActiveSourceName()] || "AI DETECT")
+            + ((getActiveSourceName() === "songDb" && __dbBypass.pending && keySource.songDb.value) ? " · " + keySource.songDb.value : ""); // AUTO-DETECT-TRUST-01: đang dò lại -> ACTIVE: DATABASE · <Key>
     }
 
     if (aiKeyDetectLineEl) {
@@ -1835,7 +1836,7 @@ function applyActiveKeyToPlugin(sourceLabel) {
     // giữ nguyên (không đổi) cho các dòng bên dưới (sendKeyToAutotune/dedupe/originalKey) — CHỈ
     // chữ hiển thị bị thay, không có rủi ro gửi "LISTENING" xuống Plugin.
     const sendValue = typeof normalizeKeyForSend === "function" ? normalizeKeyForSend(value) : value; // tên giáng -> thăng cho sendKeyToAutotune (nhãn hiển thị giữ nguyên)
-    if (currentKeyEl) currentKeyEl.textContent = typeof displayKeyText === "function" ? displayKeyText(value, source) : ((source === "ai" && !keyEverDetected) ? "LISTENING" : value);
+    if (currentKeyEl) currentKeyEl.textContent = (source === "songDb" && __dbBypass.pending) ? "LISTENING" : (typeof displayKeyText === "function" ? displayKeyText(value, source) : ((source === "ai" && !keyEverDetected) ? "LISTENING" : value)); // TASK AUTO-DETECT-TRUST-01: bấm Auto Detect trên bài Database -> ô Key về LISTENING trong lúc dò lại (Plugin vẫn dùng Key Database)
     // ===== QUY TẮC KIẾN TRÚC VĨNH VIỄN (đọc kỹ trước khi sửa vùng này) =====
     // AI Key và Manual Key là 2 nguồn điều khiển tách biệt hoàn toàn.
     // Khi AI (hoặc Song Database) đang active:
@@ -2265,7 +2266,10 @@ function startAiRealtimeLoop() {
             __dbBypass.pending = false;
             const __v = __aiBeatsDatabase(result.key, result.confidence, keySource.songDb.value);
             if (__v.ok) { __dbBypass.active = true; if (typeof aiDiag === "function") aiDiag("DB_BYPASS_ON", { db: keySource.songDb.value, ai: result.key, conf: result.confidence }); }
-            else if (typeof aiDiag === "function") aiDiag("DB_BYPASS_REJECTED", { db: keySource.songDb.value, ai: result.key, conf: result.confidence, why: __v.why });
+            else {
+                if (typeof aiDiag === "function") aiDiag("DB_BYPASS_REJECTED", { db: keySource.songDb.value, ai: result.key, conf: result.confidence, why: __v.why });
+                if (getActiveSourceName() === "songDb") applyActiveKeyToPlugin("Song Database"); // trả ô Key từ LISTENING về Key Database (cùng Key nên không gửi lại Plugin)
+            }
         }
         if (typeof __aiMemoryRemember === "function") __aiMemoryRemember(typeof lastNowPlayingKey !== "undefined" ? lastNowPlayingKey : null, result.key); // A117: Học BẬT -> nhớ Key theo bài
         keyEverDetected = true; // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — có kết quả THẬT từ audio

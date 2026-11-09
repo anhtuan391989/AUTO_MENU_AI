@@ -1,0 +1,56 @@
+--- a/ui/js/renderer.js	2026-11-09 11:49:03.208842237 +0000
++++ b/ui/js/renderer.js	2026-11-09 11:55:46.602186625 +0000
+@@ -1602,6 +1602,17 @@
+ const __dbBypass = { pending: false, active: false };
+ let __autoDetectInternal = false; // true khi CODE (không phải người dùng) gọi autoDetectBtn.click() lúc đổi bài
+ function __dbBypassClear() { __dbBypass.pending = false; __dbBypass.active = false; }
++// TASK AUTO-DETECT-TRUST-01 — Auto Detect dò lại THẬT dù bài đang lấy Key từ Database; AI CHỈ chốt Key mới thay Database khi
++// đáng tin hơn Database: Key AI KHÁC Key Database, độ tin cậy >= ngưỡng dưới (cao hơn ngưỡng khoá thường 0.80), và không phải cặp
++// "láng giềng cách 5" (F <-> A#, dễ nhầm hợp âm át với nhà — cùng luật KEY-CORRECT-02). Không đạt -> giữ Key Database.
++const AUTO_DETECT_DB_OVERRIDE_MIN_CONF = 0.85; // TẠM THỜI (đề xuất) — chỉnh theo log thật
++function __aiBeatsDatabase(aiKey, aiConf, dbKey) {
++    if (typeof aiKey !== "string" || typeof dbKey !== "string" || !dbKey) return { ok: false, why: "no-db-or-key" };
++    if (aiKey === dbKey) return { ok: false, why: "same-as-db" };
++    if (!Number.isFinite(aiConf) || aiConf < AUTO_DETECT_DB_OVERRIDE_MIN_CONF) return { ok: false, why: "low-confidence" };
++    if (typeof __keyIsFifthNeighbor === "function" && __keyIsFifthNeighbor(aiKey, dbKey)) return { ok: false, why: "fifth-neighbor" };
++    return { ok: true, why: "ai-more-trusted" };
++}
+ 
+ let lastPluginKey = appState.originalKey; // giá trị THẬT đã gửi xuống Plugin lần gần nhất (chống gửi trùng)
+ // TASK AI-KEY-FAST-08 — chống gửi lại + log lặp khi Mouse Control TẮT (status "MOUSE_DISABLED"). KHÔNG có vòng retry nền: chỉ quyết định
+@@ -1731,7 +1742,8 @@
+     const activeSourceLabelEl = document.getElementById("activeSourceLabel");
+     if (activeSourceLabelEl) {
+         const labelMap = { manual: "MANUAL", songDb: "DATABASE", ai: "AI DETECT" };
+-        activeSourceLabelEl.textContent = "ACTIVE: " + (labelMap[getActiveSourceName()] || "AI DETECT");
++        activeSourceLabelEl.textContent = "ACTIVE: " + (labelMap[getActiveSourceName()] || "AI DETECT")
++            + ((getActiveSourceName() === "songDb" && __dbBypass.pending && keySource.songDb.value) ? " · " + keySource.songDb.value : ""); // AUTO-DETECT-TRUST-01: đang dò lại -> ACTIVE: DATABASE · <Key>
+     }
+ 
+     if (aiKeyDetectLineEl) {
+@@ -1824,7 +1836,7 @@
+     // giữ nguyên (không đổi) cho các dòng bên dưới (sendKeyToAutotune/dedupe/originalKey) — CHỈ
+     // chữ hiển thị bị thay, không có rủi ro gửi "LISTENING" xuống Plugin.
+     const sendValue = typeof normalizeKeyForSend === "function" ? normalizeKeyForSend(value) : value; // tên giáng -> thăng cho sendKeyToAutotune (nhãn hiển thị giữ nguyên)
+-    if (currentKeyEl) currentKeyEl.textContent = typeof displayKeyText === "function" ? displayKeyText(value, source) : ((source === "ai" && !keyEverDetected) ? "LISTENING" : value);
++    if (currentKeyEl) currentKeyEl.textContent = (source === "songDb" && __dbBypass.pending) ? "LISTENING" : (typeof displayKeyText === "function" ? displayKeyText(value, source) : ((source === "ai" && !keyEverDetected) ? "LISTENING" : value)); // TASK AUTO-DETECT-TRUST-01: bấm Auto Detect trên bài Database -> ô Key về LISTENING trong lúc dò lại (Plugin vẫn dùng Key Database)
+     // ===== QUY TẮC KIẾN TRÚC VĨNH VIỄN (đọc kỹ trước khi sửa vùng này) =====
+     // AI Key và Manual Key là 2 nguồn điều khiển tách biệt hoàn toàn.
+     // Khi AI (hoặc Song Database) đang active:
+@@ -2250,7 +2262,15 @@
+         window.__keyDetectStopWatcher = null;
+ 
+         keySource.ai.value = result.key;
+-        if (__dbBypass.pending) { __dbBypass.pending = false; __dbBypass.active = true; if (typeof aiDiag === "function") aiDiag("DB_BYPASS_ON", { db: keySource.songDb.value, ai: result.key }); } // TASK AUTO-RELISTEN-01
++        if (__dbBypass.pending) { // TASK AUTO-RELISTEN-01 + AUTO-DETECT-TRUST-01: AI chỉ thay Database khi đáng tin hơn
++            __dbBypass.pending = false;
++            const __v = __aiBeatsDatabase(result.key, result.confidence, keySource.songDb.value);
++            if (__v.ok) { __dbBypass.active = true; if (typeof aiDiag === "function") aiDiag("DB_BYPASS_ON", { db: keySource.songDb.value, ai: result.key, conf: result.confidence }); }
++            else {
++                if (typeof aiDiag === "function") aiDiag("DB_BYPASS_REJECTED", { db: keySource.songDb.value, ai: result.key, conf: result.confidence, why: __v.why });
++                if (getActiveSourceName() === "songDb") applyActiveKeyToPlugin("Song Database"); // trả ô Key từ LISTENING về Key Database (cùng Key nên không gửi lại Plugin)
++            }
++        }
+         if (typeof __aiMemoryRemember === "function") __aiMemoryRemember(typeof lastNowPlayingKey !== "undefined" ? lastNowPlayingKey : null, result.key); // A117: Học BẬT -> nhớ Key theo bài
+         keyEverDetected = true; // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — có kết quả THẬT từ audio
+         __aiState.hasConfirmed = true; updateAiSourceStateLabel(); // TASK A74-02
