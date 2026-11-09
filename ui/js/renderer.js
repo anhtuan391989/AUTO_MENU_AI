@@ -954,6 +954,90 @@ function initAutoDetectModePopup() {
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
 }
 
+// KEY-SERVER-CORRECT-01 (Bước B) — Bấm CHUỘT PHẢI nút SEND của khối KEY -> thẻ nổi "Lưu Key vào Server":
+// Key được chọn ở ô chọn Key bên cạnh sẽ được lưu làm Key ĐÚNG của bài đang phát (Key Server + songs.json trên máy),
+// cần mật khẩu admin của Server (nhớ tới khi tắt app, không ghi ra file). Server từ chối thì không đổi gì. KHÔNG sửa HTML.
+function initKeyServerCorrectCard() {
+    const btn = document.getElementById("applyKeyBtn");
+    const sel = document.getElementById("keySelector");
+    if (!btn || !sel || document.getElementById("keyServerCorrectCard")) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
+    const card = document.createElement("div");
+    card.id = "keyServerCorrectCard";
+    card.style.cssText = "position:fixed;display:none;z-index:3000;width:230px;background:#081523;border:1px solid #1f3a57;border-radius:8px;padding:10px 12px;color:#cfe3f7;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.5);";
+    card.innerHTML = '<div style="font-weight:600;margin-bottom:6px;">Lưu Key vào Server</div>'
+        + '<div id="keySrvCorrectInfo" style="margin-bottom:8px;line-height:1.35;"></div>'
+        + '<input id="keySrvCorrectPass" type="password" autocomplete="off" placeholder="Mật khẩu Server" style="width:100%;box-sizing:border-box;background:#0b1d30;border:1px solid #1f3a57;border-radius:4px;color:#cfe3f7;padding:5px 7px;margin-bottom:8px;">'
+        + '<div style="display:flex;gap:8px;"><button id="keySrvCorrectSave" style="flex:1;cursor:pointer;">Lưu</button><button id="keySrvCorrectClose" style="cursor:pointer;">Đóng</button></div>'
+        + '<div id="keySrvCorrectMsg" style="margin-top:8px;line-height:1.35;"></div>';
+    document.body.appendChild(card);
+    const infoEl = card.querySelector("#keySrvCorrectInfo"), passEl = card.querySelector("#keySrvCorrectPass");
+    const saveEl = card.querySelector("#keySrvCorrectSave"), closeEl = card.querySelector("#keySrvCorrectClose"), msgEl = card.querySelector("#keySrvCorrectMsg");
+    const hide = () => { card.style.display = "none"; passEl.value = ""; };
+    const chosenKey = () => (sel.value && sel.value !== "AI Key Detect") ? sel.value : null;
+    const refreshInfo = () => {
+        const k = chosenKey();
+        infoEl.textContent = k ? `Lưu ${k} làm Key ĐÚNG của bài đang phát?` : "Chọn Key ĐÚNG ở ô chọn Key bên cạnh, rồi bấm chuột phải nút SEND lại.";
+        saveEl.disabled = !k;
+    };
+    const MSG = {
+        "need-token": "Nhập mật khẩu Server.",
+        "wrong-password": "Sai mật khẩu Server.",
+        "server-no-admin-token": "Server chưa cài mật khẩu admin nên không ai sửa được.",
+        "not-on-server": "Bài này chưa có trên Server.",
+        "no-song": "Chưa biết tên bài đang phát.",
+        "network": "Không kết nối được Server.",
+        "bad-key": "Key không hợp lệ.",
+        "no-segment": "Server không có đoạn Key nào để sửa.",
+        "not-allowed": "Cửa sổ này không được phép sửa Key.",
+    };
+    saveEl.addEventListener("click", async () => {
+        const k = chosenKey();
+        if (!k) { refreshInfo(); return; }
+        if (!window.electronAPI || typeof window.electronAPI.correctServerKey !== "function") { msgEl.textContent = "Bản app này chưa hỗ trợ sửa Key trên Server."; return; }
+        saveEl.disabled = true; msgEl.textContent = "Đang lưu...";
+        let r = null;
+        try { r = await window.electronAPI.correctServerKey({ key: k, token: passEl.value }); } catch (e) { r = { ok: false, reason: "error" }; }
+        passEl.value = ""; // không giữ mật khẩu trong ô nhập
+        saveEl.disabled = false;
+        if (r && r.ok) {
+            msgEl.textContent = `Đã lưu ${r.key} lên Server` + (r.localUpdated ? ` và songs.json (${r.localUpdated} mục).` : ".");
+            try { // Menu dùng Key mới ngay (chỉ khi Key đang áp dụng là của Database/Server; Manual vẫn ưu tiên cao nhất)
+                if (keySource.songDb && keySource.songDb.active) {
+                    keySource.songDb.value = r.key;
+                    __dbBypassClear();
+                    refreshKeySourceDisplay();
+                    if (!(keySource.manual && keySource.manual.active)) applyActiveKeyToPlugin("Song Database");
+                }
+            } catch (e) { /* phần hiển thị phụ — không làm hỏng việc đã lưu */ }
+        } else {
+            const why = r && r.reason;
+            msgEl.textContent = why === "multi-segment" ? `Bài có ${r.tongDoan || "nhiều"} đoạn Key khác nhau - hãy sửa trong trang quản lý của Server.` : (MSG[why] || "Không lưu được (lỗi từ Server).");
+        }
+    });
+    closeEl.addEventListener("click", hide);
+    sel.addEventListener("change", () => { if (card.style.display !== "none") refreshInfo(); });
+    passEl.addEventListener("keydown", (e) => { if (e.key === "Enter") saveEl.click(); });
+    btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (card.style.display !== "none") { hide(); return; }
+        refreshInfo(); msgEl.textContent = ""; passEl.value = "";
+        card.style.display = "block";
+        const r = btn.getBoundingClientRect();
+        const w = card.offsetWidth, h = card.offsetHeight;
+        card.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, r.left + r.width / 2 - w / 2)) + "px";
+        let top = r.top - h - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
+        if (top < 4) top = r.bottom + 6;
+        card.style.top = top + "px";
+    });
+    document.addEventListener("mousedown", (e) => {
+        const t = e.target;
+        if (card.contains(t)) return;
+        if (t && t.closest && t.closest("#applyKeyBtn")) return; // chuột phải mở/đóng do handler contextmenu lo
+        hide();
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+}
+
 ["mic1Btn", "mic2Btn", "fxBtn"].forEach(id => {
     document.getElementById(id)?.addEventListener("click", (e) => {
         e.target.classList.toggle("active");
@@ -3673,6 +3757,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (typeof initAudioChillPopup === "function") initAudioChillPopup(); // AUDIO-CHILL-01 — chuột phải MUSIC: nút Audio chill + knob VST
     if (typeof initFxAutoMenu === "function") initFxAutoMenu(); // FX-AUTO-TOGGLE-01 — chuột phải FX: ô tích Auto bật FX khi có nhạc
     if (typeof initAutoDetectModePopup === "function") initAutoDetectModePopup(); // AUTODETECT-MODE-01 — chuột phải AUTO DETECT: Tự dò bằng tay / Dò bằng AI (chọn 1)
+if (typeof initKeyServerCorrectCard === "function") initKeyServerCorrectCard(); // KEY-SERVER-CORRECT-01 — chuột phải SEND (khối KEY): lưu Key đúng vào Server + songs.json
 
     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây
     // (updateNextModTime() dùng modTimeline giả + updateModInfo("02:15","G# Minor",...) dùng

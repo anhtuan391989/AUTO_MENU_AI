@@ -84,6 +84,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // Chỉ gửi { key, confidence }; tên bài do main process tự biết. Trả { ok, reason } — luôn resolve, không throw.
     submitDetectedKey: (data) => ipcRenderer.invoke("server-submit-key", data),
 
+    // ---- KEY-SERVER-CORRECT-01: sửa Key bài đang phát trên Server + songs.json. Gửi { key, token }; trả { ok, reason, key? } — luôn resolve ----
+    correctServerKey: (data) => ipcRenderer.invoke("server-correct-key", data),
+
     // ---- Telemetry (Phase 4A): gửi 1 bản ghi JSON sang main process để ghi vào logs/*.jsonl ----
     // Fire-and-forget, không cần phản hồi — giống cơ chế reportAiResult đã có.
     sendTelemetry: (record) => ipcRenderer.send("telemetry-record", record),

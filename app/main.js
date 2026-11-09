@@ -931,6 +931,41 @@ ipcMain.handle("server-submit-key", async (event, data) => {
     }
 });
 
+// KEY-SERVER-CORRECT-01 (Bước B) — Menu sửa Key của BÀI ĐANG PHÁT trên Key Server (POST /set-key, mật khẩu admin của Server)
+// rồi sửa luôn songs.json trên máy. Logic nằm ở app/keyCorrect.js; ở đây chỉ nối IPC. Chỉ cửa sổ Menu chính được gọi.
+// Mật khẩu admin chỉ ở RAM của main (nhớ tới khi tắt app), không ghi file, không log, không trả về renderer.
+let __keyCorrector = null;
+function getKeyCorrector() {
+    if (!__keyCorrector) {
+        const { createKeyCorrector } = require("./keyCorrect");
+        const { normalizeTitle, DEFAULT_SERVER_URL } = require("../core/integration/KeyServerSync");
+        __keyCorrector = createKeyCorrector({
+            getSong: () => currentNowPlayingForSync,
+            lookup: (title, artist) => keyServerSync.lookup(title, artist),
+            getServerUrl: () => DEFAULT_SERVER_URL || keyServer.serverUrl,
+            fetchFn: (u, o) => fetch(u, o),
+            normalizeTitle,
+            db: require("../core/reference/SongDatabase"),
+            logger: console
+        });
+    }
+    return __keyCorrector;
+}
+ipcMain.handle("server-correct-key", async (event, data) => {
+    try {
+        if (!mainWin || mainWin.isDestroyed() || event.sender !== mainWin.webContents) return { ok: false, reason: "not-allowed" };
+        const d = data && typeof data === "object" ? data : {};
+        const r = await getKeyCorrector().correct({ key: d.key, token: d.token });
+        if (r && r.ok && currentNowPlayingForSync && currentNowPlayingForSync.title === r.title) {
+            currentNowPlayingForSync.serverKey = r.key; // cùng bài: các lần cập nhật sau giữ Key mới, không quay lại Key cũ trong bản nhớ tạm
+        }
+        return r;
+    } catch (err) {
+        console.error("server-correct-key lỗi (không ảnh hưởng app):", err && err.message);
+        return { ok: false, reason: "error" };
+    }
+});
+
 // ================================
 // TELEMETRY (Phase 4A): CHỈ relay bản ghi từ renderer (keyEngine.js) sang TelemetryLogger
 // để ghi vào logs/*.jsonl — không xử lý, không diễn giải nội dung record.
