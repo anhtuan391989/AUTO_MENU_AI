@@ -54,6 +54,22 @@ const tl = (running) => async (cmd, args) => ({ code: 0, stdout: running ? '"Stu
   let captured; await C.closeDaw({ dawPath: "C:\\x\\O'Brien One.exe", run: async (c, a) => { captured = Buffer.from(a[a.length - 1], 'base64').toString('utf16le'); return { stdout: 'CLOSED' }; } });
   ok(/\$Exe = 'O''Brien One\.exe'/.test(captured) && !/param\(/.test(captured), 'tên file DAW được escape dấu nháy đơn');
 
+  // 4b) COMPANION-02: mở DAW kèm Project
+  {
+    const mk = (running, spawnOk) => { const calls = []; return { calls, deps: { exists: () => true, copyFile: () => {}, buildCopyPath: (p) => p + '.copy', shellOpen: async (p) => { calls.push(['shell', p]); return ''; }, spawnOpen: async (c, a) => { calls.push(['spawn', c, a]); return spawnOk ? { ok: true, detail: 'ok' } : { ok: false, detail: 'x' }; }, isRunning: async () => running, log: () => {} } }; };
+    const o = { launchDAW: true, dawPath: 'C:\\D\\Studio Pro.exe', projectPath: 'C:\\P\\a.song', openProject: true, makeCopy: false };
+    let m = mk(false, true); let r = await C.openDawAndProject(o, m.deps);
+    ok(m.calls.length === 1 && m.calls[0][0] === 'spawn' && m.calls[0][2][0] === 'C:\\P\\a.song' && r.openedProjectPath === 'C:\\P\\a.song', 'DAW chưa chạy: mở DAW KÈM project (1 lệnh duy nhất)');
+    m = mk(false, false); r = await C.openDawAndProject(o, m.deps);
+    ok(m.calls.map(c => c[0]).join() === 'spawn,shell,shell' && r.openedProjectPath === 'C:\\P\\a.song', 'lệnh kèm lỗi: dự phòng mở DAW rồi mở project');
+    m = mk(true, true); r = await C.openDawAndProject(o, m.deps);
+    ok(m.calls.length === 1 && m.calls[0][0] === 'shell' && m.calls[0][1] === 'C:\\P\\a.song', 'DAW đã chạy: không mở lại DAW, chỉ giao project');
+    m = mk(false, true); r = await C.openDawAndProject({ ...o, makeCopy: true }, m.deps);
+    ok(m.calls[0][2][0] === 'C:\\P\\a.song.copy', 'có bật bản copy: mở bản copy');
+    m = mk(false, true); r = await C.openDawAndProject({ ...o, launchDAW: false }, m.deps);
+    ok(m.calls.length === 1 && m.calls[0][0] === 'shell', 'không bật mở DAW: chỉ mở project');
+  }
+
   // 5) nối dây
   const main = rd('app/main.js'), st2 = rd('ui/js/setup.js'), as = rd('ui/js/appSettings.js');
   ok(/autoStartup: true/.test(as), 'tự mở lúc khởi động gửi cờ autoStartup');

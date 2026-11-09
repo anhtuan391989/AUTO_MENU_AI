@@ -130,4 +130,54 @@ async function closeCompanions({ dawPath, closeDawToo = true, closeYoutubeToo = 
     return res;
 }
 
-module.exports = { STATE_FILE, readState, writeState, clearState, isProcessRunning, shouldSkipYoutube, closeCompanions, closeDaw, closeYoutube, PS_CLOSE_DAW, PS_CLOSE_YOUTUBE, exeOf };
+// COMPANION-02 — mở DAW + Project. Lỗi cũ: mở DAW rồi mở ngay file .song bằng một lệnh riêng -> DAW còn đang khởi động nên bỏ qua file.
+// Cách mới: DAW CHƯA chạy -> khởi động DAW KÈM project làm đối số dòng lệnh ("Studio Pro.exe" "x.song"), một lần duy nhất.
+// DAW ĐÃ chạy -> không mở lại DAW; project được giao cho DAW đang chạy qua file association.
+// deps: { exists(p), copyFile(a,b), buildCopyPath(p), shellOpen(p) -> Promise<string lỗi|"">, spawnOpen(cmd,args) -> Promise<{ok,detail}>, isRunning(exe) -> Promise<bool>, log(m) }
+async function openDawAndProject(o, deps) {
+    const res = { openedProjectPath: null, errors: [], method: null };
+    const log = deps.log || (() => {});
+    const dawOk = !!(o.launchDAW && o.dawPath && deps.exists(o.dawPath));
+    if (o.launchDAW && !dawOk) res.errors.push("Chưa thiết lập đường dẫn DAW hoặc file không còn tồn tại.");
+
+    let pathToOpen = null;
+    if (o.openProject) {
+        if (!o.projectPath || !deps.exists(o.projectPath)) {
+            res.errors.push("Chưa chọn Project hoặc file không còn tồn tại.");
+        } else {
+            pathToOpen = o.projectPath;
+            if (o.makeCopy) {
+                try { const c = deps.buildCopyPath(o.projectPath); deps.copyFile(o.projectPath, c); pathToOpen = c; }
+                catch (err) { res.errors.push("Không tạo được bản copy: " + err.message); }
+            }
+        }
+    }
+
+    let projectHandled = false;
+    if (dawOk) {
+        let running = false;
+        try { running = await deps.isRunning(exeOf(o.dawPath)); } catch (e) { running = false; }
+        if (running) {
+            log("DAW đã chạy — không mở lại DAW" + (pathToOpen ? "; giao project cho DAW đang chạy" : ""));
+        } else if (pathToOpen) {
+            const r = await deps.spawnOpen(o.dawPath, [pathToOpen]);
+            log("mở DAW KÈM project (đối số dòng lệnh): " + (r.ok ? "OK" : "LỖI") + " — " + r.detail);
+            if (r.ok) { res.openedProjectPath = pathToOpen; res.method = "daw-argument"; projectHandled = true; }
+            else res.errors.push("Không mở được DAW kèm project (" + r.detail + "), thử cách thường.");
+        }
+        if (!running && !projectHandled) {
+            try { const e = await deps.shellOpen(o.dawPath); log("mở DAW (shell): " + (e || "OK")); if (e) res.errors.push("Không mở được DAW: " + e); }
+            catch (err) { res.errors.push("Không mở được DAW: " + err.message); }
+        }
+    }
+    if (pathToOpen && !projectHandled) {
+        try {
+            const e = await deps.shellOpen(pathToOpen);
+            log("mở project (shell): " + (e || "OK"));
+            if (e) res.errors.push("Không mở được project: " + e); else { res.openedProjectPath = pathToOpen; res.method = res.method || "shell"; }
+        } catch (err) { res.errors.push("Không mở được project: " + err.message); }
+    }
+    return res;
+}
+
+module.exports = { openDawAndProject, STATE_FILE, readState, writeState, clearState, isProcessRunning, shouldSkipYoutube, closeCompanions, closeDaw, closeYoutube, PS_CLOSE_DAW, PS_CLOSE_YOUTUBE, exeOf };

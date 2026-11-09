@@ -1945,53 +1945,16 @@ ipcMain.handle("open-project-bundle", async (event, options = {}) => {
         autoStartup
     } = options;
 
-    const result = { openedProjectPath: null, errors: [] };
-
-    // 1) Mở DAW (nếu bật "Mở DAW cùng Menu")
-    if (launchDAW) {
-        if (!dawPath || !fs.existsSync(dawPath)) {
-            result.errors.push("Chưa thiết lập đường dẫn DAW hoặc file không còn tồn tại.");
-        } else {
-            try {
-                const openErr = await shell.openPath(dawPath);
-                if (openErr) {
-                    result.errors.push("Không mở được DAW: " + openErr);
-                }
-            } catch (err) {
-                result.errors.push("Không mở được DAW: " + err.message);
-            }
-        }
-    }
-
-    // 2) Mở Project (có thể tạo bản copy trước)
-    if (openProject) {
-        if (!projectPath || !fs.existsSync(projectPath)) {
-            result.errors.push("Chưa chọn Project hoặc file không còn tồn tại.");
-        } else {
-            let pathToOpen = projectPath;
-
-            if (makeCopy) {
-                try {
-                    const copyPath = buildCopyPath(projectPath);
-                    fs.copyFileSync(projectPath, copyPath);
-                    pathToOpen = copyPath;
-                } catch (err) {
-                    result.errors.push("Không tạo được bản copy: " + err.message);
-                }
-            }
-
-            try {
-                const openErr = await shell.openPath(pathToOpen);
-                if (openErr) {
-                    result.errors.push("Không mở được project: " + openErr);
-                } else {
-                    result.openedProjectPath = pathToOpen;
-                }
-            } catch (err) {
-                result.errors.push("Không mở được project: " + err.message);
-            }
-        }
-    }
+    // 1+2) Mở DAW + Project (COMPANION-02: DAW chưa chạy -> mở DAW KÈM project làm đối số; DAW đã chạy -> giao project cho DAW đó)
+    const result = await Companion.openDawAndProject({ launchDAW, dawPath, projectPath, openProject, makeCopy }, {
+        exists: (p) => fs.existsSync(p),
+        copyFile: (a, b) => fs.copyFileSync(a, b),
+        buildCopyPath,
+        shellOpen: (p) => shell.openPath(p),
+        spawnOpen: (cmd, args) => spawnOpen(cmd, args, {}),
+        isRunning: (exe) => Companion.isProcessRunning(exe, companionRun),
+        log: openBundleLog
+    });
 
     // 3) Mở Youtube — A108: mở BỀN hơn. Menu hiện chạy Administrator (A104) nên việc mở trình duyệt từ tiến trình quyền cao dễ "báo thành công mà không hiện cửa sổ".
     //    Thử lần lượt nhiều cách, dừng ở cách đầu tiên thành công; ghi từng bước vào open-bundle.log (cạnh app-settings.json) để có bằng chứng.
