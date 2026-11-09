@@ -1378,7 +1378,7 @@ function findAhkExecutable() {
 
 ipcMain.handle("find-ahk-path", () => findAhkExecutable());
 
-function runAhkCapture(totalPoints, ahkExePath) {
+function runAhkCapture(totalPoints, ahkExePath, screenMode) { // screenMode=true: toạ độ TUYỆT ĐỐI trên màn hình (SILENT-CLICK-01); mặc định giữ nguyên cách cũ
     return new Promise((resolve, reject) => {
         const scriptPath = path.join(__dirname, "..", "ahk", "AHK.ahk");
         const outputFile = path.join(getDownloadTempDir(), `capture_${Date.now()}.txt`);
@@ -1387,7 +1387,7 @@ function runAhkCapture(totalPoints, ahkExePath) {
         try { fs.unlinkSync(outputFile); } catch {}
         try { fs.unlinkSync(cancelFile); } catch {}
 
-        execFile(ahkExePath, [scriptPath, String(totalPoints), outputFile], (err) => {
+        execFile(ahkExePath, [scriptPath, String(totalPoints), outputFile].concat(screenMode ? ["screen"] : []), (err) => {
             if (fs.existsSync(cancelFile)) {
                 try { fs.unlinkSync(cancelFile); } catch {}
                 reject(new Error("Bạn đã huỷ lấy tọa độ (nhấn ESC)."));
@@ -1440,7 +1440,8 @@ ipcMain.handle("setup-capture", async (event, { name, points }) => {
         throw new Error('Không tìm thấy AutoHotkey v2 trên máy. Vào Setup > "Chọn đường dẫn AutoHotkey" để trỏ tay tới file AutoHotkey64.exe.');
     }
 
-    const captured = await runAhkCapture(totalPoints, ahkExePath);
+    // SILENT-CLICK-01: Auto-Key 1/2 lấy toạ độ TUYỆT ĐỐI trên màn hình (bấm ngầm cần toạ độ màn hình; cách cũ là toạ độ theo cửa sổ đang active nên bị lệch khi cửa sổ đổi chỗ).
+    const captured = await runAhkCapture(totalPoints, ahkExePath, name === "autokey1" || name === "autokey2");
     return totalPoints === 1 ? captured[0] : captured;
 });
 

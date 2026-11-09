@@ -13,6 +13,11 @@ Esc:: {
     ExitApp()
 }
 
+; SILENT-CLICK-01: tham số thứ 3 = "screen" -> toạ độ TUYỆT ĐỐI trên màn hình (không phụ thuộc cửa sổ nào đang active).
+; Không có tham số này thì giữ nguyên hành vi cũ (toạ độ theo cửa sổ active) để không đổi các toạ độ đã lưu.
+if (A_Args.Length >= 3 && A_Args[3] = "screen")
+    CoordMode("Mouse", "Screen")
+
 points := []
 
 Loop pointCount {
