@@ -19,6 +19,7 @@ using System.Runtime.InteropServices;
 public static class SilentClickW {
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int n);
     [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
     [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr h, ref POINT p);
     [DllImport("user32.dll")] public static extern IntPtr ChildWindowFromPointEx(IntPtr h, POINT p, uint flags);
@@ -26,12 +27,13 @@ public static class SilentClickW {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder sb, int max);
 }
 "@
-[void][SilentClickW]::SetProcessDPIAware()
+$dpi = [SilentClickW]::SetProcessDPIAware()
+$scr = [SilentClickW]::GetSystemMetrics(0).ToString() + 'x' + [SilentClickW]::GetSystemMetrics(1).ToString()
 $sp = New-Object SilentClickW+POINT
 $sp.X = ${Math.round(x)}
 $sp.Y = ${Math.round(y)}
 $h = [SilentClickW]::WindowFromPoint($sp)
-if ($h -eq [IntPtr]::Zero) { Write-Output 'NO_WINDOW'; exit 0 }
+if ($h -eq [IntPtr]::Zero) { Write-Output ('NO_WINDOW x=' + $sp.X + ' y=' + $sp.Y + ' manHinh=' + $scr + ' dpiAware=' + $dpi); exit 0 }
 for ($i = 0; $i -lt 12; $i++) {
     $cp = New-Object SilentClickW+POINT
     $cp.X = $sp.X; $cp.Y = $sp.Y
@@ -51,7 +53,7 @@ Start-Sleep -Milliseconds 40
 [void][SilentClickW]::PostMessage($h, 0x0201, [IntPtr]1, $lp)
 Start-Sleep -Milliseconds 70
 [void][SilentClickW]::PostMessage($h, 0x0202, [IntPtr]::Zero, $lp)
-Write-Output ('OK class=' + $sb.ToString() + ' hwnd=' + $h.ToInt64() + ' client=' + $cc.X + ',' + $cc.Y)
+Write-Output ('OK class=' + $sb.ToString() + ' hwnd=' + $h.ToInt64() + ' client=' + $cc.X + ',' + $cc.Y + ' manHinh=' + $scr)
 `;
 
 function encode(script) { return Buffer.from(script, "utf16le").toString("base64"); }
