@@ -19,6 +19,6 @@ ok(v("E Major", 0.95, null).ok === false, "không có Key Database -> không áp
 ok(/if \(__dbBypass\.pending\) \{[\s\S]{0,200}__dbBypass\.pending = false;[\s\S]{0,200}__aiBeatsDatabase\(result\.key, result\.confidence, keySource\.songDb\.value\)/.test(src), "điểm chốt Key AI gọi gate trước khi bật bypass");
 ok(/DB_BYPASS_REJECTED/.test(src), "có log DB_BYPASS_REJECTED khi giữ Database");
 ok(/source === "songDb" && __dbBypass\.pending\) \? "LISTENING"/.test(src), "bài Database + đang dò lại -> ô Key hiện LISTENING");
-ok(/getActiveSourceName\(\) === "songDb" && __dbBypass\.pending && keySource\.songDb\.value\) \? " · " \+ keySource\.songDb\.value/.test(src), "ACTIVE: DATABASE kèm Key khi đang dò lại");
+ok(/getActiveSourceName\(\) === "songDb" && keySource\.songDb\.value\) \? " - " \+ keySource\.songDb\.value/.test(src), "ACTIVE: DATABASE - <Key> luôn hiện khi nguồn là Database");
 ok(/DB_BYPASS_REJECTED[\s\S]{0,300}applyActiveKeyToPlugin\("Song Database"\)/.test(src), "AI không đủ tin cậy -> ô Key trả về Key Database");
 console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);

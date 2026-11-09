@@ -1,5 +1,5 @@
 --- a/ui/js/renderer.js	2026-11-09 11:49:03.208842237 +0000
-+++ b/ui/js/renderer.js	2026-11-09 11:55:46.602186625 +0000
++++ b/ui/js/renderer.js	2026-11-09 11:59:35.829362489 +0000
 @@ -1602,6 +1602,17 @@
  const __dbBypass = { pending: false, active: false };
  let __autoDetectInternal = false; // true khi CODE (không phải người dùng) gọi autoDetectBtn.click() lúc đổi bài
@@ -24,7 +24,7 @@
          const labelMap = { manual: "MANUAL", songDb: "DATABASE", ai: "AI DETECT" };
 -        activeSourceLabelEl.textContent = "ACTIVE: " + (labelMap[getActiveSourceName()] || "AI DETECT");
 +        activeSourceLabelEl.textContent = "ACTIVE: " + (labelMap[getActiveSourceName()] || "AI DETECT")
-+            + ((getActiveSourceName() === "songDb" && __dbBypass.pending && keySource.songDb.value) ? " · " + keySource.songDb.value : ""); // AUTO-DETECT-TRUST-01: đang dò lại -> ACTIVE: DATABASE · <Key>
++            + ((getActiveSourceName() === "songDb" && keySource.songDb.value) ? " - " + keySource.songDb.value : ""); // AUTO-DETECT-TRUST-01: nguồn Database luôn hiện kèm Key -> ACTIVE: DATABASE - G Major
      }
  
      if (aiKeyDetectLineEl) {

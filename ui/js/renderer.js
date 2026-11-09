@@ -1743,7 +1743,7 @@ function refreshKeySourceDisplay() {
     if (activeSourceLabelEl) {
         const labelMap = { manual: "MANUAL", songDb: "DATABASE", ai: "AI DETECT" };
         activeSourceLabelEl.textContent = "ACTIVE: " + (labelMap[getActiveSourceName()] || "AI DETECT")
-            + ((getActiveSourceName() === "songDb" && __dbBypass.pending && keySource.songDb.value) ? " · " + keySource.songDb.value : ""); // AUTO-DETECT-TRUST-01: đang dò lại -> ACTIVE: DATABASE · <Key>
+            + ((getActiveSourceName() === "songDb" && keySource.songDb.value) ? " - " + keySource.songDb.value : ""); // AUTO-DETECT-TRUST-01: nguồn Database luôn hiện kèm Key -> ACTIVE: DATABASE - G Major
     }
 
     if (aiKeyDetectLineEl) {
