@@ -424,6 +424,28 @@ function initSetupPage() {
     // (bản cũ có thêm 1 handler thủ công riêng cho btnAutoKey1 gây gọi capture 2 lần — đã bỏ)
     setupCaptureButton("btnAutoKey1", "autokey1");
     setupCaptureButton("btnAutoKey2", "autokey2");
+    // SILENT-CLICK-01 — nút THỬ bấm ngầm (tạo bằng JS, không sửa HTML): bấm ngầm Auto-Key 1 (dò Key) hoặc Auto-Key 2 (Send), con trỏ chuột KHÔNG di chuyển.
+    (function initSilentClickTest() {
+        const anchor = document.getElementById("btnAutoKey2");
+        if (!anchor || document.getElementById("btnTestSilentAk1")) return;
+        const mk = (id, text, key, label) => {
+            const b = document.createElement("button");
+            b.id = id; b.className = "setup-btn"; b.textContent = text;
+            b.addEventListener("click", async () => {
+                const pts = (() => { const raw = getCoordinate(key); return (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter((q) => q && typeof q.x === "number"); })();
+                if (!pts.length) { alert("Chưa lấy toạ độ " + label + ". Bấm nút \"Lấy tọa độ\" ở trên trước."); return; }
+                if (!window.electronAPI?.clickAtPointSilent) { alert("Bản Menu này chưa có chức năng bấm ngầm."); return; }
+                const out = [];
+                for (const q of pts) { const r = await window.electronAPI.clickAtPointSilent(q); out.push((r && r.ok ? "OK: " : "LỖI: ") + (r && r.detail)); }
+                alert("Thử bấm ngầm " + label + " (con trỏ chuột không di chuyển):\n" + out.join("\n") + "\n\nNếu nút của plugin Auto-Key có nhấn thì dùng được.");
+            });
+            return b;
+        };
+        const b1 = mk("btnTestSilentAk1", "🧪 Thử bấm ngầm Auto-Key 1 (dò Key)", "autokey1", "Auto-Key 1 (điểm dò Key)");
+        const b2 = mk("btnTestSilentAk2", "🧪 Thử bấm ngầm Auto-Key 2 (Send)", "autokey2", "Auto-Key 2 (Send Auto-Tune)");
+        anchor.insertAdjacentElement("afterend", b2);
+        anchor.insertAdjacentElement("afterend", b1);
+    })();
     setupCaptureButton("btnAutoTuneKey", "autotunekey");
     setupCaptureButton("btnChromatic", "chromatic");
     // Task B/B2 — DAW Action Mapping (Mục V/X): tái dùng ĐÚNG cơ chế setupCaptureButton +

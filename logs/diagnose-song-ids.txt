@@ -1,0 +1,20 @@
+=== BÁO CÁO ID BÀI HÁT ↔ TÊN BÀI HÁT (chỉ đọc, không sửa gì) ===
+Trên máy: 117 bài | thiếu songId: 0 | ca sĩ rỗng: 117
+
+[A2] Cùng tên bài xuất hiện nhiều lần trên máy: 0 nhóm
+[A] Cùng tên bài nhưng khác ca sĩ: 0 nhóm (KHÔNG kiểm tra được: mọi bài đều ca sĩ rỗng)
+[B] Một songId dùng cho nhiều bài khác nhau: 0
+[C] ID app_... không khớp tên+ca sĩ (chỉ tính bài CÓ ghi ca sĩ): 0
+    ID app_ không tái tạo được vì ca sĩ rỗng (không kết luận là lỗi): 99
+
+Server: /list trả 100 bài (chỉ là các bài mới nhất); đã đối chiếu 117 bài có songId; 17 bài trên máy không có trong /list.
+[E] Server ghi TÊN KHÁC cho ID mà máy đang dùng: 0
+[G] Server có bản ghi RỖNG (tên "Chua dat ten" hoặc không có đoạn Key đọc được) cho ID máy đang dùng: 4
+   - ID app_2f1db3b356522820: máy "LOU HOÀNG - NGÀY ĐẸP TRỜI ĐỂ NÓI CHIA TAY ( Music Video)" (A# Major) | Server: tên "Chua dat ten", 0 đoạn Key
+   - ID 0kOKtLUaYok: máy "[KARAOKE VERSION] Ngày Đẹp Trời Để Nói Chia Tay - Lou Hoàng" (F Major) | Server: tên "Chua dat ten", 0 đoạn Key
+   - ID app_b97ec1a7c6dffe04: máy "Em áo đen 2 dây vú đẹp thủ dâm || Part 2 - Sex Hay - HeoVL" (F# Major) | Server: tên "Chua dat ten", 0 đoạn Key
+   - ID app_68b238f280a96503: máy "Xuất trong đầy cái lồn hồng cực phẩm - Sex Hay - HeoVL" (G# Minor) | Server: tên "Chua dat ten", 0 đoạn Key
+    ID máy giữ mà Server không có/không đọc được: 0
+[F] Server có NHIỀU bản ghi (nhiều ID) cho cùng một tên bài: 0
+
+=> Có 4 điểm đáng nghi. Gửi file báo cáo này cho Claude B để xem từng chỗ.

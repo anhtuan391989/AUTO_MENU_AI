@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     setupCapture: (payload) => ipcRenderer.invoke("setup-capture", payload),
     downloadAhk: () => ipcRenderer.invoke("download-ahk"),
     clickAtPoint: (point) => ipcRenderer.invoke("click-at-point", point),
+    clickAtPointSilent: (point) => ipcRenderer.invoke("click-at-point-silent", point), // SILENT-CLICK-01
 
     // ---- Tải & cài phần mềm ----
     downloadAndInstall: (url, label) => ipcRenderer.invoke("download-and-install", { url, label }),

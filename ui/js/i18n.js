@@ -152,6 +152,8 @@
     ["Auto bật FX khi có nhạc", "Auto-enable FX when music plays"],
     ["Tự dò bằng tay", "Manual detect (plugin)"],
     ["Dò bằng AI", "Detect with AI"],
+    ["🧪 Thử bấm ngầm Auto-Key 1 (dò Key)", "🧪 Test silent click Auto-Key 1 (detect)"],
+    ["🧪 Thử bấm ngầm Auto-Key 2 (Send)", "🧪 Test silent click Auto-Key 2 (Send)"],
     ["BÁN ÂM", "SEMITONES"],
     ["⚠️ Lỗi gửi Mod ({0})", "⚠️ MOD send error ({0})"],
     ["ĐANG DÙNG:", "ACTIVE:"],

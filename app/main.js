@@ -1463,6 +1463,13 @@ function runAhkClick(x, y, ahkExePath) {
     });
 }
 
+// SILENT-CLICK-01 — bấm ngầm (KHÔNG di chuyển con trỏ chuột) vào toạ độ đã lưu; dùng cho Auto-Key.
+ipcMain.handle("click-at-point-silent", async (event, point) => {
+    const r = await require("./silentClick").silentClick(point && point.x, point && point.y);
+    try { openBundleLog("bấm ngầm (" + (point && point.x) + "," + (point && point.y) + "): " + JSON.stringify(r)); } catch (e) { /* log không bắt buộc */ }
+    return r;
+});
+
 ipcMain.handle("click-at-point", async (event, { x, y }) => {
     if (typeof x !== "number" || typeof y !== "number") {
         return { ok: false, detail: "Thiếu toạ độ x/y hợp lệ" };
