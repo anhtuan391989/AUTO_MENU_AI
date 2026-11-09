@@ -900,6 +900,60 @@ function initFxAutoMenu() {
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
 }
 
+// AUTODETECT-MODE-01 — Bấm CHUỘT PHẢI nút AUTO DETECT -> thẻ nổi 2 ô tích, CHỈ CHỌN 1 TRONG 2 (luôn có đúng 1 ô được tích):
+//   [ ] Tự dò bằng tay  = chế độ Auto-Key (plugin trong DAW tự dò; Menu bấm điểm dò + Send)   -> appSettings.autoKeyMode.enabled = true
+//   [x] Dò bằng AI      = AI của Menu dò Key rồi gửi xuống Auto-Tune (mặc định, như cũ)       -> appSettings.autoKeyMode.enabled = false
+// Dùng đúng khoá autoKeyMode của Setup > Calibration (cùng 1 nguồn dữ liệu, giữ nguyên waitSec). Tự ẩn sau 5 giây (A97). KHÔNG sửa HTML.
+function initAutoDetectModePopup() {
+    const btn = document.getElementById("autoDetectBtn");
+    if (!btn || document.getElementById("autoDetectModeCard")) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
+    const card = document.createElement("div");
+    card.id = "autoDetectModeCard";
+    card.style.cssText = "position:fixed;display:none;z-index:3000;background:#081523;border:1px solid #1f3a57;border-radius:8px;padding:8px 12px;color:#cfe3f7;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.5);";
+    card.innerHTML = '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;">'
+        + '<input type="checkbox" id="autoDetectManualChk" style="cursor:pointer;"><span>Tự dò bằng tay</span></label>'
+        + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;margin-top:6px;">'
+        + '<input type="checkbox" id="autoDetectAiChk" style="cursor:pointer;"><span>Dò bằng AI</span></label>';
+    document.body.appendChild(card);
+    const manualChk = card.querySelector("#autoDetectManualChk");
+    const aiChk = card.querySelector("#autoDetectAiChk");
+    const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
+    const hide = () => { card.style.display = "none"; auto.disarm(); };
+    const readManual = () => { const c = getSetting("autoKeyMode", null); return !!(c && typeof c === "object" && c.enabled === true); };
+    const show = (manual) => { manualChk.checked = manual; aiChk.checked = !manual; };
+    const choose = (manual) => {
+        const c = getSetting("autoKeyMode", null);
+        const prev = c && typeof c === "object" ? c : {};
+        setSetting("autoKeyMode", { ...prev, enabled: manual, waitSec: prev.waitSec === undefined ? 8 : prev.waitSec });
+        try { if (typeof __aiCoreCache !== "undefined") __aiCoreCache.t = 0; } catch (e) { /* bỏ qua */ } // hiệu lực ngay, không chờ cache 2 s
+        show(manual);
+    };
+    // Chọn 1 trong 2: tích ô này => ô kia tự bỏ; bỏ tích ô đang chọn => giữ nguyên (luôn còn đúng 1 ô).
+    manualChk.addEventListener("change", () => choose(true));
+    aiChk.addEventListener("change", () => choose(false));
+    btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (card.style.display !== "none") { hide(); return; }
+        show(readManual()); // đọc trạng thái hiện tại mỗi lần mở
+        card.style.display = "block";
+        const r = btn.getBoundingClientRect();
+        const w = card.offsetWidth, h = card.offsetHeight;
+        const left = Math.max(4, Math.min(window.innerWidth - w - 4, r.left + r.width / 2 - w / 2));
+        let top = r.top - h - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
+        if (top < 4) top = r.bottom + 6;
+        card.style.left = left + "px";
+        card.style.top = top + "px";
+        auto.arm();
+    });
+    document.addEventListener("mousedown", (e) => {
+        const t = e.target;
+        if (card.contains(t)) return;
+        if (t && t.closest && t.closest("#autoDetectBtn")) return; // chuột phải mở/đóng do handler contextmenu lo
+        hide();
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+}
+
 ["mic1Btn", "mic2Btn", "fxBtn"].forEach(id => {
     document.getElementById(id)?.addEventListener("click", (e) => {
         e.target.classList.toggle("active");
@@ -3624,6 +3678,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
     if (typeof initAudioChillPopup === "function") initAudioChillPopup(); // AUDIO-CHILL-01 — chuột phải MUSIC: nút Audio chill + knob VST
     if (typeof initFxAutoMenu === "function") initFxAutoMenu(); // FX-AUTO-TOGGLE-01 — chuột phải FX: ô tích Auto bật FX khi có nhạc
+    if (typeof initAutoDetectModePopup === "function") initAutoDetectModePopup(); // AUTODETECT-MODE-01 — chuột phải AUTO DETECT: Tự dò bằng tay / Dò bằng AI (chọn 1)
 
     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — ĐÃ BỎ 2 lệnh demo cứng ở đây
     // (updateNextModTime() dùng modTimeline giả + updateModInfo("02:15","G# Minor",...) dùng

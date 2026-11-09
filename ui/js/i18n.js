@@ -150,6 +150,8 @@
     ["ÂM LƯỢNG MIC 1", "MIC 1 VOLUME"],
     ["ÂM LƯỢNG MIC 2", "MIC 2 VOLUME"],
     ["Auto bật FX khi có nhạc", "Auto-enable FX when music plays"],
+    ["Tự dò bằng tay", "Manual detect (plugin)"],
+    ["Dò bằng AI", "Detect with AI"],
     ["BÁN ÂM", "SEMITONES"],
     ["⚠️ Lỗi gửi Mod ({0})", "⚠️ MOD send error ({0})"],
     ["ĐANG DÙNG:", "ACTIVE:"],
