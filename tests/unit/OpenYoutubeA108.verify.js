@@ -11,7 +11,7 @@ function make(world) {
     require: (m) => m === './Elevation' ? { isElevated: () => world.elevated } : require(m),
     spawn: (cmd, args, o) => { calls.push({ cmd, args, o }); const e = new EventEmitter(); e.unref = () => {}; setTimeout(() => { if (world.spawnError === cmd) e.emit('error', new Error('ENOENT')); else e.emit('exit', world.exit[cmd] == null ? 0 : world.exit[cmd]); }, 5); return e; },
     shell: { openExternal: async () => { calls.push({ cmd: 'openExternal' }); if (world.shellFail) throw new Error('boom'); } } };
-  vm.createContext(ctx); vm.runInContext(src.slice(a, b), ctx); return { ctx, calls, run: (br) => vm.runInContext('__menuElevated=null;openYoutubeRobust("https://www.youtube.com",' + JSON.stringify(br) + ')', ctx) };
+  vm.createContext(ctx); vm.runInContext(src.slice(a, b), ctx); return { ctx, calls, run: (br) => vm.runInContext('__menuElevated=null;openYoutubeRobust("https://www.youtube.com",' + JSON.stringify(br) + ',false)', ctx) };
 }
 (async () => {
   let m = make({ elevated: false, exit: {} }); let r = await m.run('C:\\B\\chrome.exe');

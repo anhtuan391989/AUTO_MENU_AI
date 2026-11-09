@@ -1896,13 +1896,25 @@ function spawnOpen(cmd, args, o) {
         } catch (e) { fin({ ok: false, detail: "ngoại lệ: " + e.message }); }
     });
 }
-async function openYoutubeRobust(url, browserPath) {
+// A118 — Mở Youtube dạng PWA (cửa sổ app, không thanh tab/địa chỉ) bằng ĐÚNG trình duyệt đã chọn.
+// Chromium (Chrome/Edge/Brave/Vivaldi/Opera/Chromium/Yandex) hỗ trợ --app=URL (nếu đã cài PWA Youtube thì mở đúng cửa sổ app đó).
+// Firefox/Safari... không hỗ trợ => trả null (mở tab thường như cũ).
+function chromiumAppFlag(browserPath, url) {
+    const exe = String(browserPath || "").split(/[\\/]/).pop().toLowerCase();
+    return /^(chrome|msedge|brave|vivaldi|opera|opera_gx|chromium|yandex|browser|coccoc|thorium)(\.exe)?$/.test(exe) ? "--app=" + url : null;
+}
+async function openYoutubeRobust(url, browserPath, asApp) {
     const elevated = menuIsElevated();
     const haveBrowser = !!(browserPath && fs.existsSync(browserPath));
     openBundleLog("MỞ YOUTUBE url=" + url + " trìnhDuyệt=" + (browserPath || "(mặc định)") + " tồnTại=" + haveBrowser + " MenuAdministrator=" + elevated);
     const attempts = [];
     if (haveBrowser) {
         // Menu quyền cao => hạ xuống quyền thường (runas /trustlevel) để trình duyệt mở được như người dùng bình thường.
+        const appFlag = asApp === false ? null : chromiumAppFlag(browserPath, url);
+        if (appFlag) {
+            if (elevated) attempts.push(["PWA (cửa sổ app) bằng trình duyệt đã chọn (hạ quyền)", () => spawnOpen("runas", ["/trustlevel:0x20000", '"\\"' + browserPath + '\\" ' + appFlag + '"'], { verbatim: true, hide: true })]);
+            attempts.push(["PWA (cửa sổ app) bằng trình duyệt đã chọn", () => spawnOpen(browserPath, [appFlag], {})]);
+        }
         if (elevated) attempts.push(["trình duyệt đã chọn (hạ quyền)", () => spawnOpen("runas", ["/trustlevel:0x20000", '"\\"' + browserPath + '\\" ' + url + '"'], { verbatim: true, hide: true })]);
         attempts.push(["trình duyệt đã chọn", () => spawnOpen(browserPath, [url], {})]);
     }
@@ -1929,6 +1941,7 @@ ipcMain.handle("open-project-bundle", async (event, options = {}) => {
         openYoutube,
         browserPath,
         youtubeUrl,
+        youtubeAsApp,
         autoStartup
     } = options;
 
@@ -1988,7 +2001,7 @@ ipcMain.handle("open-project-bundle", async (event, options = {}) => {
         if (skipYt.skip) { result.youtube = { skipped: true, reason: skipYt.reason }; openBundleLog("BỎ QUA mở YouTube: " + skipYt.reason); }
     }
     if (openYoutube && !skipYt.skip) {
-        const r = await openYoutubeRobust(youtubeUrl || "https://www.youtube.com", browserPath);
+        const r = await openYoutubeRobust(youtubeUrl || "https://www.youtube.com", browserPath, youtubeAsApp);
         if (r.ok) Companion.writeState(app.getPath("userData"), { youtubeOpenedAt: Date.now(), dawExe: Companion.exeOf(dawPath) });
         result.youtube = { via: r.via, tried: r.tried, log: OPEN_BUNDLE_LOG() };
         if (!r.ok) result.errors.push("Không mở được Youtube bằng cách nào (đã thử: " + r.tried.join(" → ") + "). Xem " + OPEN_BUNDLE_LOG());
