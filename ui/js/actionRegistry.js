@@ -144,7 +144,11 @@ const ACTIONS = Object.freeze({
     // TASK A96 — popup chuột phải nút MUSIC: (1) nút AUDIO CHILL = công tắc ON/OFF (sáng = BẬT = 127, tắt = TẮT = 0; đã đảo theo cách nối thật của Khói) — kênh 15 CC 94;
     // (2) knob AUDIO CHILL = điều khiển 1 tham số VST bằng CC 0..127 tuyến tính — kênh 15 CC 95. Hai điều khiển ĐỘC LẬP nhau (knob xoay được dù nút bật hay tắt).
     AUDIO_CHILL_STATE: "AUDIO_CHILL_STATE",
-    AUDIO_CHILL_KNOB: "AUDIO_CHILL_KNOB"
+    AUDIO_CHILL_KNOB: "AUDIO_CHILL_KNOB",
+    // AUTOKEY-MIDI-01 — chế độ "Tự dò bằng tay" (Auto-Key) điều khiển plugin Auto-Key bằng MIDI, KHÔNG dùng chuột:
+    // AUTOKEY_DETECT = bấm "điểm dò Key" của plugin; AUTOKEY_SEND = bấm "Send Auto-Tune". Mặc định kênh 15, CC 102 / 103 (giá trị 127) — gán MIDI Learn trong DAW.
+    AUTOKEY_DETECT: "AUTOKEY_DETECT",
+    AUTOKEY_SEND: "AUTOKEY_SEND"
 });
 
 // MIDI-DAW-CONTROL-01 — nút Menu -> cặp action ON/OFF + action toggle CŨ (dùng khi người dùng CHƯA cấu hình ON/OFF).
@@ -275,6 +279,9 @@ function getMidiOutMapping(action) {
     if (action === "TUNE_BYPASS") {
         const cubase = /^cubase/i.test(String(daw).trim());
         return { kind: "cc", channel: 16, number: cubase ? 118 : 113, value: 127, source: "DEFAULT_PRESET" };
+    }
+    if (action === "AUTOKEY_DETECT" || action === "AUTOKEY_SEND") { // AUTOKEY-MIDI-01 — mặc định mọi DAW: kênh 15, CC 102 (dò) / 103 (Send); không trùng 85-95, 26, 32-37
+        return { kind: "cc", channel: 15, number: action === "AUTOKEY_DETECT" ? 102 : 103, value: 127, source: "DEFAULT_PRESET" };
     }
     if (action === "AUDIO_CHILL_STATE" || action === "AUDIO_CHILL_KNOB") { // A96 — mặc định cho mọi DAW: kênh 15, CC 94 (nút) / CC 95 (knob); không trùng KNOB 85-88, TUNE 89-91, REMIX 92-93
         return { kind: "cc", channel: 15, number: action === "AUDIO_CHILL_STATE" ? 94 : 95, value: action === "AUDIO_CHILL_STATE" ? 127 : 64, source: "DEFAULT_PRESET" };

@@ -1,13 +1,13 @@
-// A119 — Chế độ Auto-Key (Tự dò riêng). MÔ PHỎNG (clickAtPoint giả, đồng hồ thật rút ngắn) — KHÔNG bấm chuột/Auto-Key thật.
+// A119 — Chế độ Auto-Key (Tự dò riêng). MÔ PHỎNG (ActionRegistry/MIDI giả, đồng hồ thật rút ngắn) — KHÔNG gửi MIDI/Auto-Key thật. AUTOKEY-MIDI-01: không còn dùng chuột.
 const fs=require('fs'),path=require('path'),vm=require('vm');const root=path.join(__dirname,'..','..');const rd=f=>fs.readFileSync(path.join(root,f),'utf8');
 let p=0,f=0;const ok=(c,m,x)=>{if(c){p++;console.log('  OK  ',m)}else{f++;console.log('  FAIL',m,x===undefined?'':JSON.stringify(x))}};
 const src=rd('ui/js/renderer.js');
 const dm=/const __AI_CORE_DEFAULT[\s\S]*?try \{ setInterval/.exec(src);const am=/const __autoKeyRun[\s\S]*?\nfunction restartAiForNewSong/.exec(src);ok(!!dm&&!!am,'tìm thấy cấu hình + hàm runAutoKeyDetect');
 const gi=src.indexOf('__aiCoreCfg().autoKeyMode) {');ok(gi>0,'có cổng chặn gửi Key AI khi Auto-Key BẬT');
-function make(o){const clicks=[];let t=0;const sleepLog=[];const RealDate=Date;const FakeDate=function(){return new RealDate()};FakeDate.now=()=>ctx.t;const ctx={Date:FakeDate,t:100000,console:{log(){}},window:{electronAPI:{loadSettingsSync:()=>o.st,clickAtPoint:async(q)=>{clicks.push(q);return{ok:true}}}},
+function make(o){const clicks=[],mouse=[];let t=0;const sleepLog=[];const RealDate=Date;const FakeDate=function(){return new RealDate()};FakeDate.now=()=>ctx.t;const ctx={Date:FakeDate,t:100000,console:{log(){}},window:{electronAPI:{loadSettingsSync:()=>o.st,clickAtPoint:async(q)=>{mouse.push(q);return{ok:true}}},ActionRegistry:{ACTIONS:{AUTOKEY_DETECT:'AUTOKEY_DETECT',AUTOKEY_SEND:'AUTOKEY_SEND'},executeAction:async(a)=>{if(o.midiFailOn===a)return{ok:false};clicks.push(a);return{ok:true}}}},
  getCoordinate:(k)=>o.coords[k]||"",isMouseFallbackAllowed:()=>o.mouse!==false,getActiveSourceName:()=>o.src||'ai',KeyEngine:{setTuning(){return{}}},
  setTimeout:(fn,ms)=>{sleepLog.push(ms);return setTimeout(fn,0)}};
- vm.createContext(ctx);vm.runInContext(dm[0].replace(/try \{ setInterval$/,'')+'\n'+am[0].replace(/\nfunction restartAiForNewSong$/,'')+';this.run=runAutoKeyDetect;this.cfg=__aiCoreCfg;this.st=__autoKeyRun;',ctx);return{ctx,clicks,sleepLog}}
+ vm.createContext(ctx);vm.runInContext(dm[0].replace(/try \{ setInterval$/,'')+'\n'+am[0].replace(/\nfunction restartAiForNewSong$/,'')+';this.run=runAutoKeyDetect;this.cfg=__aiCoreCfg;this.st=__autoKeyRun;',ctx);return{ctx,clicks,sleepLog,mouse}}
 const P1={x:10,y:20},P2={x:30,y:40};
 (async()=>{
  console.log('== cấu hình ==');
@@ -16,26 +16,28 @@ const P1={x:10,y:20},P2={x:30,y:40};
  m=make({st:{autoKeyMode:{enabled:true,waitSec:999}},coords:{}});ok(m.ctx.cfg().autoKeyWait===60,'chờ kẹp ≤ 60s');
  m=make({st:{autoKeyMode:{enabled:true,waitSec:0}},coords:{}});ok(m.ctx.cfg().autoKeyWait===1,'chờ kẹp ≥ 1s');
  m=make({st:{autoKeyMode:{enabled:"true"}},coords:{}});ok(m.ctx.cfg().autoKeyMode===false,'giá trị không phải true thật => TẮT');
- console.log('== chạy ==');
+ console.log('== chạy (MIDI) ==');
  const on={autoKeyMode:{enabled:true,waitSec:2}};
- m=make({st:{},coords:{autokey1:P1,autokey2:P2}});let r=await m.ctx.run('t');ok(r.why==='mode-off'&&m.clicks.length===0,'chế độ TẮT => không bấm gì');
- m=make({st:on,coords:{autokey1:P1,autokey2:P2}});r=await m.ctx.run('t');ok(r.ran&&r.sent&&JSON.stringify(m.clicks)===JSON.stringify([P1,P2]),'BẬT: bấm điểm dò (1) rồi Send Auto-Tune (2) đúng thứ tự',m.clicks);
- ok(m.sleepLog.includes(2000),'có chờ đúng waitSec (2000ms) giữa 2 bước',m.sleepLog);
- m=make({st:on,coords:{autokey1:[P1,{x:1,y:2}],autokey2:[P2,{x:3,y:4}]}});r=await m.ctx.run('t');ok(m.clicks.length===4&&m.clicks[0].x===10&&m.clicks[1].x===1&&m.clicks[2].x===30&&m.clicks[3].x===3,'toạ độ 2 điểm mỗi nút: bấm lần lượt cả 2 điểm của 1 rồi cả 2 điểm của 2',m.clicks);
- m=make({st:on,coords:{autokey1:P1}});r=await m.ctx.run('t');ok(r.why==='no-points'&&m.clicks.length===0&&/Chưa lấy đủ/.test(m.ctx.st.status),'thiếu toạ độ Auto-Key 2 => không bấm gì + báo rõ');
- m=make({st:on,coords:{autokey1:P1,autokey2:P2},mouse:false});r=await m.ctx.run('t');ok(r.why==='mouse-off'&&m.clicks.length===0,'Mouse Control TẮT => không bấm (tôn trọng công tắc)');
- m=make({st:on,coords:{autokey1:P1,autokey2:P2},src:'manual'});r=await m.ctx.run('t');ok(r.why==='manual'&&m.clicks.length===0,'đang Dò tay => không chạy');
- m=make({st:on,coords:{autokey1:P1,autokey2:P2},src:'songDb'});r=await m.ctx.run('t');ok(r.why==='song-db'&&m.clicks.length===0,'bài có Key Song Database => không chạy');
- m=make({st:on,coords:{autokey1:P1,autokey2:P2}});await m.ctx.run('a');r=await m.ctx.run('b');ok(r.why==='cooldown'&&m.clicks.length===2,'gọi lại trong 8s => bị chặn (không bấm lặp)');
- m=make({st:on,coords:{autokey1:P1,autokey2:P2}});const pa=m.ctx.run('a');const rb=await m.ctx.run('b');ok(rb.why==='busy','đang chạy mà gọi tiếp => bỏ qua');await pa;
+ const D='AUTOKEY_DETECT',S='AUTOKEY_SEND';
+ m=make({st:{}});let r=await m.ctx.run('t');ok(r.why==='mode-off'&&m.clicks.length===0,'chế độ TẮT => không gửi gì');
+ m=make({st:on});r=await m.ctx.run('t');ok(r.ran&&r.sent&&JSON.stringify(m.clicks)===JSON.stringify([D,S])&&m.mouse.length===0,'BẬT: MIDI dò Key rồi MIDI Send; KHÔNG chuột nào');
+ ok(m.sleepLog.includes(2000),'chờ đúng số giây cài đặt (2s)',m.sleepLog);
+ m=make({st:on,midiFailOn:D});r=await m.ctx.run('t');ok(r.why==='midi-fail'&&m.clicks.length===0&&/MIDI/.test(m.ctx.st.status),'MIDI dò lỗi (chưa chọn cổng) => dừng, không Send, báo trạng thái');
+ m=make({st:on,midiFailOn:S});r=await m.ctx.run('t');ok(r.ran&&r.sent===false&&m.clicks.join()===D,'MIDI Send lỗi => báo chưa Send');
+ m=make({st:on,mouse:false});r=await m.ctx.run('t');ok(r.sent&&m.clicks.length===2,'công tắc Mouse Control không còn ảnh hưởng (không dùng chuột)');
+ m=make({st:on,src:'manual'});r=await m.ctx.run('t');ok(r.why==='manual'&&m.clicks.length===0,'đang Dò tay (chọn Key) => không chạy');
+ m=make({st:on,src:'songDb'});r=await m.ctx.run('t');ok(r.why==='song-db'&&m.clicks.length===0,'bài có Key Song Database => không chạy');
+ m=make({st:on});await m.ctx.run('a');r=await m.ctx.run('b');ok(r.why==='cooldown'&&m.clicks.length===2,'gọi lại trong 8s => bị chặn (không gửi lặp)');
+ m=make({st:on});const pa=m.ctx.run('a');const rb=await m.ctx.run('b');ok(rb.why==='busy','đang chạy mà gọi tiếp => bỏ qua');await pa;
  console.log('== ngắt giữa chừng ==');
- m=make({st:on,coords:{autokey1:P1,autokey2:P2}});const pr=m.ctx.run('t');await new Promise(r=>setTimeout(r,5));m.clicks.length>=0;
- const o2={st:on,coords:{autokey1:P1,autokey2:P2},src:'ai'};m=make(o2);const pr2=m.ctx.run('t');o2.st=undefined;/* sau khi bấm bước 1, người dùng tắt chế độ */ 
- // tắt chế độ trước bước Send: loadSettingsSync trả {} sau lần đọc đầu
- let n=0;const o3={coords:{autokey1:P1,autokey2:P2}};o3.st=new Proxy({},{get:(t,k)=>k==='autoKeyMode'?(n++<1?{enabled:true,waitSec:1}:{enabled:false}):undefined});m=make(o3);
- // cache 2s của __aiCoreCfg: tăng đồng hồ ảo khi chờ
+ let n=0;const o3={};o3.st=new Proxy({},{get:(t,k)=>k==='autoKeyMode'?(n++<1?{enabled:true,waitSec:1}:{enabled:false}):undefined});m=make(o3);
  const origRun=m.ctx.run;const res=await (async()=>{const pr3=origRun('t');const iv=setInterval(()=>{m.ctx.t+=3000},1);const rr=await pr3;clearInterval(iv);return rr})();
- ok(res.ran&&res.sent===false&&res.why==='aborted'&&m.clicks.length===1,'tắt chế độ trong lúc chờ => KHÔNG bấm Send (chỉ đã bấm điểm dò)',[res,m.clicks.length]);
+ ok(res.ran&&res.sent===false&&m.clicks.join()===D,'tắt chế độ trong lúc chờ => KHÔNG gửi Send (chỉ đã gửi dò)',[res,m.clicks]);
+ console.log('== không còn dùng chuột trong runAutoKeyDetect ==');
+ ok(!/clickAtPoint|getCoordinate|isMouseFallbackAllowed/.test(am[0]),'hàm không gọi chuột/toạ độ');
+ const ar=rd('ui/js/actionRegistry.js'),su=rd('ui/js/setup.js');
+ ok(/AUTOKEY_DETECT: "AUTOKEY_DETECT"/.test(ar)&&/number: action === "AUTOKEY_DETECT" \? 102 : 103/.test(ar)&&/number: action === "AUTOKEY_DETECT" \? 102 : 103/.test(su),'mặc định kênh 15 CC 102/103 ở cả ActionRegistry và Setup');
+ ok(/action: "AUTOKEY_DETECT"/.test(su)&&/action: "AUTOKEY_SEND"/.test(su),'có trong danh sách MIDI Setup (đổi/Learn được)');
  console.log('== gate gửi Key AI ==');
  const blk=src.slice(gi-120,gi+330);ok(/source === "ai"/.test(blk)&&/return;/.test(blk),'chỉ chặn nguồn AI (Dò tay/Song DB vẫn gửi bình thường)');
  const ap=src.slice(src.indexOf('function applyActiveKeyToPlugin'));const send=ap.indexOf('sendKeyToAutotune(sendValue)');ok(ap.indexOf('autoKeyMode')<send&&ap.indexOf('autoKeyMode')>0,'cổng nằm trước lệnh gửi Plugin');

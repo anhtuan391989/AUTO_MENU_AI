@@ -2030,16 +2030,9 @@ function __aiMemoryRecall(songKey) {
 
 // A119 — CHẾ ĐỘ AUTO-KEY (Tự dò riêng): plugin Auto-Key trong DAW tự dò Key và tự gửi sang Auto-Tune.
 // Quy trình: bấm "điểm dò Key" (autokey1) -> chờ N giây (Setup) -> bấm "điểm Send Auto-Tune" (autokey2).
-// Chỉ chạy khi: chế độ BẬT, KHÔNG ở Dò tay, KHÔNG có Key Song Database, Mouse Control đang cho phép, đã lấy đủ 2 toạ độ.
+// AUTOKEY-MIDI-01: bấm bằng MIDI (AUTOKEY_DETECT / AUTOKEY_SEND), KHÔNG dùng chuột/toạ độ. Chỉ chạy khi: chế độ BẬT, KHÔNG ở Dò tay, KHÔNG có Key Song Database.
 // Menu vẫn hiển thị Key của AI Menu (Menu không đọc được Key mà Auto-Key dò ra) nhưng không gửi nó xuống Auto-Tune.
 const __autoKeyRun = { busy: false, last: 0, status: "" };
-function __autoKeyPoints(key) {
-    try {
-        const raw = typeof getCoordinate === "function" ? getCoordinate(key) : "";
-        const arr = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-        return arr.filter((q) => q && typeof q.x === "number" && typeof q.y === "number");
-    } catch (e) { return []; }
-}
 const __autoKeySleep = (ms) => new Promise((res) => setTimeout(res, ms));
 async function runAutoKeyDetect(reason) {
     try {
@@ -2051,19 +2044,20 @@ async function runAutoKeyDetect(reason) {
         if (srcNow === "songDb") return { ran: false, why: "song-db" };
         if (__autoKeyRun.busy) return { ran: false, why: "busy" };
         if (Date.now() - __autoKeyRun.last < 8000) return { ran: false, why: "cooldown" };
-        if (typeof isMouseFallbackAllowed === "function" && !isMouseFallbackAllowed()) { __autoKeyRun.status = "Mouse Control đang TẮT"; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "mouse-off" }; }
-        const p1 = __autoKeyPoints("autokey1"), p2 = __autoKeyPoints("autokey2");
-        if (!p1.length || !p2.length || !window.electronAPI?.clickAtPoint) { __autoKeyRun.status = "Chưa lấy đủ toạ độ Auto-Key 1 (điểm dò Key) / 2 (Send Auto-Tune)"; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "no-points" }; }
+        // AUTOKEY-MIDI-01: điều khiển plugin Auto-Key hoàn toàn bằng MIDI (ActionRegistry), KHÔNG dùng chuột/toạ độ.
+        const AR = window.ActionRegistry;
+        if (!AR?.executeAction || !AR.ACTIONS?.AUTOKEY_DETECT) { __autoKeyRun.status = "Chưa có ActionRegistry/MIDI"; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "no-midi" }; }
+        const fire = async (name) => { const r = await AR.executeAction(AR.ACTIONS[name], { reason: "autokey" }); return r && r.ok; };
         __autoKeyRun.busy = true; __autoKeyRun.last = Date.now();
-        console.log("[Auto-Key] Chạy (" + (reason || "?") + "): bấm điểm dò Key -> chờ " + cfg.autoKeyWait + "s -> bấm Send Auto-Tune");
+        console.log("[Auto-Key] Chạy (" + (reason || "?") + "): MIDI điểm dò Key -> chờ " + cfg.autoKeyWait + "s -> MIDI Send Auto-Tune");
         try {
             await __autoKeySleep(1500); // để bài/âm thanh vào ổn định rồi mới bắt đầu dò
-            for (const q of p1) { await window.electronAPI.clickAtPoint(q); await __autoKeySleep(300); }
+            if (!(await fire("AUTOKEY_DETECT"))) { __autoKeyRun.status = "Gửi MIDI dò Key không được (chưa chọn cổng MIDI output?)"; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "midi-fail" }; }
             await __autoKeySleep(cfg.autoKeyWait * 1000);
             const c2 = __aiCoreCfg();
-            if (!c2.autoKeyMode || (typeof getActiveSourceName === "function" && getActiveSourceName() === "manual")) { __autoKeyRun.status = "Dừng trước bước Send (đã tắt chế độ hoặc chuyển sang Dò tay)"; return { ran: true, sent: false, why: "aborted" }; }
-            for (const q of p2) { await window.electronAPI.clickAtPoint(q); await __autoKeySleep(300); }
-            __autoKeyRun.status = "Đã dò + Send lúc " + new Date().toLocaleTimeString();
+            if (!c2.autoKeyMode || (typeof getActiveSourceName === "function" && getActiveSourceName() === "manual")) { __autoKeyRun.status = "Dừng trước bước Send (đã tắt chế độ hoặc chuyển sang Dò tay)"; return { ran: true, sent: false }; }
+            if (!(await fire("AUTOKEY_SEND"))) { __autoKeyRun.status = "Gửi MIDI Send không được"; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: true, sent: false, why: "midi-fail" }; }
+            __autoKeyRun.status = "Đã dò + Send (MIDI) lúc " + new Date().toLocaleTimeString();
             return { ran: true, sent: true };
         } finally { __autoKeyRun.busy = false; }
     } catch (e) { __autoKeyRun.busy = false; __autoKeyRun.status = "Lỗi: " + (e && e.message); return { ran: false, why: "error" }; }

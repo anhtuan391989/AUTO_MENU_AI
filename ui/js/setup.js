@@ -690,6 +690,9 @@ const DAW_MIDI_ACTIONS = [
     // TASK A96 — popup chuột phải MUSIC: nút AUDIO CHILL (sáng = bật = 127, tắt = 0) và knob AUDIO CHILL (CC 0..127). Mặc định kênh 15 CC 94 / 95.
     { action: "AUDIO_CHILL_STATE", label: "AUDIO CHILL — nút ON/OFF (sáng = bật = gửi 127; tắt = gửi 0)" },
     { action: "AUDIO_CHILL_KNOB", label: "AUDIO CHILL — knob điều khiển 1 VST (CC 0..127)" },
+    // AUTOKEY-MIDI-01 — chế độ "Tự dò bằng tay" (Auto-Key): MIDI thay cho bấm chuột. Mặc định kênh 15 CC 102 / 103, giá trị 127.
+    { action: "AUTOKEY_DETECT", label: "AUTO-KEY — bấm điểm DÒ Key của plugin (kênh 15 CC 102, 127)" },
+    { action: "AUTOKEY_SEND", label: "AUTO-KEY — bấm SEND sang Auto-Tune (kênh 15 CC 103, 127)" },
     // MENU-FIX-02 — TUỲ CHỌN: lệnh CHỌN TRACK (macro chỉ "Find Track") gửi TRƯỚC lệnh ON/OFF tương ứng để Monitor không đảo nhầm track cũ.
     { action: "MUSIC_SELECT", label: "MUSIC CHỌN TRACK (Find Track Beat — gửi trước ON/OFF)" },
     { action: "MIC1_SELECT", label: "MIC 1 CHỌN TRACK (Find Track Mic — gửi trước ON/OFF)" },
@@ -759,6 +762,9 @@ function getDawMidiOutMapping(action) {
     if (/^KEY_(SCALE_MAJOR|SCALE_MINOR|ROOT)_AT[34]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
         const base = /_AT3$/.test(action) ? 34 : 36;
         return { kind: "cc", channel: 15, number: /^KEY_ROOT_/.test(action) ? base + 1 : base, value: /SCALE_MINOR/.test(action) ? 5 : 0, source: "DEFAULT_PRESET" };
+    }
+    if (action === "AUTOKEY_DETECT" || action === "AUTOKEY_SEND") { // AUTOKEY-MIDI-01 — khớp getMidiOutMapping() ở actionRegistry.js
+        return { kind: "cc", channel: 15, number: action === "AUTOKEY_DETECT" ? 102 : 103, value: 127, source: "DEFAULT_PRESET" };
     }
     if (action === "AUDIO_CHILL_STATE" || action === "AUDIO_CHILL_KNOB") { // A96 — khớp getMidiOutMapping() ở actionRegistry.js
         return { kind: "cc", channel: 15, number: action === "AUDIO_CHILL_STATE" ? 94 : 95, value: action === "AUDIO_CHILL_STATE" ? 127 : 64, source: "DEFAULT_PRESET" };

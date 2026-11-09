@@ -32,7 +32,7 @@ ok(sb.MS === 5000, 'thời gian = 5000 ms');
   c.hovered = true; advance(12000); ok(c.style.display === 'flex', 'hover mà không có sự kiện nào (timer tự kiểm tra :hover): không ẩn'); }
 console.log('== 4 popup đều dùng helper ==');
 const n = (re) => (ren.match(re) || []).length;
-ok(n(/const auto = createPopupAutoHide\(card, /g) === 3, 'MIC(1+2 chung vòng lặp) / FX / MUSIC đều tạo bộ tự ẩn', n(/const auto = createPopupAutoHide\(card, /g));
+ok(n(/const auto = createPopupAutoHide\(card, /g) === 4, 'MIC(1+2 chung vòng lặp) / FX / MUSIC / AUTO DETECT đều tạo bộ tự ẩn', n(/const auto = createPopupAutoHide\(card, /g));
 ok(/auto\.arm\(\);\s*\n\s*\}\);\s*\n\s*cards\.push\(card\)/.test(ren), 'MIC 1/2: arm khi mở');
 ok(/auto\.arm\(\);\s*\n\s*\}\);\s*\n\s*document\.addEventListener\("mousedown", \(e\) => \{\s*\n\s*const t = e\.target;\s*\n\s*if \(card\.contains\(t\)\) return;\s*\n\s*if \(t && t\.closest && t\.closest\("#fxBtn"\)\)/.test(ren), 'FX: arm khi mở');
 ok(/card\.style\.display = "flex";\s*\n\s*auto\.arm\(\);/.test(ren.slice(ren.indexOf('function initAudioChillPopup'))), 'MUSIC: arm khi mở');
