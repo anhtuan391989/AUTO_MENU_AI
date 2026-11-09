@@ -984,6 +984,7 @@ function initKeyServerCorrectCard() {
         "wrong-password": "Sai mật khẩu Server.",
         "server-no-admin-token": "Server chưa cài mật khẩu admin nên không ai sửa được.",
         "not-on-server": "Bài này chưa có trên Server.",
+        "server-disabled": "Đồng bộ Key Server đang tắt trong Setup.",
         "no-song": "Chưa biết tên bài đang phát.",
         "network": "Không kết nối được Server.",
         "bad-key": "Key không hợp lệ.",

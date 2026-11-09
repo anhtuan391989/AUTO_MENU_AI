@@ -49,6 +49,7 @@ function createKeyCorrector(deps) {
 
             let found;
             try { found = await d.lookup(cur.title, cur.artist || ""); } catch (e) { found = null; }
+            if (found && found.disabled) return { ok: false, reason: "server-disabled" }; // đồng bộ Key Server đang tắt trong Setup
             if (!found || !found.found || !found.songId) return { ok: false, reason: "not-on-server" };
 
             const url = String(d.getServerUrl ? d.getServerUrl() : "").replace(/\/+$/, "");
@@ -92,6 +93,9 @@ function createKeyCorrector(deps) {
                     if (localUpdated > 0) d.db.save(list);
                 }
             } catch (e) { localError = String((e && e.message) || e); localUpdated = 0; }
+
+            // Làm tươi bản nhớ tạm của Menu (Key đã sửa tới ngay thay vì đợi hết ~2 phút). Lỗi ở bước này KHÔNG ảnh hưởng kết quả.
+            try { if (typeof d.afterCorrect === "function") Promise.resolve(d.afterCorrect(cur, key)).catch(() => {}); } catch (e) { /* bỏ qua */ }
 
             log.log(`[KeyCorrect] Đã sửa Key bài "${cur.title}" -> ${key} (Server OK, songs.json: ${localUpdated} mục)`);
             return { ok: true, reason: "corrected", key, localUpdated, localError, songId: found.songId, title: cur.title, artist: cur.artist || "" };

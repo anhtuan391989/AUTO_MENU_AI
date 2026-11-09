@@ -946,6 +946,7 @@ function getKeyCorrector() {
             fetchFn: (u, o) => fetch(u, o),
             normalizeTitle,
             db: require("../core/reference/SongDatabase"),
+            afterCorrect: (cur) => keyServerSync.lookup(cur.title, cur.artist || "", { force: true }), // làm tươi bản nhớ tạm 2 phút của KeyServerSync
             logger: console
         });
     }

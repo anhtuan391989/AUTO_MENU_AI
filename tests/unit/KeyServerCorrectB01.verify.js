@@ -96,12 +96,40 @@ function makeCorrector(S, over) {
     ok(r.ok === false && r.reason === 'network' && !JSON.stringify(r).includes(SECRET), 'Mất mạng -> network, không throw, không lộ mật khẩu');
   }
 
+  console.log('[3b] Đồng bộ tắt + làm tươi bản nhớ tạm');
+  {
+    const m = makeCorrector(makeServer(), { lookup: async () => ({ found: false, disabled: true }) });
+    ok((await m.c.correct({ key: 'A# Major', token: SECRET })).reason === 'server-disabled', 'Đồng bộ Key Server tắt -> server-disabled');
+    let called = 0; const S = makeServer();
+    const m2 = makeCorrector(S, { afterCorrect: async () => { called++; throw new Error('lỗi phụ'); } });
+    const r = await m2.c.correct({ key: 'A# Major', token: SECRET });
+    await new Promise((res) => setTimeout(res, 10));
+    ok(r.ok === true && called === 1, 'Sửa xong gọi làm tươi bản nhớ tạm đúng 1 lần; nó lỗi cũng không ảnh hưởng kết quả');
+    let called2 = 0; const m3 = makeCorrector(makeServer(), { afterCorrect: async () => { called2++; } });
+    await m3.c.correct({ key: 'A# Major', token: 'sai' });
+    ok(called2 === 0, 'Sửa thất bại -> không làm tươi bản nhớ tạm');
+  }
+
   console.log('[4] songs.json lỗi không làm hỏng việc đã lưu trên Server');
   {
     const S = makeServer(); const m = makeCorrector(S, { db: { load() { throw new Error('hỏng file'); }, save() {} } });
     const r = await m.c.correct({ key: 'A# Major', token: SECRET });
     ok(r.ok === true && r.localUpdated === 0 && /hỏng file/.test(r.localError) && S.segs.one[0].key === 'A#', 'Server đã sửa; songs.json lỗi -> vẫn ok, báo localError');
   }
+
+  console.log('[4b] Khớp với module THẬT trong core/ (nếu có)');
+  try {
+    const real = require(path.join(ROOT, 'core/integration/KeyServerSync.js'));
+    const roots = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']; let allSame = true;
+    for (const r of roots) for (const mode of ['major', 'minor']) {
+      const mine = parseKey(r + ' ' + mode), app = real.serverKeyToAppKey(r, mode), srv = real.appKeyToServerKey(app);
+      if (!mine || displayKey(mine) !== app || !srv || srv.key !== mine.name || srv.mode !== mine.mode) allSame = false;
+    }
+    ok(allSame, '24 Key: cách đọc/hiển thị Key giống hệt serverKeyToAppKey / appKeyToServerKey của core');
+    ok(real.normalizeTitle('Xin Đừng Rời Xa Anh') === 'xin dung roi xa anh' && typeof real.DEFAULT_SERVER_URL === 'string' && real.DEFAULT_SERVER_URL.startsWith('https://'), 'core: normalizeTitle và DEFAULT_SERVER_URL có đúng như main.js đang dùng');
+    const SongDatabase = require(path.join(ROOT, 'core/reference/SongDatabase.js'));
+    ok(typeof SongDatabase.load === 'function' && typeof SongDatabase.save === 'function', 'core: SongDatabase có load() và save()');
+  } catch (e) { console.log('  (bỏ qua: không thấy thư mục core/ ở', ROOT + ')'); }
 
   console.log('[5] Nối dây trong code thật (kiểm tĩnh)');
   const main = fs.readFileSync(path.join(ROOT, 'app/main.js'), 'utf8'), pre = fs.readFileSync(path.join(ROOT, 'app/preload.js'), 'utf8'), rend = fs.readFileSync(path.join(ROOT, 'ui/js/renderer.js'), 'utf8');
