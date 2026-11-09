@@ -785,6 +785,16 @@
                     <button id="btnAutoKey2" class="setup-btn">✢ Lấy tọa độ Auto-Key 2 (2 điểm)</button>
                     <button id="btnAutoTuneKey" class="setup-btn">✢ Lấy tọa độ Key Auto-Tune (1 điểm)</button>
                     <button id="btnChromatic" class="setup-btn">✢ Lấy tọa độ Chromatic (2 điểm)</button>
+                    <div id="autoKeyModeBlock" class="placeholder-grid">
+                        <label class="ph-field">Chế độ Auto-Key (Plugin tự dò)
+                            <label class="setup-checkbox"><input type="checkbox" id="autoKeyModeEnable"> Bật</label>
+                        </label>
+                        <label class="ph-field">Chờ dò xong (giây)
+                            <input type="number" id="autoKeyWaitSec" class="setup-input" min="1" max="60" value="8">
+                        </label>
+                    </div>
+                    <p class="hint-text" id="autoKeyModeHint">Khi BẬT: Menu không gửi Key AI xuống Auto-Tune nữa; thay vào đó mỗi lần đổi bài / bấm AUTO DETECT, Menu bấm "điểm dò Key" (Auto-Key 1), chờ số giây bên dưới, rồi bấm "Send Auto-Tune" (Auto-Key 2). Menu vẫn hiển thị Key do AI của Menu dò (Menu không đọc được Key mà Auto-Key dò). Không chạy khi đang Dò tay hoặc bài có trong Song Database; cần bật Mouse Control và đã lấy đủ toạ độ Auto-Key 1 và 2.</p>
+                    <div id="autoKeyModeStatus" class="hint-text"></div>
                     <p class="hint-text">ℹ️ SoundShifter điều khiển bằng MIDI (không cần lấy tọa độ chuột). Trạng thái:
                         <b>Not calibrated</b> (chưa có toạ độ nào) → <b>Partial</b> (thiếu một số toạ độ) →
                         <b>Calibrated</b> (đủ 4 toạ độ đã lưu). "Verified" cần Engine xác minh lại — chưa có, không tự
@@ -871,6 +881,7 @@
     <script src="js/setupTools.js"></script>
     <script src="js/setupAiReadiness.js"></script>
     <script src="js/setupAiCore.js"></script>
+    <script src="js/setupAutoKey.js"></script>
     <script src="js/setupVersion.js"></script>
     <script src="js/setupEffects.js"></script>
     <script src="js/setupVuMeter.js"></script>

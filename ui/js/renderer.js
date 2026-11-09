@@ -1629,10 +1629,10 @@ function refreshKeySourceDisplay() {
 // Áp dụng key của nguồn ĐANG có hiệu lực (theo đúng thứ tự ưu tiên) xuống Plugin + UI.
 // KHÔNG gọi hàm này cho bước "xem trước" khi mới chọn Manual (chưa bấm SEND) — đó là
 // hành vi riêng trong keySelector "change" bên dưới, đúng yêu cầu giữ nguyên Logic Send.
-// A113/A114 — "Lõi AI" (Setup): 7 núm nối thật — aiCore.autoApply (mặc định BẬT = hành vi cũ), aiCore.debug, aiCore.threshold + aiCore.confidence (0..100, 50 = mặc định = KHÔNG đổi KeyEngine) + realtime/instant/speed (A116; mặc định BẬT/BẬT/medium = như cũ)
+// A113/A114 — "Lõi AI" (Setup): 12 núm nối thật — aiCore.autoApply (mặc định BẬT = hành vi cũ), aiCore.debug, aiCore.threshold + aiCore.confidence (0..100, 50 = mặc định = KHÔNG đổi KeyEngine) + realtime/instant/speed (A116; mặc định BẬT/BẬT/medium = như cũ)
 // (mặc định TẮT: chỉ tắt 3 dòng console debug tạm; aiDiag/file log KHÔNG đổi). Menu không tự đồng bộ appSettings
 // với Setup, nên đọc lại file dùng chung (loadSettingsSync, chỉ đọc) tối đa 2 giây/lần. Lỗi => dùng mặc định.
-const __AI_CORE_DEFAULT = { autoApply: true, debug: false, threshold: 50, confidence: 50, realtime: true, instant: true, speed: "medium" };
+const __AI_CORE_DEFAULT = { autoApply: true, debug: false, threshold: 50, confidence: 50, realtime: true, instant: true, speed: "medium", lockHold: true, predict: true, learn: false, memory: "default", autoKeyMode: false, autoKeyWait: 8 };
 let __aiCoreCache = { t: 0, v: __AI_CORE_DEFAULT };
 let __aiCoreTuned = null; // chữ ký tuning đã áp xuống KeyEngine lần cuối (null = chưa chỉnh gì)
 const __AI_SPEED_SCALE = { fast: 0.6, medium: 1, slow: 1.6 }; // A116: Tốc độ phản ứng -> hệ số nhân thời gian chờ chốt Key
@@ -1642,11 +1642,11 @@ function __aiConfidenceToLock(v) { v = Math.min(100, Math.max(0, v)); return v >
 function __aiCoreApplyTuning(v) {
     try {
         if (typeof KeyEngine === "undefined" || typeof KeyEngine.setTuning !== "function") return;
-        const isDefault = v.threshold === 50 && v.confidence === 50 && v.instant === true && v.speed === "medium";
-        const sig = isDefault ? "default" : [v.threshold, v.confidence, v.instant, v.speed].join("|");
+        const isDefault = v.threshold === 50 && v.confidence === 50 && v.instant === true && v.speed === "medium" && v.lockHold === true;
+        const sig = isDefault ? "default" : [v.threshold, v.confidence, v.instant, v.speed, v.lockHold].join("|");
         if (sig === (__aiCoreTuned === null ? "default" : __aiCoreTuned)) return; // không đổi (hoặc vẫn mặc định) -> không đụng KeyEngine
         __aiCoreTuned = sig;
-        const r = isDefault ? KeyEngine.setTuning(null) : KeyEngine.setTuning({ minConfidence: __aiThresholdToMinConf(v.threshold), lockConfidence: __aiConfidenceToLock(v.confidence), fastPath: v.instant, reactionScale: __AI_SPEED_SCALE[v.speed] });
+        const r = isDefault ? KeyEngine.setTuning(null) : KeyEngine.setTuning({ minConfidence: __aiThresholdToMinConf(v.threshold), lockConfidence: __aiConfidenceToLock(v.confidence), fastPath: v.instant, reactionScale: __AI_SPEED_SCALE[v.speed], holdLock: v.lockHold });
         console.log("[AI-Core] Đã áp tuning:", JSON.stringify(r));
     } catch (e) {}
 }
@@ -1659,7 +1659,13 @@ function __aiCoreCfg() {
         const c = st && typeof st === "object" ? st.aiCore : null;
         if (c && typeof c === "object") {
             const n = (x) => (typeof x === "number" && isFinite(x) ? Math.round(Math.min(100, Math.max(0, x))) : 50);
-            v = { autoApply: c.autoApply !== false, debug: c.debug === true, threshold: n(c.threshold), confidence: n(c.confidence), realtime: c.realtime !== false, instant: c.instant !== false, speed: (c.speed === "fast" || c.speed === "slow") ? c.speed : "medium" };
+            v = { autoApply: c.autoApply !== false, debug: c.debug === true, threshold: n(c.threshold), confidence: n(c.confidence), realtime: c.realtime !== false, instant: c.instant !== false, speed: (c.speed === "fast" || c.speed === "slow") ? c.speed : "medium", lockHold: c.lockHold !== false, predict: c.predict !== false, learn: c.learn === true, memory: (c.memory === "few" || c.memory === "many") ? c.memory : "default", autoKeyMode: false, autoKeyWait: 8 };
+        }
+        // A119: Chế độ Auto-Key (khoá riêng `autoKeyMode` = {enabled, waitSec}, không nằm trong aiCore)
+        const ak = st && typeof st === "object" ? st.autoKeyMode : null;
+        if (ak && typeof ak === "object" && ak.enabled === true) {
+            const w = typeof ak.waitSec === "number" && isFinite(ak.waitSec) ? Math.min(60, Math.max(1, Math.round(ak.waitSec))) : 8;
+            v = Object.assign({}, v, { autoKeyMode: true, autoKeyWait: w });
         }
     } catch (e) {}
     __aiCoreCache = { t: now, v };
@@ -1713,6 +1719,10 @@ function applyActiveKeyToPlugin(sourceLabel) {
 
     if (source === "ai" && typeof __aiCoreCfg === "function" && !__aiCoreCfg().autoApply) { // A113: Setup > Lõi AI > "Tự áp dụng" TẮT -> hiển thị Key nhưng KHÔNG tự gửi Plugin (không ghi lastPluginKey => bật lại là gửi)
         console.log("[AI-Core] Tự áp dụng TẮT — không gửi Key AI xuống Plugin.");
+        return;
+    }
+    if (source === "ai" && typeof __aiCoreCfg === "function" && __aiCoreCfg().autoKeyMode) { // A119: Chế độ Auto-Key BẬT -> plugin Auto-Key tự dò + tự gửi Auto-Tune; Menu CHỈ hiển thị Key AI, không gửi Key AI (tránh đè nhau)
+        console.log("[Auto-Key] Chế độ Auto-Key BẬT — Menu không gửi Key AI xuống Auto-Tune (Key AI chỉ để hiển thị).");
         return;
     }
 
@@ -1938,6 +1948,73 @@ window.__aiDiagStatus = () => {
     return out;
 };
 
+// A117 — Học + Bộ nhớ: nhớ Key AI đã chốt theo bài (khoá "<title>|<artist>") trong app-settings (aiSongMemory).
+// Lần sau gặp lại bài (và Song Database không có) => hiện Key đã nhớ như "Key tạm (đang dò...)" — CHỈ HIỂN THỊ,
+// KHÔNG tự gửi Plugin; AI vẫn dò và Key thật vẫn do AI chốt. Mặc định TẮT. Lỗi bất kỳ => nuốt, không ảnh hưởng luồng AI.
+const __AI_MEMORY_CAP = { few: 20, default: 50, many: 200 };
+function __aiMemoryRead() { try { const m = typeof getSetting === "function" ? getSetting("aiSongMemory", {}) : {}; return m && typeof m === "object" && !Array.isArray(m) ? m : {}; } catch (e) { return {}; } }
+function __aiMemoryRemember(songKey, key) {
+    try {
+        if (typeof __aiCoreCfg !== "function") return;
+        const cfg = __aiCoreCfg(); if (!cfg.learn || !songKey || songKey === "|" || !key) return;
+        const mem = Object.assign({}, __aiMemoryRead()); const cur = mem[songKey];
+        if (cur && cur.key === key) return; // không đổi -> khỏi ghi file
+        mem[songKey] = { key: String(key), t: Date.now() };
+        const cap = __AI_MEMORY_CAP[cfg.memory] || 50, ks = Object.keys(mem);
+        if (ks.length > cap) ks.sort((a, b) => (mem[a].t || 0) - (mem[b].t || 0)).slice(0, ks.length - cap).forEach((k) => delete mem[k]); // bỏ bài cũ nhất
+        if (typeof setSetting === "function") setSetting("aiSongMemory", mem);
+    } catch (e) {}
+}
+function __aiMemoryRecall(songKey) {
+    try {
+        if (typeof __aiCoreCfg !== "function") return;
+        const cfg = __aiCoreCfg(); if (!cfg.learn || !songKey) return;
+        const m = __aiMemoryRead()[songKey]; if (!m || !m.key || (keySource.songDb && keySource.songDb.active)) return;
+        keySource.ai.provisional = m.key; refreshKeySourceDisplay();
+    } catch (e) {}
+}
+
+// A119 — CHẾ ĐỘ AUTO-KEY (Tự dò riêng): plugin Auto-Key trong DAW tự dò Key và tự gửi sang Auto-Tune.
+// Quy trình: bấm "điểm dò Key" (autokey1) -> chờ N giây (Setup) -> bấm "điểm Send Auto-Tune" (autokey2).
+// Chỉ chạy khi: chế độ BẬT, KHÔNG ở Dò tay, KHÔNG có Key Song Database, Mouse Control đang cho phép, đã lấy đủ 2 toạ độ.
+// Menu vẫn hiển thị Key của AI Menu (Menu không đọc được Key mà Auto-Key dò ra) nhưng không gửi nó xuống Auto-Tune.
+const __autoKeyRun = { busy: false, last: 0, status: "" };
+function __autoKeyPoints(key) {
+    try {
+        const raw = typeof getCoordinate === "function" ? getCoordinate(key) : "";
+        const arr = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+        return arr.filter((q) => q && typeof q.x === "number" && typeof q.y === "number");
+    } catch (e) { return []; }
+}
+const __autoKeySleep = (ms) => new Promise((res) => setTimeout(res, ms));
+async function runAutoKeyDetect(reason) {
+    try {
+        if (typeof __aiCoreCfg !== "function") return { ran: false, why: "no-cfg" };
+        const cfg = __aiCoreCfg();
+        if (!cfg.autoKeyMode) return { ran: false, why: "mode-off" };
+        const srcNow = typeof getActiveSourceName === "function" ? getActiveSourceName() : "ai";
+        if (srcNow === "manual") return { ran: false, why: "manual" };
+        if (srcNow === "songDb") return { ran: false, why: "song-db" };
+        if (__autoKeyRun.busy) return { ran: false, why: "busy" };
+        if (Date.now() - __autoKeyRun.last < 8000) return { ran: false, why: "cooldown" };
+        if (typeof isMouseFallbackAllowed === "function" && !isMouseFallbackAllowed()) { __autoKeyRun.status = "Mouse Control đang TẮT"; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "mouse-off" }; }
+        const p1 = __autoKeyPoints("autokey1"), p2 = __autoKeyPoints("autokey2");
+        if (!p1.length || !p2.length || !window.electronAPI?.clickAtPoint) { __autoKeyRun.status = "Chưa lấy đủ toạ độ Auto-Key 1 (điểm dò Key) / 2 (Send Auto-Tune)"; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "no-points" }; }
+        __autoKeyRun.busy = true; __autoKeyRun.last = Date.now();
+        console.log("[Auto-Key] Chạy (" + (reason || "?") + "): bấm điểm dò Key -> chờ " + cfg.autoKeyWait + "s -> bấm Send Auto-Tune");
+        try {
+            await __autoKeySleep(1500); // để bài/âm thanh vào ổn định rồi mới bắt đầu dò
+            for (const q of p1) { await window.electronAPI.clickAtPoint(q); await __autoKeySleep(300); }
+            await __autoKeySleep(cfg.autoKeyWait * 1000);
+            const c2 = __aiCoreCfg();
+            if (!c2.autoKeyMode || (typeof getActiveSourceName === "function" && getActiveSourceName() === "manual")) { __autoKeyRun.status = "Dừng trước bước Send (đã tắt chế độ hoặc chuyển sang Dò tay)"; return { ran: true, sent: false, why: "aborted" }; }
+            for (const q of p2) { await window.electronAPI.clickAtPoint(q); await __autoKeySleep(300); }
+            __autoKeyRun.status = "Đã dò + Send lúc " + new Date().toLocaleTimeString();
+            return { ran: true, sent: true };
+        } finally { __autoKeyRun.busy = false; }
+    } catch (e) { __autoKeyRun.busy = false; __autoKeyRun.status = "Lỗi: " + (e && e.message); return { ran: false, why: "error" }; }
+}
+
 function restartAiForNewSong(songKey) {
     __dbBypassClear(); // TASK AUTO-RELISTEN-01
     __aiCycleGen++; // vô hiệu hoá mọi callback/timer của bài trước
@@ -1957,6 +2034,7 @@ function restartAiForNewSong(songKey) {
         if (window.__keyDetectStopWatcher) { window.__keyDetectStopWatcher(); window.__keyDetectStopWatcher = null; }
         if (typeof ModEngine !== "undefined") ModEngine.stop();
     }
+    if (typeof __aiMemoryRecall === "function") __aiMemoryRecall(songKey); // A117: Học BẬT & đã nhớ bài này -> hiện Key đã nhớ làm Key tạm (không gửi Plugin)
 }
 
 // songKey: "<title>|<artist>" hoặc null khi metadata rỗng/mất.
@@ -2029,6 +2107,7 @@ function startAiRealtimeLoop() {
 
         keySource.ai.value = result.key;
         if (__dbBypass.pending) { __dbBypass.pending = false; __dbBypass.active = true; if (typeof aiDiag === "function") aiDiag("DB_BYPASS_ON", { db: keySource.songDb.value, ai: result.key }); } // TASK AUTO-RELISTEN-01
+        if (typeof __aiMemoryRemember === "function") __aiMemoryRemember(typeof lastNowPlayingKey !== "undefined" ? lastNowPlayingKey : null, result.key); // A117: Học BẬT -> nhớ Key theo bài
         keyEverDetected = true; // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — có kết quả THẬT từ audio
         __aiState.hasConfirmed = true; updateAiSourceStateLabel(); // TASK A74-02
         window.electronAPI?.reportAiResult("key", { key: result.key, confidence: result.confidence });
@@ -2730,6 +2809,9 @@ function resetAiDisplaysToListening() {
     if (typeof manualToneSet !== "undefined" && manualToneSet && isManualOverrideActive()) renderManualToneDisplay(); // AUTO DETECT chỉ reset phần AI; Tone tay người dùng đã SET vẫn hiển thị đúng
 }
 
+document.getElementById("autoDetectBtn")?.addEventListener("click", () => { // A119: Chế độ Auto-Key — nút AUTO DETECT (kể cả bấm tự động khi đổi bài) kích hoạt Auto-Key dò + Send
+    if (typeof runAutoKeyDetect === "function") runAutoKeyDetect("AUTO DETECT");
+});
 document.getElementById("autoDetectBtn")?.addEventListener("click", () => {
     console.log("RESET AI SCAN — reset BPM + KEY + MOD, dò lại từ đầu trên CÙNG nguồn SYSTEM_AUDIO đang chạy");
 
@@ -3105,6 +3187,10 @@ function bindAiEnginesToSystemAudio(systemAudio) {
             // keySource.ai.value/lock/gửi Plugin — những việc đó vẫn 100% qua startAiRealtimeLoop()
             // (mục 7B) như cũ.
             KeyEngine.onProvisionalEstimate((estimate) => {
+                if (typeof __aiCoreCfg === "function" && !__aiCoreCfg().predict) { // A117: Setup > Lõi AI > "Dự đoán" TẮT -> không hiện "Key tạm (đang dò...)", chỉ hiện Key đã chốt
+                    if (keySource.ai.provisional) { keySource.ai.provisional = null; refreshKeySourceDisplay(); }
+                    return;
+                }
                 keySource.ai.provisional = estimate.key;
                 refreshKeySourceDisplay();
                 __keyCorrectionTick(estimate.key); // TASK KEY-CORRECT-01: tự sửa Key AI đã chốt sai
