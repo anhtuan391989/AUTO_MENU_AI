@@ -1,0 +1,6 @@
+# Phụ thuộc cho core/key_detector.py — AUTO_MENU_AI
+# Cài: pip install -r requirements.txt
+# Đọc file .mp3 cần thêm ffmpeg: sudo apt install ffmpeg  (hoặc brew install ffmpeg)
+librosa>=0.10.1
+numpy>=1.24.0
+soundfile>=0.12.1
