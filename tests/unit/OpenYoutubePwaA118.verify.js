@@ -22,4 +22,10 @@ function make(world){const calls=[];const ctx={console:{log(){}},process:{platfo
  m=make({elevated:true});r=await m.run('C:\\B\\msedge.exe');ok(r.ok&&/PWA.*hạ quyền/.test(r.via)&&m.calls[0].cmd==='runas'&&m.calls[0].args[1]==='"\\"C:\\B\\msedge.exe\\" --app=https://www.youtube.com"','Menu Administrator: PWA qua runas hạ quyền, đúng cú pháp',m.calls[0]);
  m=make({elevated:false});r=await m.run('');ok(r.ok&&r.via==='shell.openExternal','chưa chọn trình duyệt => trình duyệt mặc định như cũ');
  ok(/youtubeAsApp,?\s*(?:autoStartup)?\s*\n?\s*\} = options/.test(src)&&/openYoutubeRobust\(youtubeUrl \|\| "https:\/\/www\.youtube\.com", browserPath, youtubeAsApp\)/.test(src),'handler nhận youtubeAsApp và truyền xuống');
+
+ console.log('== A120: spawn phải có ở cấp module (lỗi thật "spawn is not defined" trong open-bundle.log) ==');
+ const top=src.slice(0,src.indexOf('const AIBootstrap'));
+ ok(/const \{[^}]*\bspawn\b[^}]*\} = require\("child_process"\)/.test(top),'main.js import spawn ở ĐẦU file (module scope), không chỉ trong callback');
+ const lines=src.split('\n');const useIdx=lines.findIndex(l=>/const ch = spawn\(cmd, args/.test(l));const topImport=lines.findIndex(l=>/^const \{[^}]*\bspawn\b[^}]*\} = require\("child_process"\)/.test(l));
+ ok(topImport>=0&&topImport<20&&useIdx>topImport,'import module-level nằm TRƯỚC chỗ dùng spawn trong spawnOpen',{topImport,useIdx});
  console.log(p+' PASS / '+f+' FAIL (MÔ PHỎNG)');process.exit(f?1:0)})();

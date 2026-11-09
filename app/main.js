@@ -6,7 +6,7 @@ const __elevation = require("./Elevation").ensureElevated({ log: console.log });
 if (__elevation.action === "relaunched") app.exit(0); // bản Administrator đã được mở -> bản quyền thường thoát ngay, không tạo cửa sổ nào
 const path = require("path");
 const fs = require("fs");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process"); // A120: spawn dùng ở openYoutubeRobust/spawnOpen (module-level); trước đây chỉ khai báo trong callback whenReady => "spawn is not defined"
 const https = require("https");
 const os = require("os");
 
