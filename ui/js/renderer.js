@@ -1602,6 +1602,17 @@ const keySource = {
 const __dbBypass = { pending: false, active: false };
 let __autoDetectInternal = false; // true khi CODE (không phải người dùng) gọi autoDetectBtn.click() lúc đổi bài
 function __dbBypassClear() { __dbBypass.pending = false; __dbBypass.active = false; }
+// TASK AUTO-DETECT-TRUST-01 — Auto Detect dò lại THẬT dù bài đang lấy Key từ Database; AI CHỈ chốt Key mới thay Database khi
+// đáng tin hơn Database: Key AI KHÁC Key Database, độ tin cậy >= ngưỡng dưới (cao hơn ngưỡng khoá thường 0.80), và không phải cặp
+// "láng giềng cách 5" (F <-> A#, dễ nhầm hợp âm át với nhà — cùng luật KEY-CORRECT-02). Không đạt -> giữ Key Database.
+const AUTO_DETECT_DB_OVERRIDE_MIN_CONF = 0.85; // TẠM THỜI (đề xuất) — chỉnh theo log thật
+function __aiBeatsDatabase(aiKey, aiConf, dbKey) {
+    if (typeof aiKey !== "string" || typeof dbKey !== "string" || !dbKey) return { ok: false, why: "no-db-or-key" };
+    if (aiKey === dbKey) return { ok: false, why: "same-as-db" };
+    if (!Number.isFinite(aiConf) || aiConf < AUTO_DETECT_DB_OVERRIDE_MIN_CONF) return { ok: false, why: "low-confidence" };
+    if (typeof __keyIsFifthNeighbor === "function" && __keyIsFifthNeighbor(aiKey, dbKey)) return { ok: false, why: "fifth-neighbor" };
+    return { ok: true, why: "ai-more-trusted" };
+}
 
 let lastPluginKey = appState.originalKey; // giá trị THẬT đã gửi xuống Plugin lần gần nhất (chống gửi trùng)
 // TASK AI-KEY-FAST-08 — chống gửi lại + log lặp khi Mouse Control TẮT (status "MOUSE_DISABLED"). KHÔNG có vòng retry nền: chỉ quyết định
@@ -2250,7 +2261,12 @@ function startAiRealtimeLoop() {
         window.__keyDetectStopWatcher = null;
 
         keySource.ai.value = result.key;
-        if (__dbBypass.pending) { __dbBypass.pending = false; __dbBypass.active = true; if (typeof aiDiag === "function") aiDiag("DB_BYPASS_ON", { db: keySource.songDb.value, ai: result.key }); } // TASK AUTO-RELISTEN-01
+        if (__dbBypass.pending) { // TASK AUTO-RELISTEN-01 + AUTO-DETECT-TRUST-01: AI chỉ thay Database khi đáng tin hơn
+            __dbBypass.pending = false;
+            const __v = __aiBeatsDatabase(result.key, result.confidence, keySource.songDb.value);
+            if (__v.ok) { __dbBypass.active = true; if (typeof aiDiag === "function") aiDiag("DB_BYPASS_ON", { db: keySource.songDb.value, ai: result.key, conf: result.confidence }); }
+            else if (typeof aiDiag === "function") aiDiag("DB_BYPASS_REJECTED", { db: keySource.songDb.value, ai: result.key, conf: result.confidence, why: __v.why });
+        }
         if (typeof __aiMemoryRemember === "function") __aiMemoryRemember(typeof lastNowPlayingKey !== "undefined" ? lastNowPlayingKey : null, result.key); // A117: Học BẬT -> nhớ Key theo bài
         keyEverDetected = true; // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — có kết quả THẬT từ audio
         __aiState.hasConfirmed = true; updateAiSourceStateLabel(); // TASK A74-02
