@@ -1,4 +1,5 @@
 const SongDatabase = require("./SongDatabase");
+const RecordingDuration = require("./RecordingDuration");
 
 /**
  * ==========================================================
@@ -87,6 +88,14 @@ class SongMatcher {
         });
 
         return found || null;
+
+    }
+
+    // DB-MATCH-ID-02: bản ghi Database có đúng là BẢN THU đang phát không? Cùng tên nhưng khác độ dài (MV/Karaoke/Live) -> false.
+    // Thiếu độ dài ở bản ghi (chưa đồng bộ) hoặc ở bài đang phát -> true (không đủ căn cứ để bác, giữ cách khớp theo tên như cũ).
+    sameRecording(song, playingDurationSec) {
+
+        return !RecordingDuration.durationMismatch(song && song.durationSec, playingDurationSec);
 
     }
 

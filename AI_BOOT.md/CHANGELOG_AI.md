@@ -55,3 +55,25 @@
 - Architecture impact: None (không đổi Server, UI, KeyEngine, luồng IPC). Hệ quả đã biết: bài chỉ khớp mờ phải chờ AI dò vài giây như bài mới; "Sửa Key trên Server" (keyCorrect) báo "not-on-server" với bài chỉ khớp mờ.
 - Verification: `KeyServerStrict01.verify.js` 10 PASS / 0 FAIL; 58 test liên quan (KeyServerSync/main/SongDb/keyCorrect/worker) cho kết quả y hệt trước/sau sửa.
 - Commit hash: *(chưa commit — giao dạng patch)*
+
+## DB-SYNC-02 — Xoá/thêm trên Server thì data Menu (songs.json) đổi theo
+- Files modified: `core/integration/SongDbServerSync.js`. Files created: `tests/unit/DbSync02.verify.js`.
+- Lỗi gốc: đồng bộ chỉ THÊM, không XOÁ; còn ĐẨY ngược mọi bài máy có mà `/list` (chỉ 100 bài mới nhất) không thấy -> bài đã xoá trên Server bị Menu đẩy lên làm SỐNG LẠI, và không có cách nào xoá bài khỏi data Menu.
+- Hành vi mới: bài "từ Server" (có `songId` hoặc ghi chú `nguồn: server`) mà `/list` không thấy -> hỏi Server từng bài (`/song-full?id=` rồi `/find` theo tên); CHỈ khi Server trả lời rõ là không còn -> xoá khỏi songs.json, chép sang `data/songs.removed-by-sync.json` (giữ BPM chỉ có ở máy). Lỗi mạng/5xx/Server cũ = giữ bài. Bài chỉ có ở máy (chưa có songId) vẫn đẩy lên như cũ; bài từ Server không bao giờ bị đẩy ngược.
+- An toàn: mỗi lượt kiểm tối đa 30 bài; không xoá quá 50% kho trong một lượt (khi > 10 bài) -> chống Server rỗng/nhầm Server.
+- Kết quả `run()` thêm `removed`, `removeBlocked`, `verifyLeft` (UI hiện tại chưa hiển thị — không đổi giao diện).
+- Không đổi: ghi đè Key đã có trên máy (vẫn KHÔNG ghi đè), UI, KeyEngine, Server.
+- Architecture impact: None. Verification: `DbSync02.verify.js` 15 PASS / 0 FAIL; 11 test liên quan (SongDb/KeyServerSync/songs.json) cho kết quả y hệt trước/sau.
+- Commit hash: *(chưa commit — giao dạng patch)*
+
+## DB-MATCH-ID-02 — Menu nhận biết ĐÚNG BẢN THU đang phát (không chỉ khớp tên)
+- Files modified: `core/integration/KeyServerSync.js`, `core/integration/SongDbServerSync.js`, `core/reference/SongMatcher.js`, `app/main.js`.
+- Files created: `core/reference/RecordingDuration.js`, `tests/unit/DbMatchId02.verify.js`.
+- Lỗi gốc: Menu thấy CÙNG TÊN bài trên Server/Database là ném thẳng Key vào, dù là bản thu khác (MV / Karaoke / Lyrics / Live) thường KHÁC tone. Tên là căn cứ duy nhất; Menu không biết ID video và Server không có ca sĩ.
+- Hành vi mới: so thêm ĐỘ DÀI bài. Bài đang phát (từ Windows/MPC-HC) và bản ghi (Database `durationSec`, hoặc Server `total_duration_sec`) cùng biết độ dài mà lệch > 3 giây -> coi là bản thu khác, KHÔNG dùng Key đó, AI dò, rồi Menu gửi Key riêng lên Server. Thiếu độ dài ở một bên -> giữ cách khớp theo tên như cũ (không đủ căn cứ để bác).
+- Gửi Key bản thu thứ hai: nếu ID theo tên đã có bản KHÁC độ dài trên Server -> dùng ID riêng `makeSongId(title, artist, durationSec)`; không ghi đè bản kia (Server cũng chặn ghi đè bài đã có Key khi không có mật khẩu). Bộ nhớ đệm và danh sách "đã gửi" tách theo độ dài.
+- Đồng bộ: kéo `tongThoiLuong` (mm:ss) từ `/list`, và học độ dài của bài ngoài `/list` qua lượt kiểm từng bài (DB-SYNC-02) -> lưu `durationSec` vào songs.json (trường mới, tuỳ chọn).
+- Ngưỡng 3 giây là GIÁ TRỊ TẠM (hằng `DURATION_TOLERANCE_SEC`) — cần chỉnh theo dữ liệu thật. Hạn chế đã biết: nếu lúc bài vừa bắt đầu Windows chưa báo độ dài thì lượt đó vẫn khớp theo tên như cũ.
+- Architecture impact: None (không đổi Server, UI, KeyEngine; không đổi chữ ký hàm cũ — `durationResolver` là option mới, mặc định tắt).
+- Verification: `DbMatchId02.verify.js` 23 PASS / 0 FAIL; 63 test liên quan cho kết quả y hệt trước/sau sửa (các lỗi còn lại đã có sẵn trên main, vd KeyServerSyncC).
+- Commit hash: *(chưa commit — giao dạng patch)*

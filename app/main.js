@@ -164,11 +164,20 @@ const keyServerSync = new KeyServerSync({
             .filter((s) => s && s.songId && normalizeTitle(s.title) === nt && (!na || !s.artist || normalizeTitle(s.artist) === na))
             .map((s) => s.songId);
     },
+    // DB-MATCH-ID-02: độ dài (giây) của bài ĐANG PHÁT -> Server báo bài cùng tên nhưng khác độ dài (MV/Karaoke/Live) thì không dùng Key đó.
+    durationResolver: (title) => {
+        const h = nowPlayingDurationHint;
+        if (!h || !(h.sec > 0)) return null;
+        const { normalizeTitle } = require("../core/integration/KeyServerSync");
+        return normalizeTitle(h.title) === normalizeTitle(title) ? h.sec : null;
+    },
     isEnabled: () => {
         const s = readSettingsFile();
         return !(s && s.keyServerAutoSync === false);
     }
 });
+// DB-MATCH-ID-02: { title, sec } của bài đang phát, cập nhật ngay khi nhận sự kiện (trước khi tra Database/Server).
+let nowPlayingDurationHint = null;
 // Bài đang phát (đã chuẩn hoá) do CHÍNH main process theo dõi — renderer không được tự khai tên bài khi gửi lên server.
 let currentNowPlayingForSync = null;
 // MIDI CONTROL CORE v1.0 — wiring MỚI, độc lập hoàn toàn với AIBootstrap/EventBus ở trên.
@@ -336,6 +345,8 @@ app.whenReady().then(async () => {
 
         const { snapshot, source } = active;
         const resolved = resolveTitleArtist(snapshot, source);
+        const playingDurationSec = snapshot && snapshot.durationMs > 0 ? snapshot.durationMs / 1000 : null; // DB-MATCH-ID-02
+        nowPlayingDurationHint = resolved.title ? { title: resolved.title, sec: playingDurationSec } : null;
         {
             const tlKey = resolved.title ? resolved.title + "|" + (resolved.artist || "") : null;
             if (tlKey !== timelineSongKey) resetKeyTimeline(tlKey); // đổi bài / mất bài: bỏ kế hoạch cũ, đồng hồ bài tính lại từ đầu
@@ -347,7 +358,13 @@ app.whenReady().then(async () => {
 
         if (resolved.title) {
 
-            const song = SongMatcher.findReference(resolved.title, resolved.artist);
+            let song = SongMatcher.findReference(resolved.title, resolved.artist);
+
+            // DB-MATCH-ID-02: cùng tên nhưng khác độ dài (MV/Karaoke/Live) = bản thu khác -> không ném Key của bản kia vào, để AI dò.
+            if (song && !SongMatcher.sameRecording(song, playingDurationSec)) {
+                console.log(`[NowPlaying] Database Reject — cùng tên nhưng khác độ dài (${Math.round(song.durationSec)}s != ${Math.round(playingDurationSec)}s) (source=${source})`);
+                song = null;
+            }
 
             if (song && song.key) {
 

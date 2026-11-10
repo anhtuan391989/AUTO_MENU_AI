@@ -24,6 +24,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { durationMismatch } = require('../reference/RecordingDuration');
 
 const DEFAULT_SERVER_URL = 'https://menu-key-server.matuotluuly.workers.dev';
 
@@ -58,8 +59,10 @@ function normalizeTitle(s) {
 }
 
 // ID ổn định cho bài do Menu tự gửi (khác mã video YouTube của extension).
-function makeSongId(title, artist) {
-    const base = normalizeTitle(title) + '|' + normalizeTitle(artist);
+// DB-MATCH-ID-02: truyền thêm durationSec -> ID RIÊNG cho bản thu có độ dài đó (dùng khi cùng tên đã có bản khác độ dài trên Server).
+function makeSongId(title, artist, durationSec) {
+    const d = Number(durationSec);
+    const base = normalizeTitle(title) + '|' + normalizeTitle(artist) + (d > 0 ? '|d' + Math.round(d) : '');
     return 'app_' + crypto.createHash('sha1').update(base).digest('hex').slice(0, 16);
 }
 
@@ -119,6 +122,9 @@ class KeyServerSync {
         // DB-MATCH-STRICT-01: true = kết quả /find chỉ "khớp mờ" (tên Server KHÁC tên đang phát sau khi chuẩn hoá) KHÔNG được coi là bài này.
         // Trả { found:false, similar:{key,songId,title} } -> Menu để AI dò (và tự gửi Key riêng của bản này lên Server). main.js bật; mặc định tắt = hành vi cũ.
         this.strictTitle = opts.strictTitle === true;
+        // DB-MATCH-ID-02: (title, artist) => độ dài (giây) của bài ĐANG PHÁT nếu biết, ngược lại null. Có độ dài -> Server báo bài cùng tên mà
+        // KHÁC độ dài (> 3 giây) thì coi là bản thu khác, không dùng Key đó. Không truyền = hành vi cũ.
+        this.durationResolver = typeof opts.durationResolver === 'function' ? opts.durationResolver : null;
 
         this._cache = new Map();           // cacheKey -> { at, ttl, value }
         this._lookupInflight = new Map();  // cacheKey -> Promise
@@ -152,8 +158,18 @@ class KeyServerSync {
         return this._enabledValue;
     }
 
-    _cacheKey(title, artist) {
-        return normalizeTitle(title) + '|' + normalizeTitle(artist);
+    // Độ dài bài đang phát: ưu tiên giá trị truyền vào, sau đó hỏi durationResolver. Không biết -> null.
+    _playingDuration(title, artist, explicit) {
+        const e = Number(explicit);
+        if (e > 0) return e;
+        if (!this.durationResolver) return null;
+        try { const d = Number(this.durationResolver(title, artist)); return d > 0 ? d : null; } catch (err) { return null; }
+    }
+
+    // Cùng tên nhưng khác độ dài = hai bản thu khác nhau -> bộ nhớ đệm phải tách riêng theo độ dài.
+    _cacheKey(title, artist, durationSec) {
+        const base = normalizeTitle(title) + '|' + normalizeTitle(artist);
+        return Number(durationSec) > 0 ? base + '|d' + Math.round(Number(durationSec)) : base;
     }
 
     _cacheGet(ck) {
@@ -174,7 +190,7 @@ class KeyServerSync {
     // Chỉ đọc cache: trả kết quả "trúng" còn hạn, ngược lại null. Đồng bộ, không gọi mạng.
     peek(title, artist) {
         if (!this._enabled()) return null;
-        const v = this._cacheGet(this._cacheKey(title, artist));
+        const v = this._cacheGet(this._cacheKey(title, artist, this._playingDuration(title, artist)));
         return v && v.found ? v : null;
     }
 
@@ -197,19 +213,30 @@ class KeyServerSync {
     }
 
     // Các ID thử theo thứ tự: ID đã lưu ở máy (vd ID server/YouTube kéo về) rồi tới ID app tự sinh từ tên bài.
-    _candidateIds(title, artist) {
+    _candidateIds(title, artist, durationSec) {
         const ids = [];
+        if (Number(durationSec) > 0) ids.push(makeSongId(title, artist, durationSec)); // DB-MATCH-ID-02: ID riêng của bản thu có đúng độ dài này (nếu từng gửi)
         if (this.idResolver) {
             try { (this.idResolver(title, artist) || []).forEach((x) => { if (x && ids.indexOf(String(x)) < 0) ids.push(String(x)); }); } catch (e) { /* bỏ qua */ }
         }
         const own = makeSongId(title, artist);
         if (ids.indexOf(own) < 0) ids.push(own);
-        return ids.slice(0, 3);
+        return ids.slice(0, Number(durationSec) > 0 ? 4 : 3);
+    }
+
+    // DB-MATCH-ID-02: thông tin bài trên Server theo ID: { ok, exists, totalSec }. Lỗi/không rõ -> ok:false (người gọi coi như KHÔNG đủ căn cứ để bác).
+    async _songInfo(id) {
+        const r = await this._request('/song-full?id=' + encodeURIComponent(String(id)), { method: 'GET' }, this.lookupTimeoutMs);
+        if (!r.ok || !r.json) return { ok: false, exists: false, totalSec: null };
+        const segs = Array.isArray(r.json.doans) ? r.json.doans : [];
+        const info = r.json.thongTin || {};
+        const t = Number(info.totalSec);
+        return { ok: true, exists: segs.length > 0 || !!(info.title && info.title !== 'Chua dat ten'), totalSec: t > 0 ? t : null };
     }
 
     // { found:true,... } | { found:false,error } (lỗi mạng: dừng ngay, không thử tiếp) | null (không ID nào có bài)
-    async _lookupById(title, artist) {
-        for (const id of this._candidateIds(title, artist)) {
+    async _lookupById(title, artist, durationSec) {
+        for (const id of this._candidateIds(title, artist, durationSec)) {
             const r = await this._request('/song-full?id=' + encodeURIComponent(id), { method: 'GET' }, this.lookupTimeoutMs);
             if (!r.ok) {
                 if (r.error === 'timeout') return { found: false, error: 'timeout' }; // server chậm: không chờ thêm, báo lỗi như cũ
@@ -220,6 +247,8 @@ class KeyServerSync {
             const appKey = serverKeyToAppKey(d[0].khoa, d[0].mode);
             if (!appKey) continue;
             const info = r.json.thongTin || {};
+            // DB-MATCH-ID-02: bản ghi này có độ dài khác hẳn bài đang phát -> bản thu khác, thử ID kế tiếp
+            if (durationMismatch(info.totalSec, durationSec)) continue;
             return { found: true, key: appKey, songId: id, title: info.title || String(title), source: 'server' };
         }
         return null;
@@ -232,11 +261,12 @@ class KeyServerSync {
      *   { found:false, error:"..." }          — lỗi mạng/timeout/không đọc được
      *   { found:false, disabled:true }        — người dùng tắt đồng bộ
      */
-    async lookup(title, artist, { force = false } = {}) {
+    async lookup(title, artist, { force = false, durationSec } = {}) {
         if (!this._enabled()) return { found: false, disabled: true };
         if (normalizeTitle(title).length < 3) return { found: false };
 
-        const ck = this._cacheKey(title, artist);
+        const dur = this._playingDuration(title, artist, durationSec); // DB-MATCH-ID-02
+        const ck = this._cacheKey(title, artist, dur);
         if (!force) {
             const cached = this._cacheGet(ck);
             if (cached) return cached;
@@ -245,7 +275,7 @@ class KeyServerSync {
 
         const p = (async () => {
             // DB-ID-01: DÒ THEO ID BÀI HÁT trước (chính xác, không đoán tên). Hỏng/không có -> hỏi theo tên như cũ.
-            const byId = this.idLookup ? await this._lookupById(title, artist) : null;
+            const byId = this.idLookup ? await this._lookupById(title, artist, dur) : null;
             if (byId && byId.found) { this._cacheSet(ck, byId, HIT_TTL_MS); this._log('lookup-id|' + ck, 'Server CÓ bài theo ID ' + byId.songId + ' -> ' + byId.key); return byId; }
             if (byId && byId.error) { this._cacheSet(ck, byId, ERROR_TTL_MS); return byId; }
             const q = '/find?title=' + encodeURIComponent(String(title)) + '&artist=' + encodeURIComponent(String(artist || ''));
@@ -267,6 +297,17 @@ class KeyServerSync {
                 this._cacheSet(ck, sim, MISS_TTL_MS);
                 this._log('lookup-similar|' + ck, 'Server chỉ có bài GẦN GIỐNG "' + j.title + '" (' + (simKey || '?') + ') != "' + String(title) + '" -> không dùng, Menu tự dò Key bản này');
                 return sim;
+            }
+            if (dur && j && j.found === true && j.songId) {
+                // DB-MATCH-ID-02: tên khớp ĐÚNG nhưng độ dài bản trên Server khác bài đang phát -> bản thu khác (MV/Karaoke/Live), không dùng Key đó.
+                const si = await this._songInfo(j.songId);
+                if (si.ok && durationMismatch(si.totalSec, dur)) {
+                    const sk = serverKeyToAppKey(j.key, j.mode);
+                    const sim = { found: false, similar: { key: sk, songId: j.songId, title: j.title || null, reason: 'duration', serverDurationSec: si.totalSec } };
+                    this._cacheSet(ck, sim, MISS_TTL_MS);
+                    this._log('lookup-duration|' + ck, 'Server có "' + String(j.title || title) + '" nhưng dài ' + Math.round(si.totalSec) + 's != bài đang phát ' + Math.round(dur) + 's -> bản thu khác, Menu tự dò Key');
+                    return sim;
+                }
             }
             if (j && j.found === true) {
                 const appKey = serverKeyToAppKey(j.key, j.mode);
@@ -325,39 +366,47 @@ class KeyServerSync {
         const sk = appKeyToServerKey(key);
         if (!sk) return reject('bad-key', 'Key "' + String(key) + '" không hợp lệ');
 
+        const dur = Number(durationSec) > 0 ? Number(durationSec) : null;
         const songId = makeSongId(title, artist);
-        if (this._submitted.has(songId)) return { ok: true, reason: 'already-submitted' };
-        if (this._submitInflight.has(songId)) return this._submitInflight.get(songId);
+        const subKey = songId + (dur ? '|d' + Math.round(dur) : ''); // DB-MATCH-ID-02: cùng tên khác độ dài = hai bản thu riêng, không chặn nhau
+        if (this._submitted.has(subKey)) return { ok: true, reason: 'already-submitted' };
+        if (this._submitInflight.has(subKey)) return this._submitInflight.get(subKey);
 
-        const failedAt = this._submitFailedAt.get(songId);
+        const failedAt = this._submitFailedAt.get(subKey);
         if (failedAt !== undefined && this.now() - failedAt < SUBMIT_RETRY_COOLDOWN_MS) {
             return { ok: false, reason: 'cooldown' };
         }
 
         const p = (async () => {
             const fail = (reason, text) => {
-                this._submitFailedAt.set(songId, this.now());
+                this._submitFailedAt.set(subKey, this.now());
                 this._log('fail|' + reason + '|' + songId, 'Gửi Key lỗi (' + reason + '): ' + text + ' -> thử lại sau ' + (SUBMIT_RETRY_COOLDOWN_MS / 1000) + ' giây');
                 return { ok: false, reason };
             };
 
             // Server đã có bài (máy khác hoặc extension đã gửi) -> không gửi trùng.
-            const existing = await this.lookup(title, artist, { force: true });
+            const existing = await this.lookup(title, artist, { force: true, durationSec: dur });
             if (existing.found) {
-                this._submitted.add(songId);
+                this._submitted.add(subKey);
                 this._log('already|' + songId, 'Không gửi Key: server ĐÃ có bài "' + label + '" (' + existing.key + ')');
                 return { ok: true, reason: 'server-already-has' };
             }
             if (existing.error) return fail('lookup-failed', 'không xác minh được server (' + existing.error + '), không gửi để tránh trùng');
 
-            const dur = Number(durationSec) > 0 ? Math.round(Number(durationSec)) : null;
+            // DB-MATCH-ID-02: ID mặc định (theo tên) đã có bản thu KHÁC độ dài trên Server -> dùng ID riêng cho bản này, tránh ghi đè bản kia.
+            let sid = songId;
+            if (dur) {
+                const own = await this._songInfo(songId);
+                if (own.ok && own.exists && durationMismatch(own.totalSec, dur)) sid = makeSongId(title, artist, dur);
+            }
+            const durRounded = dur ? Math.round(dur) : null;
             const info = await this._request('/set-song-info', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    songId,
+                    songId: sid,
                     title: String(title),
-                    totalDurationSec: dur,
+                    totalDurationSec: durRounded,
                     note: artist ? ('artist: ' + String(artist) + ' | nguon: AUTO_MENU_AI') : 'nguon: AUTO_MENU_AI'
                 })
             }, this.submitTimeoutMs);
@@ -367,9 +416,9 @@ class KeyServerSync {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    songId,
+                    songId: sid,
                     startSec: 0,
-                    endSec: dur || WHOLE_SONG_END_SEC,
+                    endSec: durRounded || WHOLE_SONG_END_SEC,
                     key: sk.key,
                     mode: sk.mode,
                     weight: 1.0
@@ -377,15 +426,15 @@ class KeyServerSync {
             }, this.submitTimeoutMs);
             if (!seg.ok || !seg.json || seg.json.ok !== true) return fail('segment-failed', 'server từ chối lưu đoạn Key (' + (seg.error || ('http-' + seg.status)) + ')');
 
-            this._submitted.add(songId);
-            this._submitFailedAt.delete(songId);
+            this._submitted.add(subKey);
+            this._submitFailedAt.delete(subKey);
             // Lần hỏi tiếp theo thấy ngay bài đã có.
-            this._cacheSet(this._cacheKey(title, artist), { found: true, key: serverKeyToAppKey(sk.key, sk.mode), songId, title: String(title), source: 'server' }, HIT_TTL_MS);
-            this._log('sent|' + songId, 'ĐÃ GỬI Key lên server: "' + label + '" -> ' + serverKeyToAppKey(sk.key, sk.mode) + ' (id ' + songId + ')');
+            this._cacheSet(this._cacheKey(title, artist, dur), { found: true, key: serverKeyToAppKey(sk.key, sk.mode), songId: sid, title: String(title), source: 'server' }, HIT_TTL_MS);
+            this._log('sent|' + sid, 'ĐÃ GỬI Key lên server: "' + label + '" -> ' + serverKeyToAppKey(sk.key, sk.mode) + ' (id ' + sid + (sid !== songId ? ', bản thu riêng theo độ dài' : '') + ')');
             return { ok: true, reason: 'submitted' };
-        })().finally(() => { this._submitInflight.delete(songId); });
+        })().finally(() => { this._submitInflight.delete(subKey); });
 
-        this._submitInflight.set(songId, p);
+        this._submitInflight.set(subKey, p);
         return p;
     }
 }
