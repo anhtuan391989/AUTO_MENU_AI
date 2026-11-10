@@ -37,3 +37,12 @@
   TaskQueue, EventBus, Plugin Controller, Telemetry, Tests, Performance, Kiến trúc, Adaptive
   Lock) làm nền tảng nội dung cho các file tài liệu này.
 - Commit hash: *(điền sau khi push xong)*
+
+## DB-COMPETE-01 — AI tự cạnh tranh với Key Database/Server (không cần bấm Auto Detect)
+- Files modified: `ui/js/renderer.js` (1 khối nhỏ trong callback `KeyEngine.detectOnce` + 1 điều kiện hiển thị dòng "AI Detect").
+- Files created: `tests/unit/DbCompete01.verify.js`.
+- Hành vi: bài có Key Database/Server -> vẫn hiện `ACTIVE: DATABASE - <tone>` và gửi Key đó xuống Auto-Tune; AI vẫn dò liên tục. Mỗi Key AI CHỐT được so với Database bằng luật `__aiBeatsDatabase` có sẵn (khác Key, tin cậy >= 0.85, không phải láng giềng cách 5). Đạt -> AI thay Database cho bài này. Manual vẫn cao nhất. Không ghi gì lên Key Server.
+- Dòng "AI Detect" ở nguồn Database hiện LISTENING cho tới khi AI dò được thật (trước đây hiện Key hạt giống).
+- Architecture impact: None (dùng đúng cơ chế `__dbBypass` có sẵn). Không đụng KeyEngine/BPM/MOD, HTML, CSS.
+- Verification: `DbCompete01.verify.js` 12 PASS / 0 FAIL; 94 test có nhắc `renderer` cho kết quả y hệt trước/sau sửa.
+- Commit hash: *(chưa commit — giao dạng patch)*

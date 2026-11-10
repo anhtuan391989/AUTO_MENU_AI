@@ -1754,7 +1754,7 @@ function refreshKeySourceDisplay() {
         const showProvisional = keySource.ai.provisional && keySource.ai.provisional !== keySource.ai.value;
         // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — chưa có kết quả AI thật nào (kể cả
         // provisional) -> hiện LISTENING, không hiện giá trị hạt giống nội bộ.
-        aiKeyDetectLineEl.textContent = (!keyEverDetected && !keySource.ai.provisional && getActiveSourceName() === "ai")
+        aiKeyDetectLineEl.textContent = (!keyEverDetected && !keySource.ai.provisional && getActiveSourceName() !== "manual") // DB-COMPETE-01: nguồn Database cũng hiện LISTENING (không hiện Key hạt giống như thể AI đã dò)
             ? "AI Detect: LISTENING"
             : showProvisional
                 ? `AI Detect: ${keySource.ai.provisional} (đang dò...)`
@@ -2270,6 +2270,15 @@ function startAiRealtimeLoop() {
                 if (typeof aiDiag === "function") aiDiag("DB_BYPASS_REJECTED", { db: keySource.songDb.value, ai: result.key, conf: result.confidence, why: __v.why });
                 if (getActiveSourceName() === "songDb") applyActiveKeyToPlugin("Song Database"); // trả ô Key từ LISTENING về Key Database (cùng Key nên không gửi lại Plugin)
             }
+        }
+        // TASK DB-COMPETE-01 — bài lấy Key từ Database/Server: AI KHÔNG cần người dùng bấm Auto Detect mới được cạnh tranh.
+        // Mỗi Key AI CHỐT (đã qua cổng của KeyEngine) được so với Key Database bằng đúng luật __aiBeatsDatabase (khác Key,
+        // tin cậy >= 0.85, không phải cặp láng giềng cách 5). Đạt -> AI thay Database cho bài này; không đạt -> giữ Database.
+        // Manual vẫn cao nhất (không bị đụng). Không ghi gì lên Server.
+        if (keySource.songDb.active && !__dbBypass.active && !(keySource.manual && (keySource.manual.active || keySource.manual.sending))
+            && __aiBeatsDatabase(result.key, result.confidence, keySource.songDb.value).ok) {
+            __dbBypass.active = true;
+            if (typeof aiDiag === "function") aiDiag("DB_BYPASS_AUTO_ON", { db: keySource.songDb.value, ai: result.key, conf: result.confidence });
         }
         if (typeof __aiMemoryRemember === "function") __aiMemoryRemember(typeof lastNowPlayingKey !== "undefined" ? lastNowPlayingKey : null, result.key); // A117: Học BẬT -> nhớ Key theo bài
         keyEverDetected = true; // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — có kết quả THẬT từ audio
