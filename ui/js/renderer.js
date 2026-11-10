@@ -3214,6 +3214,7 @@ function __debugLogKeyConfidence() {
 // bên dưới. Giữ biến ở scope module để không tạo trùng nếu hàm được gọi lại.
 let __micSource = null;
 let __dawMasterSource = null;
+let __lastKnownMasterDeviceId = ""; // TASK MASTER-VU-01 — theo dõi đổi MASTER Input từ Setup khi app đang chạy
 
 function startMicAndMasterVu() {
     // Mic VU — nguồn HOÀN TOÀN riêng, KHÔNG bao giờ nối onFrame/BPMEngine/KeyEngine.
@@ -3251,17 +3252,27 @@ function startMicAndMasterVu() {
         __lastKnownMicDeviceId = typeof AudioSource.getMicDeviceId === "function" ? AudioSource.getMicDeviceId() : null;
     }
 
-    // Master VU — DAW_MASTER chưa có native capture trong B58 (xem B58-REPORT.md). Gọi
-    // start() vẫn an toàn (no-op có log), UI phản ánh đúng trạng thái NO_DEVICE, KHÔNG
-    // lấy số liệu từ SYSTEM_AUDIO để giả lập.
+    // Master VU — TASK MASTER-VU-01: đường âm thanh RIÊNG (selectedMasterDeviceId = đầu vào soundcard
+    // nhận lại Main/Output 1+2). Chưa chọn thiết bị => NO_DEVICE + vạch "nodata" như cũ. KHÔNG lấy
+    // số liệu từ MIC/SYSTEM_AUDIO, KHÔNG nối AI.
     if (!__dawMasterSource && typeof AudioSource !== "undefined") {
         __dawMasterSource = AudioSource.createDawMasterSource();
         const masterMeter = document.getElementById("vu-master-fill");
         if (masterMeter) masterMeter.classList.add("vu-bar--nodata");
-        __dawMasterSource.onLevel(() => {
-            // luôn 0%, giữ nguyên class vu-bar--nodata — không animate giả.
-            if (masterMeter) masterMeter.style.width = "0%";
+        __dawMasterSource.onLevel(({ vuPercent, noDevice }) => {
+            if (!masterMeter) return;
+            if (noDevice) { masterMeter.style.width = "0%"; masterMeter.classList.add("vu-bar--nodata"); return; }
+            masterMeter.classList.remove("vu-bar--nodata");
+            masterMeter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
         });
+        __dawMasterSource.onStateChange((state) => {
+            if (!masterMeter) return;
+            if (state !== AudioSourceState.RUNNING) { masterMeter.style.width = "0%"; masterMeter.classList.add("vu-bar--nodata"); }
+        });
+        __dawMasterSource.onDeviceLost(() => {
+            if (masterMeter) { masterMeter.style.width = "0%"; masterMeter.classList.add("vu-bar--nodata"); }
+        });
+        __lastKnownMasterDeviceId = typeof AudioSource.getMasterDeviceId === "function" ? AudioSource.getMasterDeviceId() : "";
         __dawMasterSource.start();
     }
 }
@@ -3704,6 +3715,17 @@ window.electronAPI?.onSetupChanged?.(() => {
             __lastKnownMicDeviceId = newMicDeviceId;
             __micSource.stop();
             __micSource.start().catch((err) => console.warn("[Audio][MIC] Không mở được mic sau khi đổi thiết bị:", err));
+        }
+    }
+
+    // TASK MASTER-VU-01 — MASTER Input đổi ở Setup: ngắt rồi mở lại với thiết bị mới (None => NO_DEVICE).
+    if (typeof __dawMasterSource !== "undefined" && __dawMasterSource && typeof AudioSource !== "undefined" && typeof AudioSource.getMasterDeviceId === "function") {
+        const newMasterId = AudioSource.getMasterDeviceId();
+        if (newMasterId !== __lastKnownMasterDeviceId) {
+            console.log("[Audio][MASTER] MASTER Input vừa đổi ở Setup -> mở lại với thiết bị mới.");
+            __lastKnownMasterDeviceId = newMasterId;
+            __dawMasterSource.stop();
+            __dawMasterSource.start();
         }
     }
 

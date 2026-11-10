@@ -81,6 +81,13 @@
         return getSetting("selectedMicDeviceId", ""); // "" => dùng mic mặc định hệ thống
     }
 
+    // TASK MASTER-VU-01 — Master device: key RIÊNG "selectedMasterDeviceId" (Setup > "MASTER Input").
+    // Rỗng => DAW_MASTER = NO_DEVICE (không fallback sang MIC/SYSTEM_AUDIO/selectedSoundcardId).
+    function getMasterDeviceId() {
+        if (typeof getSetting !== "function") return "";
+        return getSetting("selectedMasterDeviceId", "");
+    }
+
     function nowSeconds(audioContext) {
         // Timestamp THẬT lấy từ AudioContext.currentTime khi có; fallback duy nhất
         // là performance.now() (không phải hard-code số 0/giá trị giả).
@@ -340,38 +347,42 @@
     }
 
     /* ---------------------------------------------------------
-       createDawMasterSource — TASK B58 Mục 9: architecture boundary ONLY.
-       KHÔNG có native capture trong B58 (không có WASAPI addon, không mượn
-       SYSTEM_AUDIO để giả lập). State CỐ ĐỊNH NO_DEVICE — start() là no-op
-       an toàn, không throw, không crash, chỉ log rõ NOT_IMPLEMENTED.
+       createDawMasterSource — TASK MASTER-VU-01 (thay cho stub B58 "NOT_IMPLEMENTED").
+       Đường âm thanh RIÊNG cho MASTER VU: đọc 1 đầu vào soundcard (selectedMasterDeviceId) đang nhận
+       lại Main/Output 1+2 của DAW. Dùng đúng cơ chế getUserMedia + AnalyserNode của MIC (cùng công
+       thức RMS/dBFS/VU), KHÔNG nối onFrame tới AI, KHÔNG mượn số liệu MIC/SYSTEM_AUDIO.
+       Chưa chọn thiết bị (key rỗng) => giữ NGUYÊN hành vi cũ: NO_DEVICE + 1 level rỗng noDevice:true.
        --------------------------------------------------------- */
     function createDawMasterSource() {
+        const inner = createMediaDeviceSource(AudioSourceType.DAW_MASTER, getMasterDeviceId, {
+            fftSize: 1024,
+            requireExplicitDevice: true, // không rơi về mic mặc định
+            autoReconnect: true,         // rút/cắm lại soundcard thì tự nối lại
+        });
         const levelListeners = [];
-        const deviceLostListeners = [];
         let warned = false;
+        const configured = () => !!getMasterDeviceId();
 
         function start() {
+            if (configured()) return inner.start();
             if (!warned) {
-                console.warn("[AudioSource:DAW_MASTER] NOT_IMPLEMENTED trong B58 — chưa có native capture. " +
-                    "Master VU sẽ giữ NO_DEVICE. Xem B58-REPORT.md mục DAW_MASTER status.");
+                console.warn("[AudioSource:DAW_MASTER] Chưa chọn MASTER Input (Setup) — MASTER VU giữ NO_DEVICE.");
                 warned = true;
             }
-            // Phát 1 level rỗng đúng contract (rms=0, timestamp thật) để UI có thể vẽ
-            // trạng thái "NO_DEVICE" nhất quán, KHÔNG lấy số liệu từ SYSTEM_AUDIO.
             for (const cb of levelListeners) {
                 try { cb({ sourceType: AudioSourceType.DAW_MASTER, rms: 0, dbfs: -Infinity, peak: 0, vuPercent: 0, timestamp: performance.now() / 1000, noDevice: true }); } catch (e) { console.error(e); }
             }
+            return Promise.resolve();
         }
-        function stop() {}
-
         return {
             type: AudioSourceType.DAW_MASTER,
-            getState: () => AudioSourceState.NO_DEVICE,
+            getState: () => (configured() ? inner.getState() : AudioSourceState.NO_DEVICE),
             start,
-            stop,
-            onLevel: (cb) => levelListeners.push(cb),
-            onFrame: () => {}, // KHÔNG BAO GIỜ có frame — không tồn tại capture
-            onDeviceLost: (cb) => deviceLostListeners.push(cb),
+            stop: () => inner.stop(),
+            onLevel: (cb) => { levelListeners.push(cb); inner.onLevel(cb); },
+            onFrame: () => {}, // MASTER không bao giờ cấp frame cho AI
+            onDeviceLost: (cb) => inner.onDeviceLost(cb),
+            onStateChange: (cb) => inner.onStateChange(cb),
         };
     }
 
@@ -642,6 +653,7 @@
         FxMusicState, FxActionState, FX_AUTO_DEFAULTS,
         getSystemAudioDeviceId, // export để renderer.js dùng lại đúng 1 nguồn sự thật
         setSystemAudioDeviceId, // TASK A65 — cấu hình thủ công (DevTools) cho tới khi có Setup UI riêng
+        getMasterDeviceId, // TASK MASTER-VU-01 — renderer.js dùng để biết MASTER Input đổi ở Setup
         getMicDeviceId, // TASK B71 — export để renderer.js (onSetupChanged) biết deviceId MIC mới nhất
                         // khi Setup lưu "selectedMicDeviceId", dùng để quyết định có cần
                         // stop()/start() lại __micSource hay không (giống hệt cơ chế C62 đã có

@@ -1,0 +1,231 @@
+--- a/ui/js/appSettings.js	2026-11-09 12:04:24.129990390 +0000
++++ b/ui/js/appSettings.js	2026-11-09 16:55:21.327639172 +0000
+@@ -25,6 +25,10 @@
+     // (initMicInputSection()). Mặc định rỗng => dùng mic mặc định của hệ điều hành (giữ nguyên
+     // hành vi từ B58, không đổi).
+     selectedMicDeviceId: "",
++    // TASK MASTER-VU-01 — đường âm thanh RIÊNG cho MASTER VU trên Menu: đầu vào soundcard đang mang tín hiệu
++    // Main/Output 1+2 của DAW (AudioSource.createDawMasterSource() đọc qua getMasterDeviceId()). TÁCH BIỆT
++    // khỏi MIC và SYSTEM_AUDIO (không dùng chung key, không fallback). Rỗng => MASTER VU = NO_DEVICE (như cũ).
++    selectedMasterDeviceId: "",
+     selectedBrowser: "",
+     selectedBrowserPath: "",
+     ahkExePath: "",
+--- a/ui/js/audioSource.js	2026-11-09 12:04:24.129990390 +0000
++++ b/ui/js/audioSource.js	2026-11-09 16:55:21.329761880 +0000
+@@ -81,6 +81,13 @@
+         return getSetting("selectedMicDeviceId", ""); // "" => dùng mic mặc định hệ thống
+     }
+ 
++    // TASK MASTER-VU-01 — Master device: key RIÊNG "selectedMasterDeviceId" (Setup > "MASTER Input").
++    // Rỗng => DAW_MASTER = NO_DEVICE (không fallback sang MIC/SYSTEM_AUDIO/selectedSoundcardId).
++    function getMasterDeviceId() {
++        if (typeof getSetting !== "function") return "";
++        return getSetting("selectedMasterDeviceId", "");
++    }
++
+     function nowSeconds(audioContext) {
+         // Timestamp THẬT lấy từ AudioContext.currentTime khi có; fallback duy nhất
+         // là performance.now() (không phải hard-code số 0/giá trị giả).
+@@ -340,38 +347,42 @@
+     }
+ 
+     /* ---------------------------------------------------------
+-       createDawMasterSource — TASK B58 Mục 9: architecture boundary ONLY.
+-       KHÔNG có native capture trong B58 (không có WASAPI addon, không mượn
+-       SYSTEM_AUDIO để giả lập). State CỐ ĐỊNH NO_DEVICE — start() là no-op
+-       an toàn, không throw, không crash, chỉ log rõ NOT_IMPLEMENTED.
++       createDawMasterSource — TASK MASTER-VU-01 (thay cho stub B58 "NOT_IMPLEMENTED").
++       Đường âm thanh RIÊNG cho MASTER VU: đọc 1 đầu vào soundcard (selectedMasterDeviceId) đang nhận
++       lại Main/Output 1+2 của DAW. Dùng đúng cơ chế getUserMedia + AnalyserNode của MIC (cùng công
++       thức RMS/dBFS/VU), KHÔNG nối onFrame tới AI, KHÔNG mượn số liệu MIC/SYSTEM_AUDIO.
++       Chưa chọn thiết bị (key rỗng) => giữ NGUYÊN hành vi cũ: NO_DEVICE + 1 level rỗng noDevice:true.
+        --------------------------------------------------------- */
+     function createDawMasterSource() {
++        const inner = createMediaDeviceSource(AudioSourceType.DAW_MASTER, getMasterDeviceId, {
++            fftSize: 1024,
++            requireExplicitDevice: true, // không rơi về mic mặc định
++            autoReconnect: true,         // rút/cắm lại soundcard thì tự nối lại
++        });
+         const levelListeners = [];
+-        const deviceLostListeners = [];
+         let warned = false;
++        const configured = () => !!getMasterDeviceId();
+ 
+         function start() {
++            if (configured()) return inner.start();
+             if (!warned) {
+-                console.warn("[AudioSource:DAW_MASTER] NOT_IMPLEMENTED trong B58 — chưa có native capture. " +
+-                    "Master VU sẽ giữ NO_DEVICE. Xem B58-REPORT.md mục DAW_MASTER status.");
++                console.warn("[AudioSource:DAW_MASTER] Chưa chọn MASTER Input (Setup) — MASTER VU giữ NO_DEVICE.");
+                 warned = true;
+             }
+-            // Phát 1 level rỗng đúng contract (rms=0, timestamp thật) để UI có thể vẽ
+-            // trạng thái "NO_DEVICE" nhất quán, KHÔNG lấy số liệu từ SYSTEM_AUDIO.
+             for (const cb of levelListeners) {
+                 try { cb({ sourceType: AudioSourceType.DAW_MASTER, rms: 0, dbfs: -Infinity, peak: 0, vuPercent: 0, timestamp: performance.now() / 1000, noDevice: true }); } catch (e) { console.error(e); }
+             }
++            return Promise.resolve();
+         }
+-        function stop() {}
+-
+         return {
+             type: AudioSourceType.DAW_MASTER,
+-            getState: () => AudioSourceState.NO_DEVICE,
++            getState: () => (configured() ? inner.getState() : AudioSourceState.NO_DEVICE),
+             start,
+-            stop,
+-            onLevel: (cb) => levelListeners.push(cb),
+-            onFrame: () => {}, // KHÔNG BAO GIỜ có frame — không tồn tại capture
+-            onDeviceLost: (cb) => deviceLostListeners.push(cb),
++            stop: () => inner.stop(),
++            onLevel: (cb) => { levelListeners.push(cb); inner.onLevel(cb); },
++            onFrame: () => {}, // MASTER không bao giờ cấp frame cho AI
++            onDeviceLost: (cb) => inner.onDeviceLost(cb),
++            onStateChange: (cb) => inner.onStateChange(cb),
+         };
+     }
+ 
+@@ -642,6 +653,7 @@
+         FxMusicState, FxActionState, FX_AUTO_DEFAULTS,
+         getSystemAudioDeviceId, // export để renderer.js dùng lại đúng 1 nguồn sự thật
+         setSystemAudioDeviceId, // TASK A65 — cấu hình thủ công (DevTools) cho tới khi có Setup UI riêng
++        getMasterDeviceId, // TASK MASTER-VU-01 — renderer.js dùng để biết MASTER Input đổi ở Setup
+         getMicDeviceId, // TASK B71 — export để renderer.js (onSetupChanged) biết deviceId MIC mới nhất
+                         // khi Setup lưu "selectedMicDeviceId", dùng để quyết định có cần
+                         // stop()/start() lại __micSource hay không (giống hệt cơ chế C62 đã có
+--- a/ui/js/renderer.js	2026-11-09 16:54:35.795355803 +0000
++++ b/ui/js/renderer.js	2026-11-09 16:55:32.782371693 +0000
+@@ -3214,6 +3214,7 @@
+ // bên dưới. Giữ biến ở scope module để không tạo trùng nếu hàm được gọi lại.
+ let __micSource = null;
+ let __dawMasterSource = null;
++let __lastKnownMasterDeviceId = ""; // TASK MASTER-VU-01 — theo dõi đổi MASTER Input từ Setup khi app đang chạy
+ 
+ function startMicAndMasterVu() {
+     // Mic VU — nguồn HOÀN TOÀN riêng, KHÔNG bao giờ nối onFrame/BPMEngine/KeyEngine.
+@@ -3251,17 +3252,27 @@
+         __lastKnownMicDeviceId = typeof AudioSource.getMicDeviceId === "function" ? AudioSource.getMicDeviceId() : null;
+     }
+ 
+-    // Master VU — DAW_MASTER chưa có native capture trong B58 (xem B58-REPORT.md). Gọi
+-    // start() vẫn an toàn (no-op có log), UI phản ánh đúng trạng thái NO_DEVICE, KHÔNG
+-    // lấy số liệu từ SYSTEM_AUDIO để giả lập.
++    // Master VU — TASK MASTER-VU-01: đường âm thanh RIÊNG (selectedMasterDeviceId = đầu vào soundcard
++    // nhận lại Main/Output 1+2). Chưa chọn thiết bị => NO_DEVICE + vạch "nodata" như cũ. KHÔNG lấy
++    // số liệu từ MIC/SYSTEM_AUDIO, KHÔNG nối AI.
+     if (!__dawMasterSource && typeof AudioSource !== "undefined") {
+         __dawMasterSource = AudioSource.createDawMasterSource();
+         const masterMeter = document.getElementById("vu-master-fill");
+         if (masterMeter) masterMeter.classList.add("vu-bar--nodata");
+-        __dawMasterSource.onLevel(() => {
+-            // luôn 0%, giữ nguyên class vu-bar--nodata — không animate giả.
+-            if (masterMeter) masterMeter.style.width = "0%";
++        __dawMasterSource.onLevel(({ vuPercent, noDevice }) => {
++            if (!masterMeter) return;
++            if (noDevice) { masterMeter.style.width = "0%"; masterMeter.classList.add("vu-bar--nodata"); return; }
++            masterMeter.classList.remove("vu-bar--nodata");
++            masterMeter.style.width = Math.max(0, Math.min(100, vuPercent)) + "%";
+         });
++        __dawMasterSource.onStateChange((state) => {
++            if (!masterMeter) return;
++            if (state !== AudioSourceState.RUNNING) { masterMeter.style.width = "0%"; masterMeter.classList.add("vu-bar--nodata"); }
++        });
++        __dawMasterSource.onDeviceLost(() => {
++            if (masterMeter) { masterMeter.style.width = "0%"; masterMeter.classList.add("vu-bar--nodata"); }
++        });
++        __lastKnownMasterDeviceId = typeof AudioSource.getMasterDeviceId === "function" ? AudioSource.getMasterDeviceId() : "";
+         __dawMasterSource.start();
+     }
+ }
+@@ -3707,6 +3718,17 @@
+         }
+     }
+ 
++    // TASK MASTER-VU-01 — MASTER Input đổi ở Setup: ngắt rồi mở lại với thiết bị mới (None => NO_DEVICE).
++    if (typeof __dawMasterSource !== "undefined" && __dawMasterSource && typeof AudioSource !== "undefined" && typeof AudioSource.getMasterDeviceId === "function") {
++        const newMasterId = AudioSource.getMasterDeviceId();
++        if (newMasterId !== __lastKnownMasterDeviceId) {
++            console.log("[Audio][MASTER] MASTER Input vừa đổi ở Setup -> mở lại với thiết bị mới.");
++            __lastKnownMasterDeviceId = newMasterId;
++            __dawMasterSource.stop();
++            __dawMasterSource.start();
++        }
++    }
++
+     // TASK B72 — Audio Output: chỉ áp dụng lại khi lựa chọn thực sự đổi (tránh setSinkId lặp).
+     if (typeof SoundEffectEngine !== "undefined" &&
+         (getSetting?.("selectedAudioOutputDeviceId", "") || "") !== __lastKnownOutputDeviceId) {
+--- a/ui/js/setup.js	2026-11-09 12:04:24.130720857 +0000
++++ b/ui/js/setup.js	2026-11-09 16:55:21.334157908 +0000
+@@ -276,6 +276,7 @@
+     initSoundcardSection();
+     initSystemAudioSection(); // TASK A71
+     initMicSection(); // TASK A76-FIX
++    initMasterInputSection(); // TASK MASTER-VU-01
+     initOutputSection(); // TASK A76-FIX
+     initModal("openMidiModal", "midiModal", "closeMidiBtn");
+     initMidiSection();
+@@ -1801,6 +1802,53 @@
+     el.className = cls;
+ }
+ 
++/* ================= MASTER INPUT (TASK MASTER-VU-01) — route riêng: audioinput -> selectedMasterDeviceId -> createDawMasterSource() ================= */
++// Card dựng bằng JS ngay sau card "MIC Input" (KHÔNG đổi setup.html). Không dùng chung key với MIC/SYSTEM_AUDIO.
++function updateMasterStatusBadge(foundInRealList) {
++    const savedId = getSetting("selectedMasterDeviceId");
++    const badge = document.getElementById("masterStatusBadge");
++    if (!badge) return;
++    if (!savedId) { badge.textContent = "⚠ Chưa chọn MASTER Input (MASTER VU đứng im)"; badge.className = "badge badge-warn"; }
++    else if (foundInRealList) { badge.textContent = "● Đã chọn MASTER Input"; badge.className = "badge badge-live"; }
++    else { badge.textContent = "⚠ MASTER đã chọn không còn khả dụng"; badge.className = "badge badge-warn"; }
++}
++
++function initMasterInputSection() {
++    const micSel = document.getElementById("micSelect");
++    if (!micSel || document.getElementById("masterSelect")) return; // thiếu card MIC, hoặc đã dựng rồi
++    const anchor = micSel.closest(".panel-card");
++    if (!anchor) return;
++    const card = document.createElement("div");
++    card.className = "panel-card";
++    card.innerHTML = '<div class="panel-card-title">🎚 MASTER Input <span class="badge badge-live">Nguồn cho MASTER VU</span></div>'
++        + '<p class="hint-text">Đường âm thanh <b>RIÊNG</b> cho thanh MASTER trên Menu — chọn đầu vào của soundcard đang nhận lại '
++        + '<b>Output 1 + 2</b> (Main của DAW; thường là kênh Loopback/Return của soundcard). Tách biệt hoàn toàn khỏi MIC và SYSTEM_AUDIO. '
++        + 'Chưa chọn = MASTER VU đứng im.</p>'
++        + '<div style="margin-bottom:10px;"><span id="masterStatusBadge" class="badge badge-warn">⚠ Chưa chọn MASTER Input</span></div>'
++        + '<select id="masterSelect" class="ph-select"><option value="">— None / Chưa chọn thiết bị —</option></select>'
++        + '<div class="row-buttons"><button id="btnSelectMaster" class="setup-btn">Chọn MASTER Input</button>'
++        + '<button id="btnClearMaster" class="setup-btn">Đặt về None</button></div>';
++    anchor.insertAdjacentElement("afterend", card);
++
++    const select = document.getElementById("masterSelect");
++    const PLACEHOLDER = "— None / Chưa chọn thiết bị —";
++    const refresh = (val) => populateSoundcardOptions(select, val, PLACEHOLDER, "audioinput").then(({ foundInRealList }) => updateMasterStatusBadge(foundInRealList));
++    refresh(getSetting("selectedMasterDeviceId"));
++
++    document.getElementById("btnSelectMaster")?.addEventListener("click", () => {
++        saveSetting("selectedMasterDeviceId", select.value || ""); // chỉ ghi ĐÚNG 1 key (MASTER)
++        refresh(select.value);
++        notifySetupChanged(); // Menu tự mở lại MASTER VU với thiết bị mới
++        alert(select.value ? "Đã lưu MASTER Input." : "Đã đặt MASTER về None (MASTER VU đứng im).");
++    });
++    document.getElementById("btnClearMaster")?.addEventListener("click", () => {
++        select.value = "";
++        saveSetting("selectedMasterDeviceId", "");
++        updateMasterStatusBadge(false);
++        notifySetupChanged();
++    });
++}
++
+ function initMicSection() {
+     const select = document.getElementById("micSelect");
+     if (!select) return;
+@@ -2123,7 +2171,7 @@
+     "selectedDAW", "selectedAutoKey", "selectedAutoTune", "selectedBrowser", "selectedSoundcard",
+     "autokey1", "autokey2", "autotunekey", "chromatic", "launchDAW",
+     // bổ sung (preset cũ thiếu các trường này vẫn nạp bình thường — chỉ áp những trường có mặt)
+-    "selectedSoundcardId", "selectedSystemAudioDeviceId", "selectedMicDeviceId",
++    "selectedSoundcardId", "selectedSystemAudioDeviceId", "selectedMicDeviceId", "selectedMasterDeviceId",
+     "selectedAudioOutputDeviceId", "midiOutputPort", "selectedBrowserPath", "selectedDAWPath"
+ ];
+ 

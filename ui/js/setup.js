@@ -276,6 +276,7 @@ function initSetupPage() {
     initSoundcardSection();
     initSystemAudioSection(); // TASK A71
     initMicSection(); // TASK A76-FIX
+    initMasterInputSection(); // TASK MASTER-VU-01
     initOutputSection(); // TASK A76-FIX
     initModal("openMidiModal", "midiModal", "closeMidiBtn");
     initMidiSection();
@@ -1801,6 +1802,53 @@ function renderMicStateBadge(payload) {
     el.className = cls;
 }
 
+/* ================= MASTER INPUT (TASK MASTER-VU-01) — route riêng: audioinput -> selectedMasterDeviceId -> createDawMasterSource() ================= */
+// Card dựng bằng JS ngay sau card "MIC Input" (KHÔNG đổi setup.html). Không dùng chung key với MIC/SYSTEM_AUDIO.
+function updateMasterStatusBadge(foundInRealList) {
+    const savedId = getSetting("selectedMasterDeviceId");
+    const badge = document.getElementById("masterStatusBadge");
+    if (!badge) return;
+    if (!savedId) { badge.textContent = "⚠ Chưa chọn MASTER Input (MASTER VU đứng im)"; badge.className = "badge badge-warn"; }
+    else if (foundInRealList) { badge.textContent = "● Đã chọn MASTER Input"; badge.className = "badge badge-live"; }
+    else { badge.textContent = "⚠ MASTER đã chọn không còn khả dụng"; badge.className = "badge badge-warn"; }
+}
+
+function initMasterInputSection() {
+    const micSel = document.getElementById("micSelect");
+    if (!micSel || document.getElementById("masterSelect")) return; // thiếu card MIC, hoặc đã dựng rồi
+    const anchor = micSel.closest(".panel-card");
+    if (!anchor) return;
+    const card = document.createElement("div");
+    card.className = "panel-card";
+    card.innerHTML = '<div class="panel-card-title">🎚 MASTER Input <span class="badge badge-live">Nguồn cho MASTER VU</span></div>'
+        + '<p class="hint-text">Đường âm thanh <b>RIÊNG</b> cho thanh MASTER trên Menu — chọn đầu vào của soundcard đang nhận lại '
+        + '<b>Output 1 + 2</b> (Main của DAW; thường là kênh Loopback/Return của soundcard). Tách biệt hoàn toàn khỏi MIC và SYSTEM_AUDIO. '
+        + 'Chưa chọn = MASTER VU đứng im.</p>'
+        + '<div style="margin-bottom:10px;"><span id="masterStatusBadge" class="badge badge-warn">⚠ Chưa chọn MASTER Input</span></div>'
+        + '<select id="masterSelect" class="ph-select"><option value="">— None / Chưa chọn thiết bị —</option></select>'
+        + '<div class="row-buttons"><button id="btnSelectMaster" class="setup-btn">Chọn MASTER Input</button>'
+        + '<button id="btnClearMaster" class="setup-btn">Đặt về None</button></div>';
+    anchor.insertAdjacentElement("afterend", card);
+
+    const select = document.getElementById("masterSelect");
+    const PLACEHOLDER = "— None / Chưa chọn thiết bị —";
+    const refresh = (val) => populateSoundcardOptions(select, val, PLACEHOLDER, "audioinput").then(({ foundInRealList }) => updateMasterStatusBadge(foundInRealList));
+    refresh(getSetting("selectedMasterDeviceId"));
+
+    document.getElementById("btnSelectMaster")?.addEventListener("click", () => {
+        saveSetting("selectedMasterDeviceId", select.value || ""); // chỉ ghi ĐÚNG 1 key (MASTER)
+        refresh(select.value);
+        notifySetupChanged(); // Menu tự mở lại MASTER VU với thiết bị mới
+        alert(select.value ? "Đã lưu MASTER Input." : "Đã đặt MASTER về None (MASTER VU đứng im).");
+    });
+    document.getElementById("btnClearMaster")?.addEventListener("click", () => {
+        select.value = "";
+        saveSetting("selectedMasterDeviceId", "");
+        updateMasterStatusBadge(false);
+        notifySetupChanged();
+    });
+}
+
 function initMicSection() {
     const select = document.getElementById("micSelect");
     if (!select) return;
@@ -2123,7 +2171,7 @@ const PRESET_FIELDS = [
     "selectedDAW", "selectedAutoKey", "selectedAutoTune", "selectedBrowser", "selectedSoundcard",
     "autokey1", "autokey2", "autotunekey", "chromatic", "launchDAW",
     // bổ sung (preset cũ thiếu các trường này vẫn nạp bình thường — chỉ áp những trường có mặt)
-    "selectedSoundcardId", "selectedSystemAudioDeviceId", "selectedMicDeviceId",
+    "selectedSoundcardId", "selectedSystemAudioDeviceId", "selectedMicDeviceId", "selectedMasterDeviceId",
     "selectedAudioOutputDeviceId", "midiOutputPort", "selectedBrowserPath", "selectedDAWPath"
 ];
 

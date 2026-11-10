@@ -25,6 +25,10 @@ const DEFAULT_APP_SETTINGS = {
     // (initMicInputSection()). Mặc định rỗng => dùng mic mặc định của hệ điều hành (giữ nguyên
     // hành vi từ B58, không đổi).
     selectedMicDeviceId: "",
+    // TASK MASTER-VU-01 — đường âm thanh RIÊNG cho MASTER VU trên Menu: đầu vào soundcard đang mang tín hiệu
+    // Main/Output 1+2 của DAW (AudioSource.createDawMasterSource() đọc qua getMasterDeviceId()). TÁCH BIỆT
+    // khỏi MIC và SYSTEM_AUDIO (không dùng chung key, không fallback). Rỗng => MASTER VU = NO_DEVICE (như cũ).
+    selectedMasterDeviceId: "",
     selectedBrowser: "",
     selectedBrowserPath: "",
     ahkExePath: "",
