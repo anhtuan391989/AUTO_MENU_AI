@@ -1,0 +1,141 @@
+diff --git a/AI_BOOT.md/CHANGELOG_AI.md b/AI_BOOT.md/CHANGELOG_AI.md
+index 630eb3d..a18e1fc 100644
+--- a/AI_BOOT.md/CHANGELOG_AI.md
++++ b/AI_BOOT.md/CHANGELOG_AI.md
+@@ -46,3 +46,12 @@
+ - Architecture impact: None (dùng đúng cơ chế `__dbBypass` có sẵn). Không đụng KeyEngine/BPM/MOD, HTML, CSS.
+ - Verification: `DbCompete01.verify.js` 12 PASS / 0 FAIL; 94 test có nhắc `renderer` cho kết quả y hệt trước/sau sửa.
+ - Commit hash: *(chưa commit — giao dạng patch)*
++
++## DB-MATCH-STRICT-01 — Key Server chỉ khớp MỜ tên thì không dùng làm Key bài đang phát
++- Files modified: `core/integration/KeyServerSync.js` (option mới `strictTitle`, 1 khối trong `lookup()`), `app/main.js` (1 dòng bật `strictTitle: true`).
++- Files created: `tests/unit/KeyServerStrict01.verify.js`.
++- Lỗi gốc: route `/find` của Server khớp mờ tên (>=80% số từ trùng, hoặc chứa nhau) nên các bản khác nhau của cùng 1 bài (MV / Karaoke / Lyrics, có thể khác tone) bị coi là MỘT bài -> dùng chung tone; và `submit()` bị chặn "server đã có" nên bản thứ hai không bao giờ có Key riêng.
++- Hành vi mới: `/find` trả tên Server KHÁC tên đang phát (sau chuẩn hoá) -> `lookup()` trả `{found:false, similar:{key,songId,title}}`: Menu không dùng làm DATABASE, AI dò, rồi tự gửi Key riêng của bản này lên Server. Khớp đúng tên/ID, hoặc Server không trả title: giữ như cũ. Mặc định `strictTitle` tắt (tương thích ngược), chỉ main.js bật.
++- Architecture impact: None (không đổi Server, UI, KeyEngine, luồng IPC). Hệ quả đã biết: bài chỉ khớp mờ phải chờ AI dò vài giây như bài mới; "Sửa Key trên Server" (keyCorrect) báo "not-on-server" với bài chỉ khớp mờ.
++- Verification: `KeyServerStrict01.verify.js` 10 PASS / 0 FAIL; 58 test liên quan (KeyServerSync/main/SongDb/keyCorrect/worker) cho kết quả y hệt trước/sau sửa.
++- Commit hash: *(chưa commit — giao dạng patch)*
+diff --git a/app/main.js b/app/main.js
+index 456f72f..bbe5072 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -155,6 +155,7 @@ const KeyTimeline = require("../core/integration/KeyTimeline"); // MOD theo đo
+ const NowPlayingClock = require("../core/integration/NowPlayingClock"); // đồng hồ bài đang phát (vị trí/thời lượng thật từ MPC-HC hoặc SMTC)
+ const keyServerSync = new KeyServerSync({
+     idLookup: true, // DB-ID-01: dò theo ID bài hát trước, theo tên sau
++    strictTitle: true, // DB-MATCH-STRICT-01: Server chỉ khớp mờ tên (bản Karaoke/MV khác) -> không dùng làm Key bài này
+     // DB-ID-01: ID bài hát đã lưu ở máy (songs.json, trường songId) -> Menu dò theo ID trước, theo tên sau.
+     idResolver: (title, artist) => {
+         const { normalizeTitle } = require("../core/integration/KeyServerSync");
+diff --git a/core/integration/KeyServerSync.js b/core/integration/KeyServerSync.js
+index d1c4243..9e40f9d 100644
+--- a/core/integration/KeyServerSync.js
++++ b/core/integration/KeyServerSync.js
+@@ -116,6 +116,9 @@ class KeyServerSync {
+         // DB-ID-01: (title, artist) => [songId đã biết ở máy]. Không bắt buộc; lỗi trong hàm này bị bỏ qua.
+         this.idResolver = typeof opts.idResolver === 'function' ? opts.idResolver : null;
+         this.idLookup = opts.idLookup === true; // true = dò theo ID bài hát trước, theo tên sau (main.js bật); mặc định tắt để giữ nguyên hành vi cũ
++        // DB-MATCH-STRICT-01: true = kết quả /find chỉ "khớp mờ" (tên Server KHÁC tên đang phát sau khi chuẩn hoá) KHÔNG được coi là bài này.
++        // Trả { found:false, similar:{key,songId,title} } -> Menu để AI dò (và tự gửi Key riêng của bản này lên Server). main.js bật; mặc định tắt = hành vi cũ.
++        this.strictTitle = opts.strictTitle === true;
+ 
+         this._cache = new Map();           // cacheKey -> { at, ttl, value }
+         this._lookupInflight = new Map();  // cacheKey -> Promise
+@@ -256,6 +259,15 @@ class KeyServerSync {
+                 return val;
+             }
+             const j = r.json;
++            if (this.strictTitle && j && j.found === true && typeof j.title === 'string' && j.title.trim()
++                && normalizeTitle(j.title) !== normalizeTitle(title)) {
++                // DB-MATCH-STRICT-01: Server chỉ khớp MỜ (vd bản Karaoke/MV khác) -> không chắc cùng bản thu, KHÔNG dùng làm Key bài này.
++                const simKey = serverKeyToAppKey(j.key, j.mode);
++                const sim = { found: false, similar: { key: simKey, songId: j.songId || null, title: j.title } };
++                this._cacheSet(ck, sim, MISS_TTL_MS);
++                this._log('lookup-similar|' + ck, 'Server chỉ có bài GẦN GIỐNG "' + j.title + '" (' + (simKey || '?') + ') != "' + String(title) + '" -> không dùng, Menu tự dò Key bản này');
++                return sim;
++            }
+             if (j && j.found === true) {
+                 const appKey = serverKeyToAppKey(j.key, j.mode);
+                 if (appKey) {
+diff --git a/tests/unit/KeyServerStrict01.verify.js b/tests/unit/KeyServerStrict01.verify.js
+new file mode 100644
+index 0000000..1b7b34f
+--- /dev/null
++++ b/tests/unit/KeyServerStrict01.verify.js
+@@ -0,0 +1,76 @@
++// TASK DB-MATCH-STRICT-01 — chạy: node tests/unit/KeyServerStrict01.verify.js
++// Bài chỉ "khớp mờ" tên trên Server (bản Karaoke/MV khác) KHÔNG được dùng làm Key; Menu tự dò và tự gửi Key riêng của bản này.
++'use strict';
++const fs = require('fs'), path = require('path');
++const { KeyServerSync, normalizeTitle } = require('../../core/integration/KeyServerSync.js');
++let pass = 0, fail = 0;
++const ok = (c, m) => { if (c) { pass++; console.log('PASS', m); } else { fail++; console.log('FAIL', m); } };
++
++// Server giả: chỉ có 1 bản trên Server (Karaoke, F Major). /find trả đúng như worker.js: khớp mờ trả bản đó.
++function makeServer(opts = {}) {
++    const calls = [];
++    const fetchFn = async (url, init) => {
++        const u = new URL(url); calls.push(u.pathname + (init && init.method === 'POST' ? ' POST' : ''));
++        const json = (o, status = 200) => ({ ok: status < 400, status, json: async () => o, text: async () => JSON.stringify(o) });
++        if (u.pathname === '/song-full') return json({ doans: [] }); // không có ID nào
++        if (u.pathname === '/find') {
++            if (opts.findTitle === null) return json({ found: false });
++            return json({ found: true, songId: '0kOKtLUaYok', title: opts.findTitle, key: 'F', mode: 'major' });
++        }
++        if (u.pathname === '/set-song-info' || u.pathname === '/add-segment') return json({ ok: true });
++        return json({ error: 'nf' }, 404);
++    };
++    return { fetchFn, calls };
++}
++const quiet = { log() {} };
++const KARAOKE = '[KARAOKE VERSION] Ngày Đẹp Trời Để Nói Chia Tay - Lou Hoàng';
++const MV = 'LOU HOÀNG - NGÀY ĐẸP TRỜI ĐỂ NÓI CHIA TAY ( Music Video)';
++
++(async () => {
++    // 1) strictTitle BẬT: bản MV chỉ khớp mờ với bản Karaoke -> KHÔNG found, có similar để tham khảo
++    let s = makeServer({ findTitle: KARAOKE });
++    let k = new KeyServerSync({ fetchFn: s.fetchFn, logger: quiet, strictTitle: true, idLookup: true });
++    let r = await k.lookup(MV, '');
++    ok(r.found === false && r.similar && r.similar.key === 'F Major', 'strict BẬT: bản MV chỉ khớp mờ bản Karaoke -> found=false, giữ similar (F Major) làm tham khảo');
++    ok(k.peek(MV, '') === null, 'strict BẬT: peek() không trả Key khớp mờ (Menu không dùng làm DATABASE)');
++
++    // 2) strictTitle BẬT: khớp ĐÚNG tên (khác hoa/thường/dấu câu) -> vẫn found như cũ
++    s = makeServer({ findTitle: 'lou hoàng - ngày đẹp trời để nói chia tay (music video)' });
++    k = new KeyServerSync({ fetchFn: s.fetchFn, logger: quiet, strictTitle: true, idLookup: true });
++    r = await k.lookup('LOU HOÀNG - NGÀY ĐẸP TRỜI ĐỂ NÓI CHIA TAY (Music Video)', '');
++    ok(r.found === true && r.key === 'F Major' && r.songId === '0kOKtLUaYok', 'strict BẬT: tên khớp đúng sau chuẩn hoá -> vẫn dùng Key Server');
++
++    // 3) strictTitle TẮT (mặc định): hành vi cũ giữ nguyên — khớp mờ vẫn found
++    s = makeServer({ findTitle: KARAOKE });
++    k = new KeyServerSync({ fetchFn: s.fetchFn, logger: quiet, idLookup: true });
++    r = await k.lookup(MV, '');
++    ok(r.found === true && r.key === 'F Major', 'strict TẮT (mặc định): giữ hành vi cũ, khớp mờ vẫn found');
++
++    // 4) Server không gửi title -> không đủ căn cứ để coi là mờ -> vẫn found (tương thích ngược)
++    s = makeServer({ findTitle: '' });
++    k = new KeyServerSync({ fetchFn: s.fetchFn, logger: quiet, strictTitle: true, idLookup: true });
++    r = await k.lookup(MV, '');
++    ok(r.found === true, 'strict BẬT nhưng Server không trả title -> giữ found (tương thích ngược)');
++
++    // 5) submit(): bản chỉ khớp mờ KHÔNG bị chặn "server đã có" -> Menu gửi Key riêng lên Server
++    s = makeServer({ findTitle: KARAOKE });
++    k = new KeyServerSync({ fetchFn: s.fetchFn, logger: quiet, strictTitle: true, idLookup: true });
++    r = await k.submit({ title: MV, artist: '', key: 'A# Major', confidence: 0.9 });
++    ok(r.ok === true && r.reason === 'submitted', 'strict BẬT: bản MV được gửi Key riêng (A# Major), không bị coi là "server đã có"');
++    ok(s.calls.includes('/set-song-info POST') && s.calls.includes('/add-segment POST'), 'đã ghi thông tin bài + đoạn Key cho bản MV');
++    r = await k.lookup(MV, '');
++    ok(r.found === true && r.key === 'A# Major', 'sau khi gửi: lần hỏi tiếp theo bản MV ra A# Major (không còn F Major của Karaoke)');
++
++    // 6) strict TẮT: submit bị chặn như cũ (chứng minh lỗi gốc)
++    s = makeServer({ findTitle: KARAOKE });
++    k = new KeyServerSync({ fetchFn: s.fetchFn, logger: quiet, idLookup: true });
++    r = await k.submit({ title: MV, artist: '', key: 'A# Major', confidence: 0.9 });
++    ok(r.reason === 'server-already-has', 'strict TẮT: bản MV bị chặn "server-already-has" (lỗi gốc người dùng gặp)');
++
++    // 7) main.js đã bật strictTitle; không đụng UI/KeyEngine
++    const main = fs.readFileSync(path.join(__dirname, '../../app/main.js'), 'utf8');
++    ok(/new KeyServerSync\(\{[\s\S]{0,200}strictTitle: true/.test(main), 'main.js bật strictTitle cho KeyServerSync');
++
++    console.log(`\n${pass} PASS / ${fail} FAIL`);
++    process.exit(fail ? 1 : 0);
++})();

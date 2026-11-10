@@ -155,6 +155,7 @@ const KeyTimeline = require("../core/integration/KeyTimeline"); // MOD theo đo�
 const NowPlayingClock = require("../core/integration/NowPlayingClock"); // đồng hồ bài đang phát (vị trí/thời lượng thật từ MPC-HC hoặc SMTC)
 const keyServerSync = new KeyServerSync({
     idLookup: true, // DB-ID-01: dò theo ID bài hát trước, theo tên sau
+    strictTitle: true, // DB-MATCH-STRICT-01: Server chỉ khớp mờ tên (bản Karaoke/MV khác) -> không dùng làm Key bài này
     // DB-ID-01: ID bài hát đã lưu ở máy (songs.json, trường songId) -> Menu dò theo ID trước, theo tên sau.
     idResolver: (title, artist) => {
         const { normalizeTitle } = require("../core/integration/KeyServerSync");

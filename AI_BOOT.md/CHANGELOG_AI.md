@@ -46,3 +46,12 @@
 - Architecture impact: None (dùng đúng cơ chế `__dbBypass` có sẵn). Không đụng KeyEngine/BPM/MOD, HTML, CSS.
 - Verification: `DbCompete01.verify.js` 12 PASS / 0 FAIL; 94 test có nhắc `renderer` cho kết quả y hệt trước/sau sửa.
 - Commit hash: *(chưa commit — giao dạng patch)*
+
+## DB-MATCH-STRICT-01 — Key Server chỉ khớp MỜ tên thì không dùng làm Key bài đang phát
+- Files modified: `core/integration/KeyServerSync.js` (option mới `strictTitle`, 1 khối trong `lookup()`), `app/main.js` (1 dòng bật `strictTitle: true`).
+- Files created: `tests/unit/KeyServerStrict01.verify.js`.
+- Lỗi gốc: route `/find` của Server khớp mờ tên (>=80% số từ trùng, hoặc chứa nhau) nên các bản khác nhau của cùng 1 bài (MV / Karaoke / Lyrics, có thể khác tone) bị coi là MỘT bài -> dùng chung tone; và `submit()` bị chặn "server đã có" nên bản thứ hai không bao giờ có Key riêng.
+- Hành vi mới: `/find` trả tên Server KHÁC tên đang phát (sau chuẩn hoá) -> `lookup()` trả `{found:false, similar:{key,songId,title}}`: Menu không dùng làm DATABASE, AI dò, rồi tự gửi Key riêng của bản này lên Server. Khớp đúng tên/ID, hoặc Server không trả title: giữ như cũ. Mặc định `strictTitle` tắt (tương thích ngược), chỉ main.js bật.
+- Architecture impact: None (không đổi Server, UI, KeyEngine, luồng IPC). Hệ quả đã biết: bài chỉ khớp mờ phải chờ AI dò vài giây như bài mới; "Sửa Key trên Server" (keyCorrect) báo "not-on-server" với bài chỉ khớp mờ.
+- Verification: `KeyServerStrict01.verify.js` 10 PASS / 0 FAIL; 58 test liên quan (KeyServerSync/main/SongDb/keyCorrect/worker) cho kết quả y hệt trước/sau sửa.
+- Commit hash: *(chưa commit — giao dạng patch)*

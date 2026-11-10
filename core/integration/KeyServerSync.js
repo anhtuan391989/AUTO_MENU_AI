@@ -116,6 +116,9 @@ class KeyServerSync {
         // DB-ID-01: (title, artist) => [songId đã biết ở máy]. Không bắt buộc; lỗi trong hàm này bị bỏ qua.
         this.idResolver = typeof opts.idResolver === 'function' ? opts.idResolver : null;
         this.idLookup = opts.idLookup === true; // true = dò theo ID bài hát trước, theo tên sau (main.js bật); mặc định tắt để giữ nguyên hành vi cũ
+        // DB-MATCH-STRICT-01: true = kết quả /find chỉ "khớp mờ" (tên Server KHÁC tên đang phát sau khi chuẩn hoá) KHÔNG được coi là bài này.
+        // Trả { found:false, similar:{key,songId,title} } -> Menu để AI dò (và tự gửi Key riêng của bản này lên Server). main.js bật; mặc định tắt = hành vi cũ.
+        this.strictTitle = opts.strictTitle === true;
 
         this._cache = new Map();           // cacheKey -> { at, ttl, value }
         this._lookupInflight = new Map();  // cacheKey -> Promise
@@ -256,6 +259,15 @@ class KeyServerSync {
                 return val;
             }
             const j = r.json;
+            if (this.strictTitle && j && j.found === true && typeof j.title === 'string' && j.title.trim()
+                && normalizeTitle(j.title) !== normalizeTitle(title)) {
+                // DB-MATCH-STRICT-01: Server chỉ khớp MỜ (vd bản Karaoke/MV khác) -> không chắc cùng bản thu, KHÔNG dùng làm Key bài này.
+                const simKey = serverKeyToAppKey(j.key, j.mode);
+                const sim = { found: false, similar: { key: simKey, songId: j.songId || null, title: j.title } };
+                this._cacheSet(ck, sim, MISS_TTL_MS);
+                this._log('lookup-similar|' + ck, 'Server chỉ có bài GẦN GIỐNG "' + j.title + '" (' + (simKey || '?') + ') != "' + String(title) + '" -> không dùng, Menu tự dò Key bản này');
+                return sim;
+            }
             if (j && j.found === true) {
                 const appKey = serverKeyToAppKey(j.key, j.mode);
                 if (appKey) {
