@@ -24,7 +24,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { durationMismatch } = require('../reference/RecordingDuration');
+const { durationMismatch, parseClock } = require('../reference/RecordingDuration');
 
 const DEFAULT_SERVER_URL = 'https://menu-key-server.matuotluuly.workers.dev';
 
@@ -57,6 +57,11 @@ function normalizeTitle(s) {
         .replace(/[^a-z0-9]+/g, ' ')
         .trim();
 }
+
+// OLD-KEY-01: bản ghi "Chua dat ten" (không có tên) trên Server KHÔNG dùng làm Key. Chỉ BỎ QUA khi tra cứu — không xoá, không sửa gì trên Server.
+const UNNAMED_TITLE_NORM = 'chua dat ten';
+function isUnnamedTitle(t) { return normalizeTitle(t) === UNNAMED_TITLE_NORM; }
+function isUnusableServerTitle(t) { const n = normalizeTitle(t); return n === '' || n === UNNAMED_TITLE_NORM; }
 
 // ID ổn định cho bài do Menu tự gửi (khác mã video YouTube của extension).
 // DB-MATCH-ID-02: truyền thêm durationSec -> ID RIÊNG cho bản thu có độ dài đó (dùng khi cùng tên đã có bản khác độ dài trên Server).
@@ -247,11 +252,56 @@ class KeyServerSync {
             const appKey = serverKeyToAppKey(d[0].khoa, d[0].mode);
             if (!appKey) continue;
             const info = r.json.thongTin || {};
+            if (isUnusableServerTitle(info.title)) continue; // OLD-KEY-01: bản ghi không tên -> bỏ qua
             // DB-MATCH-ID-02: bản ghi này có độ dài khác hẳn bài đang phát -> bản thu khác, thử ID kế tiếp
             if (durationMismatch(info.totalSec, durationSec)) continue;
             return { found: true, key: appKey, songId: id, title: info.title || String(title), source: 'server' };
         }
         return null;
+    }
+
+    // OLD-KEY-01: tên Server KHÁC tên đang phát (vd Key cũ do extension lưu theo tên tab dài). Có phải CÙNG bản thu không? -> xác minh bằng ĐỘ DÀI.
+    // { same:true } chỉ khi cả hai độ dài đều biết và lệch <= ngưỡng. Thiếu một bên -> { same:false, reason } (không đủ căn cứ -> không dùng, giữ an toàn).
+    async _sameRecordingByDuration(songId, playingDurSec, getInfo) {
+        if (!(Number(playingDurSec) > 0)) return { same: false, reason: 'no-playing-duration' };
+        const si = await getInfo(songId);
+        if (!si.ok || !(Number(si.totalSec) > 0)) return { same: false, reason: 'no-server-duration' };
+        if (durationMismatch(si.totalSec, playingDurSec)) return { same: false, reason: 'duration', serverDurationSec: si.totalSec };
+        return { same: true, serverDurationSec: si.totalSec };
+    }
+
+    // OLD-KEY-01: /find chỉ trả 1 bài. Cùng tên có nhiều bản (MV 268s, Karaoke 290s...) mà /find chọn nhầm bản thì thử /list: tìm bản có tên
+    // liên quan VÀ độ dài khớp (<= ngưỡng) VÀ có Key. Chỉ ĐỌC. Không đủ căn cứ / lỗi mạng -> null (Menu tự dò như cũ).
+    async _findInList(title, durSec) {
+        if (!(Number(durSec) > 0)) return null;
+        const r = await this._request('/list', { method: 'GET' }, this.lookupTimeoutMs);
+        const arr = r.ok && r.json && Array.isArray(r.json.danhSach) ? r.json.danhSach : null;
+        if (!arr) return null;
+        const q = normalizeTitle(title);
+        const qw = new Set(q.split(' ').filter(Boolean));
+        const related = (nt) => {
+            if (!nt) return false;
+            if (nt === q) return true;
+            if (q.length >= 8 && nt.includes(q)) return true;
+            if (nt.length >= 8 && q.includes(nt)) return true;
+            const tw = new Set(nt.split(' ').filter(Boolean));
+            let common = 0; for (const w of qw) if (tw.has(w)) common++;
+            const smaller = Math.min(qw.size, tw.size);
+            return common >= 3 && smaller > 0 && common / smaller >= 0.8;
+        };
+        let best = null;
+        for (const it of arr) {
+            if (!it || isUnusableServerTitle(it.title) || !it.songId) continue;
+            const appKey = serverKeyToAppKey(it.key, it.mode);
+            if (!appKey) continue;
+            const sec = parseClock(it.tongThoiLuong);
+            if (sec === null || durationMismatch(sec, durSec)) continue;
+            const nt = normalizeTitle(it.title);
+            if (!related(nt)) continue;
+            const score = (nt === q ? 0 : 10) + Math.abs(sec - durSec);
+            if (!best || score < best.score) best = { score, songId: String(it.songId), title: String(it.title), key: appKey, sec };
+        }
+        return best;
     }
 
     /**
@@ -289,23 +339,50 @@ class KeyServerSync {
                 return val;
             }
             const j = r.json;
+            if (j && j.found === true && isUnnamedTitle(j.title)) {
+                // OLD-KEY-01: bản ghi "Chua dat ten" -> coi như Server chưa có bài này
+                const miss0 = { found: false };
+                this._cacheSet(ck, miss0, MISS_TTL_MS);
+                this._log('lookup-unnamed|' + ck, 'Server chỉ có bản ghi KHÔNG TÊN cho \"' + String(title) + '\" -> bỏ qua, Menu tự dò Key');
+                return miss0;
+            }
+            let siMemo = null; // chỉ hỏi /song-full 1 lần cho mỗi lượt tra
+            const getInfo = async (id) => (siMemo || (siMemo = await this._songInfo(id)));
+            // OLD-KEY-01: /find chọn nhầm bản khác -> thử tìm đúng bản theo tên liên quan + độ dài trong /list
+            const rescue = async () => {
+                const alt = await this._findInList(title, dur);
+                if (!alt) return null;
+                const val = { found: true, key: alt.key, songId: alt.songId, title: alt.title, source: 'server' };
+                this._cacheSet(ck, val, HIT_TTL_MS);
+                this._log('lookup-list|' + ck, 'Tìm đúng bản theo độ dài trong danh sách Server: \"' + alt.title + '\" (' + Math.round(alt.sec) + 's) -> ' + alt.key);
+                return val;
+            };
             if (this.strictTitle && j && j.found === true && typeof j.title === 'string' && j.title.trim()
                 && normalizeTitle(j.title) !== normalizeTitle(title)) {
-                // DB-MATCH-STRICT-01: Server chỉ khớp MỜ (vd bản Karaoke/MV khác) -> không chắc cùng bản thu, KHÔNG dùng làm Key bài này.
-                const simKey = serverKeyToAppKey(j.key, j.mode);
-                const sim = { found: false, similar: { key: simKey, songId: j.songId || null, title: j.title } };
-                this._cacheSet(ck, sim, MISS_TTL_MS);
-                this._log('lookup-similar|' + ck, 'Server chỉ có bài GẦN GIỐNG "' + j.title + '" (' + (simKey || '?') + ') != "' + String(title) + '" -> không dùng, Menu tự dò Key bản này');
-                return sim;
+                // Tên Server khác tên đang phát. OLD-KEY-01: nếu ĐỘ DÀI khớp (<= ngưỡng) thì vẫn là CÙNG bản thu (Key cũ của extension) -> dùng.
+                const v = j.songId ? await this._sameRecordingByDuration(j.songId, dur, getInfo) : { same: false, reason: 'no-id' };
+                if (v.same) {
+                    this._log('lookup-oldkey|' + ck, 'Key CŨ trên Server \"' + j.title + '\" khác tên nhưng cùng độ dài (' + Math.round(v.serverDurationSec) + 's) -> dùng làm Key bài \"' + String(title) + '\"');
+                } else {
+                    // Khác độ dài, hoặc thiếu độ dài một bên -> không chắc cùng bản thu: KHÔNG dùng làm Key bài này.
+                    const alt1 = await rescue(); if (alt1) return alt1;
+                    const simKey = serverKeyToAppKey(j.key, j.mode);
+                    const sim = { found: false, similar: { key: simKey, songId: j.songId || null, title: j.title, reason: v.reason || 'title' } };
+                    if (v.serverDurationSec) sim.similar.serverDurationSec = v.serverDurationSec;
+                    this._cacheSet(ck, sim, MISS_TTL_MS);
+                    this._log('lookup-similar|' + ck, 'Server chỉ có bài GẦN GIỐNG \"' + j.title + '\" (' + (simKey || '?') + ') != \"' + String(title) + '\" (' + (v.reason || 'tên khác') + ') -> không dùng, Menu tự dò Key bản này');
+                    return sim;
+                }
             }
             if (dur && j && j.found === true && j.songId) {
                 // DB-MATCH-ID-02: tên khớp ĐÚNG nhưng độ dài bản trên Server khác bài đang phát -> bản thu khác (MV/Karaoke/Live), không dùng Key đó.
-                const si = await this._songInfo(j.songId);
+                const si = await getInfo(j.songId);
                 if (si.ok && durationMismatch(si.totalSec, dur)) {
+                    const alt2 = await rescue(); if (alt2) return alt2;
                     const sk = serverKeyToAppKey(j.key, j.mode);
                     const sim = { found: false, similar: { key: sk, songId: j.songId, title: j.title || null, reason: 'duration', serverDurationSec: si.totalSec } };
                     this._cacheSet(ck, sim, MISS_TTL_MS);
-                    this._log('lookup-duration|' + ck, 'Server có "' + String(j.title || title) + '" nhưng dài ' + Math.round(si.totalSec) + 's != bài đang phát ' + Math.round(dur) + 's -> bản thu khác, Menu tự dò Key');
+                    this._log('lookup-duration|' + ck, 'Server có \"' + String(j.title || title) + '\" nhưng dài ' + Math.round(si.totalSec) + 's != bài đang phát ' + Math.round(dur) + 's -> bản thu khác, Menu tự dò Key');
                     return sim;
                 }
             }
@@ -442,6 +519,7 @@ class KeyServerSync {
 module.exports = {
     KeyServerSync,
     normalizeTitle,
+    isUnnamedTitle,
     makeSongId,
     serverKeyToAppKey,
     appKeyToServerKey,
