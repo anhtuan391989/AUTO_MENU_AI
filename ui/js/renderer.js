@@ -649,7 +649,7 @@ const PRESET_NAME_TO_ACTION = {
 // Mặc định (mở app): nút SÁNG, chữ "TUNE ON" = Auto-Tune chạy, Bypass TẮT.
 // Bấm: nút TẮT SÁNG, chữ "TUNE OFF" = Bypass BẬT (Auto-Tune bị bỏ qua, cả 2 mic). Bấm lần nữa: về TUNE ON.
 // HTML giữ nguyên (nút vẫn khai báo "TUNE OFF", không có class active) — JS nhận diện nút theo chữ MỘT LẦN rồi gắn data-tune-btn.
-document.querySelectorAll(".preset-btn").forEach((b) => { if (b.textContent.trim() === "TUNE OFF") b.dataset.tuneBtn = "1"; });
+document.querySelectorAll(".preset-btn").forEach((b) => { if (["TUNE OFF", "TẮT TUNE", "TUNE ON", "BẬT TUNE"].includes(b.textContent.trim())) b.dataset.tuneBtn = "1"; }); // VI-LABELS-01: chữ có thể đã được i18n dịch
 const isTuneOffBtn = (b) => !!(b && b.dataset && b.dataset.tuneBtn === "1");
 // TASK A94 — nút LOFI KHÔNG thuộc nhóm chọn-một: là công tắc ON/OFF ĐỘC LẬP (kết hợp được với NORM/RAP/REMIX). Mặc định TẮT (không sáng).
 // Bấm: nút SÁNG = LOFI BẬT (CC 127), bấm lần nữa: TẮT (CC 0). Không đổi HTML — JS nhận diện nút theo chữ "LOFI" một lần. Không lưu/khôi phục (Menu không đọc được trạng thái DAW): luôn mở ở TẮT.
@@ -807,7 +807,7 @@ function initMicVolumePopups() {
 // ==========================================================
 // AUDIO-CHILL-01 (A96) — Bấm CHUỘT PHẢI vào nút MUSIC -> thẻ nổi giống popup Mic: TRÊN là nút "AUDIO CHILL" (ON/OFF), DƯỚI là knob điều khiển 1 VST.
 // Tất cả qua MIDI (ActionRegistry: AUDIO_CHILL_STATE / AUDIO_CHILL_KNOB). Nút và knob ĐỘC LẬP: xoay knob không đổi nút, bấm nút không đổi knob.
-// Nút: sáng = ON (gửi 127), tắt = OFF (gửi 0). Mở app luôn ở OFF và knob luôn về mặc định 50 (KHÔNG lưu/khôi phục), không gửi gì (Menu không đọc được trạng thái DAW). Tạo bằng JS, KHÔNG sửa HTML/CSS.
+// Nút: sáng = ON (gửi 0), tắt = OFF (gửi 127) — kiểu BYPASS như LOFI (AUDIO-CHILL-FIX-01: trước đây gửi ngược nên đèn sáng mà hiệu ứng tắt). Mở app luôn ở OFF và knob luôn về mặc định 50 (KHÔNG lưu/khôi phục), không gửi gì (Menu không đọc được trạng thái DAW). Tạo bằng JS, KHÔNG sửa HTML/CSS.
 // Bấm trái MUSIC giữ nguyên như cũ. Đóng thẻ: bấm ra ngoài, phím Esc, hoặc chuột phải lần nữa.
 // ==========================================================
 function initAudioChillPopup() {

@@ -711,7 +711,7 @@ const DAW_MIDI_ACTIONS = [
     // TASK A94 — nút LOFI: ON/OFF độc lập, kết hợp được với NORM/RAP/REMIX. 1 CC kiểu bypass: 0 = LOFI bật (nút sáng), 127 = LOFI tắt (mặc định kênh 16 CC 118 / Cubase 119).
     { action: "LOFI_STATE", label: "LOFI ON/OFF kiểu bypass (nút sáng = LOFI bật = gửi 0; tắt = gửi 127) — kết hợp với preset khác" },
     // TASK A96 — popup chuột phải MUSIC: nút AUDIO CHILL (sáng = bật = 127, tắt = 0) và knob AUDIO CHILL (CC 0..127). Mặc định kênh 15 CC 94 / 95.
-    { action: "AUDIO_CHILL_STATE", label: "AUDIO CHILL — nút ON/OFF (sáng = bật = gửi 127; tắt = gửi 0)" },
+    { action: "AUDIO_CHILL_STATE", label: "AUDIO CHILL — nút ON/OFF kiểu bypass (nút sáng = bật = gửi 0; tắt = gửi 127)" },
     { action: "AUDIO_CHILL_KNOB", label: "AUDIO CHILL — knob điều khiển 1 VST (CC 0..127)" },
     // AUTOKEY-MIDI-01 — chế độ "Tự dò bằng tay" (Auto-Key): MIDI thay cho bấm chuột. Mặc định kênh 15 CC 102 / 103, giá trị 127.
     { action: "AUTOKEY_DETECT", label: "AUTO-KEY — bấm điểm DÒ Key của plugin (kênh 15 CC 102, 127)" },

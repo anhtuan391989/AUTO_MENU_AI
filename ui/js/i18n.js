@@ -6,8 +6,9 @@
      (chữ tĩnh trong HTML + chữ do JS tạo ra + hộp thoại alert/confirm/prompt) khớp 1 cặp thì được đổi sang
      ngôn ngữ đang chọn. Chuỗi có giá trị chạy thật dùng {0},{1},... (vd "Đã lưu {0} mục").
    - Chữ nào KHÔNG có trong bảng (tên bài hát, tên file, tên thiết bị, dữ liệu người dùng...) giữ nguyên.
-   - Tên preset (NORM / LOFI / RAP / REMIX / TUNE OFF) KHÔNG bao giờ bị dịch vì renderer.js đọc đúng
-     chữ đó làm logic (so sánh textContent).
+   - Tên preset (NORM / LOFI / RAP / REMIX) KHÔNG bao giờ bị dịch vì renderer.js đọc đúng chữ đó làm logic
+     (so sánh textContent). Riêng nút TUNE được dịch (TUNE ON <-> BẬT TUNE, TUNE OFF <-> TẮT TUNE): renderer.js nhận
+     nút bằng data-tune-btn một lần lúc nạp, không đọc chữ để làm logic nữa.
    - Ngôn ngữ lưu ở appSettings.language ("vi" | "en", mặc định "vi") qua setSetting() — file dùng chung
      nên Menu và Cài đặt luôn cùng 1 ngôn ngữ. Đổi ở ô Language trong Cài đặt -> notifySetupChanged() ->
      Menu tự áp dụng ngay (không cần mở lại app). Bảng Hiệu Ứng cập nhật khi cửa sổ được focus.
@@ -129,7 +130,7 @@
     ["ĐẶT", "SET"],
     ["⭕ TỰ DÒ", "⭕ AUTO DETECT"],
     ["🎵 NHẠC", "🎵 MUSIC"],
-    ["Bảng EFFECT Độc Lập", "Standalone EFFECT Panel"],
+    ["Bảng HIỆU ỨNG Độc Lập", "Standalone EFFECT Panel", ["Bảng EFFECT Độc Lập"]],
     ["Đường dẫn âm thanh tự cài đặt sẵn trong cài đặt :", "Audio path preset in Settings :"],
     ["😂 Tiếng Cười", "😂 Laugh"],
     ["👏 Tiếng Vỗ Tay", "👏 Applause"],
@@ -147,6 +148,9 @@
     ["Dừng mọi âm thanh đang phát", "Stop all playing audio"],
     ["Always on Top — Luôn ở phía trên", "Always on Top"],
     ["BẬT TUNE", "TUNE ON"],
+    ["TẮT TUNE", "TUNE OFF"], // TASK VI-LABELS-01: nút TUNE đang tắt hiện "TẮT TUNE" khi ngôn ngữ Việt (renderer nhận nút bằng data-tune-btn, không còn đọc chữ)
+    ["HIỆU ỨNG", "EFFECT"], // nút/nhãn EFFECT trên Menu -> "HIỆU ỨNG" khi ngôn ngữ Việt
+    ["BẬT", "ON"], // chữ ON/OFF đứng một mình -> BẬT/TẮT khi ngôn ngữ Việt
     ["ÂM LƯỢNG MIC 1", "MIC 1 VOLUME"],
     ["ÂM LƯỢNG MIC 2", "MIC 2 VOLUME"],
     ["Auto bật FX khi có nhạc", "Auto-enable FX when music plays"],
@@ -627,7 +631,7 @@
     ["TUNE ON/OFF — BYPASS Auto-Tune 3 (nút TUNE gửi cả 4)", "TUNE ON/OFF — BYPASS Auto-Tune 3 (TUNE button sends all 4)"],
     ["TUNE ON/OFF — BYPASS Auto-Tune 4 (nút TUNE gửi cả 4)", "TUNE ON/OFF — BYPASS Auto-Tune 4 (TUNE button sends all 4)"],
     ["LOFI ON/OFF kiểu bypass (nút sáng = LOFI bật = gửi 0; tắt = gửi 127) — kết hợp với preset khác", "LOFI ON/OFF bypass-style (lit button = LOFI on = sends 0; off = sends 127) — combine with other presets"],
-    ["AUDIO CHILL — nút ON/OFF (sáng = bật = gửi 127; tắt = gửi 0)", "AUDIO CHILL — ON/OFF button (lit = on = sends 127; off = sends 0)"],
+    ["AUDIO CHILL — nút ON/OFF kiểu bypass (nút sáng = bật = gửi 0; tắt = gửi 127)", "AUDIO CHILL — ON/OFF button, bypass-style (lit = on = sends 0; off = sends 127)", ["AUDIO CHILL — nút ON/OFF (sáng = bật = gửi 127; tắt = gửi 0)"]],
     ["AUDIO CHILL — knob điều khiển 1 VST (CC 0..127)", "AUDIO CHILL — knob controlling 1 VST (CC 0..127)"],
     ["MUSIC CHỌN TRACK (Find Track Beat — gửi trước ON/OFF)", "MUSIC SELECT TRACK (Find Track Beat — sent before ON/OFF)"],
     ["MIC 1 CHỌN TRACK (Find Track Mic — gửi trước ON/OFF)", "MIC 1 SELECT TRACK (Find Track Mic — sent before ON/OFF)"],
@@ -770,7 +774,7 @@
     ["MIC 2 (Monitor Không Dây)", "MIC 2 (Wireless Monitor)"],
     ["TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — cả 4 plugin Auto-Tune)", "TUNE (ON = Bypass OFF, OFF = Bypass ON — all 4 Auto-Tune plugins)"],
     ["LOFI (ON/OFF độc lập, kết hợp được với preset khác)", "LOFI (independent ON/OFF, can be combined with other presets)"],
-    ["AUDIO CHILL (ON/OFF: sáng = BẬT = gửi 127; tắt = TẮT = gửi 0; độc lập với knob)", "AUDIO CHILL (ON/OFF: lit = ON = sends 127; off = OFF = sends 0; independent of the knob)"],
+    ["AUDIO CHILL (ON/OFF kiểu bypass: sáng = BẬT = gửi 0; tắt = TẮT = gửi 127; độc lập với knob)", "AUDIO CHILL (ON/OFF bypass-style: lit = ON = sends 0; off = OFF = sends 127; independent of the knob)", ["AUDIO CHILL (ON/OFF: sáng = BẬT = gửi 127; tắt = TẮT = gửi 0; độc lập với knob)"]],
     ["đã GỬI lệnh toggle cũ ({0}) — DAW chưa xác nhận; chưa cấu hình ON/OFF riêng", "sent legacy toggle command ({0}) — DAW has not confirmed; separate ON/OFF not configured"],
     ["CHƯA cấu hình {0} ON/OFF trong Setup — DAW KHÔNG nhận lệnh", "{0} ON/OFF NOT configured in Setup — DAW will NOT receive the command"],
     ["gửi lệnh toggle cũ ({0}) LỖI{1}", "legacy toggle command ({0}) send FAILED{1}"],
@@ -963,7 +967,7 @@
     ];
 
     // renderer.js đọc đúng các chữ này từ textContent để làm logic -> không được dịch.
-    var PROTECT = { "NORM": 1, "LOFI": 1, "RAP": 1, "REMIX": 1, "TUNE OFF": 1,
+    var PROTECT = { "NORM": 1, "LOFI": 1, "RAP": 1, "REMIX": 1,
         "PRESET NORM": 1, "PRESET LOFI": 1, "PRESET RAP": 1, "PRESET REMIX": 1, "PRESET TUNE OFF": 1 };
 
     var LETTER = /[A-Za-zÀ-ỹ]/;

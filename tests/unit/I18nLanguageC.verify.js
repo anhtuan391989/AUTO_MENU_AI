@@ -61,7 +61,7 @@ I.setLang('vi');
 ok(I.translate('Settings (Lock all)') === 'Cài đặt (Khóa toàn bộ)', 'Settings (Lock all) -> Cài đặt (Khóa toàn bộ)', I.translate('Settings (Lock all)'));
 for (const lang of ['vi', 'en']) {
   I.setLang(lang);
-  ok(['NORM', 'LOFI', 'RAP', 'REMIX', 'TUNE OFF'].every((n) => I.translate(n) === null), `[${lang}] tên preset NORM/LOFI/RAP/REMIX/TUNE OFF KHÔNG bị dịch`);
+  ok(['NORM', 'LOFI', 'RAP', 'REMIX'].every((n) => I.translate(n) === null), `[${lang}] tên preset NORM/LOFI/RAP/REMIX KHÔNG bị dịch (TUNE đã được dịch riêng từ VI-LABELS-01)`);
 }
 // mẫu có giá trị chạy thật
 const tpl = PAIRS.find((p) => /\{0\}/.test(p[0]) && !/\{1\}/.test(p[0]) && p[0].replace(/\{0\}/g, '').replace(/[^A-Za-zÀ-ỹ]/g, '').length >= 6);
