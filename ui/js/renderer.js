@@ -1306,7 +1306,9 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
             const st = document.createElement("style");
             st.id = "verticalExpandFitStyle";
             st.textContent = "body.vertical-mode .mixer-grid{grid-template-rows:repeat(3,122px);}"
-                + "body.vertical-mode .app{height:auto !important;max-height:100vh;overflow-y:auto;}";
+                + "body.vertical-mode .app{height:auto !important;max-height:100vh;overflow-y:auto;}"
+                // MARQUEE-VISIBLE-01: dòng chữ chạy "Thời hạn Key dịch vụ" là 1 mục flex trong .app; khi .app bị giới hạn chiều cao (chế độ dọc) nó bị co còn ~11px nên chỉ thấy 1 vạch xanh. Không cho co.
+                + ".marquee-bar{flex-shrink:0;}";
             document.head.appendChild(st);
         }
     } catch (err) { console.error("VERTICAL-EXPAND-FIT-01 lỗi (bỏ qua):", err); }

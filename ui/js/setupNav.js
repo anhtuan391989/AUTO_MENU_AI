@@ -155,3 +155,139 @@
     // Chạy 1 lần khi trang load xong, sau khi setup.js đã initSetupPage().
     window.addEventListener("load", () => setTimeout(refreshDashboard, 300));
 })();
+
+/* SETUP-LOCK-01 BEGIN — KHOÁ BẢO VỆ KHU VỰC CÀI ĐẶT.
+   Setup luôn mở ra trong trạng thái KHOÁ: một lớp phủ kín che toàn bộ trang, phần phía sau bị "inert" (chuột + phím Tab đều không chạm được).
+   Mật khẩu KHÔNG được so sánh ở đây — chỉ gửi cho main (electronAPI.setupLockVerify -> core/shared/SetupLock.js) và nhận đúng/sai.
+   Không lưu trạng thái mở khoá ở đâu cả (không localStorage/file): đóng/ẩn Setup là main báo "setup-lock-engage" để khoá lại; mở lại phải nhập lại.
+   Lỗi bất kỳ (không gọi được main...) => GIỮ NGUYÊN khoá, không bao giờ tự mở. Không đổi HTML: lớp phủ dựng bằng JS, CSS có tiền tố "sl01-". */
+(function setupLockInit() {
+    "use strict";
+    if (typeof document === "undefined" || !document.body) return;
+
+    var overlay = null;
+    var retryTimer = null;
+
+    function isEn() { return !!(window.I18N && window.I18N.lang === "en"); }
+    function t(vi, en) { return isEn() ? en : vi; }
+
+    function injectStyle() {
+        if (document.getElementById("setupLockStyle")) return;
+        var st = document.createElement("style");
+        st.id = "setupLockStyle";
+        st.textContent =
+            ".sl01-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;background:#020813;display:flex;align-items:center;justify-content:center;font-family:'Segoe UI',sans-serif;}" +
+            ".sl01-box{width:340px;max-width:90vw;box-sizing:border-box;padding:26px 28px;border-radius:12px;background:#0b1a2b;border:1px solid #1c3b5a;color:#e6f4ff;box-shadow:0 12px 48px rgba(0,0,0,.6);}" +
+            ".sl01-title{font-size:17px;font-weight:700;letter-spacing:.5px;text-align:center;margin-bottom:6px;color:#38bdf8;}" +
+            ".sl01-sub{font-size:12px;text-align:center;opacity:.75;margin-bottom:16px;}" +
+            ".sl01-input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;border:1px solid #2a4a6b;background:#06111d;color:#fff;font-size:15px;}" +
+            ".sl01-input:focus{outline:none;border-color:#38bdf8;}" +
+            ".sl01-err{min-height:18px;margin:8px 0 2px;font-size:12px;color:#ff6b6b;text-align:center;}" +
+            ".sl01-btn{width:100%;padding:10px;border:0;border-radius:8px;background:#00d2ff;color:#02202e;font-weight:700;font-size:14px;cursor:pointer;}" +
+            ".sl01-btn:disabled{opacity:.5;cursor:default;}";
+        (document.head || document.documentElement).appendChild(st);
+    }
+
+    function setInert(on) {
+        Array.prototype.forEach.call(document.body.children, function (c) {
+            if (c === overlay) return;
+            if (c.tagName === "SCRIPT" || c.tagName === "STYLE") return;
+            if (on) c.setAttribute("inert", ""); else c.removeAttribute("inert");
+        });
+    }
+
+    function unlock() {
+        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        overlay = null;
+        setInert(false);
+    }
+
+    function lock() {
+        if (overlay) return; // đã khoá rồi
+        injectStyle();
+
+        overlay = document.createElement("div");
+        overlay.className = "sl01-overlay";
+        var box = document.createElement("div");
+        box.className = "sl01-box";
+
+        var title = document.createElement("div");
+        title.className = "sl01-title";
+        title.textContent = t("🔒 CÀI ĐẶT ĐÃ KHOÁ", "🔒 SETTINGS LOCKED");
+        var sub = document.createElement("div");
+        sub.className = "sl01-sub";
+        sub.textContent = t("Nhập mật khẩu để mở Cài đặt", "Enter the password to open Settings");
+
+        var input = document.createElement("input");
+        input.type = "password";
+        input.className = "sl01-input";
+        input.autocomplete = "off";
+        input.placeholder = "••••••••";
+
+        var err = document.createElement("div");
+        err.className = "sl01-err";
+
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "sl01-btn";
+        btn.textContent = t("MỞ KHOÁ", "UNLOCK");
+
+        box.appendChild(title);
+        box.appendChild(sub);
+        box.appendChild(input);
+        box.appendChild(err);
+        box.appendChild(btn);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        setInert(true);
+        setTimeout(function () { try { input.focus(); } catch (e) { /* bỏ qua */ } }, 50);
+
+        var busy = false;
+        function setBusy(b) { busy = b; btn.disabled = b; input.disabled = b; }
+
+        function attempt() {
+            if (busy) return;
+            var pw = input.value; // không bao giờ log biến này
+            if (!pw) { err.textContent = t("Vui lòng nhập mật khẩu.", "Please enter the password."); return; }
+            var api = window.electronAPI;
+            if (!api || typeof api.setupLockVerify !== "function") {
+                err.textContent = t("Không kiểm tra được mật khẩu (thiếu kênh kết nối).", "Cannot verify the password (missing channel).");
+                return; // fail-closed: giữ khoá
+            }
+            err.textContent = "";
+            setBusy(true);
+            Promise.resolve(api.setupLockVerify(pw)).then(function (r) {
+                if (r && r.ok === true) { unlock(); return; }
+                input.value = "";
+                if (r && r.reason === "locked") {
+                    var sec = Math.max(1, Math.ceil((r.retryMs || 30000) / 1000));
+                    err.textContent = t("Sai nhiều lần. Thử lại sau " + sec + " giây.", "Too many attempts. Try again in " + sec + " s.");
+                    btn.disabled = true; input.disabled = true; // giữ khoá nút trong lúc chờ
+                    retryTimer = setTimeout(function () { retryTimer = null; setBusy(false); err.textContent = ""; try { input.focus(); } catch (e) { /* bỏ qua */ } }, sec * 1000);
+                    return;
+                }
+                err.textContent = t("Sai mật khẩu.", "Wrong password.");
+                setBusy(false);
+                try { input.focus(); } catch (e) { /* bỏ qua */ }
+            }).catch(function () {
+                err.textContent = t("Lỗi hệ thống, thử lại.", "System error, try again.");
+                setBusy(false);
+            });
+        }
+
+        btn.addEventListener("click", attempt);
+        input.addEventListener("keydown", function (e) { if (e.key === "Enter") attempt(); });
+    }
+
+    // Khoá ngay khi trang Setup dựng xong (cửa sổ Setup tạo ẩn lúc khởi động, hiện ra thì đã khoá sẵn).
+    lock();
+
+    // Main báo Setup vừa bị ẩn/đóng => khoá lại cho lần mở sau.
+    try {
+        if (window.electronAPI && typeof window.electronAPI.onSetupLockEngage === "function") {
+            window.electronAPI.onSetupLockEngage(function () { lock(); });
+        }
+    } catch (e) { console.error("SETUP-LOCK-01 đăng ký engage lỗi (bỏ qua):", e); }
+})();
+/* SETUP-LOCK-01 END */

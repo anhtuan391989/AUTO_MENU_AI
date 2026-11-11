@@ -1,0 +1,394 @@
+diff --git a/app/main.js b/app/main.js
+index ac0b355..1ad6418 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -121,6 +121,9 @@ function createMainWindow() {
+     mainWin = new BrowserWindow({
+         width: 1200,
+         height: 800,
++        frame: false, // MENU-FRAMELESS-01: bỏ thanh tiêu đề + thanh File/Edit/View/Window của Windows (nguồn của dấu ✕ thứ 2); thanh của app (header) làm thanh tiêu đề
++        maximizable: false, // MENU-NOMAX-01: Menu không được phóng to (cả dạng dọc lẫn ngang)
++        fullscreenable: false, // MENU-NOMAX-01: không cho toàn màn hình (F11...)
+         ...(savedPos ? { x: savedPos.x, y: savedPos.y } : {}),
+         webPreferences: {
+             preload: path.join(__dirname, "preload.js"),
+@@ -132,6 +135,24 @@ function createMainWindow() {
+ 
+     mainWin.loadFile(path.join(__dirname, "..", "ui", "index.html"));
+ 
++    // MENU-NOMAX-01: lớp bảo hiểm thứ 2 — nếu Windows vẫn phóng to / toàn màn hình được (Win+↑, kéo lên mép trên màn hình, F11) thì đưa về cỡ cũ ngay.
++    mainWin.on("maximize", () => { try { if (mainWin && !mainWin.isDestroyed()) mainWin.unmaximize(); } catch (err) { console.error("MENU-NOMAX-01 unmaximize lỗi:", err); } });
++    mainWin.on("enter-full-screen", () => { try { if (mainWin && !mainWin.isDestroyed()) mainWin.setFullScreen(false); } catch (err) { console.error("MENU-NOMAX-01 setFullScreen lỗi:", err); } });
++
++    // MENU-FRAMELESS-01: không còn khung Windows nên phải cho kéo cửa sổ bằng header của app.
++    // Chèn CSS từ main process (KHÔNG sửa HTML/CSS của giao diện). Các nút trong .window-buttons giữ no-drag để vẫn bấm được.
++    mainWin.webContents.on("did-finish-load", () => {
++        try {
++            if (mainWin && !mainWin.isDestroyed()) {
++                mainWin.webContents.insertCSS(
++                    ".header { -webkit-app-region: drag; } .window-buttons, .window-buttons * { -webkit-app-region: no-drag; }"
++                ).catch(() => {});
++            }
++        } catch (err) {
++            console.error("MENU-FRAMELESS-01 insertCSS lỗi (bỏ qua):", err);
++        }
++    });
++
+     // AUDIO-AUTOSTART-01 — ui/js/renderer.js chỉ khởi động nghe âm thanh (Key/BPM/VU) ở cú click ĐẦU TIÊN vào Menu
+     // (listener {once:true} trên document.body, vì autoplay policy). Bản cài .exe mở Menu mà người dùng chưa bấm gì
+     // nên Menu "điếc" tới khi bấm. Ở đây tự thực hiện đúng cú click đầu đó (userGesture=true) ngay khi trang tải xong
+@@ -189,6 +210,14 @@ function createSetupWindow() {
+ 
+     setupWin.loadFile(path.join(__dirname, "..", "ui", "setup.html"));
+ 
++    // SETUP-LOCK-01: mỗi lần Setup bị ẩn (nút đóng trong Setup / close-setup) thì khoá lại, lần mở sau phải nhập mật khẩu lại.
++    // Lần đầu trang tải xong tự khoá (xem ui/js/setupNav.js), nên cửa sổ vừa tạo cũng luôn bị khoá.
++    setupWin.on("hide", () => {
++        try {
++            if (setupWin && !setupWin.isDestroyed()) setupWin.webContents.send("setup-lock-engage");
++        } catch (err) { console.error("SETUP-LOCK-01 engage lỗi (bỏ qua):", err); }
++    });
++
+     setupWin.on("closed", () => {
+         setupWin = null;
+     });
+@@ -206,6 +235,7 @@ const Logger = require("../core/shared/Logger");
+ // TASK A52 — Admin Authentication Backend cho khu vực "AI 🔒" trong Setup (SETUP OWNER: Claude A).
+ // Toàn bộ logic hash/verify/change password nằm trong module này, main.js chỉ relay qua IPC.
+ const AdminAuth = require("../core/shared/AdminAuth");
++const SetupLock = require("../core/shared/SetupLock"); // SETUP-LOCK-01
+ const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
+ const MpcHcSession = require("../core/integration/MpcHcSession"); // Task C — nguồn thứ 2 (MPC-HC), file có sẵn nhưng trước đây chưa được require/dùng ở đây
+ const NowPlayingArbitrator = require("../core/integration/NowPlayingArbitrator"); // Task C — quyết định SMTC hay MPC-HC đang active
+@@ -768,6 +798,17 @@ ipcMain.on("open-setup", () => {
+ 
+ });
+ 
++// SETUP-LOCK-01 — xác thực mật khẩu mở Cài đặt (logic thật ở core/shared/SetupLock.js). Chỉ nhận từ cửa sổ Setup; lỗi => từ chối (không bao giờ tự mở khoá).
++ipcMain.handle("setup-lock-verify", async (event, password) => {
++    try {
++        if (!setupWin || setupWin.isDestroyed() || event.sender !== setupWin.webContents) return { ok: false, reason: "denied" };
++        return SetupLock.verify(password);
++    } catch (err) {
++        console.error("setup-lock-verify lỗi:", err && err.message);
++        return { ok: false, reason: "error" };
++    }
++});
++
+ ipcMain.on("close-setup", () => {
+ 
+     if (!setupWin || setupWin.isDestroyed()) {
+diff --git a/app/preload.js b/app/preload.js
+index 633a5a7..2c2069b 100644
+--- a/app/preload.js
++++ b/app/preload.js
+@@ -155,6 +155,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
+     // Xác thực THẬT xảy ra ở main process (core/shared/AdminAuth.js) — hàm này chỉ relay
+     // qua IPC, không tự so sánh password ở renderer.
+     adminAuthVerify: (password) => ipcRenderer.invoke("admin-auth-verify", password),
++    // SETUP-LOCK-01 — khoá mở Cài đặt: main kiểm tra mật khẩu (core/shared/SetupLock.js); main báo "khoá lại" khi Setup bị ẩn.
++    setupLockVerify: (password) => ipcRenderer.invoke("setup-lock-verify", password),
++    onSetupLockEngage: (callback) => ipcRenderer.on("setup-lock-engage", () => callback()),
+     getDatabaseStatus: () => ipcRenderer.invoke("database-status"), // DB-STATUS-01
+     // APP-UPDATE-01 — Phiên bản / Cập nhật
+     getAppVersion: () => ipcRenderer.invoke("app-version"),
+diff --git a/core/shared/SetupLock.js b/core/shared/SetupLock.js
+new file mode 100644
+index 0000000..da51222
+--- /dev/null
++++ b/core/shared/SetupLock.js
+@@ -0,0 +1,71 @@
++"use strict";
++
++// ================================================================
++// SETUP-LOCK-01 — KHOÁ BẢO VỆ KHU VỰC CÀI ĐẶT (SETUP)
++// ================================================================
++// Việc DUY NHẤT của module này: kiểm tra mật khẩu mở Cài đặt, chạy ở tiến trình main (renderer
++// chỉ gửi mật khẩu qua IPC "setup-lock-verify" và nhận đúng/sai — không tự so sánh).
++//
++// - Mật khẩu KHÔNG nằm trong mã nguồn ở dạng đọc được: chỉ lưu {salt, hash} (scrypt, một chiều).
++// - So sánh bằng crypto.timingSafeEqual.
++// - Chống dò mật khẩu: sai MAX_FAILS lần liên tiếp thì khoá thử LOCK_MS (giữ trong bộ nhớ, tắt app là reset).
++// - Tách biệt hoàn toàn với core/shared/AdminAuth.js (mật khẩu Admin của tab AI) — không đụng file đó.
++// - KHÔNG bao giờ log mật khẩu.
++// ================================================================
++
++const crypto = require("crypto");
++
++const SALT_HEX = "e0468a4c1c6f247876ff3a73196f739a";
++const HASH_HEX = "a3b9391db7effe1639881ed5dd844b1bbb51ddc9fec8f13909fcc25ae34bc732a31b8aa1dffd9105b8c8befc371927bbb03e83e41e4574e060a6fe5a5c8d9730";
++const SCRYPT_KEYLEN = 64;
++const MAX_FAILS = 5;
++const LOCK_MS = 30 * 1000;
++
++function createSetupLock(opts) {
++    const o = opts || {};
++    const salt = o.saltHex || SALT_HEX;
++    const hash = o.hashHex || HASH_HEX;
++    const now = typeof o.now === "function" ? o.now : () => Date.now();
++    let fails = 0;
++    let lockedUntil = 0;
++
++    function verify(password) {
++        const t = now();
++        if (t < lockedUntil) {
++            return { ok: false, reason: "locked", retryMs: lockedUntil - t };
++        }
++        if (typeof password !== "string" || password.length === 0 || password.length > 128) {
++            return { ok: false, reason: "wrong" };
++        }
++        let match = false;
++        try {
++            const cand = crypto.scryptSync(password, salt, SCRYPT_KEYLEN);
++            const ref = Buffer.from(hash, "hex");
++            match = cand.length === ref.length && crypto.timingSafeEqual(cand, ref);
++        } catch {
++            match = false;
++        }
++        if (match) {
++            fails = 0;
++            return { ok: true };
++        }
++        fails += 1;
++        if (fails >= MAX_FAILS) {
++            fails = 0;
++            lockedUntil = now() + LOCK_MS;
++            return { ok: false, reason: "locked", retryMs: LOCK_MS };
++        }
++        return { ok: false, reason: "wrong", triesLeft: MAX_FAILS - fails };
++    }
++
++    return { verify };
++}
++
++const defaultInstance = createSetupLock();
++
++module.exports = {
++    createSetupLock,
++    MAX_FAILS,
++    LOCK_MS,
++    verify: (password) => defaultInstance.verify(password)
++};
+diff --git a/tests/unit/SetupLockMenuWindow.verify.js b/tests/unit/SetupLockMenuWindow.verify.js
+new file mode 100644
+index 0000000..039c705
+--- /dev/null
++++ b/tests/unit/SetupLockMenuWindow.verify.js
+@@ -0,0 +1,58 @@
++"use strict";
++/**
++ * SETUP-LOCK-01 + MENU-NOMAX-01 + MENU-FRAMELESS-01 + MARQUEE-VISIBLE-01 — kiểm tra tự động.
++ * KHÔNG chứa mật khẩu thật (repo công khai): phần "đúng mật khẩu" đã được chạy tay trong báo cáo; ở đây chỉ kiểm
++ * logic từ chối / chống dò / cấu trúc nối dây.
++ */
++const fs = require("fs");
++const path = require("path");
++const crypto = require("crypto");
++const root = path.join(__dirname, "..", "..");
++const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
++
++let pass = 0, fail = 0;
++function ok(cond, msg) { if (cond) { pass++; console.log("  OK   " + msg); } else { fail++; console.log("  FAIL " + msg); } }
++
++// ---- SetupLock (logic) ----
++const { createSetupLock, MAX_FAILS, LOCK_MS } = require(path.join(root, "core/shared/SetupLock.js"));
++const salt = crypto.randomBytes(16).toString("hex");
++const hash = crypto.scryptSync("mat-khau-chi-de-test", salt, 64).toString("hex");
++let clock = 1000;
++const lock = createSetupLock({ saltHex: salt, hashHex: hash, now: () => clock });
++
++ok(lock.verify("mat-khau-chi-de-test").ok === true, "đúng mật khẩu => ok");
++ok(lock.verify("sai").ok === false, "sai mật khẩu => từ chối");
++ok(lock.verify("").ok === false && lock.verify(null).ok === false && lock.verify(123).ok === false, "rỗng / null / không phải chuỗi => từ chối");
++ok(lock.verify("x".repeat(500)).ok === false, "chuỗi quá dài => từ chối");
++const lk = createSetupLock({ saltHex: salt, hashHex: hash, now: () => clock });
++let last;
++for (let i = 0; i < MAX_FAILS; i++) last = lk.verify("sai" + i);
++ok(last.ok === false && last.reason === "locked" && last.retryMs === LOCK_MS, "sai " + MAX_FAILS + " lần => bị khoá tạm");
++ok(lk.verify("mat-khau-chi-de-test").ok === false, "đang bị khoá: ngay cả mật khẩu đúng cũng chưa được");
++clock += LOCK_MS + 1;
++ok(lk.verify("mat-khau-chi-de-test").ok === true, "hết thời gian khoá => mật khẩu đúng mở được");
++const mod = read("core/shared/SetupLock.js");
++ok(/SALT_HEX = "[0-9a-f]{32}"/.test(mod) && /HASH_HEX = "[0-9a-f]{128}"/.test(mod), "mã nguồn chỉ chứa salt + hash (hex), không có mật khẩu rõ");
++ok(!/console\.(log|error|warn)\([^)]*password/i.test(mod), "không log mật khẩu");
++
++// ---- nối dây main/preload/renderer ----
++const main = read("app/main.js");
++ok(/ipcMain\.handle\("setup-lock-verify"/.test(main), "main có IPC setup-lock-verify");
++ok(/event\.sender !== setupWin\.webContents\) return \{ ok: false, reason: "denied" \}/.test(main), "IPC chỉ nhận từ cửa sổ Setup");
++ok(/setupWin\.on\("hide"/.test(main) && /"setup-lock-engage"/.test(main), "main báo khoá lại khi Setup bị ẩn");
++const mw = main.slice(main.indexOf("function createMainWindow"), main.indexOf("function createSetupWindow"));
++ok(/frame:\s*false/.test(mw), "Menu không khung (bỏ thanh tiêu đề Windows => hết ✕ thừa)");
++ok(/maximizable:\s*false/.test(mw) && /fullscreenable:\s*false/.test(mw), "Menu không phóng to / không toàn màn hình");
++ok(/on\("maximize"/.test(mw) && /unmaximize\(\)/.test(mw) && /on\("enter-full-screen"/.test(mw) && /setFullScreen\(false\)/.test(mw), "lớp bảo hiểm: lỡ phóng to thì tự đưa về");
++ok(/-webkit-app-region: drag/.test(mw), "vẫn kéo được cửa sổ bằng header");
++const pre = read("app/preload.js");
++ok(/setupLockVerify:/.test(pre) && /onSetupLockEngage:/.test(pre), "preload mở đủ 2 kênh khoá");
++const nav = read("ui/js/setupNav.js");
++ok(/SETUP-LOCK-01 BEGIN/.test(nav) && /setupLockVerify/.test(nav) && /fail-closed/.test(nav), "setupNav.js dựng khoá và giữ khoá khi lỗi");
++const rend = read("ui/js/renderer.js");
++ok(/\.marquee-bar\{flex-shrink:0;\}/.test(rend), "dòng Key dịch vụ không bị ép mỏng (flex-shrink:0)");
++const setupHtml = read("ui/setup.html");
++ok(!/setupLock/i.test(setupHtml), "setup.html không bị sửa");
++
++console.log("\n" + pass + " PASS, " + fail + " FAIL");
++process.exit(fail ? 1 : 0);
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 6462341..616ace3 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -1306,7 +1306,9 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
+             const st = document.createElement("style");
+             st.id = "verticalExpandFitStyle";
+             st.textContent = "body.vertical-mode .mixer-grid{grid-template-rows:repeat(3,122px);}"
+-                + "body.vertical-mode .app{height:auto !important;max-height:100vh;overflow-y:auto;}";
++                + "body.vertical-mode .app{height:auto !important;max-height:100vh;overflow-y:auto;}"
++                // MARQUEE-VISIBLE-01: dòng chữ chạy "Thời hạn Key dịch vụ" là 1 mục flex trong .app; khi .app bị giới hạn chiều cao (chế độ dọc) nó bị co còn ~11px nên chỉ thấy 1 vạch xanh. Không cho co.
++                + ".marquee-bar{flex-shrink:0;}";
+             document.head.appendChild(st);
+         }
+     } catch (err) { console.error("VERTICAL-EXPAND-FIT-01 lỗi (bỏ qua):", err); }
+diff --git a/ui/js/setupNav.js b/ui/js/setupNav.js
+index 088ec59..1091bb9 100644
+--- a/ui/js/setupNav.js
++++ b/ui/js/setupNav.js
+@@ -155,3 +155,139 @@
+     // Chạy 1 lần khi trang load xong, sau khi setup.js đã initSetupPage().
+     window.addEventListener("load", () => setTimeout(refreshDashboard, 300));
+ })();
++
++/* SETUP-LOCK-01 BEGIN — KHOÁ BẢO VỆ KHU VỰC CÀI ĐẶT.
++   Setup luôn mở ra trong trạng thái KHOÁ: một lớp phủ kín che toàn bộ trang, phần phía sau bị "inert" (chuột + phím Tab đều không chạm được).
++   Mật khẩu KHÔNG được so sánh ở đây — chỉ gửi cho main (electronAPI.setupLockVerify -> core/shared/SetupLock.js) và nhận đúng/sai.
++   Không lưu trạng thái mở khoá ở đâu cả (không localStorage/file): đóng/ẩn Setup là main báo "setup-lock-engage" để khoá lại; mở lại phải nhập lại.
++   Lỗi bất kỳ (không gọi được main...) => GIỮ NGUYÊN khoá, không bao giờ tự mở. Không đổi HTML: lớp phủ dựng bằng JS, CSS có tiền tố "sl01-". */
++(function setupLockInit() {
++    "use strict";
++    if (typeof document === "undefined" || !document.body) return;
++
++    var overlay = null;
++    var retryTimer = null;
++
++    function isEn() { return !!(window.I18N && window.I18N.lang === "en"); }
++    function t(vi, en) { return isEn() ? en : vi; }
++
++    function injectStyle() {
++        if (document.getElementById("setupLockStyle")) return;
++        var st = document.createElement("style");
++        st.id = "setupLockStyle";
++        st.textContent =
++            ".sl01-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;background:#020813;display:flex;align-items:center;justify-content:center;font-family:'Segoe UI',sans-serif;}" +
++            ".sl01-box{width:340px;max-width:90vw;box-sizing:border-box;padding:26px 28px;border-radius:12px;background:#0b1a2b;border:1px solid #1c3b5a;color:#e6f4ff;box-shadow:0 12px 48px rgba(0,0,0,.6);}" +
++            ".sl01-title{font-size:17px;font-weight:700;letter-spacing:.5px;text-align:center;margin-bottom:6px;color:#38bdf8;}" +
++            ".sl01-sub{font-size:12px;text-align:center;opacity:.75;margin-bottom:16px;}" +
++            ".sl01-input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;border:1px solid #2a4a6b;background:#06111d;color:#fff;font-size:15px;}" +
++            ".sl01-input:focus{outline:none;border-color:#38bdf8;}" +
++            ".sl01-err{min-height:18px;margin:8px 0 2px;font-size:12px;color:#ff6b6b;text-align:center;}" +
++            ".sl01-btn{width:100%;padding:10px;border:0;border-radius:8px;background:#00d2ff;color:#02202e;font-weight:700;font-size:14px;cursor:pointer;}" +
++            ".sl01-btn:disabled{opacity:.5;cursor:default;}";
++        (document.head || document.documentElement).appendChild(st);
++    }
++
++    function setInert(on) {
++        Array.prototype.forEach.call(document.body.children, function (c) {
++            if (c === overlay) return;
++            if (c.tagName === "SCRIPT" || c.tagName === "STYLE") return;
++            if (on) c.setAttribute("inert", ""); else c.removeAttribute("inert");
++        });
++    }
++
++    function unlock() {
++        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
++        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
++        overlay = null;
++        setInert(false);
++    }
++
++    function lock() {
++        if (overlay) return; // đã khoá rồi
++        injectStyle();
++
++        overlay = document.createElement("div");
++        overlay.className = "sl01-overlay";
++        var box = document.createElement("div");
++        box.className = "sl01-box";
++
++        var title = document.createElement("div");
++        title.className = "sl01-title";
++        title.textContent = t("🔒 CÀI ĐẶT ĐÃ KHOÁ", "🔒 SETTINGS LOCKED");
++        var sub = document.createElement("div");
++        sub.className = "sl01-sub";
++        sub.textContent = t("Nhập mật khẩu để mở Cài đặt", "Enter the password to open Settings");
++
++        var input = document.createElement("input");
++        input.type = "password";
++        input.className = "sl01-input";
++        input.autocomplete = "off";
++        input.placeholder = "••••••••";
++
++        var err = document.createElement("div");
++        err.className = "sl01-err";
++
++        var btn = document.createElement("button");
++        btn.type = "button";
++        btn.className = "sl01-btn";
++        btn.textContent = t("MỞ KHOÁ", "UNLOCK");
++
++        box.appendChild(title);
++        box.appendChild(sub);
++        box.appendChild(input);
++        box.appendChild(err);
++        box.appendChild(btn);
++        overlay.appendChild(box);
++        document.body.appendChild(overlay);
++        setInert(true);
++        setTimeout(function () { try { input.focus(); } catch (e) { /* bỏ qua */ } }, 50);
++
++        var busy = false;
++        function setBusy(b) { busy = b; btn.disabled = b; input.disabled = b; }
++
++        function attempt() {
++            if (busy) return;
++            var pw = input.value; // không bao giờ log biến này
++            if (!pw) { err.textContent = t("Vui lòng nhập mật khẩu.", "Please enter the password."); return; }
++            var api = window.electronAPI;
++            if (!api || typeof api.setupLockVerify !== "function") {
++                err.textContent = t("Không kiểm tra được mật khẩu (thiếu kênh kết nối).", "Cannot verify the password (missing channel).");
++                return; // fail-closed: giữ khoá
++            }
++            err.textContent = "";
++            setBusy(true);
++            Promise.resolve(api.setupLockVerify(pw)).then(function (r) {
++                if (r && r.ok === true) { unlock(); return; }
++                input.value = "";
++                if (r && r.reason === "locked") {
++                    var sec = Math.max(1, Math.ceil((r.retryMs || 30000) / 1000));
++                    err.textContent = t("Sai nhiều lần. Thử lại sau " + sec + " giây.", "Too many attempts. Try again in " + sec + " s.");
++                    btn.disabled = true; input.disabled = true; // giữ khoá nút trong lúc chờ
++                    retryTimer = setTimeout(function () { retryTimer = null; setBusy(false); err.textContent = ""; try { input.focus(); } catch (e) { /* bỏ qua */ } }, sec * 1000);
++                    return;
++                }
++                err.textContent = t("Sai mật khẩu.", "Wrong password.");
++                setBusy(false);
++                try { input.focus(); } catch (e) { /* bỏ qua */ }
++            }).catch(function () {
++                err.textContent = t("Lỗi hệ thống, thử lại.", "System error, try again.");
++                setBusy(false);
++            });
++        }
++
++        btn.addEventListener("click", attempt);
++        input.addEventListener("keydown", function (e) { if (e.key === "Enter") attempt(); });
++    }
++
++    // Khoá ngay khi trang Setup dựng xong (cửa sổ Setup tạo ẩn lúc khởi động, hiện ra thì đã khoá sẵn).
++    lock();
++
++    // Main báo Setup vừa bị ẩn/đóng => khoá lại cho lần mở sau.
++    try {
++        if (window.electronAPI && typeof window.electronAPI.onSetupLockEngage === "function") {
++            window.electronAPI.onSetupLockEngage(function () { lock(); });
++        }
++    } catch (e) { console.error("SETUP-LOCK-01 đăng ký engage lỗi (bỏ qua):", e); }
++})();
++/* SETUP-LOCK-01 END */

@@ -121,6 +121,9 @@ function createMainWindow() {
     mainWin = new BrowserWindow({
         width: 1200,
         height: 800,
+        frame: false, // MENU-FRAMELESS-01: bỏ thanh tiêu đề + thanh File/Edit/View/Window của Windows (nguồn của dấu ✕ thứ 2); thanh của app (header) làm thanh tiêu đề
+        maximizable: false, // MENU-NOMAX-01: Menu không được phóng to (cả dạng dọc lẫn ngang)
+        fullscreenable: false, // MENU-NOMAX-01: không cho toàn màn hình (F11...)
         ...(savedPos ? { x: savedPos.x, y: savedPos.y } : {}),
         webPreferences: {
             preload: path.join(__dirname, "preload.js"),
@@ -131,6 +134,24 @@ function createMainWindow() {
     });
 
     mainWin.loadFile(path.join(__dirname, "..", "ui", "index.html"));
+
+    // MENU-NOMAX-01: lớp bảo hiểm thứ 2 — nếu Windows vẫn phóng to / toàn màn hình được (Win+↑, kéo lên mép trên màn hình, F11) thì đưa về cỡ cũ ngay.
+    mainWin.on("maximize", () => { try { if (mainWin && !mainWin.isDestroyed()) mainWin.unmaximize(); } catch (err) { console.error("MENU-NOMAX-01 unmaximize lỗi:", err); } });
+    mainWin.on("enter-full-screen", () => { try { if (mainWin && !mainWin.isDestroyed()) mainWin.setFullScreen(false); } catch (err) { console.error("MENU-NOMAX-01 setFullScreen lỗi:", err); } });
+
+    // MENU-FRAMELESS-01: không còn khung Windows nên phải cho kéo cửa sổ bằng header của app.
+    // Chèn CSS từ main process (KHÔNG sửa HTML/CSS của giao diện). Các nút trong .window-buttons giữ no-drag để vẫn bấm được.
+    mainWin.webContents.on("did-finish-load", () => {
+        try {
+            if (mainWin && !mainWin.isDestroyed()) {
+                mainWin.webContents.insertCSS(
+                    ".header { -webkit-app-region: drag; } .window-buttons, .window-buttons * { -webkit-app-region: no-drag; }"
+                ).catch(() => {});
+            }
+        } catch (err) {
+            console.error("MENU-FRAMELESS-01 insertCSS lỗi (bỏ qua):", err);
+        }
+    });
 
     // AUDIO-AUTOSTART-01 — ui/js/renderer.js chỉ khởi động nghe âm thanh (Key/BPM/VU) ở cú click ĐẦU TIÊN vào Menu
     // (listener {once:true} trên document.body, vì autoplay policy). Bản cài .exe mở Menu mà người dùng chưa bấm gì
@@ -189,6 +210,14 @@ function createSetupWindow() {
 
     setupWin.loadFile(path.join(__dirname, "..", "ui", "setup.html"));
 
+    // SETUP-LOCK-01: mỗi lần Setup bị ẩn (nút đóng trong Setup / close-setup) thì khoá lại, lần mở sau phải nhập mật khẩu lại.
+    // Lần đầu trang tải xong tự khoá (xem ui/js/setupNav.js), nên cửa sổ vừa tạo cũng luôn bị khoá.
+    setupWin.on("hide", () => {
+        try {
+            if (setupWin && !setupWin.isDestroyed()) setupWin.webContents.send("setup-lock-engage");
+        } catch (err) { console.error("SETUP-LOCK-01 engage lỗi (bỏ qua):", err); }
+    });
+
     setupWin.on("closed", () => {
         setupWin = null;
     });
@@ -206,6 +235,7 @@ const Logger = require("../core/shared/Logger");
 // TASK A52 — Admin Authentication Backend cho khu vực "AI 🔒" trong Setup (SETUP OWNER: Claude A).
 // Toàn bộ logic hash/verify/change password nằm trong module này, main.js chỉ relay qua IPC.
 const AdminAuth = require("../core/shared/AdminAuth");
+const SetupLock = require("../core/shared/SetupLock"); // SETUP-LOCK-01
 const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
 const MpcHcSession = require("../core/integration/MpcHcSession"); // Task C — nguồn thứ 2 (MPC-HC), file có sẵn nhưng trước đây chưa được require/dùng ở đây
 const NowPlayingArbitrator = require("../core/integration/NowPlayingArbitrator"); // Task C — quyết định SMTC hay MPC-HC đang active
@@ -766,6 +796,17 @@ ipcMain.on("open-setup", () => {
     setupWin.show();
     setupWin.focus();
 
+});
+
+// SETUP-LOCK-01 — xác thực mật khẩu mở Cài đặt (logic thật ở core/shared/SetupLock.js). Chỉ nhận từ cửa sổ Setup; lỗi => từ chối (không bao giờ tự mở khoá).
+ipcMain.handle("setup-lock-verify", async (event, password) => {
+    try {
+        if (!setupWin || setupWin.isDestroyed() || event.sender !== setupWin.webContents) return { ok: false, reason: "denied" };
+        return SetupLock.verify(password);
+    } catch (err) {
+        console.error("setup-lock-verify lỗi:", err && err.message);
+        return { ok: false, reason: "error" };
+    }
 });
 
 ipcMain.on("close-setup", () => {

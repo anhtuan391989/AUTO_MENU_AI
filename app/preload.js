@@ -155,6 +155,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // Xác thực THẬT xảy ra ở main process (core/shared/AdminAuth.js) — hàm này chỉ relay
     // qua IPC, không tự so sánh password ở renderer.
     adminAuthVerify: (password) => ipcRenderer.invoke("admin-auth-verify", password),
+    // SETUP-LOCK-01 — khoá mở Cài đặt: main kiểm tra mật khẩu (core/shared/SetupLock.js); main báo "khoá lại" khi Setup bị ẩn.
+    setupLockVerify: (password) => ipcRenderer.invoke("setup-lock-verify", password),
+    onSetupLockEngage: (callback) => ipcRenderer.on("setup-lock-engage", () => callback()),
     getDatabaseStatus: () => ipcRenderer.invoke("database-status"), // DB-STATUS-01
     // APP-UPDATE-01 — Phiên bản / Cập nhật
     getAppVersion: () => ipcRenderer.invoke("app-version"),
