@@ -107,10 +107,37 @@ index 0000000..e69b907
 +
 +module.exports = { createInstalledUpdater, compareVersions };
 diff --git a/app/main.js b/app/main.js
-index 2ead1ab..0c1307a 100644
+index 2ead1ab..ac0b355 100644
 --- a/app/main.js
 +++ b/app/main.js
-@@ -973,8 +973,15 @@ ipcMain.handle("database-status", async () => {
+@@ -125,12 +125,25 @@ function createMainWindow() {
+         webPreferences: {
+             preload: path.join(__dirname, "preload.js"),
+             contextIsolation: true,
+-            nodeIntegration: false
++            nodeIntegration: false,
++            autoplayPolicy: "no-user-gesture-required" // AUDIO-AUTOSTART-01: AudioContext chạy ngay, không chờ người dùng bấm vào Menu
+         }
+     });
+ 
+     mainWin.loadFile(path.join(__dirname, "..", "ui", "index.html"));
+ 
++    // AUDIO-AUTOSTART-01 — ui/js/renderer.js chỉ khởi động nghe âm thanh (Key/BPM/VU) ở cú click ĐẦU TIÊN vào Menu
++    // (listener {once:true} trên document.body, vì autoplay policy). Bản cài .exe mở Menu mà người dùng chưa bấm gì
++    // nên Menu "điếc" tới khi bấm. Ở đây tự thực hiện đúng cú click đầu đó (userGesture=true) ngay khi trang tải xong
++    // => đi đúng đường cũ startAudioMonitor(), không đổi renderer/HTML. Click thật của người dùng sau đó vô hại (listener chỉ chạy 1 lần).
++    mainWin.webContents.once("did-finish-load", () => {
++        setTimeout(() => {
++            try {
++                if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.executeJavaScript("document.body && document.body.click()", true).catch(() => {});
++            } catch (err) { console.error("AUDIO-AUTOSTART-01 lỗi:", err); }
++        }, 500);
++    });
++
+     // MENU-POS-MEMORY-01: lưu vị trí sau khi người dùng kéo xong (chờ 400ms không còn di chuyển mới ghi, để khỏi ghi file liên tục) và 1 lần nữa khi đóng.
+     let posSaveTimer = null;
+     mainWin.on("move", () => {
+@@ -973,8 +986,15 @@ ipcMain.handle("database-status", async () => {
  let __appUpdater = null;
  function getAppUpdater() {
      if (!__appUpdater) {
@@ -4727,10 +4754,10 @@ index 1870c12..6c0942f 100644
  }
 diff --git a/tests/unit/InstalledUpdater02.verify.js b/tests/unit/InstalledUpdater02.verify.js
 new file mode 100644
-index 0000000..c9ebb5d
+index 0000000..d121cc0
 --- /dev/null
 +++ b/tests/unit/InstalledUpdater02.verify.js
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,107 @@
 +// APP-UPDATE-02 / PACKAGE-01 — bộ cập nhật cho bản cài .exe (electron-updater giả lập, không chạm mạng) + đường dẫn ghi dữ liệu.
 +const fs = require('fs'), path = require('path'), os = require('os');
 +const { createInstalledUpdater, compareVersions } = require('../../app/InstalledUpdater.js');
@@ -4821,6 +4848,10 @@ index 0000000..c9ebb5d
 +  ok(pkg.scripts.dist && pkg.scripts.release && pkg.build && pkg.build.asar === false, 'package.json: có lệnh dist/release, asar=false (AHK/PowerShell cần file thật)');
 +  ok(pkg.build.npmRebuild === false, 'package.json: npmRebuild=false (MIDI dùng bản N-API dựng sẵn, máy build không cần Visual Studio)');
 +  ok(/^dist\/?$/m.test(rd('.gitignore')), '.gitignore có dist/ (sync.bat dùng git add . — tránh đẩy file cài 145MB lên GitHub)');
++  // AUDIO-AUTOSTART-01 — Menu phải tự nghe âm thanh khi mở, không chờ người dùng bấm.
++  ok(/autoplayPolicy:\s*"no-user-gesture-required"/.test(main), 'main.js: mainWin có autoplayPolicy no-user-gesture-required');
++  ok(/did-finish-load[\s\S]{0,400}executeJavaScript\("document\.body && document\.body\.click\(\)",\s*true\)/.test(main), 'main.js: tự click đầu tiên (userGesture=true) sau khi trang tải xong');
++  ok(/document\.body\.addEventListener\('click'[\s\S]{0,120}startAudioMonitor\(\)[\s\S]{0,40}\{ once: true \}/.test(rd('ui/js/renderer.js')), 'renderer.js: listener click đầu tiên -> startAudioMonitor() vẫn nguyên (không sửa)');
 +  const pub = (pkg.build.publish || [])[0] || {};
 +  ok(pub.provider === 'github' && pub.owner === 'anhtuan391989' && /^AUTO_MENU_AI$/i.test(pub.repo), 'package.json: publish -> GitHub Releases của repo', pub);
 +  const inc = pkg.build.files.join('|');

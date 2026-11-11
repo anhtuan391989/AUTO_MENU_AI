@@ -88,6 +88,10 @@ function fakeApp(version) {
   ok(pkg.scripts.dist && pkg.scripts.release && pkg.build && pkg.build.asar === false, 'package.json: có lệnh dist/release, asar=false (AHK/PowerShell cần file thật)');
   ok(pkg.build.npmRebuild === false, 'package.json: npmRebuild=false (MIDI dùng bản N-API dựng sẵn, máy build không cần Visual Studio)');
   ok(/^dist\/?$/m.test(rd('.gitignore')), '.gitignore có dist/ (sync.bat dùng git add . — tránh đẩy file cài 145MB lên GitHub)');
+  // AUDIO-AUTOSTART-01 — Menu phải tự nghe âm thanh khi mở, không chờ người dùng bấm.
+  ok(/autoplayPolicy:\s*"no-user-gesture-required"/.test(main), 'main.js: mainWin có autoplayPolicy no-user-gesture-required');
+  ok(/did-finish-load[\s\S]{0,400}executeJavaScript\("document\.body && document\.body\.click\(\)",\s*true\)/.test(main), 'main.js: tự click đầu tiên (userGesture=true) sau khi trang tải xong');
+  ok(/document\.body\.addEventListener\('click'[\s\S]{0,120}startAudioMonitor\(\)[\s\S]{0,40}\{ once: true \}/.test(rd('ui/js/renderer.js')), 'renderer.js: listener click đầu tiên -> startAudioMonitor() vẫn nguyên (không sửa)');
   const pub = (pkg.build.publish || [])[0] || {};
   ok(pub.provider === 'github' && pub.owner === 'anhtuan391989' && /^AUTO_MENU_AI$/i.test(pub.repo), 'package.json: publish -> GitHub Releases của repo', pub);
   const inc = pkg.build.files.join('|');

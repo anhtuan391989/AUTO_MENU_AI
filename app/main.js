@@ -10,10 +10,6 @@ const { execFile, spawn } = require("child_process"); // A120: spawn dùng ở o
 const https = require("https");
 const os = require("os");
 
-// HIDE-FOLDERS-01 — ẩn thư mục dữ liệu (%APPDATA%\AutoMenuAI) và thư mục cài đặt (bản .exe đã đóng gói)
-// khỏi File Explorer. Chi tiết + giới hạn thật: xem app/HideFolders.js.
-const { hideAppFolders } = require("./HideFolders");
-
 let mainWin = null;
 let setupWin = null;
 // MENU-UI-01B — true khi người dùng đã chủ động gạt Always on Top trong phiên này (không lưu qua phiên).
@@ -125,29 +121,27 @@ function createMainWindow() {
     mainWin = new BrowserWindow({
         width: 1200,
         height: 800,
-        frame: false, // MENU-FRAMELESS-01: bỏ thanh tiêu đề + thanh File/Edit/View/Window của Windows; thanh của app (header) làm thanh tiêu đề
         ...(savedPos ? { x: savedPos.x, y: savedPos.y } : {}),
         webPreferences: {
             preload: path.join(__dirname, "preload.js"),
             contextIsolation: true,
-            nodeIntegration: false
+            nodeIntegration: false,
+            autoplayPolicy: "no-user-gesture-required" // AUDIO-AUTOSTART-01: AudioContext chạy ngay, không chờ người dùng bấm vào Menu
         }
     });
 
     mainWin.loadFile(path.join(__dirname, "..", "ui", "index.html"));
 
-    // MENU-FRAMELESS-01: không còn khung Windows nên phải cho kéo cửa sổ bằng header của app.
-    // Chèn CSS từ main process (KHÔNG sửa HTML/CSS của giao diện). Các nút trong .window-buttons giữ no-drag để vẫn bấm được.
-    mainWin.webContents.on("did-finish-load", () => {
-        try {
-            if (mainWin && !mainWin.isDestroyed()) {
-                mainWin.webContents.insertCSS(
-                    ".header { -webkit-app-region: drag; } .window-buttons, .window-buttons * { -webkit-app-region: no-drag; }"
-                ).catch(() => {});
-            }
-        } catch (err) {
-            console.error("MENU-FRAMELESS-01 insertCSS lỗi (bỏ qua):", err);
-        }
+    // AUDIO-AUTOSTART-01 — ui/js/renderer.js chỉ khởi động nghe âm thanh (Key/BPM/VU) ở cú click ĐẦU TIÊN vào Menu
+    // (listener {once:true} trên document.body, vì autoplay policy). Bản cài .exe mở Menu mà người dùng chưa bấm gì
+    // nên Menu "điếc" tới khi bấm. Ở đây tự thực hiện đúng cú click đầu đó (userGesture=true) ngay khi trang tải xong
+    // => đi đúng đường cũ startAudioMonitor(), không đổi renderer/HTML. Click thật của người dùng sau đó vô hại (listener chỉ chạy 1 lần).
+    mainWin.webContents.once("did-finish-load", () => {
+        setTimeout(() => {
+            try {
+                if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.executeJavaScript("document.body && document.body.click()", true).catch(() => {});
+            } catch (err) { console.error("AUDIO-AUTOSTART-01 lỗi:", err); }
+        }, 500);
     });
 
     // MENU-POS-MEMORY-01: lưu vị trí sau khi người dùng kéo xong (chờ 400ms không còn di chuyển mới ghi, để khỏi ghi file liên tục) và 1 lần nữa khi đóng.
@@ -294,17 +288,6 @@ function onLicenseLost(st) {
     try { __companionDone = true; } catch (err) { /* không tự động đóng DAW/YouTube của người dùng chỉ vì hết license */ }
     licenseManager.relaunch(app); // relaunch + quit: đi qua before-quit như thoát bình thường (khôi phục DAW đang ẩn, đóng MIDI)
 }
-
-app.whenReady().then(() => {
-    try {
-        hideAppFolders({
-            userDataDir: app.getPath("userData"),
-            installDir: path.dirname(app.getPath("exe")),
-            isPackaged: app.isPackaged,
-            log: console.error
-        });
-    } catch (err) { console.error("HIDE-FOLDERS-01 lỗi (bỏ qua):", err); }
-});
 
 app.whenReady().then(async () => {
     // LICENSE-01 — cổng kiểm tra: không qua được thì dừng ngay, mọi khối khởi động phía dưới không chạy.
