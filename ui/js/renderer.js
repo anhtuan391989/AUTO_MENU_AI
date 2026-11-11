@@ -4175,7 +4175,16 @@ function bridgeSemitoneDelta(fromKeyName, toKeyName) {
                 if (v === null) return;
                 el.setAttribute("data-i18n-skip", ""); // tự dịch theo ngôn ngữ ở đây, không để bộ dịch chuỗi cố định đụng vào
                 const line = buildLine(v, en);
-                if (el.textContent !== line) el.textContent = line;
+                if (el.textContent === line) return;
+                el.textContent = line;
+                // LICENSE-MARQUEE-02: đổi chữ lúc hoạt ảnh "marquee" (CSS, chạy liên tục @keyframes marquee)
+                // đang chạy có thể làm chữ vẽ sai/biến mất cho tới khi có 1 reflow khác xảy ra (ví dụ bấm
+                // "MỞ RỘNG" rồi thu lại). Buộc khởi động lại hoạt ảnh ngay sau khi đổi chữ để tránh việc này.
+                try {
+                    el.style.animation = "none";
+                    void el.offsetWidth; // ép trình duyệt tính lại layout trước khi bật hoạt ảnh lại
+                    el.style.animation = "";
+                } catch (e2) { /* không chặn nếu trình duyệt không hỗ trợ */ }
             }).catch(() => { /* giữ nguyên chữ hiện có */ });
         } catch (err) { console.error("LICENSE-MARQUEE-01 lỗi (bỏ qua):", err); }
     }
