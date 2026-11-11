@@ -4142,3 +4142,46 @@ function bridgeSemitoneDelta(fromKeyName, toKeyName) {
     } catch (err) { console.error("MENU-LAYOUT-MEMORY-01 lỗi (bỏ qua):", err); }
 })();
 /* MENU-LAYOUT-MEMORY-01 END */
+
+/* LICENSE-MARQUEE-01 BEGIN — dòng chạy "Thời hạn Key dịch vụ" ở đáy Menu đọc thời hạn THẬT từ license (cùng nguồn với mục License trong Cài đặt), thay cho chữ cứng "Vĩnh viễn (Pro Active)" trong HTML. KHÔNG sửa HTML: chỉ đổi chữ của .marquee-text lúc chạy. */
+(function licenseMarqueeInit() {
+    "use strict";
+    function pad2(n) { return (n < 10 ? "0" : "") + n; }
+    function fmtDate(ms) { const d = new Date(ms); return pad2(d.getDate()) + "/" + pad2(d.getMonth() + 1) + "/" + d.getFullYear(); }
+    // Trả về phần chữ thời hạn theo ngôn ngữ đang chọn; null nếu chưa có dữ liệu đáng tin (khi đó giữ nguyên chữ hiện có).
+    function validityText(st, en) {
+        if (!st || st.licensed !== true) return null;
+        if (st.plan === "life") return en ? "Lifetime" : "Vĩnh viễn";
+        if (typeof st.expiresAt !== "number" || typeof st.daysLeft !== "number") return null;
+        const planVi = st.planLabel || "";
+        const planEn = { "3d": "3 days", "3m": "3 months", "6m": "6 months", "1y": "1 year" }[st.plan] || planVi;
+        return en
+            ? planEn + ", " + st.daysLeft + " days left (expires " + fmtDate(st.expiresAt) + ")"
+            : planVi + ", còn " + st.daysLeft + " ngày (hết hạn " + fmtDate(st.expiresAt) + ")";
+    }
+    function buildLine(valid, en) {
+        return en
+            ? "✨ Tech support: Khói Studio | Service Key validity: " + valid + " | Contact Zalo: 0349.644.194 ✨"
+            : "✨ Hỗ trợ kỹ thuật: Khói Studio | Thời hạn Key dịch vụ: " + valid + " | Liên hệ Zalo: 0349.644.194 ✨";
+    }
+    function refresh() {
+        try {
+            const el = document.querySelector(".marquee-text");
+            const api = window.electronAPI;
+            if (!el || !api || typeof api.licenseStatus !== "function") return;
+            Promise.resolve(api.licenseStatus()).then((st) => {
+                const en = !!(window.I18N && window.I18N.lang === "en");
+                const v = validityText(st, en);
+                if (v === null) return;
+                el.setAttribute("data-i18n-skip", ""); // tự dịch theo ngôn ngữ ở đây, không để bộ dịch chuỗi cố định đụng vào
+                const line = buildLine(v, en);
+                if (el.textContent !== line) el.textContent = line;
+            }).catch(() => { /* giữ nguyên chữ hiện có */ });
+        } catch (err) { console.error("LICENSE-MARQUEE-01 lỗi (bỏ qua):", err); }
+    }
+    if (typeof document === "undefined") return;
+    refresh();
+    setInterval(refresh, 10 * 60 * 1000);   // số ngày còn lại đổi theo ngày
+    window.addEventListener("focus", refresh); // quay lại từ Cài đặt (đổi ngôn ngữ / gia hạn) thì cập nhật ngay
+})();
+/* LICENSE-MARQUEE-01 END */
