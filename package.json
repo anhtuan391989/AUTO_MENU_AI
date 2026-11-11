@@ -84,7 +84,7 @@
   "build": {
     "appId": "com.automenu.ai",
     "productName": "AutoMenuAI",
-    "asar": false,
+    "asar": true,
     "npmRebuild": false,
     "directories": {
       "output": "dist"
@@ -130,6 +130,12 @@
         "repo": "AUTO_MENU_AI",
         "releaseType": "release"
       }
+    ],
+    "asarUnpack": [
+      "ahk/**/*",
+      "node_modules/@julusian/midi/**/*",
+      "node_modules/easymidi/**/*",
+      "node_modules/mic/**/*"
     ]
   }
 }

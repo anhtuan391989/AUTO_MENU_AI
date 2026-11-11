@@ -1,0 +1,172 @@
+diff --git a/app/HideFolders.js b/app/HideFolders.js
+new file mode 100644
+index 0000000..a71764c
+--- /dev/null
++++ b/app/HideFolders.js
+@@ -0,0 +1,45 @@
++// HIDE-FOLDERS-01 — Ẩn thư mục dữ liệu (%APPDATA%\AutoMenuAI) và thư mục cài đặt của app khỏi
++// File Explorer bằng thuộc tính Windows "Hidden" + "System" (lệnh attrib có sẵn trong Windows,
++// không cần cài thêm gì). CHỈ chạy trên Windows (process.platform === "win32"), best-effort:
++// mọi lỗi (quyền, ổ mạng, antivirus chặn...) đều bị nuốt, không bao giờ làm app dừng hay crash.
++//
++// GIỚI HẠN THẬT (phải biết trước khi dùng):
++// - Thuộc tính Hidden/System chỉ ẩn khỏi File Explorer theo thiết lập mặc định. Bất kỳ ai bật
++//   "Hiện tệp, thư mục và ổ đĩa đã ẩn" (Show hidden files) trong Windows đều thấy lại ngay — đây
++//   KHÔNG phải khoá hay mã hoá, chỉ là ẩn hiển thị thông thường.
++//   KHÔNG mã hoá nội dung file: ai mở được file (kể cả khi đã ẩn) vẫn đọc được nguyên văn.
++// - Dòng lệnh Command Prompt/PowerShell với "dir /a" hoặc "Get-ChildItem -Force" vẫn thấy bình
++//   thường dù đã ẩn.
++'use strict';
++const path = require('path');
++const { execFile } = require('child_process');
++
++function hideFolder(targetDir, log) {
++    if (process.platform !== 'win32') return; // chỉ Windows mới có attrib kiểu này
++    if (!targetDir || typeof targetDir !== 'string') return;
++    try {
++        // /S: áp dụng cho toàn bộ file trong thư mục con. /D: áp dụng luôn cho các thư mục con.
++        // Ẩn cả bản thân targetDir lẫn mọi thứ bên trong.
++        execFile('attrib', ['+h', '+s', targetDir], () => {
++            execFile('attrib', ['+h', '+s', path.join(targetDir, '*.*'), '/S', '/D'], (err) => {
++                if (err && typeof log === 'function') log('HIDE-FOLDERS-01: ẩn nội dung "' + targetDir + '" lỗi (bỏ qua): ' + err.message);
++            });
++        });
++    } catch (err) {
++        if (typeof log === 'function') log('HIDE-FOLDERS-01: ẩn "' + targetDir + '" lỗi (bỏ qua): ' + (err && err.message));
++    }
++}
++
++// Gọi 1 lần lúc app khởi động xong, SAU khi mọi file cấu hình/license/log cần thiết đã được tạo
++// (nếu ẩn thư mục trước khi app kịp tạo file bên trong, file mới tạo thêm sau đó sẽ KHÔNG tự ẩn
++// theo — nên hàm này nên được gọi lại định kỳ hoặc sau mỗi lần có file mới quan trọng).
++// userDataDir: app.getPath("userData") — chứa app-settings.json, license.json, các log/state.
++// installDir: thư mục chứa app khi đã đóng gói .exe (vd app.getPath("exe") lấy dirname) — KHÔNG
++// truyền khi đang chạy "electron ." từ mã nguồn (sẽ ẩn luôn thư mục code đang sửa, gây khó chịu
++// khi làm việc bằng git/editor).
++function hideAppFolders({ userDataDir, installDir, isPackaged, log } = {}) {
++    if (userDataDir) hideFolder(userDataDir, log);
++    if (isPackaged && installDir) hideFolder(installDir, log);
++}
++
++module.exports = { hideFolder, hideAppFolders };
+diff --git a/app/main.js b/app/main.js
+index 0c1307a..c41ca65 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -10,6 +10,10 @@ const { execFile, spawn } = require("child_process"); // A120: spawn dùng ở o
+ const https = require("https");
+ const os = require("os");
+ 
++// HIDE-FOLDERS-01 — ẩn thư mục dữ liệu (%APPDATA%\AutoMenuAI) và thư mục cài đặt (bản .exe đã đóng gói)
++// khỏi File Explorer. Chi tiết + giới hạn thật: xem app/HideFolders.js.
++const { hideAppFolders } = require("./HideFolders");
++
+ let mainWin = null;
+ let setupWin = null;
+ // MENU-UI-01B — true khi người dùng đã chủ động gạt Always on Top trong phiên này (không lưu qua phiên).
+@@ -121,6 +125,7 @@ function createMainWindow() {
+     mainWin = new BrowserWindow({
+         width: 1200,
+         height: 800,
++        frame: false, // MENU-FRAMELESS-01: bỏ thanh tiêu đề + thanh File/Edit/View/Window của Windows; thanh của app (header) làm thanh tiêu đề
+         ...(savedPos ? { x: savedPos.x, y: savedPos.y } : {}),
+         webPreferences: {
+             preload: path.join(__dirname, "preload.js"),
+@@ -131,6 +136,20 @@ function createMainWindow() {
+ 
+     mainWin.loadFile(path.join(__dirname, "..", "ui", "index.html"));
+ 
++    // MENU-FRAMELESS-01: không còn khung Windows nên phải cho kéo cửa sổ bằng header của app.
++    // Chèn CSS từ main process (KHÔNG sửa HTML/CSS của giao diện). Các nút trong .window-buttons giữ no-drag để vẫn bấm được.
++    mainWin.webContents.on("did-finish-load", () => {
++        try {
++            if (mainWin && !mainWin.isDestroyed()) {
++                mainWin.webContents.insertCSS(
++                    ".header { -webkit-app-region: drag; } .window-buttons, .window-buttons * { -webkit-app-region: no-drag; }"
++                ).catch(() => {});
++            }
++        } catch (err) {
++            console.error("MENU-FRAMELESS-01 insertCSS lỗi (bỏ qua):", err);
++        }
++    });
++
+     // MENU-POS-MEMORY-01: lưu vị trí sau khi người dùng kéo xong (chờ 400ms không còn di chuyển mới ghi, để khỏi ghi file liên tục) và 1 lần nữa khi đóng.
+     let posSaveTimer = null;
+     mainWin.on("move", () => {
+@@ -276,6 +295,17 @@ function onLicenseLost(st) {
+     licenseManager.relaunch(app); // relaunch + quit: đi qua before-quit như thoát bình thường (khôi phục DAW đang ẩn, đóng MIDI)
+ }
+ 
++app.whenReady().then(() => {
++    try {
++        hideAppFolders({
++            userDataDir: app.getPath("userData"),
++            installDir: path.dirname(app.getPath("exe")),
++            isPackaged: app.isPackaged,
++            log: console.error
++        });
++    } catch (err) { console.error("HIDE-FOLDERS-01 lỗi (bỏ qua):", err); }
++});
++
+ app.whenReady().then(async () => {
+     // LICENSE-01 — cổng kiểm tra: không qua được thì dừng ngay, mọi khối khởi động phía dưới không chạy.
+     await licenseReady;
+diff --git a/package.json b/package.json
+index 6614772..6e22226 100644
+--- a/package.json
++++ b/package.json
+@@ -84,7 +84,7 @@
+   "build": {
+     "appId": "com.automenu.ai",
+     "productName": "AutoMenuAI",
+-    "asar": false,
++    "asar": true,
+     "npmRebuild": false,
+     "directories": {
+       "output": "dist"
+@@ -127,6 +127,12 @@
+         "repo": "AUTO_MENU_AI",
+         "releaseType": "release"
+       }
++    ],
++    "asarUnpack": [
++      "ahk/**/*",
++      "node_modules/@julusian/midi/**/*",
++      "node_modules/easymidi/**/*",
++      "node_modules/mic/**/*"
+     ]
+   }
+ }
+diff --git a/tests/unit/HideFolders01.verify.js b/tests/unit/HideFolders01.verify.js
+new file mode 100644
+index 0000000..e938c38
+--- /dev/null
++++ b/tests/unit/HideFolders01.verify.js
+@@ -0,0 +1,27 @@
++// HIDE-FOLDERS-01 — kiểm tra tĩnh: module ẩn thư mục + cách nối vào app.whenReady() trong main.js,
++// và cấu hình đóng gói asar trong package.json. KHÔNG phải Electron/Windows thật.
++// Chạy: node tests/unit/HideFolders01.verify.js
++'use strict';
++const fs = require('fs'), path = require('path');
++let pass = 0, fail = 0; const ok = (c, m) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m); } };
++
++const hf = fs.readFileSync(path.join(__dirname, '..', '..', 'app', 'HideFolders.js'), 'utf8');
++ok(/process\.platform !== ['"]win32['"]/.test(hf), 'HideFolders.js chỉ chạy trên Windows');
++ok(/attrib/.test(hf), 'dùng lệnh attrib của Windows');
++ok(/try\s*\{/.test(hf) && /catch/.test(hf), 'có try/catch (best-effort, không throw ra ngoài)');
++ok(typeof require('../../app/HideFolders.js').hideAppFolders === 'function', 'export hideAppFolders');
++
++const main = fs.readFileSync(path.join(__dirname, '..', '..', 'app', 'main.js'), 'utf8');
++ok(/require\(["']\.\/HideFolders["']\)/.test(main), 'main.js require HideFolders');
++ok(/hideAppFolders\(\{/.test(main), 'main.js gọi hideAppFolders() trong whenReady');
++ok(/installDir:\s*path\.dirname\(app\.getPath\("exe"\)\)/.test(main), 'truyền thư mục cài đặt (.exe) để ẩn khi đã đóng gói');
++ok(/isPackaged:\s*app\.isPackaged/.test(main), 'chỉ ẩn thư mục cài đặt khi app.isPackaged (không ẩn thư mục mã nguồn lúc dev)');
++
++const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'));
++ok(pkg.build && pkg.build.asar === true, 'package.json build.asar = true (đóng gói mã nguồn, không để .js nằm trần)');
++const unpack = (pkg.build && pkg.build.asarUnpack) || [];
++ok(unpack.some((p) => /ahk/.test(p)), 'asarUnpack có ahk/** (AutoHotkey cần đường dẫn file thật ngoài asar)');
++ok(unpack.some((p) => /easymidi/.test(p)) && unpack.some((p) => /julusian\/midi/.test(p)), 'asarUnpack có easymidi + @julusian/midi (native binding)');
++ok(unpack.some((p) => /\bmic\b/.test(p)), 'asarUnpack có mic (spawn file nhị phân ngoài)');
++
++console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);

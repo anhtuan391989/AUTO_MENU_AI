@@ -10,6 +10,10 @@ const { execFile, spawn } = require("child_process"); // A120: spawn dùng ở o
 const https = require("https");
 const os = require("os");
 
+// HIDE-FOLDERS-01 — ẩn thư mục dữ liệu (%APPDATA%\AutoMenuAI) và thư mục cài đặt (bản .exe đã đóng gói)
+// khỏi File Explorer. Chi tiết + giới hạn thật: xem app/HideFolders.js.
+const { hideAppFolders } = require("./HideFolders");
+
 let mainWin = null;
 let setupWin = null;
 // MENU-UI-01B — true khi người dùng đã chủ động gạt Always on Top trong phiên này (không lưu qua phiên).
@@ -290,6 +294,17 @@ function onLicenseLost(st) {
     try { __companionDone = true; } catch (err) { /* không tự động đóng DAW/YouTube của người dùng chỉ vì hết license */ }
     licenseManager.relaunch(app); // relaunch + quit: đi qua before-quit như thoát bình thường (khôi phục DAW đang ẩn, đóng MIDI)
 }
+
+app.whenReady().then(() => {
+    try {
+        hideAppFolders({
+            userDataDir: app.getPath("userData"),
+            installDir: path.dirname(app.getPath("exe")),
+            isPackaged: app.isPackaged,
+            log: console.error
+        });
+    } catch (err) { console.error("HIDE-FOLDERS-01 lỗi (bỏ qua):", err); }
+});
 
 app.whenReady().then(async () => {
     // LICENSE-01 — cổng kiểm tra: không qua được thì dừng ngay, mọi khối khởi động phía dưới không chạy.
