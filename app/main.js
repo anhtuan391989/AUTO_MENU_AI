@@ -121,6 +121,7 @@ function createMainWindow() {
     mainWin = new BrowserWindow({
         width: 1200,
         height: 800,
+        frame: false, // MENU-FRAMELESS-01: bỏ thanh tiêu đề + thanh File/Edit/View/Window của Windows; thanh của app (header) làm thanh tiêu đề
         ...(savedPos ? { x: savedPos.x, y: savedPos.y } : {}),
         webPreferences: {
             preload: path.join(__dirname, "preload.js"),
@@ -130,6 +131,20 @@ function createMainWindow() {
     });
 
     mainWin.loadFile(path.join(__dirname, "..", "ui", "index.html"));
+
+    // MENU-FRAMELESS-01: không còn khung Windows nên phải cho kéo cửa sổ bằng header của app.
+    // Chèn CSS từ main process (KHÔNG sửa HTML/CSS của giao diện). Các nút trong .window-buttons giữ no-drag để vẫn bấm được.
+    mainWin.webContents.on("did-finish-load", () => {
+        try {
+            if (mainWin && !mainWin.isDestroyed()) {
+                mainWin.webContents.insertCSS(
+                    ".header { -webkit-app-region: drag; } .window-buttons, .window-buttons * { -webkit-app-region: no-drag; }"
+                ).catch(() => {});
+            }
+        } catch (err) {
+            console.error("MENU-FRAMELESS-01 insertCSS lỗi (bỏ qua):", err);
+        }
+    });
 
     // MENU-POS-MEMORY-01: lưu vị trí sau khi người dùng kéo xong (chờ 400ms không còn di chuyển mới ghi, để khỏi ghi file liên tục) và 1 lần nữa khi đóng.
     let posSaveTimer = null;
