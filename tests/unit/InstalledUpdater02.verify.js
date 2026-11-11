@@ -92,6 +92,10 @@ function fakeApp(version) {
   ok(pub.provider === 'github' && pub.owner === 'anhtuan391989' && /^AUTO_MENU_AI$/i.test(pub.repo), 'package.json: publish -> GitHub Releases của repo', pub);
   const inc = pkg.build.files.join('|');
   for (const need of ['app/**/*', 'core/**/*', 'ui/**/*', 'ahk/**/*', 'data/songs.json']) ok(inc.includes(need), 'build.files có ' + need);
+  // d1Loader.js đọc docs/d1/* lúc chạy (đường dẫn dựng bằng path.join(__dirname,'..','..','docs','d1')) — thiếu là app không mở được.
+  for (const f of ['midi-mapping.xml', 'midi-mapping.xsd', 'semanticValidate.js']) {
+    ok(inc.includes('docs/d1/' + f) && fs.existsSync(path.join(__dirname, '..', '..', 'docs', 'd1', f)), 'build.files có docs/d1/' + f + ' (d1Loader cần khi chạy)');
+  }
   ok(fs.existsSync(path.join(__dirname, '..', '..', 'app', 'license-public-key.txt')), 'app/license-public-key.txt có trong thư mục app (được đóng gói)');
   for (const id of ['appVersionText', 'btnCheckUpdate', 'btnApplyUpdate', 'btnRelaunchApp', 'appUpdateMessage']) ok(setupHtml.includes('id="' + id + '"'), 'UI giữ nguyên id ' + id);
 
