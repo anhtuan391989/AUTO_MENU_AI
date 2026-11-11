@@ -1250,6 +1250,16 @@ const effectsWindow = createEffectsWindowManager({
         const cur = s.effectsWindow && typeof s.effectsWindow === "object" && !Array.isArray(s.effectsWindow) ? s.effectsWindow : {};
         if (cur.alwaysOnTop === !!v) return true; // không đổi => khỏi ghi file
         return writeSettingsFile({ ...s, effectsWindow: { ...cur, alwaysOnTop: !!v } });
+    },
+    // EFFECT-POS-01 — nhớ VỊ TRÍ Bảng Hiệu Ứng ở lần kéo cuối (app-settings.json > effectsWindow.position = { x, y }). Chỉ đổi đúng key này, giữ nguyên alwaysOnTop và mọi key khác.
+    // Việc kiểm tra vị trí có còn nằm trong màn hình đang cắm hay không do EffectsWindow.js lo.
+    loadPosition: () => { const s = readSettingsFile(); return (s && s.effectsWindow && s.effectsWindow.position) || null; },
+    savePosition: (pos) => {
+        if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return false;
+        const s = readSettingsFile() || {};
+        const cur = s.effectsWindow && typeof s.effectsWindow === "object" && !Array.isArray(s.effectsWindow) ? s.effectsWindow : {};
+        if (cur.position && cur.position.x === pos.x && cur.position.y === pos.y) return true; // không đổi => khỏi ghi file
+        return writeSettingsFile({ ...s, effectsWindow: { ...cur, position: { x: pos.x, y: pos.y } } });
     }
 });
 

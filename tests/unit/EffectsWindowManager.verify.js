@@ -8,7 +8,7 @@ const path = require("path");
 const { EventEmitter } = require("events");
 
 const root = path.join(__dirname, "..", "..");
-const { createEffectsWindowManager, computeInitialPosition, WIDTH, HEIGHT } = require(path.join(root, "app", "EffectsWindow.js"));
+const { createEffectsWindowManager, computeInitialPosition, sanitizeSavedPosition, WIDTH, HEIGHT } = require(path.join(root, "app", "EffectsWindow.js"));
 
 let pass = 0;
 let fail = 0;
@@ -38,11 +38,13 @@ class FakeWin extends EventEmitter {
     isAlwaysOnTop() { return this.aot; }
     loadFile(p) { this.loaded = p; }
     getBounds() { return { x: 100, y: 50, width: 1200, height: 300 }; }
-    close() { this.destroyed = true; this.emit("closed"); }
+    getPosition() { return this.pos || [this.opts.x, this.opts.y]; }
+    dragTo(x, y) { this.pos = [x, y]; this.emit("move"); }
+    close() { if (this.destroyed) return; this.emit("close"); this.destroyed = true; this.emit("closed"); } // như Electron: "close" (còn sống) rồi mới "closed"
 }
 FakeWin.instances = [];
 
-const screenFake = { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }), getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }) };
+const screenFake = { getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }], getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }), getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }) };
 
 // ---- computeInitialPosition ----
 {
@@ -180,6 +182,42 @@ const effectsOf = (main) => FakeWin.instances.find((w) => w !== main);
     { const m = fs.readFileSync(path.join(root, "app", "main.js"), "utf8"); check(m.includes("loadAlwaysOnTop") && m.includes("saveAlwaysOnTop") && m.includes("effectsWindow: {"), "main.js nối load/save AOT vào app-settings.json (effectsWindow.alwaysOnTop)"); check(/did-finish-load[\s\S]{0,700}autoOpenEffectsIfPinned\(\)/.test(m) && m.includes("effectsWindow.openIfPinned()"), "main.js: Menu nạp xong (did-finish-load) -> gọi tự mở theo trạng thái Luôn Hiện"); }
 }
 
+
+// ---- EFFECT-POS-01: nhớ VỊ TRÍ Bảng Hiệu Ứng (lần kéo cuối cùng thắng) ----
+{
+    function setupPos(saved, opts) {
+        FakeWin.instances.length = 0;
+        const store = { pos: saved, saves: [] };
+        const main = new FakeWin({});
+        const mgr = createEffectsWindowManager({
+            BrowserWindow: FakeWin, screen: screenFake, getMainWin: () => main, preloadPath: "/p/preload.js", htmlPath: "/p/effects.html",
+            loadPosition: () => { if (opts && opts.loadThrows) throw new Error("đọc lỗi"); return store.pos; },
+            savePosition: (p) => { if (opts && opts.saveThrows) throw new Error("ghi lỗi"); store.saves.push(p); store.pos = p; }
+        });
+        return { main, mgr, store };
+    }
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    // sanitizeSavedPosition
+    const disp = [{ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }];
+    check(JSON.stringify(sanitizeSavedPosition({ x: 500.4, y: 300.6 }, disp)) === '{"x":500,"y":301}', "vị trí hợp lệ -> làm tròn và nhận");
+    check(sanitizeSavedPosition({ x: 5000, y: 300 }, disp) === null, "vị trí nằm ngoài mọi màn hình -> bỏ");
+    check(sanitizeSavedPosition({ x: 500, y: 5000 }, disp) === null, "vị trí quá thấp (ngoài màn hình) -> bỏ");
+    check(sanitizeSavedPosition({ x: "a", y: 1 }, disp) === null && sanitizeSavedPosition(null, disp) === null && sanitizeSavedPosition(undefined, disp) === null, "giá trị rác/rỗng -> bỏ");
+    check(sanitizeSavedPosition({ x: 10, y: 10 }, []) === null, "không có danh sách màn hình -> bỏ");
+
+    // mở lần đầu (chưa lưu) -> vị trí mặc định như cũ
+    { const { main, mgr } = setupPos(null); mgr.open(); const fx = effectsOf(main); const def = computeInitialPosition({ x: 100, y: 50, width: 1200, height: 300 }, { x: 0, y: 0, width: 1920, height: 1040 }); check(fx.opts.x === def.x && fx.opts.y === def.y, "chưa lưu vị trí -> mở ở vị trí mặc định (hành vi cũ)"); }
+    // đã lưu -> mở đúng chỗ cũ
+    { const { main, mgr } = setupPos({ x: 777, y: 222 }); mgr.open(); const fx = effectsOf(main); check(fx.opts.x === 777 && fx.opts.y === 222, "đã lưu vị trí -> mở đúng chỗ cũ"); }
+    // đã lưu nhưng nằm ngoài màn hình -> mặc định
+    { const { main, mgr } = setupPos({ x: 9000, y: 9000 }); mgr.open(); const fx = effectsOf(main); const def = computeInitialPosition({ x: 100, y: 50, width: 1200, height: 300 }, { x: 0, y: 0, width: 1920, height: 1040 }); check(fx.opts.x === def.x && fx.opts.y === def.y, "vị trí đã lưu ngoài màn hình -> dùng vị trí mặc định"); }
+    // lỗi đọc -> mặc định, không throw
+    { const { main, mgr } = setupPos({ x: 777, y: 222 }, { loadThrows: true }); mgr.open(); check(!!effectsOf(main) && mgr.isOpen(), "đọc vị trí lỗi -> vẫn mở bình thường"); }
+    // thiếu hàm tiêm (cách dùng cũ) -> như trước
+    { const { main, mgr } = setup(); mgr.open(); const fx = effectsOf(main); fx.emit("ready-to-show"); fx.dragTo(300, 300); check(mgr.isOpen(), "không tiêm load/savePosition -> chạy như bản cũ"); }
+}
+
 // ---- giá trị không hợp lệ ----
 {
     const { mgr } = setup();
@@ -217,7 +255,7 @@ const effectsOf = (main) => FakeWin.instances.find((w) => w !== main);
     }
     const main = read("app/main.js");
     check(main.includes('require("./EffectsWindow")'), "main.js nạp EffectsWindow");
-    check(main.includes("screen } = require(\"electron\")"), "main.js lấy screen từ electron");
+    check(/\bscreen\b[^}]*\}\s*=\s*require\("electron"\)/.test(main), "main.js lấy screen từ electron");
     for (const ch of ["effects-toggle", "effects-close", "effects-get-aot", "effects-set-aot"]) {
         check(main.includes(`"${ch}"`), `main.js đăng ký kênh ${ch}`);
     }
@@ -230,5 +268,36 @@ const effectsOf = (main) => FakeWin.instances.find((w) => w !== main);
     check(html.includes("fxAotCheck") && html.includes("setEffectsAlwaysOnTop"), "effects.html có checkbox Luôn hiển thị nối IPC");
 }
 
-console.log(`\nEffectsWindowManager: ${pass} đạt, ${fail} lỗi`);
-process.exit(fail === 0 ? 0 : 1);
+console.log(`\nEffectsWindowManager (phần đồng bộ): ${pass} đạt, ${fail} lỗi`);
+
+(async () => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    function mk(opts) {
+        FakeWin.instances.length = 0;
+        const saves = [];
+        const main = new FakeWin({});
+        const mgr = createEffectsWindowManager({
+            BrowserWindow: FakeWin, screen: screenFake, getMainWin: () => main, preloadPath: "/p", htmlPath: "/p",
+            loadPosition: () => null, savePosition: (p) => { if (opts && opts.saveThrows) throw new Error("ghi lỗi"); saves.push(p); }
+        });
+        mgr.open();
+        const fx = effectsOf(main);
+        fx.emit("ready-to-show");
+        return { main, mgr, fx, saves };
+    }
+    // kéo liên tục -> chỉ ghi 1 lần, đúng toạ độ cuối
+    { const { fx, saves } = mk(); fx.dragTo(100, 100); fx.dragTo(200, 150); fx.dragTo(321, 234); check(saves.length === 0, "đang kéo -> chưa ghi (chờ dừng)"); await wait(600); check(saves.length === 1 && saves[0].x === 321 && saves[0].y === 234, "kéo xong -> ghi 1 lần đúng toạ độ cuối"); }
+    // đóng cửa sổ -> ghi vị trí lần nữa
+    { const { mgr, fx, saves } = mk(); fx.pos = [640, 480]; mgr.close(); check(saves.length === 1 && saves[0].x === 640 && saves[0].y === 480, "đóng cửa sổ -> ghi vị trí hiện tại"); }
+    // kéo rồi đóng ngay (chưa hết 400ms) -> vẫn ghi đúng, không ghi lặp sau khi đóng
+    { const { mgr, fx, saves } = mk(); fx.dragTo(50, 60); mgr.close(); await wait(600); check(saves.length === 1 && saves[0].x === 50 && saves[0].y === 60, "kéo rồi đóng ngay -> ghi đúng 1 lần, không ghi sau khi đóng"); }
+    // cửa sổ đang ẩn (menu thu xuống taskbar, AOT tắt) -> không ghi
+    { const { main, mgr, fx, saves } = mk(); main.emit("minimize"); fx.pos = [1, 1]; fx.emit("move"); await wait(600); check(saves.length === 0, "cửa sổ đang ẩn -> không ghi vị trí"); mgr.close(); check(saves.length === 0, "đóng khi đang ẩn -> không ghi vị trí rác"); }
+    // lỗi ghi -> không throw, cửa sổ vẫn dùng bình thường
+    { const { mgr, fx } = mk({ saveThrows: true }); let threw = false; try { fx.dragTo(10, 10); await wait(600); mgr.close(); } catch { threw = true; } check(!threw, "ghi vị trí lỗi -> không throw"); }
+    // nối dây main.js
+    { const m = fs.readFileSync(path.join(root, "app", "main.js"), "utf8"); check(m.includes("loadPosition") && m.includes("savePosition") && m.includes("position: { x: pos.x, y: pos.y }"), "main.js nối load/savePosition vào app-settings.json (effectsWindow.position)"); check(/\.\.\.cur, position:/.test(m) && /\.\.\.cur, alwaysOnTop:/.test(m), "main.js: ghi vị trí/AOT đều giữ nguyên key kia (không đè nhau)"); }
+    console.log(`EFFECT-POS-01: tổng cộng ${pass} đạt, ${fail} lỗi`);
+    process.exit(fail === 0 ? 0 : 1);
+})();
+

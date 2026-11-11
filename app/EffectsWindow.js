@@ -10,6 +10,8 @@
        TẮT  -> cửa sổ thường; tự ẩn khi menu thu xuống taskbar, tự hiện lại khi menu mở lại.
    - EFFECT-AOT-PERSIST: trạng thái "Luôn hiển thị" được GHI NHỚ qua các lần mở app (lần tích cuối cùng thắng). Việc đọc/ghi file do main.js
      tiêm vào (loadAlwaysOnTop / saveAlwaysOnTop) — module này không chạm file. Lỗi đọc/ghi không bao giờ làm hỏng cửa sổ.
+   - EFFECT-POS-01: VỊ TRÍ cửa sổ được GHI NHỚ (lần kéo cuối cùng thắng): kéo xong thì lưu, lần mở sau hiện đúng chỗ cũ. Việc đọc/ghi file do main.js
+     tiêm vào (loadPosition / savePosition). Vị trí đã lưu mà nằm ngoài mọi màn hình đang cắm => bỏ qua, dùng vị trí mặc định. Mọi lỗi đều bị bỏ qua.
    - Module thuần Node (BrowserWindow/screen được truyền vào) để test được bằng đối tượng giả.
    ========================================================== */
 
@@ -39,7 +41,24 @@ function computeInitialPosition(mainBounds, workArea) {
     return { x: Math.round(x), y: Math.round(y) };
 }
 
-function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preloadPath, htmlPath, onStateChange, loadAlwaysOnTop, saveAlwaysOnTop }) {
+// EFFECT-POS-01: vị trí đã lưu chỉ dùng được khi phần thanh tiêu đề (góc trên-trái) vẫn nằm trong 1 màn hình đang cắm
+// (tránh cửa sổ rơi ra ngoài khi đổi/tháo màn hình). Trả về {x,y} đã làm tròn, hoặc null nếu không dùng được.
+function sanitizeSavedPosition(pos, displays) {
+    if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return null;
+    const x = Math.round(pos.x);
+    const y = Math.round(pos.y);
+    if (!Array.isArray(displays) || displays.length === 0) return null;
+    const ok = displays.some((d) => {
+        const a = d && d.workArea;
+        if (!a) return false;
+        return x + 100 > a.x && x < a.x + a.width - 100 && y >= a.y - 10 && y < a.y + a.height - 50;
+    });
+    return ok ? { x, y } : null;
+}
+
+const POS_SAVE_DELAY_MS = 400;
+
+function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preloadPath, htmlPath, onStateChange, loadAlwaysOnTop, saveAlwaysOnTop, loadPosition, savePosition }) {
     let win = null;
     // EFFECT-LIT-01 — báo trạng thái mở/đóng ra ngoài (menu dùng để sáng/tắt nút EFFECT). Lỗi ở callback không được làm hỏng cửa sổ.
     function emitState(open) { try { if (typeof onStateChange === "function") onStateChange(!!open); } catch (err) { console.error("effects onStateChange lỗi:", err); } }
@@ -111,6 +130,14 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
             console.error("effects tính vị trí lỗi (dùng mặc định):", err);
             pos = computeInitialPosition(null, null);
         }
+        // EFFECT-POS-01: ưu tiên vị trí đã lưu ở lần kéo cuối (nếu còn nằm trong màn hình đang cắm).
+        try {
+            if (typeof loadPosition === "function") {
+                const displays = screen && screen.getAllDisplays ? screen.getAllDisplays() : [];
+                const saved = sanitizeSavedPosition(loadPosition(), displays);
+                if (saved) pos = saved;
+            }
+        } catch (err) { console.error("effects đọc vị trí đã lưu lỗi (dùng mặc định):", err); }
 
         win = new BrowserWindow({
             width: WIDTH,
@@ -141,7 +168,29 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
         thisWin.once("ready-to-show", () => {
             try { if (alive(thisWin)) thisWin.show(); } catch (err) { console.error("effects show lỗi:", err); }
         });
+        // EFFECT-POS-01: lưu vị trí sau khi kéo xong (chờ 400ms không còn di chuyển mới ghi) và 1 lần nữa khi đóng.
+        let posTimer = null;
+        function savePosNow() {
+            try {
+                if (typeof savePosition !== "function" || !alive(thisWin)) return;
+                if (!thisWin.isVisible() || typeof thisWin.getPosition !== "function") return; // đang ẩn/chưa hiện => toạ độ không phải do người dùng kéo
+                const p = thisWin.getPosition();
+                if (!Array.isArray(p) || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return;
+                savePosition({ x: Math.round(p[0]), y: Math.round(p[1]) });
+            } catch (err) { console.error("effects lưu vị trí lỗi (bỏ qua):", err); }
+        }
+        thisWin.on("move", () => {
+            if (typeof savePosition !== "function") return;
+            if (posTimer) clearTimeout(posTimer);
+            posTimer = setTimeout(() => { posTimer = null; savePosNow(); }, POS_SAVE_DELAY_MS);
+            if (posTimer && typeof posTimer.unref === "function") posTimer.unref();
+        });
+        thisWin.on("close", () => {
+            if (posTimer) { clearTimeout(posTimer); posTimer = null; }
+            savePosNow();
+        });
         thisWin.on("closed", () => {
+            if (posTimer) { clearTimeout(posTimer); posTimer = null; }
             if (win === thisWin) {
                 win = null;
                 unbindMain();
@@ -219,4 +268,4 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
     return { open, openIfPinned, close, toggle, getAlwaysOnTop, setAlwaysOnTop, isFromEffects, isFromMain, isOpen: () => alive(win), getWebContents: () => (alive(win) ? win.webContents : null) };
 }
 
-module.exports = { createEffectsWindowManager, computeInitialPosition, WIDTH, HEIGHT };
+module.exports = { createEffectsWindowManager, computeInitialPosition, sanitizeSavedPosition, WIDTH, HEIGHT };
