@@ -1,0 +1,1746 @@
+diff --git a/AI_BOOT.md/CHANGELOG_AI.md b/AI_BOOT.md/CHANGELOG_AI.md
+index faf41c8..99ff276 100644
+--- a/AI_BOOT.md/CHANGELOG_AI.md
++++ b/AI_BOOT.md/CHANGELOG_AI.md
+@@ -17,6 +17,26 @@
+ 
+ ---
+ 
++## 2026-11-11 — LICENSE-01: kích hoạt bằng key (1 key = 1 mã máy, thời hạn 3 ngày / 3 tháng / 6 tháng / 1 năm)
++
++- Thực hiện bởi: Claude (Claude A)
++- Completed: hệ thống License. Server riêng (Cloudflare Worker + D1) cấp/thu hồi/đổi máy cho key; app lấy mã máy, kích hoạt, lưu license đã
++  ký Ed25519, kiểm tra lại với server mỗi 6 giờ, cho dùng offline tối đa 72 giờ, phát hiện lùi đồng hồ. Chưa kích hoạt / hết hạn / thu hồi /
++  thiếu khoá công khai => `main.js` KHÔNG khởi động bất kỳ tính năng nào, chỉ hiện màn hình kích hoạt `ui/license.html`.
++- Files created: `app/LicenseManager.js`, `ui/license.html`, `ui/js/licenseGate.js`, `ui/js/setupLicense.js`,
++  `MENU-LICENSE-SERVER/{worker.js,schema.sql,tao-khoa.html,tao-key.html,HUONG-DAN-LICENSE.md}`,
++  `tests/unit/{LicenseServer01,LicenseManager01,LicenseGate01}.verify.js`
++- Files modified: `app/main.js` (khối LICENSE-01 trước `app.whenReady` + cổng đầu callback + 4 IPC `license-*` + chặn 2 khối whenReady phụ),
++  `app/preload.js` (4 hàm `license*`), `ui/setup.html` (chỉ ô "License / kích hoạt": thêm id + nạp `setupLicense.js`),
++  `ui/js/i18n.js` (cặp dịch cho ô License), `tests/unit/AppUpdater01.verify.js` (không còn kiểm tra chữ "Sắp ra mắt")
++- Architecture impact: CÓ (đã được Developer xác nhận trước khi làm): thêm cổng license ở khởi động `main.js` + 1 server ngoài (MENU-LICENSE-SERVER,
++  độc lập với server Key). Không đụng EventBus, keyEngine/bpmEngine/modEngine, giao diện Menu, CSS.
++- Verification: `LicenseServer01` 40/40, `LicenseManager01` 36/36, `LicenseGate01` 32/32 (trích code thật của main.js chạy trong vm); toàn bộ
++  tests/unit: không có test nào đạt trên `main` gốc mà lỗi trên bản này. Chưa chạy Electron/Cloudflare thật (cần Khói làm theo HUONG-DAN-LICENSE.md).
++- Commit hash: chưa push (Khói copy vào G:\AUTO_MENU_AI và auto-sync); base `8ea56d5`
++
++---
++
+ ## 2026-07-21 — Chuẩn hoá GitHub `main` thành Single Source of Truth
+ 
+ - Thực hiện bởi: Claude
+diff --git a/AI_BOOT.md/KNOWN_LIMITATIONS.md b/AI_BOOT.md/KNOWN_LIMITATIONS.md
+index 0a4659b..657f755 100644
+--- a/AI_BOOT.md/KNOWN_LIMITATIONS.md
++++ b/AI_BOOT.md/KNOWN_LIMITATIONS.md
+@@ -99,6 +99,13 @@ câm lặng mà không báo lỗi nào.
+ `EventBus` — 0 file test. Đây là lý do mục 1 (lỗi chặn boot) tồn tại được qua nhiều commit
+ mà không ai phát hiện.
+ 
++### 12. License (LICENSE-01) chỉ ngăn người dùng thông thường, không chống được người sửa mã nguồn
++
++App chạy từ mã nguồn (`electron .`) nên người có kỹ thuật vẫn có thể sửa `main.js`/xoá khoá công khai để bỏ cổng kiểm tra. Server vẫn là nguồn
++thời hạn duy nhất (đổi giờ Windows không kéo dài hạn nhờ chữ ký + kiểm tra 6 giờ/lần) và thu hồi được key. Muốn chắc hơn: đóng gói/obfuscate app
++(việc riêng, cần xác nhận). Thiếu `app/license-public-key.txt` => app khoá (cố ý, fail-closed). Màn hình kích hoạt chỉ có tiếng Việt;
++mất hiệu lực lúc đang chạy thì app tự đóng/mở lại về màn hình kích hoạt (không tự đóng DAW).
++
+ ## 📝 Ghi chú khác
+ 
+ - `config/`, `assets/`, `database/songLibrary.json` — khung thư mục/file rỗng, chưa có dữ
+diff --git a/AI_BOOT.md/TASKS.md b/AI_BOOT.md/TASKS.md
+index d0cbb0f..19880cd 100644
+--- a/AI_BOOT.md/TASKS.md
++++ b/AI_BOOT.md/TASKS.md
+@@ -8,6 +8,10 @@
+ - *(chưa có nhiệm vụ code nào đang chạy dở tại thời điểm viết file này — chỉ vừa hoàn thành
+   chuẩn hoá tài liệu)*
+ 
++- **LICENSE-01 (code xong, chờ Khói triển khai):** dựng server theo `MENU-LICENSE-SERVER/HUONG-DAN-LICENSE.md`, tạo cặp khoá bằng `tao-khoa.html`,
++  chép `license-public-key.txt` vào `app/`, rồi mới chép app mới (nếu chép app trước, app sẽ khoá vì chưa có khoá công khai). Việc còn lại: chạy thật
++  trên Windows/Electron, cân nhắc cảnh báo sắp hết hạn, thanh toán/cấp key tự động (chưa làm).
++
+ ## NEXT (ưu tiên cao, nên làm ngay sau tài liệu này)
+ 
+ 1. **Sửa lỗi chặn boot** — `core/ai/AIBootstrap.js` (khai báo `WorkflowManager` lặp) và
+diff --git a/MENU-LICENSE-SERVER/HUONG-DAN-LICENSE.md b/MENU-LICENSE-SERVER/HUONG-DAN-LICENSE.md
+new file mode 100644
+index 0000000..7220c45
+--- /dev/null
++++ b/MENU-LICENSE-SERVER/HUONG-DAN-LICENSE.md
+@@ -0,0 +1,76 @@
++# Hướng dẫn dựng server License cho MENU (Cloudflare, miễn phí)
++
++Dành cho Khói. Chỉ bấm chuột và copy-paste, không gõ lệnh. Cùng kiểu với `MENU-KEY-SERVER/HUONG-DAN-SERVER.md`,
++nhưng là **server riêng** (tên `menu-license-server`) để lỗi bên này không ảnh hưởng server Key bài hát.
++
++**Vì sao chọn Cloudflare Workers + D1:** miễn phí ở mức dùng của MENU, không phải thuê/quản trị máy chủ, bạn đã dùng đúng
++cách này cho server Key. Các lựa chọn khác (thuê VPS, Supabase, Firebase) tốn tiền hoặc tốn công bảo trì hơn mà không có lợi
++thêm cho bài toán chỉ có vài chục–vài trăm khách.
++
++**Gói gồm:** `schema.sql`, `worker.js`, `tao-khoa.html`, `tao-key.html`, file này.
++
++> Thứ tự RẤT QUAN TRỌNG: làm xong bước 1→6 và lưu `license-public-key.txt` **rồi mới** chép file app mới vào `G:\AUTO_MENU_AI`.
++> Nếu chép app trước, app sẽ khoá (đúng thiết kế) vì chưa có khoá công khai và chưa có server.
++
++---
++
++## Bước 1. Tạo cơ sở dữ liệu
++1. Cloudflare → **Storage & Databases → D1 SQL Database → Create Database**, tên `menu-license-db`.
++2. Vào `menu-license-db` → thẻ **Console** → dán toàn bộ `schema.sql` → **Execute**.
++   (File này cố ý không có dòng ghi chú `--`, vì ô Console dồn mọi thứ thành 1 dòng. Thấy báo `No SQL statements detected` nghĩa là còn sót ghi chú hoặc dán thiếu.)
++
++## Bước 2. Tạo server
++1. **Compute (Workers) → Workers & Pages → Create application → Start with Hello World**, tên `menu-license-server` → **Deploy**.
++2. **Edit code** → xóa hết mã có sẵn → dán toàn bộ `worker.js` → **Deploy**.
++
++## Bước 3. Nối server với cơ sở dữ liệu
++1. Server `menu-license-server` → thẻ **Bindings → Add binding → D1 database**.
++2. **Variable name** gõ đúng `DB`, chọn `menu-license-db` → **Add binding** (deploy lại nếu được hỏi).
++
++## Bước 4. Tạo cặp khoá ký (1 lần duy nhất)
++1. Mở `tao-khoa.html` bằng **Chrome hoặc Edge bản mới**.
++2. Bấm **① Tạo cặp khoá**.
++3. **Khoá RIÊNG:** bấm *Sao chép khoá riêng*. Làm bước 5 để dán vào Cloudflare, rồi bấm *Tải về file khoá riêng* cất ở nơi
++   an toàn **ngoài** `G:\AUTO_MENU_AI` (USB/Drive riêng tư). Mất khoá này thì phải tạo lại và khách phải kích hoạt lại.
++4. **Khoá CÔNG KHAI:** bấm *Tải về file license-public-key.txt*, rồi chép file đó vào `G:\AUTO_MENU_AI\app\` (cạnh `main.js`).
++
++## Bước 5. Đặt 2 mật khẩu cho server
++Server → **Settings → Variables and Secrets → Add** (Type chọn **Secret**), thêm 2 cái:
++1. `LICENSE_SIGN_KEY` = khoá riêng ở bước 4.3 (dán đúng nguyên chuỗi).
++2. `ADMIN_TOKEN` = một chuỗi dài ngẫu nhiên 20 ký tự trở lên, **tự đặt và tự cất kỹ** (dùng để tạo key ở `tao-key.html`).
++Bấm **Deploy**.
++
++## Bước 6. Kiểm tra
++1. Mở `https://menu-license-server.TEN-BAN.workers.dev/health` → phải thấy `{"ok":true,"service":"menu-license",...}`.
++   (`TEN-BAN` là phần giữa tên server và `.workers.dev` — giống địa chỉ server Key của bạn.)
++2. Mở `tao-key.html`, dán địa chỉ server + `ADMIN_TOKEN`, chọn gói, bấm **Tạo key** → phải ra 1 key dạng
++   `MENU-XXXXX-XXXXX-XXXXX-XXXXX`. Sao chép ngay (chỉ hiện đủ 1 lần).
++3. Chép app mới vào `G:\AUTO_MENU_AI`, mở MENU → màn hình **Cần kích hoạt** → dán key → bấm Kích hoạt.
++
++> Nếu địa chỉ server của bạn **không phải** `https://menu-license-server.matuotluuly.workers.dev`, thêm dòng
++> `"licenseServerUrl": "https://địa-chỉ-của-bạn"` vào file `app-settings.json` (hoặc nhờ AI sửa hằng số trong `app/LicenseManager.js`).
++
++## Cách dùng hằng ngày (cài cho người khác)
++1. Khách mở MENU → thấy **Mã máy** (có nút Sao chép) → gửi mã đó cho bạn.
++2. Bạn mở `tao-key.html` → chọn gói (3 ngày / 3 tháng / 6 tháng / 1 năm) → dán **mã máy của khách** → Tạo key → gửi key cho khách.
++   Key đã gắn mã máy thì **chỉ chạy đúng máy đó**.
++3. Khách dán key → Kích hoạt. **Thời hạn tính từ lúc bấm Kích hoạt.**
++4. Gia hạn: tạo key mới, khách nhập key mới vào ô License trong Cài đặt (thời hạn mới tính lại từ lúc nhập).
++5. Khách đổi máy: ở `tao-key.html` bấm **Đổi máy** cạnh key đó (giữ nguyên hạn còn lại), khách nhập lại key trên máy mới.
++6. Khách vi phạm/hoàn tiền: bấm **Thu hồi** → app khách bị khoá trong tối đa vài giờ (lần kiểm tra kế tiếp).
++
++## Quy tắc hoạt động
++- 1 key = 1 mã máy. Server dùng giờ của chính nó, đổi giờ Windows không kéo dài được hạn.
++- App kiểm tra lại với server mỗi vài giờ. Mất mạng vẫn dùng tiếp được tối đa **72 giờ** kể từ lần kiểm tra thành công cuối;
++  quá 72 giờ phải có mạng để kiểm tra lại.
++- Key trong database chỉ lưu dạng băm (không đọc ngược được); mất bản sao key thì phải tạo key mới.
++
++## Nếu gặp lỗi
++| Triệu chứng | Cách xử lý |
++|---|---|
++| `/health` không mở được | Chưa Deploy ở bước 2 |
++| Tạo key báo `SERVER_ERROR` | Chưa nối DB (tên biến phải đúng `DB`) hoặc chưa chạy `schema.sql` |
++| Kích hoạt báo `SERVER_ERROR` | Chưa đặt `LICENSE_SIGN_KEY` hoặc dán thiếu/thừa ký tự |
++| App báo "Chưa cấu hình khoá License" | Thiếu `app/license-public-key.txt` (bước 4.4) |
++| App báo "Phản hồi server không hợp lệ" | Khoá công khai trong app không khớp khoá riêng trên Cloudflare — làm lại bước 4 và 5 cho khớp cặp |
++| `tao-khoa.html` báo không hỗ trợ | Dùng Chrome/Edge bản mới |
+diff --git a/MENU-LICENSE-SERVER/schema.sql b/MENU-LICENSE-SERVER/schema.sql
+new file mode 100644
+index 0000000..d3e98dd
+--- /dev/null
++++ b/MENU-LICENSE-SERVER/schema.sql
+@@ -0,0 +1,14 @@
++CREATE TABLE IF NOT EXISTS licenses (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    key_hash TEXT NOT NULL UNIQUE,
++    key_hint TEXT NOT NULL,
++    plan TEXT NOT NULL,
++    note TEXT NOT NULL DEFAULT '',
++    status TEXT NOT NULL DEFAULT 'unused',
++    machine TEXT,
++    created_at INTEGER NOT NULL,
++    activated_at INTEGER,
++    expires_at INTEGER
++);
++
++CREATE INDEX IF NOT EXISTS idx_licenses_machine ON licenses(machine);
+diff --git a/MENU-LICENSE-SERVER/tao-key.html b/MENU-LICENSE-SERVER/tao-key.html
+new file mode 100644
+index 0000000..b4b3402
+--- /dev/null
++++ b/MENU-LICENSE-SERVER/tao-key.html
+@@ -0,0 +1,115 @@
++<!DOCTYPE html>
++<html lang="vi">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1">
++<title>MENU — Tạo & quản lý key License</title>
++<style>
++  body{font-family:Segoe UI,Arial,sans-serif;background:#0b1220;color:#dbe7f5;max-width:980px;margin:24px auto;padding:0 16px;line-height:1.5}
++  h1{font-size:20px} h2{font-size:16px;margin-top:24px}
++  .box{background:#111c30;border:1px solid #23406b;border-radius:8px;padding:14px;margin:12px 0}
++  label{display:block;font-size:13px;color:#9db4d1;margin:8px 0 3px}
++  input,select{width:100%;box-sizing:border-box;background:#0a1626;color:#e6f2ff;border:1px solid #23406b;border-radius:6px;padding:8px;font-size:14px}
++  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
++  button{background:#0e4d7a;color:#fff;border:0;border-radius:6px;padding:8px 13px;cursor:pointer;font-size:13px;margin:4px 6px 4px 0}
++  button:hover{background:#136aa8} button.red{background:#7a2a2a} button.red:hover{background:#a33a3a}
++  table{width:100%;border-collapse:collapse;font-size:13px} th,td{border-bottom:1px solid #23406b;padding:6px 8px;text-align:left}
++  code{color:#9fe3ff;font-family:Consolas,monospace} .good{color:#7dffb0} .bad{color:#ff8a8a} .warn{color:#ffd37a}
++  .newkey{font-size:16px;letter-spacing:1px;padding:6px 0}
++</style>
++</head>
++<body>
++<h1>Tạo & quản lý key License</h1>
++<p class="warn">Chỉ mở trang này trên máy của bạn. Mật khẩu quản trị chỉ nhập vào đây, không ai khác cần biết.</p>
++
++<div class="box">
++  <div class="row">
++    <div><label>Địa chỉ server License (không có dấu / cuối)</label>
++      <input id="server" placeholder="https://menu-license-server.TEN-BAN.workers.dev"></div>
++    <div><label>Mật khẩu quản trị (ADMIN_TOKEN)</label>
++      <input id="token" type="password" autocomplete="off"></div>
++  </div>
++</div>
++
++<h2>Tạo key mới</h2>
++<div class="box">
++  <div class="row">
++    <div><label>Gói</label>
++      <select id="plan"><option value="3d">3 ngày</option><option value="3m">3 tháng</option><option value="6m">6 tháng</option><option value="1y">1 năm</option></select></div>
++    <div><label>Số lượng</label><input id="count" type="number" min="1" max="50" value="1"></div>
++  </div>
++  <div class="row">
++    <div><label>Ghi chú (tên khách…)</label><input id="note" maxlength="100"></div>
++    <div><label>Mã máy của khách (không bắt buộc — nhập thì key chỉ chạy đúng máy đó)</label><input id="machine" placeholder="XXXXX-XXXXX-XXXXX-XXXXX"></div>
++  </div>
++  <button id="btnCreate">Tạo key</button>
++  <div id="created"></div>
++</div>
++
++<h2>Danh sách key <button id="btnList">Tải lại</button></h2>
++<div class="box"><div id="msg"></div>
++<table><thead><tr><th>#</th><th>Key (4 số cuối)</th><th>Gói</th><th>Ghi chú</th><th>Trạng thái</th><th>Mã máy</th><th>Hết hạn</th><th></th></tr></thead>
++<tbody id="rows"></tbody></table></div>
++
++<script>
++  const $ = (id) => document.getElementById(id);
++  const PLAN = { '3d': '3 ngày', '3m': '3 tháng', '6m': '6 tháng', '1y': '1 năm' };
++  const STATUS = { unused: 'Chưa dùng', active: 'Đang dùng', revoked: 'Đã thu hồi' };
++  try { $('server').value = localStorage.getItem('menuLicenseServer') || ''; } catch (_) {}
++
++  function base() { const u = $('server').value.trim().replace(/\/+$/, ''); try { localStorage.setItem('menuLicenseServer', u); } catch (_) {} return u; }
++  function say(t, cls) { $('msg').textContent = t || ''; $('msg').className = cls || ''; }
++  async function call(path, body) {
++    const r = await fetch(base() + path, {
++      method: body === undefined ? 'GET' : 'POST',
++      headers: { 'Authorization': 'Bearer ' + $('token').value.trim(), 'Content-Type': 'application/json' },
++      body: body === undefined ? undefined : JSON.stringify(body)
++    });
++    return await r.json();
++  }
++  function fmt(ts) { return ts ? new Date(ts).toLocaleString('vi-VN') : '—'; }
++
++  async function load() {
++    say('Đang tải…');
++    try {
++      const r = await call('/admin/license/list');
++      if (!r.ok) { say(r.message || 'Lỗi', 'bad'); return; }
++      say('Có ' + r.licenses.length + ' key.', 'good');
++      const tb = $('rows'); tb.textContent = '';
++      for (const l of r.licenses) {
++        const tr = document.createElement('tr');
++        const cells = [l.id, '…' + l.hint, PLAN[l.plan] || l.plan, l.note, STATUS[l.status] || l.status, l.machine || '—', fmt(l.expiresAt)];
++        for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
++        const act = document.createElement('td');
++        const add = (label, path, cls) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls;
++          b.onclick = async () => { if (!confirm(label + ' key #' + l.id + '?')) return; const x = await call(path, { id: l.id }); say(x.ok ? 'Xong.' : (x.message || 'Lỗi'), x.ok ? 'good' : 'bad'); load(); };
++          act.appendChild(b); };
++        if (l.status !== 'revoked') { add('Thu hồi', '/admin/license/revoke', 'red'); if (l.machine) add('Đổi máy', '/admin/license/unbind'); }
++        else add('Khôi phục', '/admin/license/restore');
++        tr.appendChild(act); tb.appendChild(tr);
++      }
++    } catch (e) { say('Không kết nối được server: ' + e.message, 'bad'); }
++  }
++
++  $('btnList').onclick = load;
++  $('btnCreate').onclick = async () => {
++    $('created').textContent = '';
++    try {
++      const body = { plan: $('plan').value, count: parseInt($('count').value, 10) || 1, note: $('note').value.trim() };
++      const m = $('machine').value.trim(); if (m) body.machine = m;
++      const r = await call('/admin/license/create', body);
++      if (!r.ok) { $('created').textContent = r.message || 'Lỗi'; $('created').className = 'bad'; return; }
++      $('created').className = 'good'; $('created').textContent = 'Đã tạo. Key chỉ hiện đầy đủ ở lần này — hãy sao chép ngay:';
++      for (const k of r.keys) {
++        const d = document.createElement('div'); d.className = 'newkey';
++        const c = document.createElement('code'); c.textContent = k.key; d.appendChild(c);
++        const b = document.createElement('button'); b.textContent = 'Sao chép';
++        b.onclick = () => navigator.clipboard.writeText(k.key); d.appendChild(b);
++        $('created').appendChild(d);
++      }
++      load();
++    } catch (e) { $('created').textContent = 'Không kết nối được server: ' + e.message; $('created').className = 'bad'; }
++  };
++</script>
++</body>
++</html>
+diff --git a/MENU-LICENSE-SERVER/tao-khoa.html b/MENU-LICENSE-SERVER/tao-khoa.html
+new file mode 100644
+index 0000000..3d0f029
+--- /dev/null
++++ b/MENU-LICENSE-SERVER/tao-khoa.html
+@@ -0,0 +1,76 @@
++<!DOCTYPE html>
++<html lang="vi">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1">
++<title>MENU — Tạo khoá ký License (làm 1 lần)</title>
++<style>
++  body{font-family:Segoe UI,Arial,sans-serif;background:#0b1220;color:#dbe7f5;max-width:760px;margin:24px auto;padding:0 16px;line-height:1.5}
++  h1{font-size:20px} h2{font-size:16px;margin-top:26px}
++  .box{background:#111c30;border:1px solid #23406b;border-radius:8px;padding:14px;margin:12px 0}
++  textarea{width:100%;height:84px;background:#0a1626;color:#9fe3ff;border:1px solid #23406b;border-radius:6px;padding:8px;font-family:Consolas,monospace;font-size:12px;box-sizing:border-box}
++  button{background:#0e4d7a;color:#fff;border:0;border-radius:6px;padding:9px 14px;cursor:pointer;font-size:14px;margin:4px 6px 4px 0}
++  button:hover{background:#136aa8}
++  .warn{color:#ffd37a} .bad{color:#ff8a8a} .good{color:#7dffb0}
++</style>
++</head>
++<body>
++<h1>Tạo khoá ký License (chỉ làm 1 lần)</h1>
++<p>Trang này chạy hoàn toàn trên máy bạn (không gửi gì đi đâu). Nó tạo ra <b>một cặp khoá</b>:</p>
++<ul>
++  <li><b>Khoá RIÊNG</b> — dán vào Cloudflare (Secret <code>LICENSE_SIGN_KEY</code>). <span class="warn">Tuyệt đối không đưa cho ai, không để trong thư mục GitHub, không gửi cho AI.</span></li>
++  <li><b>Khoá CÔNG KHAI</b> — lưu thành file <code>license-public-key.txt</code> đặt trong thư mục <code>app</code> của MENU. File này công khai được, đưa lên GitHub không sao.</li>
++</ul>
++
++<div class="box">
++  <button id="btnGen">① Tạo cặp khoá</button>
++  <span id="status"></span>
++</div>
++
++<h2>② Khoá RIÊNG (dán vào Cloudflare, rồi cất kỹ bản sao ở nơi an toàn)</h2>
++<div class="box">
++  <textarea id="priv" readonly placeholder="Bấm ① trước"></textarea>
++  <button id="btnCopyPriv">Sao chép khoá riêng</button>
++  <button id="btnSavePriv">Tải về file khoá riêng (cất ngoài thư mục dự án)</button>
++</div>
++
++<h2>③ Khoá CÔNG KHAI (lưu vào app/license-public-key.txt)</h2>
++<div class="box">
++  <textarea id="pub" readonly placeholder="Bấm ① trước"></textarea>
++  <button id="btnCopyPub">Sao chép khoá công khai</button>
++  <button id="btnSavePub">Tải về file license-public-key.txt</button>
++</div>
++
++<p class="warn">Nếu tạo lại cặp khoá mới thì MỌI key đã kích hoạt trước đó trên máy khách sẽ phải kiểm tra lại với server (cần khoá cũ cho tới khi cập nhật xong). Đừng tạo lại nếu không cần.</p>
++
++<script>
++  const $ = (id) => document.getElementById(id);
++  const b64 = (buf) => { let s = ''; for (const b of new Uint8Array(buf)) s += String.fromCharCode(b); return btoa(s); };
++  function download(name, text) {
++    const a = document.createElement('a');
++    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
++    a.download = name; document.body.appendChild(a); a.click(); a.remove();
++  }
++  async function copy(id) {
++    const v = $(id).value; if (!v) return;
++    try { await navigator.clipboard.writeText(v); } catch (_) { $(id).select(); document.execCommand('copy'); }
++    $('status').textContent = 'Đã sao chép.'; $('status').className = 'good';
++  }
++  $('btnGen').onclick = async () => {
++    try {
++      const kp = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
++      $('priv').value = b64(await crypto.subtle.exportKey('pkcs8', kp.privateKey));
++      $('pub').value = b64(await crypto.subtle.exportKey('spki', kp.publicKey));
++      $('status').textContent = 'Đã tạo xong. Làm tiếp bước ② và ③.'; $('status').className = 'good';
++    } catch (e) {
++      $('status').textContent = 'Trình duyệt này không hỗ trợ tạo khoá. Hãy mở trang bằng Chrome hoặc Edge bản mới (từ giữa 2025). Chi tiết: ' + e.message;
++      $('status').className = 'bad';
++    }
++  };
++  $('btnCopyPriv').onclick = () => copy('priv');
++  $('btnCopyPub').onclick = () => copy('pub');
++  $('btnSavePriv').onclick = () => $('priv').value && download('license-private-key-CAT-KY.txt', $('priv').value);
++  $('btnSavePub').onclick = () => $('pub').value && download('license-public-key.txt', $('pub').value);
++</script>
++</body>
++</html>
+diff --git a/MENU-LICENSE-SERVER/worker.js b/MENU-LICENSE-SERVER/worker.js
+new file mode 100644
+index 0000000..c1c88db
+--- /dev/null
++++ b/MENU-LICENSE-SERVER/worker.js
+@@ -0,0 +1,241 @@
++// LICENSE-01 — Server License cho MENU (Cloudflare Worker + D1). ĐỘC LẬP với server Key bài hát.
++// Quy tắc: 1 key = 1 mã máy. Thời hạn tính từ lúc kích hoạt. Server là nguồn giờ duy nhất.
++// Mọi phản hồi "được dùng" đều được ký Ed25519 (khoá riêng nằm ở Secret LICENSE_SIGN_KEY, app chỉ giữ khoá công khai).
++
++const PLANS = { "3d": { days: 3 }, "3m": { months: 3 }, "6m": { months: 6 }, "1y": { months: 12 } };
++const ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"; // 30 ký tự, bỏ I L O U 0 1 cho dễ đọc
++const DAY_MS = 86400000;
++
++const CORS = {
++    "Access-Control-Allow-Origin": "*",
++    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
++    "Access-Control-Allow-Headers": "Content-Type, Authorization"
++};
++
++function json(obj, status) {
++    return new Response(JSON.stringify(obj), { status: status || 200, headers: Object.assign({ "Content-Type": "application/json; charset=utf-8" }, CORS) });
++}
++function fail(reason, message, status) { return json({ ok: false, reason, message }, status || 200); }
++
++// ---------- tiện ích ----------
++function randomKey() {
++    const out = [];
++    while (out.length < 20) {
++        const buf = new Uint8Array(32);
++        crypto.getRandomValues(buf);
++        for (const b of buf) { if (b < 240 && out.length < 20) out.push(ALPHABET[b % 30]); } // 240 = 30*8, tránh lệch xác suất
++    }
++    return "MENU-" + out.join("").match(/.{5}/g).join("-");
++}
++function normalizeKey(raw) {
++    const s = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
++    const m = /^MENU([A-Z0-9]{20})$/.exec(s);
++    if (!m) return null;
++    for (const ch of m[1]) if (ALPHABET.indexOf(ch) < 0) return null;
++    return "MENU-" + m[1].match(/.{5}/g).join("-");
++}
++function normalizeMachine(raw) {
++    const s = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
++    return /^[A-Z0-9]{16,40}$/.test(s) ? s : null;
++}
++async function sha256Hex(text) {
++    const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
++    return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, "0")).join("");
++}
++function addPlan(ts, plan) {
++    const p = PLANS[plan];
++    if (!p) return null;
++    if (p.days) return ts + p.days * DAY_MS;
++    const d = new Date(ts);
++    const day = d.getUTCDate();
++    d.setUTCDate(1);
++    d.setUTCMonth(d.getUTCMonth() + p.months);
++    const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
++    d.setUTCDate(Math.min(day, last));
++    return d.getTime();
++}
++function safeEqual(a, b) {
++    a = String(a); b = String(b);
++    let diff = a.length ^ b.length;
++    const n = Math.max(a.length, b.length);
++    for (let i = 0; i < n; i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
++    return diff === 0;
++}
++function b64ToBytes(b64) {
++    const bin = atob(String(b64).replace(/\s+/g, ""));
++    const u = new Uint8Array(bin.length);
++    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
++    return u;
++}
++function bytesToB64(bytes) {
++    let s = "";
++    for (const b of new Uint8Array(bytes)) s += String.fromCharCode(b);
++    return btoa(s);
++}
++
++// ---------- ký phản hồi ----------
++let signKeyCache = null; // { raw, key }
++async function getSignKey(env) {
++    if (!env.LICENSE_SIGN_KEY) throw new Error("missing LICENSE_SIGN_KEY");
++    if (signKeyCache && signKeyCache.raw === env.LICENSE_SIGN_KEY) return signKeyCache.key;
++    const der = b64ToBytes(env.LICENSE_SIGN_KEY);
++    let key;
++    try { key = await crypto.subtle.importKey("pkcs8", der, { name: "Ed25519" }, false, ["sign"]); }
++    catch (_) { key = await crypto.subtle.importKey("pkcs8", der, { name: "NODE-ED25519", namedCurve: "NODE-ED25519" }, false, ["sign"]); }
++    signKeyCache = { raw: env.LICENSE_SIGN_KEY, key };
++    return key;
++}
++async function signPayload(env, payloadObj) {
++    const payload = JSON.stringify(payloadObj);
++    const key = await getSignKey(env);
++    let sig;
++    try { sig = await crypto.subtle.sign({ name: "Ed25519" }, key, new TextEncoder().encode(payload)); }
++    catch (_) { sig = await crypto.subtle.sign({ name: "NODE-ED25519" }, key, new TextEncoder().encode(payload)); }
++    return { payload, sig: bytesToB64(sig) };
++}
++
++// ---------- logic license ----------
++const MESSAGES = {
++    INVALID_KEY: "Key không đúng. Kiểm tra lại từng ký tự.",
++    REVOKED: "Key đã bị thu hồi. Liên hệ người cung cấp.",
++    EXPIRED: "Key đã hết hạn. Hãy mua/nhập key mới.",
++    MACHINE_MISMATCH: "Key này đã gắn với máy khác (1 key chỉ dùng cho 1 máy).",
++    NOT_ACTIVATED: "Key chưa được kích hoạt trên máy này."
++};
++function evaluate(row, machine, now) {
++    if (!row) return "INVALID_KEY";
++    if (row.status === "revoked") return "REVOKED";
++    if (row.machine && row.machine !== machine) return "MACHINE_MISMATCH";
++    if (row.status === "active" && row.expires_at != null && row.expires_at <= now) return "EXPIRED";
++    return null;
++}
++async function okResponse(env, row, now) {
++    const signed = await signPayload(env, {
++        v: 1, status: "active", machine: row.machine, plan: row.plan,
++        activatedAt: row.activated_at, expiresAt: row.expires_at, issuedAt: now
++    });
++    return json({ ok: true, payload: signed.payload, sig: signed.sig, serverTime: now });
++}
++async function findRow(env, key) {
++    const hash = await sha256Hex(key);
++    return await env.DB.prepare("SELECT * FROM licenses WHERE key_hash = ?").bind(hash).first();
++}
++async function readBody(request) {
++    try { const b = await request.json(); return (b && typeof b === "object") ? b : {}; } catch (_) { return {}; }
++}
++
++async function handleActivate(request, env) {
++    const body = await readBody(request);
++    const key = normalizeKey(body.key);
++    const machine = normalizeMachine(body.machine);
++    if (!key) return fail("INVALID_KEY", MESSAGES.INVALID_KEY);
++    if (!machine) return fail("BAD_REQUEST", "Mã máy không hợp lệ.");
++    const now = Date.now();
++    let row = await findRow(env, key);
++    let reason = evaluate(row, machine, now);
++    if (reason) return fail(reason, MESSAGES[reason]);
++
++    if (row.status === "unused") {
++        const exp = addPlan(now, row.plan);
++        const r = await env.DB.prepare("UPDATE licenses SET status='active', machine=?, activated_at=?, expires_at=? WHERE id=? AND status='unused'")
++            .bind(machine, now, exp, row.id).run();
++        if (!r || !r.meta || r.meta.changes !== 1) { // máy khác vừa kích hoạt trước
++            row = await findRow(env, key);
++            reason = evaluate(row, machine, now);
++            if (reason) return fail(reason, MESSAGES[reason]);
++        } else {
++            row = await findRow(env, key);
++        }
++    } else if (row.status === "active" && !row.machine) { // đã được gỡ máy cũ -> gắn máy mới, giữ nguyên hạn
++        await env.DB.prepare("UPDATE licenses SET machine=? WHERE id=? AND machine IS NULL").bind(machine, row.id).run();
++        row = await findRow(env, key);
++        reason = evaluate(row, machine, now);
++        if (reason) return fail(reason, MESSAGES[reason]);
++    }
++    return await okResponse(env, row, now);
++}
++
++async function handleCheck(request, env) {
++    const body = await readBody(request);
++    const key = normalizeKey(body.key);
++    const machine = normalizeMachine(body.machine);
++    if (!key) return fail("INVALID_KEY", MESSAGES.INVALID_KEY);
++    if (!machine) return fail("BAD_REQUEST", "Mã máy không hợp lệ.");
++    const now = Date.now();
++    const row = await findRow(env, key);
++    let reason = evaluate(row, machine, now);
++    if (!reason && (row.status !== "active" || row.machine !== machine)) reason = "NOT_ACTIVATED";
++    if (reason) return fail(reason, MESSAGES[reason]);
++    return await okResponse(env, row, now);
++}
++
++// ---------- quản trị (cần ADMIN_TOKEN) ----------
++function isAdmin(request, env) {
++    if (!env.ADMIN_TOKEN) return false;
++    const auth = request.headers.get("Authorization") || "";
++    return safeEqual(auth, "Bearer " + env.ADMIN_TOKEN);
++}
++function publicRow(r) {
++    return { id: r.id, hint: r.key_hint, plan: r.plan, note: r.note, status: r.status, machine: r.machine,
++        createdAt: r.created_at, activatedAt: r.activated_at, expiresAt: r.expires_at };
++}
++async function handleAdmin(path, request, env) {
++    if (!env.ADMIN_TOKEN) return fail("ADMIN_NOT_CONFIGURED", "Server chưa đặt ADMIN_TOKEN.", 500);
++    if (!isAdmin(request, env)) return fail("UNAUTHORIZED", "Sai mật khẩu quản trị.", 401);
++
++    if (path === "/admin/license/list") {
++        const { results } = await env.DB.prepare("SELECT * FROM licenses ORDER BY id DESC LIMIT 300").all();
++        return json({ ok: true, licenses: results.map(publicRow) });
++    }
++    const body = await readBody(request);
++    if (path === "/admin/license/create") {
++        if (!PLANS[body.plan]) return fail("BAD_REQUEST", "Gói không hợp lệ (3d, 3m, 6m, 1y).");
++        const count = Math.max(1, Math.min(50, parseInt(body.count, 10) || 1));
++        const note = String(body.note || "").slice(0, 100);
++        let machine = null;
++        if (body.machine) { machine = normalizeMachine(body.machine); if (!machine) return fail("BAD_REQUEST", "Mã máy không hợp lệ."); }
++        const keys = [];
++        for (let i = 0; i < count; i++) {
++            const key = randomKey();
++            const hash = await sha256Hex(key);
++            const r = await env.DB.prepare("INSERT INTO licenses (key_hash, key_hint, plan, note, status, machine, created_at) VALUES (?, ?, ?, ?, 'unused', ?, ?)")
++                .bind(hash, key.slice(-4), body.plan, note, machine, Date.now()).run();
++            keys.push({ key, plan: body.plan, id: r && r.meta ? r.meta.last_row_id : null });
++        }
++        return json({ ok: true, keys });
++    }
++    const id = parseInt(body.id, 10);
++    if (!id) return fail("BAD_REQUEST", "Thiếu id.");
++    if (path === "/admin/license/revoke") {
++        const r = await env.DB.prepare("UPDATE licenses SET status='revoked' WHERE id=?").bind(id).run();
++        return json({ ok: true, changed: r.meta.changes });
++    }
++    if (path === "/admin/license/restore") {
++        const r = await env.DB.prepare("UPDATE licenses SET status = CASE WHEN activated_at IS NULL THEN 'unused' ELSE 'active' END WHERE id=? AND status='revoked'").bind(id).run();
++        return json({ ok: true, changed: r.meta.changes });
++    }
++    if (path === "/admin/license/unbind") { // đổi máy: gỡ máy cũ, giữ nguyên hạn dùng
++        const r = await env.DB.prepare("UPDATE licenses SET machine=NULL WHERE id=? AND status != 'revoked'").bind(id).run();
++        return json({ ok: true, changed: r.meta.changes });
++    }
++    return fail("NOT_FOUND", "Không có chức năng này.", 404);
++}
++
++export default {
++    async fetch(request, env) {
++        if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
++        const path = new URL(request.url).pathname;
++        try {
++            if (path === "/health") return json({ ok: true, service: "menu-license", time: Date.now() });
++            if (request.method === "POST" && path === "/license/activate") return await handleActivate(request, env);
++            if (request.method === "POST" && path === "/license/check") return await handleCheck(request, env);
++            if (path.indexOf("/admin/license/") === 0) return await handleAdmin(path, request, env);
++            return fail("NOT_FOUND", "Không có chức năng này.", 404);
++        } catch (err) {
++            console.error("license worker error:", err && err.message);
++            return fail("SERVER_ERROR", "Lỗi server, thử lại sau.", 500);
++        }
++    }
++};
++
++export { normalizeKey, normalizeMachine, addPlan, randomKey };
+diff --git a/app/LicenseManager.js b/app/LicenseManager.js
+new file mode 100644
+index 0000000..1d4281c
+--- /dev/null
++++ b/app/LicenseManager.js
+@@ -0,0 +1,284 @@
++// LICENSE-01 — Kích hoạt bản quyền: 1 key = 1 mã máy, có thời hạn (3 ngày / 3 tháng / 6 tháng / 1 năm tính từ lúc kích hoạt),
++// kiểm tra với server License (MENU-LICENSE-SERVER). Chưa kích hoạt / hết hạn / bị thu hồi => main.js KHÔNG mở bất kỳ tính năng nào.
++//
++// An toàn: mọi phản hồi "được dùng" của server đều được ký Ed25519; app chỉ giữ KHOÁ CÔNG KHAI (app/license-public-key.txt),
++// nên sửa file license đã lưu hay giả lập server đều không tạo được license hợp lệ. Thiếu khoá công khai => KHOÁ app (fail-closed).
++// Mất mạng: dùng tiếp tối đa 72 giờ kể từ lần kiểm tra server thành công cuối. Lùi đồng hồ Windows bị phát hiện => bắt buộc kiểm tra lại online.
++// Giới hạn đã biết: app chạy từ mã nguồn nên người có kỹ thuật vẫn có thể sửa code bỏ đoạn kiểm tra (xem báo cáo).
++'use strict';
++const fs = require('fs');
++const path = require('path');
++const os = require('os');
++const crypto = require('crypto');
++
++const DEFAULT_SERVER_URL = 'https://menu-license-server.matuotluuly.workers.dev';
++const ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789'; // cùng bảng ký tự với server
++const GRACE_MS = 72 * 3600 * 1000;      // mất mạng vẫn dùng tối đa 72 giờ kể từ lần kiểm tra thành công cuối
++const RECHECK_MS = 6 * 3600 * 1000;     // kiểm tra lại với server mỗi 6 giờ
++const TICK_MS = 5 * 60 * 1000;          // đánh giá cục bộ mỗi 5 phút khi app đang chạy
++const CLOCK_SKEW_MS = 10 * 60 * 1000;   // dung sai đồng hồ trước khi coi là bị lùi giờ
++const FETCH_TIMEOUT_MS = 8000;
++const PLAN_LABEL = { '3d': '3 ngày', '3m': '3 tháng', '6m': '6 tháng', '1y': '1 năm' };
++// Lý do server trả về nghĩa là license thật sự không còn dùng được (khác lỗi tạm thời như SERVER_ERROR/mất mạng).
++const DEFINITIVE = new Set(['INVALID_KEY', 'REVOKED', 'EXPIRED', 'MACHINE_MISMATCH', 'NOT_ACTIVATED']);
++
++function normalizeKey(raw) {
++    const s = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
++    const m = /^MENU([A-Z0-9]{20})$/.exec(s);
++    if (!m) return null;
++    for (const ch of m[1]) if (ALPHABET.indexOf(ch) < 0) return null;
++    return 'MENU-' + m[1].match(/.{5}/g).join('-');
++}
++
++function machineCodeFromRaw(raw) {
++    const d = crypto.createHash('sha256').update('MENU-LICENSE-v1|' + String(raw)).digest();
++    let s = '';
++    for (let i = 0; i < 20; i++) s += ALPHABET[d[i] % 30];
++    return s.match(/.{5}/g).join('-');
++}
++
++function fmtDate(ts) {
++    const d = new Date(ts), p = (n) => String(n).padStart(2, '0');
++    return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear();
++}
++
++// exec thật — execFile, không qua shell, tham số là hằng số.
++function realExec(cmd, args) {
++    const { execFile } = require('child_process');
++    return new Promise((resolve) => {
++        execFile(cmd, args, { timeout: 8000, windowsHide: true }, (err, stdout) => resolve({ code: err ? 1 : 0, stdout: String(stdout || '') }));
++    });
++}
++
++function createLicenseManager(opts) {
++    opts = opts || {};
++    const userDataDir = opts.userDataDir;
++    const appDir = opts.appDir || __dirname;
++    const now = opts.now || Date.now;
++    const fetchFn = opts.fetchFn || ((u, o) => fetch(u, o));
++    const run = opts.exec || realExec;
++    const platform = opts.platform || process.platform;
++    const tickMs = opts.tickMs || TICK_MS;
++    const cacheFile = path.join(userDataDir, 'license.json');
++
++    let machine = null;      // "XXXXX-XXXXX-XXXXX-XXXXX"
++    let pubKey = null;
++    let pubKeyProblem = null; // { code, message }
++    let cache = null;         // { v, key, payload, sig, lastOkLocal, maxLocal }
++    let denied = null;        // { code, message } — lý do gần nhất server từ chối (để hiện ở màn hình kích hoạt)
++    let timer = null;
++    let refreshing = null;
++
++    // ---------- mã máy ----------
++    async function readRawMachineId() {
++        if (typeof opts.machineIdProvider === 'function') return await opts.machineIdProvider();
++        if (platform === 'win32') {
++            try {
++                const r = await run('reg', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid']);
++                const m = /MachineGuid\s+REG_SZ\s+([0-9a-fA-F-]{16,})/.exec(r.stdout || '');
++                if (m) return 'win:' + m[1].toLowerCase();
++            } catch (_) { /* dùng dự phòng bên dưới */ }
++        }
++        // Dự phòng (không phải Windows hoặc không đọc được registry): tên máy + CPU + địa chỉ MAC.
++        const macs = [];
++        try {
++            const nics = os.networkInterfaces();
++            for (const k of Object.keys(nics)) for (const n of nics[k] || []) if (n && !n.internal && n.mac && n.mac !== '00:00:00:00:00:00') macs.push(n.mac);
++        } catch (_) { /* bỏ qua */ }
++        let cpu = '';
++        try { cpu = (os.cpus()[0] || {}).model || ''; } catch (_) { /* bỏ qua */ }
++        return 'fb:' + os.hostname() + '|' + cpu + '|' + Array.from(new Set(macs)).sort().join(',');
++    }
++    async function getMachineCode() {
++        if (!machine) machine = machineCodeFromRaw(await readRawMachineId());
++        return machine;
++    }
++
++    // ---------- khoá công khai ----------
++    function loadPublicKey() {
++        pubKey = null; pubKeyProblem = null;
++        let text = opts.publicKeyText;
++        if (typeof text !== 'string') {
++            try { text = fs.readFileSync(path.join(appDir, 'license-public-key.txt'), 'utf8'); }
++            catch (_) {
++                pubKeyProblem = { code: 'NO_PUBLIC_KEY', message: 'Chưa cấu hình khoá License (thiếu app/license-public-key.txt). Xem MENU-LICENSE-SERVER/HUONG-DAN-LICENSE.md, bước 4.' };
++                return;
++            }
++        }
++        try {
++            const k = crypto.createPublicKey({ key: Buffer.from(String(text).replace(/\s+/g, ''), 'base64'), format: 'der', type: 'spki' });
++            if (k.asymmetricKeyType !== 'ed25519') throw new Error('không phải ed25519');
++            pubKey = k;
++        } catch (_) {
++            pubKeyProblem = { code: 'INVALID_PUBLIC_KEY', message: 'File app/license-public-key.txt không hợp lệ. Tạo lại bằng MENU-LICENSE-SERVER/tao-khoa.html.' };
++        }
++    }
++
++    // ---------- lưu trữ ----------
++    function loadCache() {
++        cache = null;
++        try {
++            const j = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
++            if (j && j.v === 1 && typeof j.key === 'string' && typeof j.payload === 'string' && typeof j.sig === 'string') {
++                cache = { v: 1, key: j.key, payload: j.payload, sig: j.sig, lastOkLocal: Number(j.lastOkLocal) || 0, maxLocal: Number(j.maxLocal) || 0 };
++            }
++        } catch (_) { /* chưa có hoặc hỏng => coi như chưa kích hoạt */ }
++    }
++    function saveCache() {
++        if (!cache) return;
++        const tmp = cacheFile + '.tmp-' + process.pid + '-' + Math.floor(Math.random() * 1e9);
++        try {
++            fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
++            fs.writeFileSync(tmp, JSON.stringify(cache), 'utf8');
++            fs.renameSync(tmp, cacheFile);
++        } catch (_) { try { fs.unlinkSync(tmp); } catch (e2) { /* bỏ qua */ } }
++    }
++    function clearCache() {
++        cache = null;
++        try { fs.unlinkSync(cacheFile); } catch (_) { /* không có thì thôi */ }
++    }
++
++    // ---------- xác minh chữ ký ----------
++    function verifySigned(payloadStr, sigB64) {
++        if (!pubKey) return null;
++        try {
++            if (!crypto.verify(null, Buffer.from(payloadStr, 'utf8'), pubKey, Buffer.from(sigB64, 'base64'))) return null;
++            const p = JSON.parse(payloadStr);
++            if (!p || p.v !== 1 || p.status !== 'active' || typeof p.expiresAt !== 'number' || typeof p.machine !== 'string') return null;
++            return p;
++        } catch (_) { return null; }
++    }
++
++    // ---------- đánh giá trạng thái (đồng bộ, không gọi mạng) ----------
++    function evaluate(t) {
++        const out = (licensed, code, message, extra) => Object.assign({ licensed, code, message }, extra || {});
++        if (pubKeyProblem) return out(false, pubKeyProblem.code, pubKeyProblem.message);
++        if (!cache) return denied ? out(false, denied.code, denied.message) : out(false, 'UNLICENSED', 'Chưa kích hoạt. Cần nhập key để sử dụng MENU.');
++        const p = verifySigned(cache.payload, cache.sig);
++        if (!p) return out(false, 'TAMPERED', 'Dữ liệu license không hợp lệ. Hãy nhập lại key.');
++        if (!machine || p.machine !== machine.replace(/-/g, '')) return out(false, 'MACHINE_MISMATCH', 'License này thuộc máy khác. 1 key chỉ dùng cho 1 máy.');
++        const info = { plan: p.plan, planLabel: PLAN_LABEL[p.plan] || String(p.plan), activatedAt: p.activatedAt || null, expiresAt: p.expiresAt, keyHint: cache.key.slice(-4), lastCheckAt: cache.lastOkLocal || null };
++        if (t >= p.expiresAt) return out(false, 'EXPIRED', 'License đã hết hạn ngày ' + fmtDate(p.expiresAt) + '. Hãy nhập key mới.', info);
++        if (t < (cache.maxLocal || 0) - CLOCK_SKEW_MS) return out(false, 'NEED_ONLINE', 'Đồng hồ máy bị lùi so với lần dùng trước. Cần kết nối mạng để xác minh lại license.', info);
++        if (t - (cache.lastOkLocal || 0) > GRACE_MS) return out(false, 'NEED_ONLINE', 'Đã quá 72 giờ chưa xác minh được license với server. Hãy kết nối mạng rồi bấm kiểm tra lại.', info);
++        const graceLeftMs = Math.max(0, GRACE_MS - (t - cache.lastOkLocal));
++        return out(true, 'LICENSED', 'Đã kích hoạt — gói ' + info.planLabel + ', còn ' + Math.max(1, Math.ceil((p.expiresAt - t) / 86400000)) + ' ngày (hết hạn ' + fmtDate(p.expiresAt) + ').',
++            Object.assign(info, { daysLeft: Math.max(1, Math.ceil((p.expiresAt - t) / 86400000)), graceLeftHours: Math.floor(graceLeftMs / 3600000) }));
++    }
++    function getStatus() {
++        const st = evaluate(now());
++        return Object.assign({ ok: true, machineCode: machine }, st);
++    }
++    function isLicensed() { return evaluate(now()).licensed; }
++
++    // ---------- gọi server ----------
++    function serverUrl() {
++        let u = '';
++        try { u = (typeof opts.getServerUrl === 'function' && opts.getServerUrl()) || ''; } catch (_) { /* dùng mặc định */ }
++        return String(u || DEFAULT_SERVER_URL).replace(/\/+$/, '');
++    }
++    async function post(p, body) {
++        const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
++        const to = ctrl ? setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS) : null;
++        try {
++            const res = await fetchFn(serverUrl() + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctrl ? ctrl.signal : undefined });
++            let j;
++            try { j = await res.json(); } catch (_) { throw new Error('BAD_RESPONSE'); }
++            if (!j || typeof j !== 'object') throw new Error('BAD_RESPONSE');
++            return j;
++        } finally { if (to) clearTimeout(to); }
++    }
++
++    async function activate(keyRaw) {
++        await getMachineCode();
++        if (pubKeyProblem) return { ok: false, reason: pubKeyProblem.code, message: pubKeyProblem.message };
++        const key = normalizeKey(keyRaw);
++        if (!key) return { ok: false, reason: 'INVALID_KEY', message: 'Key không đúng định dạng (MENU-XXXXX-XXXXX-XXXXX-XXXXX).' };
++        let res;
++        try { res = await post('/license/activate', { key, machine }); }
++        catch (_) { return { ok: false, reason: 'NETWORK', message: 'Không kết nối được server License. Kiểm tra mạng rồi thử lại.' }; }
++        if (!res.ok) return { ok: false, reason: String(res.reason || 'ERROR'), message: String(res.message || 'Server từ chối kích hoạt.') };
++        const p = verifySigned(res.payload, res.sig);
++        if (!p || p.machine !== machine.replace(/-/g, '')) return { ok: false, reason: 'BAD_SIGNATURE', message: 'Phản hồi server không hợp lệ (khoá công khai trong app không khớp khoá của server).' };
++        const t = now();
++        cache = { v: 1, key, payload: res.payload, sig: res.sig, lastOkLocal: t, maxLocal: t };
++        denied = null;
++        saveCache();
++        return { ok: true, status: getStatus() };
++    }
++
++    // Kiểm tra lại với server. Mất mạng/lỗi tạm thời => giữ nguyên (còn trong hạn 72 giờ). Server nói rõ không còn hiệu lực => xoá license.
++    function refresh() {
++        if (refreshing) return refreshing;
++        refreshing = (async () => {
++            await getMachineCode();
++            if (!cache || !cache.key || pubKeyProblem) return { ok: false, reason: 'NO_LICENSE' };
++            let res;
++            try { res = await post('/license/check', { key: cache.key, machine }); }
++            catch (_) { return { ok: false, reason: 'NETWORK', message: 'Không kết nối được server License.' }; }
++            if (res.ok) {
++                const p = verifySigned(res.payload, res.sig);
++                if (!p || p.machine !== machine.replace(/-/g, '')) return { ok: false, reason: 'BAD_SIGNATURE', message: 'Phản hồi server không hợp lệ.' };
++                const t = now();
++                cache.payload = res.payload; cache.sig = res.sig; cache.lastOkLocal = t; cache.maxLocal = t; // server xác nhận => lấy mốc thời gian mới (đồng hồ đã chỉnh lại cũng hợp lệ)
++                denied = null;
++                saveCache();
++                return { ok: true };
++            }
++            const reason = String(res.reason || 'ERROR');
++            if (DEFINITIVE.has(reason)) {
++                denied = { code: reason, message: String(res.message || 'License không còn hiệu lực.') };
++                clearCache();
++                return { ok: false, reason, message: denied.message };
++            }
++            return { ok: false, reason, message: String(res.message || 'Server lỗi tạm thời.') };
++        })().finally(() => { refreshing = null; });
++        return refreshing;
++    }
++
++    function bumpMaxLocal(t) {
++        if (cache && t > (cache.maxLocal || 0)) { cache.maxLocal = t; saveCache(); }
++    }
++
++    async function init() {
++        await getMachineCode();
++        loadPublicKey();
++        loadCache();
++        const st = evaluate(now());
++        if (cache && !pubKeyProblem && (st.code === 'NEED_ONLINE' || (st.licensed && now() - cache.lastOkLocal > RECHECK_MS))) await refresh();
++        bumpMaxLocal(now());
++        return getStatus();
++    }
++
++    // Khi app đang chạy: định kỳ đánh giá cục bộ, kiểm tra lại server mỗi 6 giờ; mất hiệu lực => gọi onLost(status).
++    function startWatcher(w) {
++        stopWatcher();
++        let busy = false;
++        timer = setInterval(async () => {
++            if (busy) return;
++            busy = true;
++            try {
++                const t = now();
++                let st = evaluate(t);
++                if (cache && (st.code === 'NEED_ONLINE' || (st.licensed && t - cache.lastOkLocal > RECHECK_MS))) await refresh();
++                bumpMaxLocal(now());
++                st = evaluate(now());
++                if (!st.licensed && w && typeof w.onLost === 'function') { stopWatcher(); w.onLost(Object.assign({ machineCode: machine }, st)); }
++            } catch (_) { /* không để watcher làm sập app */ } finally { busy = false; }
++        }, tickMs);
++        if (timer && timer.unref) timer.unref();
++    }
++    function stopWatcher() { if (timer) { clearInterval(timer); timer = null; } }
++
++    // Khởi động lại app (cùng cách AppUpdater.relaunch — main.js KHÔNG được tự gọi app.relaunch, xem MenuElevationA104.verify.js).
++    // Không liên quan cơ chế nâng quyền Administrator ở Elevation.js: bản mới khởi động sẽ tự chạy ensureElevated như mọi lần mở app.
++    function relaunch(appObj) {
++        appObj.relaunch();
++        appObj.quit();
++        return { ok: true };
++    }
++
++    return { init, getMachineCode, getStatus, isLicensed, activate, refresh, startWatcher, stopWatcher, relaunch };
++}
++
++module.exports = { createLicenseManager, normalizeKey, machineCodeFromRaw, DEFAULT_SERVER_URL, GRACE_MS, RECHECK_MS };
+diff --git a/app/main.js b/app/main.js
+index cff2032..7496999 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -185,7 +185,53 @@ let currentNowPlayingForSync = null;
+ // vào runtime thật. Toàn bộ lỗi bên trong CommandRuntime tự bắt, không throw ra ngoài.
+ const CommandRuntime = require("../core/command-engine-js/runtime");
+ 
++// ================================
++// LICENSE-01 — Kích hoạt bằng key (1 key = 1 mã máy, có thời hạn), kiểm tra với server License. Logic thật ở app/LicenseManager.js.
++// Chưa kích hoạt / hết hạn / bị thu hồi / thiếu khoá công khai => KHÔNG khởi động bất kỳ tính năng nào (không cửa sổ Menu/Setup, không MIDI,
++// không Now Playing, không tự mở DAW...) — chỉ hiện màn hình kích hoạt ui/license.html. Kích hoạt xong => app tự khởi động lại bản đầy đủ.
++// ================================
++const { createLicenseManager } = require("./LicenseManager");
++const licenseManager = createLicenseManager({
++    userDataDir: app.getPath("userData"),
++    appDir: __dirname,
++    getServerUrl: () => { const s = readSettingsFile(); return s && typeof s.licenseServerUrl === "string" ? s.licenseServerUrl : ""; } // mặc định: DEFAULT_SERVER_URL trong LicenseManager.js
++});
++const licenseReady = licenseManager.init().catch((err) => { console.error("LicenseManager.init lỗi (coi như chưa kích hoạt):", err); });
++let licenseGateOpen = false;
++let licenseRelaunchScheduled = false;
++
++function openLicenseGate() {
++    licenseGateOpen = true;
++    const w = new BrowserWindow({
++        width: 540, height: 640, resizable: false, autoHideMenuBar: true, title: "MENU — Cần kích hoạt",
++        webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false }
++    });
++    w.loadFile(path.join(__dirname, "..", "ui", "license.html"));
++    // Đóng màn hình kích hoạt = thoát hẳn. app.exit (không qua before-quit) vì phiên này chưa khởi động gì cần dọn (MIDI, đóng DAW/YouTube...).
++    // (Khi vừa kích hoạt xong thì licenseRelaunchScheduled = true: để licenseManager.relaunch tự thoát, không exit đôi.)
++    w.on("closed", () => { if (!licenseRelaunchScheduled) app.exit(0); });
++}
++function relaunchAfterLicense() {
++    if (licenseRelaunchScheduled) return;
++    licenseRelaunchScheduled = true;
++    setTimeout(() => {
++        try { __companionDone = true; } catch (err) { /* không tự đóng DAW/YouTube của người dùng chỉ vì vừa kích hoạt xong */ }
++        licenseManager.relaunch(app);
++    }, 1500); // chừa 1,5 giây để màn hình kích hoạt kịp hiện "thành công"
++}
++// Đang chạy mà license mất hiệu lực (hết hạn / bị thu hồi / quá 72 giờ chưa xác minh được): báo rồi khởi động lại -> màn hình kích hoạt.
++function onLicenseLost(st) {
++    try { dialog.showMessageBoxSync({ type: "warning", title: "MENU — Cần kích hoạt", message: "License không còn hiệu lực.", detail: (st && st.message) || "", buttons: ["Đóng"] }); } catch (err) { console.error("Hộp thoại license lỗi:", err); }
++    try { __companionDone = true; } catch (err) { /* không tự động đóng DAW/YouTube của người dùng chỉ vì hết license */ }
++    licenseManager.relaunch(app); // relaunch + quit: đi qua before-quit như thoát bình thường (khôi phục DAW đang ẩn, đóng MIDI)
++}
++
+ app.whenReady().then(async () => {
++    // LICENSE-01 — cổng kiểm tra: không qua được thì dừng ngay, mọi khối khởi động phía dưới không chạy.
++    await licenseReady;
++    if (!licenseManager.isLicensed()) { openLicenseGate(); return; }
++    licenseManager.startWatcher({ onLost: onLicenseLost });
++
+     // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
+     // App này cần quyền mic để liệt kê tên soundcard, và quyền midi để gửi MIDI sang DAW.
+     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+@@ -887,6 +933,34 @@ ipcMain.handle("app-update-check", async () => { try { return await getAppUpdate
+ ipcMain.handle("app-update-apply", async () => { try { return await getAppUpdater().apply(); } catch (e) { return { ok: false, reason: "ERROR", message: String((e && e.message) || e) }; } });
+ ipcMain.handle("app-relaunch", async () => { try { return getAppUpdater().relaunch(app); } catch (e) { return { ok: false, message: String((e && e.message) || e) }; } });
+ 
++// LICENSE-01 — relay IPC cho màn hình kích hoạt (ui/license.html) và ô License trong Setup (ui/js/setupLicense.js). Logic thật ở app/LicenseManager.js.
++ipcMain.handle("license-status", async () => { try { await licenseReady; return licenseManager.getStatus(); } catch (e) { return { ok: false, licensed: false, message: String((e && e.message) || e) }; } });
++ipcMain.handle("license-activate", async (event, key) => {
++    try {
++        await licenseReady;
++        const r = await licenseManager.activate(key);
++        if (r && r.ok && licenseGateOpen) relaunchAfterLicense(); // đang ở màn hình kích hoạt: mở lại app đầy đủ
++        return r;
++    } catch (e) { return { ok: false, reason: "ERROR", message: String((e && e.message) || e) }; }
++});
++ipcMain.handle("license-refresh", async () => {
++    try {
++        await licenseReady;
++        await licenseManager.refresh();
++        const st = licenseManager.getStatus();
++        if (st.licensed && licenseGateOpen) relaunchAfterLicense();
++        return st;
++    } catch (e) { return { ok: false, licensed: false, message: String((e && e.message) || e) }; }
++});
++ipcMain.handle("license-copy-machine", async () => {
++    try {
++        const code = licenseManager.getStatus().machineCode;
++        if (!code) return { ok: false };
++        require("electron").clipboard.writeText(code);
++        return { ok: true };
++    } catch (e) { return { ok: false, message: String((e && e.message) || e) }; }
++});
++
+ ipcMain.handle("admin-auth-verify", async (event, password) => {
+     try {
+         return AdminAuth.verify(password);
+@@ -1191,7 +1265,7 @@ function getDawReadyWatcher() {
+     }
+     return dawReadyWatcher;
+ }
+-app.whenReady().then(() => { try { getDawReadyWatcher().start(); } catch (err) { console.error("DawReadyWatcher lỗi (bỏ qua):", err); } });
++app.whenReady().then(() => licenseReady).then(() => { if (!licenseManager.isLicensed()) return; /* LICENSE-01: chưa kích hoạt thì không tự ẩn DAW */ try { getDawReadyWatcher().start(); } catch (err) { console.error("DawReadyWatcher lỗi (bỏ qua):", err); } });
+ app.on("before-quit", () => { try { if (dawReadyWatcher) dawReadyWatcher.stop(); } catch (err) { /* bỏ qua */ } });
+ 
+ ipcMain.handle("effects-get-aot", (event) => {
+@@ -1247,7 +1321,8 @@ function getSongDbSync() {
+     }
+     return __songDbSync;
+ }
+-app.whenReady().then(() => {
++app.whenReady().then(() => licenseReady).then(() => {
++    if (!licenseManager.isLicensed()) return; // LICENSE-01: chưa kích hoạt thì không tự đồng bộ Database
+     const auto = () => { getSongDbSync().run().catch((e) => console.error("DB-SYNC-01 tự đồng bộ lỗi:", e)); };
+     setTimeout(auto, 15000);
+     const t = setInterval(auto, 10 * 60 * 1000);
+diff --git a/app/preload.js b/app/preload.js
+index 5be9f8b..1667b36 100644
+--- a/app/preload.js
++++ b/app/preload.js
+@@ -161,6 +161,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
+     checkAppUpdate: () => ipcRenderer.invoke("app-update-check"),
+     applyAppUpdate: () => ipcRenderer.invoke("app-update-apply"),
+     relaunchApp: () => ipcRenderer.invoke("app-relaunch"),
++    // LICENSE-01 — kích hoạt / trạng thái license (logic thật ở app/LicenseManager.js, main chỉ relay)
++    licenseStatus: () => ipcRenderer.invoke("license-status"),
++    licenseActivate: (key) => ipcRenderer.invoke("license-activate", key),
++    licenseRefresh: () => ipcRenderer.invoke("license-refresh"),
++    licenseCopyMachine: () => ipcRenderer.invoke("license-copy-machine"),
+     // HIDE-DAW-01 — Setup > Công cụ và sửa lỗi > Ẩn DAW xuống khay thông báo
+     toolsDawStatus: () => ipcRenderer.invoke("tools-daw-status"),
+     aiReadinessSnapshot: () => ipcRenderer.invoke("ai-readiness-snapshot"), // A112: chỉ-đọc (Setup -> main -> đọc nhãn từ Menu chính)
+diff --git a/tests/unit/AppUpdater01.verify.js b/tests/unit/AppUpdater01.verify.js
+index f8034dd..cc288f7 100644
+--- a/tests/unit/AppUpdater01.verify.js
++++ b/tests/unit/AppUpdater01.verify.js
+@@ -58,7 +58,8 @@ const sh = (cwd, c) => cp.execSync(c, { cwd, stdio: 'pipe', env: Object.assign({
+   const main = rd('app/main.js'), pre = rd('app/preload.js'), html = rd('ui/setup.html'), ui = rd('ui/js/setupVersion.js');
+   for (const ch of ['app-version', 'app-update-check', 'app-update-apply', 'app-relaunch']) ok(main.includes('ipcMain.handle("' + ch + '"') && pre.includes('ipcRenderer.invoke("' + ch + '")'), 'IPC ' + ch + ' có ở main + preload');
+   for (const id of ['appVersionText', 'btnCheckUpdate', 'btnApplyUpdate', 'btnRelaunchApp', 'appUpdateMessage']) ok(html.includes('id="' + id + '"') && ui.includes(id), 'UI có ' + id);
+-  ok(html.includes('js/setupVersion.js') && /License \/ kích hoạt<\/b><span>Sắp ra mắt/.test(html), 'setup.html nạp setupVersion.js, License vẫn ghi Sắp ra mắt');
++  // LICENSE-01: ô License đã có hệ thống thật (trước đây ghi "Sắp ra mắt") — chỉ còn kiểm tra setup.html vẫn nạp setupVersion.js và ô License vẫn nằm đúng chỗ.
++  ok(html.includes('js/setupVersion.js') && html.includes('id="licenseBox"') && /License \/ kích hoạt<\/b><span id="licenseSummary"/.test(html) && html.includes('js/setupLicense.js'), 'setup.html nạp setupVersion.js; ô License vẫn ở dưới Cập nhật và nạp setupLicense.js');
+ 
+   console.log('\nAppUpdater01: ' + pass + ' đạt, ' + fail + ' lỗi'); process.exit(fail ? 1 : 0);
+ })();
+diff --git a/tests/unit/LicenseGate01.verify.js b/tests/unit/LicenseGate01.verify.js
+new file mode 100644
+index 0000000..7d60eae
+--- /dev/null
++++ b/tests/unit/LicenseGate01.verify.js
+@@ -0,0 +1,113 @@
++// LICENSE-01 — kiểm thử CỔNG license trong app/main.js: trích đúng đoạn code thật rồi chạy trong vm sandbox (giống cách các verify khác
++// trong repo), vì main.js cần Electron nên không require thẳng được. Chạy: node tests/unit/LicenseGate01.verify.js
++const fs = require('fs'), path = require('path'), vm = require('vm');
++let pass = 0, fail = 0;
++const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m, x === undefined ? '' : JSON.stringify(x)); } };
++const root = path.join(__dirname, '..', '..');
++const main = fs.readFileSync(path.join(root, 'app/main.js'), 'utf8');
++const pre = fs.readFileSync(path.join(root, 'app/preload.js'), 'utf8');
++
++function slice(from, toExclusive) {
++  const a = main.indexOf(from), b = main.indexOf(toExclusive, a);
++  if (a < 0 || b < 0) throw new Error('không tìm thấy mốc trích: ' + from + ' / ' + toExclusive);
++  return main.slice(a, b);
++}
++
++(async () => {
++  console.log('== nối dây tĩnh');
++  const gateAt = main.indexOf('if (!licenseManager.isLicensed()) { openLicenseGate(); return; }');
++  const permAt = main.indexOf('session.defaultSession.setPermissionRequestHandler');
++  const createAt = main.indexOf('createMainWindow();\n    createSetupWindow();');
++  ok(gateAt > 0 && gateAt < permAt && gateAt < createAt, 'cổng license nằm TRƯỚC mọi khởi động (quyền, cửa sổ Menu/Setup, MIDI, Now Playing...)');
++  for (const ch of ['license-status', 'license-activate', 'license-refresh', 'license-copy-machine']) ok(main.includes('ipcMain.handle("' + ch + '"') && pre.includes('ipcRenderer.invoke("' + ch + '"'), 'IPC ' + ch + ' có ở main + preload');
++  const wr = main.split('\n').filter((l) => l.startsWith('app.whenReady()'));
++  const unguarded = wr.filter((l) => !l.includes('licenseReady') && !l.startsWith('app.whenReady().then(async () => {') && !l.includes('restoreTrayIfHidden'));
++  ok(unguarded.length === 0, 'mọi khối app.whenReady đều được chặn bởi license (trừ restoreTrayIfHidden: chỉ KHÔI PHỤC DAW đang ẩn từ phiên trước)', unguarded);
++  ok(main.indexOf('setTimeout(() => { autoLaunchPrograms(); }, 2000);') > gateAt, 'tự mở loopMIDI/Studio One nằm sau cổng');
++  ok(!/app\.relaunch\(/.test(main), 'main.js không gọi app.relaunch trực tiếp (MenuElevationA104) — đi qua licenseManager.relaunch');
++  const html = fs.readFileSync(path.join(root, 'ui/license.html'), 'utf8');
++  for (const id of ['gateMessage', 'gateMachine', 'gateKey', 'btnGateActivate', 'btnGateCopy', 'btnGateRecheck', 'gateResult']) ok(html.includes('id="' + id + '"') && fs.readFileSync(path.join(root, 'ui/js/licenseGate.js'), 'utf8').includes(id), 'màn hình kích hoạt có ' + id);
++  const sh = fs.readFileSync(path.join(root, 'ui/setup.html'), 'utf8');
++  ok(sh.includes('id="licenseBox"') && sh.includes('id="licenseSummary"') && sh.includes('js/setupLicense.js'), 'Setup: ô License + nạp setupLicense.js');
++  ok(fs.existsSync(path.join(root, 'app/license-public-key.txt')) === false, 'KHÔNG có sẵn khoá công khai trong repo (người dùng tự tạo bằng tao-khoa.html) -> bản chưa cấu hình sẽ khoá, không mở toang');
++
++  console.log('== chạy thật đoạn cổng trong sandbox');
++  const block1 = slice('const { createLicenseManager } = require("./LicenseManager");', '    // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm');
++  const block2 = slice('// LICENSE-01 — relay IPC cho màn hình kích hoạt', 'ipcMain.handle("admin-auth-verify"');
++
++  function makeEnv(licensed) {
++    const log = { windows: [], rest: 0, watcher: null, exits: [], relaunch: 0, quit: 0, dialogs: [], handlers: {}, clip: [], loaded: [] };
++    let isLic = licensed;
++    const mgr = {
++      init: async () => {}, isLicensed: () => isLic, startWatcher: (w) => { log.watcher = w; },
++      getStatus: () => ({ ok: true, licensed: isLic, machineCode: 'AAAAA-BBBBB-CCCCC-DDDDD', message: 'm' }),
++      activate: async (k) => (k === 'GOOD' ? (isLic = true, { ok: true, status: { licensed: true } }) : { ok: false, reason: 'INVALID_KEY', message: 'sai' }),
++      refresh: async () => ({ ok: true }),
++      relaunch: (a) => { a.relaunch(); a.quit(); return { ok: true }; } // giống LicenseManager.relaunch thật
++    };
++    let readyCb = null;
++    const sandbox = {
++      console, setTimeout, clearTimeout, __dirname: '/app', Promise,
++      require: (p) => { if (p === './LicenseManager') return { createLicenseManager: () => mgr }; if (p === 'electron') return { clipboard: { writeText: (t) => log.clip.push(t) } }; throw new Error('require ngoài dự kiến: ' + p); },
++      app: { getPath: () => '/ud', whenReady: () => ({ then: (cb) => { readyCb = cb; return { then: () => ({}) }; } }), relaunch: () => { log.relaunch++; }, quit: () => { log.quit++; }, exit: (c) => { log.exits.push(c); } },
++      BrowserWindow: function (o) { this.opts = o; this.on = (ev, cb) => { this.closedCb = ev === 'closed' ? cb : this.closedCb; }; this.loadFile = (f) => { log.loaded.push(f); }; log.windows.push(this); },
++      dialog: { showMessageBoxSync: (o) => { log.dialogs.push(o); return 0; } },
++      path, ipcMain: { handle: (ch, fn) => { log.handlers[ch] = fn; } },
++      readSettingsFile: () => ({ licenseServerUrl: 'https://x.test' }),
++      __restOfStartup: () => { log.rest++; }
++    };
++    vm.createContext(sandbox);
++    // `let __companionDone` giống main.js (khai báo ở cuối file) để kiểm tra onLicenseLost không tự đóng DAW/YouTube
++    vm.runInContext('let __companionDone = false;\n' + block1 + '    __restOfStartup();\n});\n' + block2 + '\nthis.__t = { isDone: () => __companionDone, onLost: onLicenseLost, readyCb: () => 0 };', sandbox);
++    return { sandbox, log, mgr, setLic: (v) => { isLic = v; }, run: () => readyCb(), api: sandbox.__t };
++  }
++
++  // 1) chưa kích hoạt
++  let e = makeEnv(false);
++  await e.run();
++  ok(e.log.windows.length === 1 && e.log.loaded[0].endsWith('license.html') && e.log.windows[0].opts.resizable === false, 'CHƯA kích hoạt: chỉ mở đúng 1 cửa sổ = màn hình kích hoạt (license.html)');
++  ok(e.log.rest === 0 && e.log.watcher === null, 'CHƯA kích hoạt: toàn bộ phần khởi động phía sau (Menu, Setup, MIDI, Now Playing, tự mở DAW...) KHÔNG chạy');
++  e.log.windows[0].closedCb();
++  ok(e.log.exits.length === 1 && e.log.quit === 0, 'đóng màn hình kích hoạt = thoát hẳn (app.exit, không qua before-quit)');
++
++  // 2) đã kích hoạt
++  e = makeEnv(true);
++  await e.run();
++  ok(e.log.windows.length === 0 && e.log.rest === 1 && typeof e.log.watcher.onLost === 'function', 'ĐÃ kích hoạt: không mở màn hình kích hoạt, khởi động bình thường và bật watcher');
++
++  // 3) IPC
++  e = makeEnv(false);
++  await e.run();
++  const H = e.log.handlers;
++  ok((await H['license-status']()).machineCode === 'AAAAA-BBBBB-CCCCC-DDDDD', 'IPC license-status trả mã máy');
++  const bad = await H['license-activate']({}, 'BAD');
++  ok(bad.ok === false && e.log.relaunch === 0, 'key sai: báo lỗi, KHÔNG khởi động lại');
++  const good = await H['license-activate']({}, 'GOOD');
++  ok(good.ok === true && e.log.relaunch === 0, 'key đúng: trả OK, chưa khởi động lại ngay (chừa thời gian hiện "thành công")');
++  await new Promise((r) => setTimeout(r, 1700));
++  ok(e.log.relaunch === 1 && e.log.quit === 1, 'sau ~1,5 giây: tự mở lại app đầy đủ (relaunch + quit)');
++  ok(e.api.isDone() === true, 'khởi động lại sau kích hoạt KHÔNG tự đóng DAW/YouTube của người dùng');
++  e.log.windows[0].closedCb();
++  ok(e.log.exits.length === 0 && e.log.quit === 1, 'cửa sổ kích hoạt đóng trong lúc đang khởi động lại: không thoát đôi');
++  await H['license-activate']({}, 'GOOD');
++  await new Promise((r) => setTimeout(r, 1700));
++  ok(e.log.relaunch === 1, 'bấm kích hoạt nhiều lần: chỉ khởi động lại 1 lần');
++  ok((await H['license-copy-machine']()).ok && e.log.clip[0] === 'AAAAA-BBBBB-CCCCC-DDDDD', 'IPC license-copy-machine chép mã máy vào clipboard');
++
++  // 4) kích hoạt trong Setup (đang có license) không khởi động lại
++  e = makeEnv(true);
++  await e.run();
++  await e.log.handlers['license-activate']({}, 'GOOD');
++  await new Promise((r) => setTimeout(r, 1700));
++  ok(e.log.relaunch === 0, 'gia hạn trong Setup (đã có license): KHÔNG khởi động lại app');
++
++  // 5) mất hiệu lực lúc đang chạy
++  e = makeEnv(true);
++  await e.run();
++  e.log.watcher.onLost({ message: 'License đã hết hạn' });
++  ok(e.log.dialogs.length === 1 && e.log.dialogs[0].detail === 'License đã hết hạn' && e.log.relaunch === 1 && e.log.quit === 1, 'mất hiệu lực lúc đang chạy: báo, khởi động lại về màn hình kích hoạt, thoát qua before-quit (khôi phục DAW ẩn/đóng MIDI)');
++  ok(e.api.isDone() === true, 'hết license KHÔNG tự đóng DAW/YouTube của người dùng (tránh mất project chưa lưu)');
++
++  console.log('\nLicenseGate01: ' + pass + ' đạt, ' + fail + ' lỗi');
++  process.exit(fail ? 1 : 0);
++})().catch((err) => { console.error('LỖI TEST:', err); process.exit(2); });
+diff --git a/tests/unit/LicenseManager01.verify.js b/tests/unit/LicenseManager01.verify.js
+new file mode 100644
+index 0000000..ff5902b
+--- /dev/null
++++ b/tests/unit/LicenseManager01.verify.js
+@@ -0,0 +1,186 @@
++// LICENSE-01 — kiểm thử app/LicenseManager.js nối thẳng với MENU-LICENSE-SERVER/worker.js (D1 giả lập bằng SQLite thật).
++// Không chạm mạng. Đồng hồ và "mất mạng" được giả lập. Chạy: node tests/unit/LicenseManager01.verify.js
++const fs = require('fs'), path = require('path'), os = require('os'), crypto = require('crypto');
++const { DatabaseSync } = require('node:sqlite');
++const { createLicenseManager, normalizeKey, machineCodeFromRaw } = require('../../app/LicenseManager.js');
++let pass = 0, fail = 0;
++const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m, x === undefined ? '' : JSON.stringify(x)); } };
++const root = path.join(__dirname, '..', '..');
++const H = 3600 * 1000;
++
++function fakeD1(db) {
++  return { prepare(sql) { let params = []; const st = {
++    bind(...p) { params = p; return st; },
++    async first() { return db.prepare(sql).get(...params) || null; },
++    async all() { return { results: db.prepare(sql).all(...params) }; },
++    async run() { const r = db.prepare(sql).run(...params); return { meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }; } }; return st; } };
++}
++const pubOf = (kp) => kp.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
++const privOf = (kp) => kp.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
++
++(async () => {
++  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'licmgr-'));
++  fs.copyFileSync(path.join(root, 'MENU-LICENSE-SERVER', 'worker.js'), path.join(tmp, 'worker.mjs'));
++  const worker = (await import('file://' + path.join(tmp, 'worker.mjs'))).default;
++  const db = new DatabaseSync(':memory:');
++  db.exec(fs.readFileSync(path.join(root, 'MENU-LICENSE-SERVER', 'schema.sql'), 'utf8'));
++  const kp = crypto.generateKeyPairSync('ed25519');
++  const env = { DB: fakeD1(db), ADMIN_TOKEN: 'admin-token-for-test-0123456789', LICENSE_SIGN_KEY: privOf(kp) };
++
++  let netDown = false, fetchCalls = 0, forceEnv = null;
++  const fetchFn = async (url, init) => {
++    fetchCalls++;
++    if (netDown) throw new Error('mất mạng');
++    return worker.fetch(new Request(url, init), forceEnv || env);
++  };
++  const admin = async (p, body) => (await (await worker.fetch(new Request('https://x.test' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + env.ADMIN_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), env)).json());
++  const newKey = async (plan, machine) => (await admin('/admin/license/create', { plan, machine })).keys[0].key;
++
++  let clock = Date.now();
++  const mk = (dir, extra) => createLicenseManager(Object.assign({ userDataDir: dir, appDir: tmp, publicKeyText: pubOf(kp), fetchFn, now: () => clock, machineIdProvider: async () => 'may-A', getServerUrl: () => 'https://lic.test' }, extra || {}));
++  const dirA = path.join(tmp, 'userA'); fs.mkdirSync(dirA);
++
++  console.log('== khoá công khai (fail-closed)');
++  const noKey = createLicenseManager({ userDataDir: dirA, appDir: tmp, now: () => clock, fetchFn, machineIdProvider: async () => 'may-A' }); // tmp không có license-public-key.txt
++  await noKey.init();
++  ok(!noKey.isLicensed() && noKey.getStatus().code === 'NO_PUBLIC_KEY', 'thiếu license-public-key.txt -> KHOÁ, báo rõ lý do');
++  const badKey = createLicenseManager({ userDataDir: dirA, appDir: tmp, publicKeyText: 'abc', now: () => clock, fetchFn, machineIdProvider: async () => 'may-A' });
++  await badKey.init();
++  ok(!badKey.isLicensed() && badKey.getStatus().code === 'INVALID_PUBLIC_KEY', 'khoá công khai hỏng -> KHOÁ');
++  ok((await noKey.activate('MENU-AAAAA-AAAAA-AAAAA-AAAAA')).reason === 'NO_PUBLIC_KEY', 'thiếu khoá công khai thì không cho kích hoạt');
++  fs.writeFileSync(path.join(tmp, 'license-public-key.txt'), pubOf(kp) + '\n');
++  const fromFile = createLicenseManager({ userDataDir: dirA, appDir: tmp, now: () => clock, fetchFn, machineIdProvider: async () => 'may-A' });
++  await fromFile.init();
++  ok(fromFile.getStatus().code === 'UNLICENSED', 'đọc được khoá công khai từ file (có xuống dòng cuối)');
++  fs.unlinkSync(path.join(tmp, 'license-public-key.txt'));
++
++  console.log('== mã máy');
++  const mcRe = /^[A-HJKMNP-TV-Z2-9]{5}(-[A-HJKMNP-TV-Z2-9]{5}){3}$/;
++  ok(mcRe.test(machineCodeFromRaw('x')) && machineCodeFromRaw('x') === machineCodeFromRaw('x') && machineCodeFromRaw('x') !== machineCodeFromRaw('y'), 'mã máy đúng định dạng, ổn định, khác máy thì khác mã');
++  const regOut = 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\r\n    MachineGuid    REG_SZ    4C4C4544-0042-4A10-8058-B5C04F4D4D32\r\n';
++  let regArgs = null;
++  const winMgr = createLicenseManager({ userDataDir: dirA, appDir: tmp, platform: 'win32', exec: async (c, a) => { regArgs = [c].concat(a); return { code: 0, stdout: regOut }; } });
++  ok((await winMgr.getMachineCode()) === machineCodeFromRaw('win:4c4c4544-0042-4a10-8058-b5c04f4d4d32') && regArgs[0] === 'reg', 'Windows: đọc MachineGuid từ registry');
++  const winFail = createLicenseManager({ userDataDir: dirA, appDir: tmp, platform: 'win32', exec: async () => ({ code: 1, stdout: '' }) });
++  ok(mcRe.test(await winFail.getMachineCode()), 'registry lỗi -> dùng dự phòng, vẫn ra mã hợp lệ');
++
++  console.log('== chưa kích hoạt / nhập key');
++  const m1 = mk(dirA); await m1.init();
++  ok(!m1.isLicensed() && m1.getStatus().code === 'UNLICENSED' && mcRe.test(m1.getStatus().machineCode), 'chưa kích hoạt -> KHOÁ, có mã máy để gửi cho bạn');
++  fetchCalls = 0;
++  ok((await m1.activate('abc')).reason === 'INVALID_KEY' && fetchCalls === 0, 'key sai định dạng bị chặn ngay, không gọi mạng');
++  const k3m = await newKey('3m');
++  netDown = true;
++  ok((await m1.activate(k3m)).reason === 'NETWORK' && !m1.isLicensed(), 'mất mạng lúc kích hoạt -> báo lỗi mạng, vẫn khoá');
++  netDown = false;
++  const r1 = await m1.activate(k3m.toLowerCase());
++  ok(r1.ok && m1.isLicensed(), 'kích hoạt thành công -> mở khoá');
++  const st1 = m1.getStatus();
++  ok(st1.plan === '3m' && st1.daysLeft >= 88 && st1.keyHint === k3m.slice(-4) && !JSON.stringify(st1).includes(k3m), 'trạng thái: gói 3 tháng, ~90 ngày, chỉ lộ 4 số cuối key');
++  ok(fs.existsSync(path.join(dirA, 'license.json')), 'đã lưu license trên máy');
++
++  console.log('== mở lại app / sao chép sang máy khác / sửa file');
++  netDown = true;
++  const m2 = mk(dirA); await m2.init();
++  ok(m2.isLicensed(), 'mở lại app khi mất mạng vẫn dùng được (còn trong hạn 72 giờ)');
++  netDown = false;
++  const dirB = path.join(tmp, 'userB'); fs.mkdirSync(dirB); fs.copyFileSync(path.join(dirA, 'license.json'), path.join(dirB, 'license.json'));
++  const mB = mk(dirB, { machineIdProvider: async () => 'may-B' }); await mB.init();
++  ok(!mB.isLicensed() && mB.getStatus().code === 'MACHINE_MISMATCH', 'chép license.json sang máy khác -> KHOÁ');
++  const dirC = path.join(tmp, 'userC'); fs.mkdirSync(dirC);
++  const j = JSON.parse(fs.readFileSync(path.join(dirA, 'license.json'), 'utf8'));
++  const pj = JSON.parse(j.payload); pj.expiresAt += 400 * 24 * H; j.payload = JSON.stringify(pj);
++  fs.writeFileSync(path.join(dirC, 'license.json'), JSON.stringify(j));
++  const mC = mk(dirC); await mC.init();
++  ok(!mC.isLicensed() && mC.getStatus().code === 'TAMPERED', 'sửa ngày hết hạn trong file -> chữ ký sai -> KHOÁ');
++  const kp2 = crypto.generateKeyPairSync('ed25519');
++  const mFake = mk(path.join(tmp, 'userF'), { fetchFn: async (u, i) => worker.fetch(new Request(u, i), Object.assign({}, env, { LICENSE_SIGN_KEY: privOf(kp2) })) });
++  await mFake.init();
++  const rf = await mFake.activate(await newKey('1y'));
++  ok(rf.reason === 'BAD_SIGNATURE' && !mFake.isLicensed(), 'server giả/ký bằng khoá khác -> từ chối, vẫn khoá');
++
++  console.log('== 72 giờ offline & lùi đồng hồ');
++  const t0 = clock;
++  netDown = true;
++  clock = t0 + 71 * H;
++  ok(m1.isLicensed(), 'offline 71 giờ -> vẫn dùng được');
++  clock = t0 + 73 * H;
++  ok(!m1.isLicensed() && m1.getStatus().code === 'NEED_ONLINE', 'offline 73 giờ -> KHOÁ, cần mạng');
++  ok((await m1.refresh()).reason === 'NETWORK' && m1.getStatus().code === 'NEED_ONLINE', 'thử kiểm tra khi vẫn mất mạng -> vẫn khoá');
++  netDown = false;
++  ok((await m1.refresh()).ok && m1.isLicensed(), 'có mạng + kiểm tra lại -> mở khoá lại');
++  const t1 = clock;
++  clock = t1 + 10 * H; await m1.refresh();            // app chạy tới +10 giờ, kiểm tra server thành công
++  clock = t1 + 20 * H; await mk(dirA).init();          // mở lại ở +20 giờ: quá 6 giờ nên tự kiểm tra lại, mốc thời gian lớn nhất = +20 giờ
++  clock = t1 + 12 * H; // lùi đồng hồ 8 giờ so với lần dùng trước
++  netDown = true;
++  const mRoll = mk(dirA); await mRoll.init();
++  ok(!mRoll.isLicensed() && mRoll.getStatus().code === 'NEED_ONLINE', 'lùi đồng hồ -> bắt buộc kiểm tra online, offline thì KHOÁ');
++  netDown = false;
++  const mRoll2 = mk(dirA); await mRoll2.init();
++  ok(mRoll2.isLicensed(), 'có mạng: tự kiểm tra lại lúc mở app -> hợp lệ (đồng hồ đã chỉnh đúng cũng không bị kẹt)');
++  clock = t0;
++
++  console.log('== hết hạn');
++  const dirE = path.join(tmp, 'userE'); fs.mkdirSync(dirE);
++  const mE = mk(dirE); await mE.init();
++  await mE.activate(await newKey('3d'));
++  clock = t0 + 3 * 24 * H + 1000;
++  ok(!mE.isLicensed() && mE.getStatus().code === 'EXPIRED', 'hết hạn 3 ngày -> KHOÁ (đánh giá cục bộ, không cần mạng)');
++  clock = t0;
++
++  console.log('== server thu hồi / hết hạn / lỗi tạm thời');
++  const dirR = path.join(tmp, 'userR'); fs.mkdirSync(dirR);
++  const mR = mk(dirR); await mR.init();
++  const kR = await newKey('6m');
++  await mR.activate(kR);
++  const idR = db.prepare('SELECT id FROM licenses ORDER BY id DESC LIMIT 1').get().id;
++  const bad500 = async () => new Response(JSON.stringify({ ok: false, reason: 'SERVER_ERROR', message: 'Lỗi server' }), { status: 500 });
++  const mT = mk(dirR, { fetchFn: bad500 }); await mT.init();
++  ok((await mT.refresh()).reason === 'SERVER_ERROR' && mT.isLicensed() && fs.existsSync(path.join(dirR, 'license.json')), 'server lỗi tạm thời (500) -> KHÔNG khoá, không xoá license');
++  const garbage = async () => new Response('<html>502</html>', { status: 502 });
++  const mG = mk(dirR, { fetchFn: garbage }); await mG.init();
++  ok((await mG.refresh()).reason === 'NETWORK' && mG.isLicensed(), 'server trả rác (không phải JSON) -> coi như lỗi mạng, không khoá');
++  await admin('/admin/license/revoke', { id: idR });
++  const rv = await mR.refresh();
++  ok(rv.reason === 'REVOKED' && !mR.isLicensed() && mR.getStatus().code === 'REVOKED' && !fs.existsSync(path.join(dirR, 'license.json')), 'server thu hồi -> KHOÁ ngay lần kiểm tra kế tiếp, xoá license, báo lý do');
++  await admin('/admin/license/restore', { id: idR });
++  ok((await mR.activate(kR)).ok && mR.isLicensed(), 'khôi phục -> nhập lại key dùng được');
++  db.prepare('UPDATE licenses SET expires_at = ? WHERE id = ?').run(Date.now() - 1000, idR);
++  ok((await mR.refresh()).reason === 'EXPIRED' && !mR.isLicensed(), 'server báo hết hạn -> KHOÁ');
++
++  console.log('== gia hạn bằng key mới');
++  const dirN = path.join(tmp, 'userN'); fs.mkdirSync(dirN);
++  const mN = mk(dirN); await mN.init();
++  await mN.activate(await newKey('3d'));
++  ok(mN.getStatus().plan === '3d', 'đang dùng gói 3 ngày');
++  const kOther = await newKey('1y', 'ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ');
++  ok((await mN.activate(kOther)).reason === 'MACHINE_MISMATCH' && mN.isLicensed() && mN.getStatus().plan === '3d', 'key gắn máy khác: bị từ chối và license đang dùng KHÔNG bị mất');
++  ok((await mN.activate(await newKey('1y'))).ok && mN.getStatus().plan === '1y', 'nhập key mới hợp lệ -> chuyển sang gói 1 năm');
++
++  console.log('== watcher');
++  const dirW = path.join(tmp, 'userW'); fs.mkdirSync(dirW);
++  const mWt = mk(dirW, { tickMs: 20 }); await mWt.init();
++  await mWt.activate(await newKey('6m'));
++  const idW = db.prepare('SELECT id FROM licenses ORDER BY id DESC LIMIT 1').get().id;
++  let lost = 0, lostStatus = null;
++  mWt.startWatcher({ onLost: (s) => { lost++; lostStatus = s; } });
++  await new Promise((r) => setTimeout(r, 80));
++  ok(lost === 0, 'còn hiệu lực -> watcher không báo mất');
++  await admin('/admin/license/revoke', { id: idW });
++  clock = t0 + 7 * H; // quá chu kỳ kiểm tra lại 6 giờ -> watcher hỏi server
++  await new Promise((r) => setTimeout(r, 150));
++  ok(lost === 1 && lostStatus.code === 'REVOKED', 'bị thu hồi lúc đang chạy -> watcher báo mất đúng 1 lần', { lost, code: lostStatus && lostStatus.code });
++  mWt.stopWatcher(); clock = t0;
++
++  console.log('== khởi động lại');
++  const rl = []; m1.relaunch({ relaunch: () => rl.push('relaunch'), quit: () => rl.push('quit') });
++  ok(rl.join() === 'relaunch,quit', 'relaunch(app) = app.relaunch() rồi app.quit()');
++
++  console.log('== tiện ích');
++  ok(normalizeKey('menu-aaaaa-bbbbb-ccccc-dddd0') === null && normalizeKey('menu-aaaaa-bbbbb-ccccc-ddddO') === null && normalizeKey('menu 22222 33333 44444 55555') === 'MENU-22222-33333-44444-55555' && normalizeKey(' menu-aaaaa-bbbbb-ccccc-ddddd ') === 'MENU-AAAAA-BBBBB-CCCCC-DDDDD', 'chuẩn hoá key: bỏ khoảng trắng, chấp nhận chữ thường; ký tự ngoài bảng (0, O) bị loại');
++
++  console.log('\nLicenseManager01: ' + pass + ' đạt, ' + fail + ' lỗi');
++  fs.rmSync(tmp, { recursive: true, force: true });
++  process.exit(fail ? 1 : 0);
++})().catch((e) => { console.error('LỖI TEST:', e); process.exit(2); });
+diff --git a/tests/unit/LicenseServer01.verify.js b/tests/unit/LicenseServer01.verify.js
+new file mode 100644
+index 0000000..32f8688
+--- /dev/null
++++ b/tests/unit/LicenseServer01.verify.js
+@@ -0,0 +1,125 @@
++// LICENSE-01 — kiểm thử server License (MENU-LICENSE-SERVER/worker.js) với D1 giả lập bằng SQLite thật (node:sqlite).
++// Không chạm mạng/Cloudflare. Chạy: node tests/unit/LicenseServer01.verify.js
++const fs = require('fs'), path = require('path'), os = require('os'), crypto = require('crypto');
++const { DatabaseSync } = require('node:sqlite');
++let pass = 0, fail = 0;
++const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m, x === undefined ? '' : JSON.stringify(x)); } };
++const root = path.join(__dirname, '..', '..');
++
++function fakeD1(db) {
++  return { prepare(sql) {
++    let params = [];
++    const st = {
++      bind(...p) { params = p; return st; },
++      async first() { return db.prepare(sql).get(...params) || null; },
++      async all() { return { results: db.prepare(sql).all(...params) }; },
++      async run() { const r = db.prepare(sql).run(...params); return { meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }; }
++    };
++    return st;
++  } };
++}
++
++(async () => {
++  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lic-'));
++  const mjs = path.join(tmp, 'worker.mjs');
++  fs.copyFileSync(path.join(root, 'MENU-LICENSE-SERVER', 'worker.js'), mjs);
++  const W = await import('file://' + mjs);
++  const worker = W.default;
++
++  const db = new DatabaseSync(':memory:');
++  db.exec(fs.readFileSync(path.join(root, 'MENU-LICENSE-SERVER', 'schema.sql'), 'utf8'));
++  db.exec(fs.readFileSync(path.join(root, 'MENU-LICENSE-SERVER', 'schema.sql'), 'utf8')); // chạy lại không hỏng
++  const kp = crypto.generateKeyPairSync('ed25519');
++  const env = {
++    DB: fakeD1(db), ADMIN_TOKEN: 'admin-token-for-test-0123456789',
++    LICENSE_SIGN_KEY: kp.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64')
++  };
++  const verify = (r) => crypto.verify(null, Buffer.from(r.payload), kp.publicKey, Buffer.from(r.sig, 'base64'));
++
++  const call = async (p, body, admin) => {
++    const headers = { 'Content-Type': 'application/json' };
++    if (admin !== undefined) headers.Authorization = 'Bearer ' + admin;
++    const res = await worker.fetch(new Request('https://x.test' + p, { method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body) }), env);
++    return { status: res.status, body: await res.json() };
++  };
++  const adm = (p, b) => call(p, b === undefined ? undefined : b, env.ADMIN_TOKEN);
++  const M1 = 'AAAAA-BBBBB-CCCCC-DDDDD', M2 = 'EEEEE-FFFFF-GGGGG-HHHHH';
++
++  console.log('== cơ bản & quyền quản trị');
++  ok((await call('/health')).body.ok === true, '/health ok');
++  ok((await call('/admin/license/list')).status === 401, 'không có token -> 401');
++  ok((await call('/admin/license/list', undefined, 'sai')).status === 401, 'sai token -> 401');
++  ok((await call('/license/khac', {})).status === 404, 'đường dẫn lạ -> 404');
++  const noAdmin = await worker.fetch(new Request('https://x.test/admin/license/list'), { DB: env.DB });
++  ok(noAdmin.status === 500, 'server chưa đặt ADMIN_TOKEN -> từ chối (không mở toang)');
++
++  console.log('== tạo key');
++  ok((await adm('/admin/license/create', { plan: 'xx' })).body.ok === false, 'gói sai bị từ chối');
++  ok((await adm('/admin/license/create', { plan: '3d', machine: '!!' })).body.ok === false, 'mã máy sai bị từ chối');
++  const c1 = await adm('/admin/license/create', { plan: '3d', note: 'khach A' });
++  const key1 = c1.body.keys && c1.body.keys[0].key;
++  ok(/^MENU(-[A-HJKMNP-TV-Z2-9]{5}){4}$/.test(key1), 'key đúng định dạng MENU-XXXXX-XXXXX-XXXXX-XXXXX', key1);
++  const list = (await adm('/admin/license/list')).body.licenses;
++  ok(list.length === 1 && list[0].hint === key1.slice(-4) && !JSON.stringify(list).includes(key1), 'danh sách chỉ có 4 số cuối, không lộ key đầy đủ');
++  ok(!db.prepare('SELECT key_hash FROM licenses').get().key_hash.includes(key1.slice(5, 10)), 'DB chỉ lưu băm');
++  const many = await adm('/admin/license/create', { plan: '1y', count: 999 });
++  ok(many.body.keys.length === 50, 'số lượng tối đa 50/lần');
++  ok(new Set(many.body.keys.map((k) => k.key)).size === 50, '50 key không trùng nhau');
++
++  console.log('== kích hoạt');
++  ok((await call('/license/activate', { key: 'MENU-AAAAA-AAAAA-AAAAA-AAAAA', machine: M1 })).body.reason === 'INVALID_KEY', 'key không tồn tại/sai ký tự -> INVALID_KEY');
++  ok((await call('/license/activate', { key: key1, machine: 'x' })).body.reason === 'BAD_REQUEST', 'mã máy sai -> BAD_REQUEST');
++  ok((await call('/license/activate', 'rac')).body.reason === 'INVALID_KEY', 'body rác không làm sập server');
++  const t0 = Date.now();
++  const a1 = (await call('/license/activate', { key: key1.toLowerCase().replace(/-/g, ' '), machine: M1.toLowerCase() })).body;
++  ok(a1.ok === true, 'kích hoạt OK (chấp nhận gõ thường/khoảng trắng)', a1);
++  const p1 = JSON.parse(a1.payload);
++  ok(verify(a1), 'chữ ký Ed25519 hợp lệ');
++  ok(p1.machine === M1.replace(/-/g, '') && p1.plan === '3d', 'payload gắn đúng mã máy + gói');
++  ok(p1.expiresAt - p1.activatedAt === 3 * 86400000 && p1.activatedAt >= t0, 'hạn = 3 ngày tính từ lúc kích hoạt');
++  ok(!verify({ payload: a1.payload.replace('3d', '1y'), sig: a1.sig }), 'sửa payload thì chữ ký sai');
++  const a1b = (await call('/license/activate', { key: key1, machine: M1 })).body;
++  ok(a1b.ok && JSON.parse(a1b.payload).expiresAt === p1.expiresAt, 'kích hoạt lại cùng máy: giữ nguyên hạn (cài lại app không lợi gì)');
++  ok((await call('/license/activate', { key: key1, machine: M2 })).body.reason === 'MACHINE_MISMATCH', 'máy khác dùng key đã gắn -> MACHINE_MISMATCH');
++
++  console.log('== kiểm tra định kỳ');
++  ok((await call('/license/check', { key: key1, machine: M1 })).body.ok === true, 'check đúng máy OK');
++  ok((await call('/license/check', { key: key1, machine: M2 })).body.reason === 'MACHINE_MISMATCH', 'check sai máy bị chặn');
++  const k2 = (await adm('/admin/license/create', { plan: '3m' })).body.keys[0].key;
++  ok((await call('/license/check', { key: k2, machine: M1 })).body.reason === 'NOT_ACTIVATED', 'check key chưa kích hoạt -> NOT_ACTIVATED');
++
++  console.log('== thu hồi / khôi phục / đổi máy / hết hạn');
++  const id1 = list[0].id;
++  await adm('/admin/license/revoke', { id: id1 });
++  ok((await call('/license/check', { key: key1, machine: M1 })).body.reason === 'REVOKED', 'thu hồi -> check báo REVOKED');
++  ok((await call('/license/activate', { key: key1, machine: M1 })).body.reason === 'REVOKED', 'thu hồi -> không kích hoạt lại được');
++  await adm('/admin/license/restore', { id: id1 });
++  ok((await call('/license/check', { key: key1, machine: M1 })).body.ok === true, 'khôi phục -> dùng lại được, giữ trạng thái active');
++  await adm('/admin/license/unbind', { id: id1 });
++  const a2 = (await call('/license/activate', { key: key1, machine: M2 })).body;
++  ok(a2.ok && JSON.parse(a2.payload).expiresAt === p1.expiresAt, 'đổi máy: máy mới kích hoạt được, GIỮ NGUYÊN hạn cũ');
++  ok((await call('/license/check', { key: key1, machine: M1 })).body.reason === 'MACHINE_MISMATCH', 'máy cũ bị chặn sau khi đổi máy');
++  db.prepare('UPDATE licenses SET expires_at = ? WHERE id = ?').run(Date.now() - 1000, id1);
++  ok((await call('/license/check', { key: key1, machine: M2 })).body.reason === 'EXPIRED', 'quá hạn -> EXPIRED');
++  ok((await call('/license/activate', { key: key1, machine: M2 })).body.reason === 'EXPIRED', 'quá hạn -> không kích hoạt lại để lấy thêm hạn');
++
++  console.log('== key gắn sẵn mã máy & tranh chấp');
++  const kb = (await adm('/admin/license/create', { plan: '6m', machine: M1 })).body.keys[0].key;
++  ok((await call('/license/activate', { key: kb, machine: M2 })).body.reason === 'MACHINE_MISMATCH', 'key gắn sẵn máy A: máy B không kích hoạt được');
++  ok((await call('/license/activate', { key: kb, machine: M1 })).body.ok === true, 'key gắn sẵn máy A: máy A kích hoạt được');
++  const kr = (await adm('/admin/license/create', { plan: '1y' })).body.keys[0].key;
++  const rs = await Promise.all([call('/license/activate', { key: kr, machine: M1 }), call('/license/activate', { key: kr, machine: M2 })]);
++  ok(rs.filter((r) => r.body.ok).length === 1 && rs.filter((r) => r.body.reason === 'MACHINE_MISMATCH').length === 1, '2 máy kích hoạt cùng lúc 1 key: đúng 1 máy thắng');
++
++  console.log('== tính hạn theo tháng');
++  const d = (iso) => Date.parse(iso);
++  ok(W.addPlan(d('2026-01-31T00:00:00Z'), '3m') === d('2026-04-30T00:00:00Z'), '31/01 + 3 tháng = 30/04');
++  ok(W.addPlan(d('2026-08-31T00:00:00Z'), '6m') === d('2027-02-28T00:00:00Z'), '31/08 + 6 tháng = 28/02');
++  ok(W.addPlan(d('2028-02-29T00:00:00Z'), '1y') === d('2029-02-28T00:00:00Z'), '29/02 + 1 năm = 28/02');
++  ok(W.addPlan(d('2026-11-10T00:00:00Z'), '3d') === d('2026-11-13T00:00:00Z'), '3 ngày');
++  ok(W.addPlan(0, 'abc') === null, 'gói lạ -> null');
++
++  console.log('\nLicenseServer01: ' + pass + ' đạt, ' + fail + ' lỗi');
++  fs.rmSync(tmp, { recursive: true, force: true });
++  process.exit(fail ? 1 : 0);
++})().catch((e) => { console.error('LỖI TEST:', e); process.exit(2); });
+diff --git a/ui/js/i18n.js b/ui/js/i18n.js
+index bbe19aa..d703217 100644
+--- a/ui/js/i18n.js
++++ b/ui/js/i18n.js
+@@ -84,6 +84,20 @@
+     ["trên GitHub về thư mục app (cần cài git và thư mục app là bản clone từ GitHub). Git chỉ nhận bản mới khi không đè lên thay đổi chưa lưu của bạn — nếu có xung đột sẽ báo lỗi và KHÔNG ghi đè gì.", "from GitHub into the app folder (requires git, and the app folder must be a clone from GitHub). Git only accepts the new version when it does not overwrite your unsaved changes — if there is a conflict it reports an error and overwrites NOTHING."],
+     ["License / kích hoạt", "License / activation"],
+     ["Sắp ra mắt — chưa có hệ thống license trong project", "Coming soon — the project has no license system yet"],
++    // LICENSE-01 — ô License trong Setup (thông báo do server trả về giữ nguyên tiếng Việt)
++    ["Mã máy", "Machine code"],
++    ["🔑 Kích hoạt / Gia hạn", "🔑 Activate / Renew"],
++    ["📋 Sao chép mã máy", "📋 Copy machine code"],
++    ["🔄 Kiểm tra lại", "🔄 Check again"],
++    ["Đã sao chép mã máy.", "Machine code copied."],
++    ["Không sao chép được mã máy.", "Could not copy the machine code."],
++    ["Hãy nhập key.", "Please enter a key."],
++    ["⏳ Đang kích hoạt…", "⏳ Activating…"],
++    ["✅ Kích hoạt thành công.", "✅ Activated successfully."],
++    ["⏳ Đang kiểm tra với server…", "⏳ Checking with the server…"],
++    ["✅ License hợp lệ.", "✅ License is valid."],
++    ["Chưa kích hoạt. Cần nhập key để sử dụng MENU.", "Not activated. Enter a key to use MENU."],
++    ["Đã kích hoạt — gói {0}, còn {1} ngày (hết hạn {2}).", "Activated — {0} plan, {1} days left (expires {2})."],
+     ["Đã nối IPC", "IPC connected"],
+     ["Chưa có IPC", "No IPC"],
+     ["Dữ liệu thật nằm ở data/songs.json. Số liệu đọc trực tiếp từ file — chưa có bài thì hiện 0, không bịa số.", "Real data lives in data/songs.json. Figures are read directly from the file — with no songs it shows 0, no made-up numbers."],
+diff --git a/ui/js/licenseGate.js b/ui/js/licenseGate.js
+new file mode 100644
+index 0000000..3ffd142
+--- /dev/null
++++ b/ui/js/licenseGate.js
+@@ -0,0 +1,60 @@
++/* LICENSE-01 — Màn hình "Cần kích hoạt". Chỉ relay qua IPC (logic thật ở app/LicenseManager.js; main.js tự mở lại app sau khi kích hoạt thành công). */
++(function () {
++    function $(id) { return document.getElementById(id); }
++    function api() { return window.electronAPI || {}; }
++    function result(text, cls) {
++        const r = $("gateResult");
++        if (!r) return;
++        r.style.display = text ? "" : "none";
++        r.textContent = text || "";
++        r.className = "status-text" + (cls ? " " + cls : "");
++    }
++
++    function render(st) {
++        st = st || {};
++        $("gateMessage").textContent = st.message || "Chưa kích hoạt. Cần nhập key để sử dụng MENU.";
++        $("gateMachine").textContent = st.machineCode || "không đọc được";
++        $("btnGateRecheck").style.display = st.code === "NEED_ONLINE" ? "" : "none";
++    }
++
++    function load() {
++        if (typeof api().licenseStatus !== "function") { render({ message: "Thiếu kênh IPC license." }); return Promise.resolve(); }
++        return Promise.resolve(api().licenseStatus()).then(render).catch((e) => render({ message: "Không đọc được trạng thái license: " + (e && e.message ? e.message : e) }));
++    }
++
++    function init() {
++        if (!$("gateKey")) return;
++        let busy = false;
++        const bAct = $("btnGateActivate"), bCopy = $("btnGateCopy"), bRe = $("btnGateRecheck"), input = $("gateKey");
++        function lock(on) { busy = on; [bAct, bCopy, bRe, input].forEach((el) => { if (el) el.disabled = on; }); }
++
++        function activate() {
++            if (busy) return;
++            const key = input.value.trim();
++            if (!key) { result("Hãy nhập key.", "gate-bad"); return; }
++            lock(true); result("⏳ Đang kích hoạt…");
++            Promise.resolve(api().licenseActivate(key)).then((r) => {
++                if (!r || !r.ok) { result("❌ " + ((r && r.message) || "Kích hoạt thất bại."), "gate-bad"); lock(false); return; }
++                result("✅ Kích hoạt thành công. Đang mở MENU…", "gate-ok"); // main.js sẽ tự khởi động lại app; giữ nút khoá
++            }).catch((e) => { result("❌ " + (e && e.message ? e.message : e), "gate-bad"); lock(false); });
++        }
++
++        bAct.addEventListener("click", activate);
++        input.addEventListener("keydown", (e) => { if (e.key === "Enter") activate(); });
++        bCopy.addEventListener("click", () => {
++            Promise.resolve(api().licenseCopyMachine()).then((r) => result(r && r.ok ? "Đã sao chép mã máy." : "Không sao chép được mã máy.", r && r.ok ? "gate-ok" : "gate-bad")).catch(() => {});
++        });
++        bRe.addEventListener("click", () => {
++            if (busy) return;
++            lock(true); result("⏳ Đang kiểm tra với server…");
++            Promise.resolve(api().licenseRefresh()).then((st) => {
++                render(st);
++                if (st && st.licensed) { result("✅ License hợp lệ. Đang mở MENU…", "gate-ok"); return; }
++                result("❌ " + ((st && st.message) || "Chưa xác minh được license."), "gate-bad"); lock(false);
++            }).catch((e) => { result("❌ " + (e && e.message ? e.message : e), "gate-bad"); lock(false); });
++        });
++        load();
++    }
++
++    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
++})();
+diff --git a/ui/js/setupLicense.js b/ui/js/setupLicense.js
+new file mode 100644
+index 0000000..ea3e90f
+--- /dev/null
++++ b/ui/js/setupLicense.js
+@@ -0,0 +1,75 @@
++/* LICENSE-01 — Setup > System & Backup > License / kích hoạt. Chỉ relay qua IPC (logic thật ở app/LicenseManager.js).
++   Dòng "License / kích hoạt" có sẵn trong setup.html; các ô còn lại (mã máy, nhập key, nút) được dựng bằng JS, dùng lại class CSS sẵn có. */
++(function () {
++    function $(id) { return document.getElementById(id); }
++    function api() { return window.electronAPI || {}; }
++
++    function init() {
++        const box = $("licenseBox"), sum = $("licenseSummary");
++        if (!box || !sum) return;
++
++        const codeRow = document.createElement("div");
++        codeRow.className = "soon-row";
++        const codeLabel = document.createElement("b"); codeLabel.textContent = "Mã máy";
++        const codeVal = document.createElement("span");
++        const code = document.createElement("code"); code.id = "licenseMachine"; code.textContent = "…";
++        codeVal.appendChild(code);
++        codeRow.appendChild(codeLabel); codeRow.appendChild(codeVal);
++
++        const keyRow = document.createElement("div");
++        keyRow.className = "row-buttons";
++        const input = document.createElement("input");
++        input.type = "text"; input.id = "licenseKeyInput"; input.placeholder = "MENU-XXXXX-XXXXX-XXXXX-XXXXX";
++        input.maxLength = 40; input.spellcheck = false; input.autocomplete = "off"; input.style.cssText = "flex:1;min-width:230px;text-transform:uppercase;";
++        const bAct = document.createElement("button"); bAct.id = "btnLicenseActivate"; bAct.className = "setup-btn"; bAct.textContent = "🔑 Kích hoạt / Gia hạn";
++        const bCopy = document.createElement("button"); bCopy.id = "btnLicenseCopy"; bCopy.className = "setup-btn"; bCopy.textContent = "📋 Sao chép mã máy";
++        const bRe = document.createElement("button"); bRe.id = "btnLicenseRecheck"; bRe.className = "setup-btn"; bRe.textContent = "🔄 Kiểm tra lại";
++        [input, bAct, bCopy, bRe].forEach((el) => keyRow.appendChild(el));
++
++        const msg = document.createElement("div");
++        msg.className = "status-text"; msg.id = "licenseMessage"; msg.style.display = "none";
++
++        box.appendChild(codeRow); box.appendChild(keyRow); box.appendChild(msg);
++
++        function say(t) { msg.style.display = t ? "" : "none"; msg.textContent = t || ""; }
++        function render(st) {
++            st = st || {};
++            sum.textContent = st.message || "Không đọc được trạng thái license.";
++            code.textContent = st.machineCode || "không đọc được";
++        }
++        function load() {
++            if (typeof api().licenseStatus !== "function") { sum.textContent = "Thiếu kênh IPC license."; return; }
++            Promise.resolve(api().licenseStatus()).then(render).catch(() => { sum.textContent = "Không đọc được trạng thái license."; });
++        }
++
++        let busy = false;
++        function lock(on) { busy = on; [input, bAct, bCopy, bRe].forEach((el) => { el.disabled = on; }); }
++
++        function activate() {
++            if (busy) return;
++            const key = input.value.trim();
++            if (!key) { say("Hãy nhập key."); return; }
++            lock(true); say("⏳ Đang kích hoạt…");
++            Promise.resolve(api().licenseActivate(key)).then((r) => {
++                if (!r || !r.ok) { say("❌ " + ((r && r.message) || "Kích hoạt thất bại.")); return; }
++                input.value = ""; say("✅ Kích hoạt thành công."); render(r.status);
++            }).catch((e) => say("❌ " + (e && e.message ? e.message : e))).finally(() => lock(false));
++        }
++        bAct.addEventListener("click", activate);
++        input.addEventListener("keydown", (e) => { if (e.key === "Enter") activate(); });
++        bCopy.addEventListener("click", () => {
++            Promise.resolve(api().licenseCopyMachine()).then((r) => say(r && r.ok ? "Đã sao chép mã máy." : "Không sao chép được mã máy.")).catch(() => {});
++        });
++        bRe.addEventListener("click", () => {
++            if (busy) return;
++            lock(true); say("⏳ Đang kiểm tra với server…");
++            Promise.resolve(api().licenseRefresh()).then((st) => { render(st); say(st && st.licensed ? "✅ License hợp lệ." : "❌ " + ((st && st.message) || "Chưa xác minh được license.")); })
++                .catch((e) => say("❌ " + (e && e.message ? e.message : e))).finally(() => lock(false));
++        });
++
++        load();
++        window.addEventListener("focus", load);
++    }
++
++    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
++})();
+diff --git a/ui/license.html b/ui/license.html
+new file mode 100644
+index 0000000..6a7996f
+--- /dev/null
++++ b/ui/license.html
+@@ -0,0 +1,55 @@
++<!DOCTYPE html>
++<html lang="vi">
++
++<head>
++    <meta charset="UTF-8">
++    <title>MENU — Cần kích hoạt</title>
++    <link rel="stylesheet" href="css/setup.css">
++    <style>
++        /* LICENSE-01 — màn hình duy nhất hiện ra khi chưa kích hoạt / hết hạn / bị thu hồi. Dùng lại token & nút của setup.css. */
++        body { display: flex; align-items: center; justify-content: center; padding: 18px; }
++        .gate-card { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 12px;
++            background: linear-gradient(180deg, #081523, #05101a); border: 1px solid rgba(0,180,255,.3); border-radius: 14px; padding: 20px; }
++        .gate-title { font-size: 18px; font-weight: 700; color: var(--cyan); }
++        .gate-notice { font-size: 13px; line-height: 1.5; color: var(--soon); background: rgba(255,180,84,.08);
++            border: 1px solid rgba(255,180,84,.3); border-radius: 8px; padding: 10px 12px; }
++        .gate-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
++        .gate-machine { font-family: Consolas, monospace; font-size: 17px; letter-spacing: 1px; color: var(--cyan2); user-select: all; }
++        .gate-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
++        #gateKey { flex: 1; min-width: 220px; height: 34px; font-family: Consolas, monospace; text-transform: uppercase; }
++        .gate-ok { color: var(--ok); } .gate-bad { color: var(--danger); }
++    </style>
++</head>
++
++<body>
++    <div class="gate-card">
++        <div class="gate-title">🔒 MENU — Cần kích hoạt</div>
++        <div class="gate-notice" id="gateMessage">Đang kiểm tra license…</div>
++
++        <div>
++            <div class="gate-label">Mã máy của bạn (gửi mã này cho người cung cấp để nhận key)</div>
++            <div class="gate-row">
++                <span class="gate-machine" id="gateMachine">…</span>
++                <button id="btnGateCopy" class="setup-btn">📋 Sao chép</button>
++            </div>
++        </div>
++
++        <div>
++            <div class="gate-label">Nhập key kích hoạt</div>
++            <div class="gate-row">
++                <input type="text" id="gateKey" placeholder="MENU-XXXXX-XXXXX-XXXXX-XXXXX" maxlength="40" spellcheck="false" autocomplete="off">
++                <button id="btnGateActivate" class="setup-btn">🔑 Kích hoạt</button>
++            </div>
++        </div>
++
++        <div class="row-buttons">
++            <button id="btnGateRecheck" class="setup-btn" style="display:none;">🔄 Kiểm tra lại</button>
++        </div>
++        <div class="status-text" id="gateResult" style="display:none;"></div>
++        <p class="hint-text">Mỗi key chỉ dùng cho 1 máy và có thời hạn tính từ lúc kích hoạt. Cần kết nối Internet khi kích hoạt.</p>
++    </div>
++
++    <script src="js/licenseGate.js"></script>
++</body>
++
++</html>
+diff --git a/ui/setup.html b/ui/setup.html
+index 6eb3e54..6faa113 100644
+--- a/ui/setup.html
++++ b/ui/setup.html
+@@ -861,8 +861,8 @@
+                     <p class="hint-text">Cập nhật = lấy bản mới nhất của nhánh <code>main</code> trên GitHub về thư mục app (cần cài git
+                         và thư mục app là bản clone từ GitHub). Git chỉ nhận bản mới khi không đè lên thay đổi chưa lưu của bạn — nếu có
+                         xung đột sẽ báo lỗi và KHÔNG ghi đè gì.</p>
+-                    <div class="soon-list" style="margin-top:8px;">
+-                        <div class="soon-row"><b>License / kích hoạt</b><span>Sắp ra mắt — chưa có hệ thống license trong project</span></div>
++                    <div class="soon-list" id="licenseBox" style="margin-top:8px;">
++                        <div class="soon-row"><b>License / kích hoạt</b><span id="licenseSummary">Đang đọc…</span></div>
+                     </div>
+                 </div>
+ 
+@@ -883,6 +883,7 @@
+     <script src="js/setupAiCore.js"></script>
+     <script src="js/setupAutoKey.js"></script>
+     <script src="js/setupVersion.js"></script>
++    <script src="js/setupLicense.js"></script>
+     <script src="js/setupEffects.js"></script>
+     <script src="js/setupVuMeter.js"></script>
+     <script src="js/midiHealth.js"></script>

@@ -58,7 +58,8 @@ const sh = (cwd, c) => cp.execSync(c, { cwd, stdio: 'pipe', env: Object.assign({
   const main = rd('app/main.js'), pre = rd('app/preload.js'), html = rd('ui/setup.html'), ui = rd('ui/js/setupVersion.js');
   for (const ch of ['app-version', 'app-update-check', 'app-update-apply', 'app-relaunch']) ok(main.includes('ipcMain.handle("' + ch + '"') && pre.includes('ipcRenderer.invoke("' + ch + '")'), 'IPC ' + ch + ' có ở main + preload');
   for (const id of ['appVersionText', 'btnCheckUpdate', 'btnApplyUpdate', 'btnRelaunchApp', 'appUpdateMessage']) ok(html.includes('id="' + id + '"') && ui.includes(id), 'UI có ' + id);
-  ok(html.includes('js/setupVersion.js') && /License \/ kích hoạt<\/b><span>Sắp ra mắt/.test(html), 'setup.html nạp setupVersion.js, License vẫn ghi Sắp ra mắt');
+  // LICENSE-01: ô License đã có hệ thống thật (trước đây ghi "Sắp ra mắt") — chỉ còn kiểm tra setup.html vẫn nạp setupVersion.js và ô License vẫn nằm đúng chỗ.
+  ok(html.includes('js/setupVersion.js') && html.includes('id="licenseBox"') && /License \/ kích hoạt<\/b><span id="licenseSummary"/.test(html) && html.includes('js/setupLicense.js'), 'setup.html nạp setupVersion.js; ô License vẫn ở dưới Cập nhật và nạp setupLicense.js');
 
   console.log('\nAppUpdater01: ' + pass + ' đạt, ' + fail + ' lỗi'); process.exit(fail ? 1 : 0);
 })();

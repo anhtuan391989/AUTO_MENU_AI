@@ -99,6 +99,13 @@ câm lặng mà không báo lỗi nào.
 `EventBus` — 0 file test. Đây là lý do mục 1 (lỗi chặn boot) tồn tại được qua nhiều commit
 mà không ai phát hiện.
 
+### 12. License (LICENSE-01) chỉ ngăn người dùng thông thường, không chống được người sửa mã nguồn
+
+App chạy từ mã nguồn (`electron .`) nên người có kỹ thuật vẫn có thể sửa `main.js`/xoá khoá công khai để bỏ cổng kiểm tra. Server vẫn là nguồn
+thời hạn duy nhất (đổi giờ Windows không kéo dài hạn nhờ chữ ký + kiểm tra 6 giờ/lần) và thu hồi được key. Muốn chắc hơn: đóng gói/obfuscate app
+(việc riêng, cần xác nhận). Thiếu `app/license-public-key.txt` => app khoá (cố ý, fail-closed). Màn hình kích hoạt chỉ có tiếng Việt;
+mất hiệu lực lúc đang chạy thì app tự đóng/mở lại về màn hình kích hoạt (không tự đóng DAW).
+
 ## 📝 Ghi chú khác
 
 - `config/`, `assets/`, `database/songLibrary.json` — khung thư mục/file rỗng, chưa có dữ

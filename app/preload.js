@@ -161,6 +161,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     checkAppUpdate: () => ipcRenderer.invoke("app-update-check"),
     applyAppUpdate: () => ipcRenderer.invoke("app-update-apply"),
     relaunchApp: () => ipcRenderer.invoke("app-relaunch"),
+    // LICENSE-01 — kích hoạt / trạng thái license (logic thật ở app/LicenseManager.js, main chỉ relay)
+    licenseStatus: () => ipcRenderer.invoke("license-status"),
+    licenseActivate: (key) => ipcRenderer.invoke("license-activate", key),
+    licenseRefresh: () => ipcRenderer.invoke("license-refresh"),
+    licenseCopyMachine: () => ipcRenderer.invoke("license-copy-machine"),
     // HIDE-DAW-01 — Setup > Công cụ và sửa lỗi > Ẩn DAW xuống khay thông báo
     toolsDawStatus: () => ipcRenderer.invoke("tools-daw-status"),
     aiReadinessSnapshot: () => ipcRenderer.invoke("ai-readiness-snapshot"), // A112: chỉ-đọc (Setup -> main -> đọc nhãn từ Menu chính)

@@ -17,6 +17,26 @@
 
 ---
 
+## 2026-11-11 — LICENSE-01: kích hoạt bằng key (1 key = 1 mã máy, thời hạn 3 ngày / 3 tháng / 6 tháng / 1 năm)
+
+- Thực hiện bởi: Claude (Claude A)
+- Completed: hệ thống License. Server riêng (Cloudflare Worker + D1) cấp/thu hồi/đổi máy cho key; app lấy mã máy, kích hoạt, lưu license đã
+  ký Ed25519, kiểm tra lại với server mỗi 6 giờ, cho dùng offline tối đa 72 giờ, phát hiện lùi đồng hồ. Chưa kích hoạt / hết hạn / thu hồi /
+  thiếu khoá công khai => `main.js` KHÔNG khởi động bất kỳ tính năng nào, chỉ hiện màn hình kích hoạt `ui/license.html`.
+- Files created: `app/LicenseManager.js`, `ui/license.html`, `ui/js/licenseGate.js`, `ui/js/setupLicense.js`,
+  `MENU-LICENSE-SERVER/{worker.js,schema.sql,tao-khoa.html,tao-key.html,HUONG-DAN-LICENSE.md}`,
+  `tests/unit/{LicenseServer01,LicenseManager01,LicenseGate01}.verify.js`
+- Files modified: `app/main.js` (khối LICENSE-01 trước `app.whenReady` + cổng đầu callback + 4 IPC `license-*` + chặn 2 khối whenReady phụ),
+  `app/preload.js` (4 hàm `license*`), `ui/setup.html` (chỉ ô "License / kích hoạt": thêm id + nạp `setupLicense.js`),
+  `ui/js/i18n.js` (cặp dịch cho ô License), `tests/unit/AppUpdater01.verify.js` (không còn kiểm tra chữ "Sắp ra mắt")
+- Architecture impact: CÓ (đã được Developer xác nhận trước khi làm): thêm cổng license ở khởi động `main.js` + 1 server ngoài (MENU-LICENSE-SERVER,
+  độc lập với server Key). Không đụng EventBus, keyEngine/bpmEngine/modEngine, giao diện Menu, CSS.
+- Verification: `LicenseServer01` 40/40, `LicenseManager01` 36/36, `LicenseGate01` 32/32 (trích code thật của main.js chạy trong vm); toàn bộ
+  tests/unit: không có test nào đạt trên `main` gốc mà lỗi trên bản này. Chưa chạy Electron/Cloudflare thật (cần Khói làm theo HUONG-DAN-LICENSE.md).
+- Commit hash: chưa push (Khói copy vào G:\AUTO_MENU_AI và auto-sync); base `8ea56d5`
+
+---
+
 ## 2026-07-21 — Chuẩn hoá GitHub `main` thành Single Source of Truth
 
 - Thực hiện bởi: Claude

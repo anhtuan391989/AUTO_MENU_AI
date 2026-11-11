@@ -8,6 +8,10 @@
 - *(chưa có nhiệm vụ code nào đang chạy dở tại thời điểm viết file này — chỉ vừa hoàn thành
   chuẩn hoá tài liệu)*
 
+- **LICENSE-01 (code xong, chờ Khói triển khai):** dựng server theo `MENU-LICENSE-SERVER/HUONG-DAN-LICENSE.md`, tạo cặp khoá bằng `tao-khoa.html`,
+  chép `license-public-key.txt` vào `app/`, rồi mới chép app mới (nếu chép app trước, app sẽ khoá vì chưa có khoá công khai). Việc còn lại: chạy thật
+  trên Windows/Electron, cân nhắc cảnh báo sắp hết hạn, thanh toán/cấp key tự động (chưa làm).
+
 ## NEXT (ưu tiên cao, nên làm ngay sau tài liệu này)
 
 1. **Sửa lỗi chặn boot** — `core/ai/AIBootstrap.js` (khai báo `WorkflowManager` lặp) và

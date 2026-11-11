@@ -185,7 +185,53 @@ let currentNowPlayingForSync = null;
 // vào runtime thật. Toàn bộ lỗi bên trong CommandRuntime tự bắt, không throw ra ngoài.
 const CommandRuntime = require("../core/command-engine-js/runtime");
 
+// ================================
+// LICENSE-01 — Kích hoạt bằng key (1 key = 1 mã máy, có thời hạn), kiểm tra với server License. Logic thật ở app/LicenseManager.js.
+// Chưa kích hoạt / hết hạn / bị thu hồi / thiếu khoá công khai => KHÔNG khởi động bất kỳ tính năng nào (không cửa sổ Menu/Setup, không MIDI,
+// không Now Playing, không tự mở DAW...) — chỉ hiện màn hình kích hoạt ui/license.html. Kích hoạt xong => app tự khởi động lại bản đầy đủ.
+// ================================
+const { createLicenseManager } = require("./LicenseManager");
+const licenseManager = createLicenseManager({
+    userDataDir: app.getPath("userData"),
+    appDir: __dirname,
+    getServerUrl: () => { const s = readSettingsFile(); return s && typeof s.licenseServerUrl === "string" ? s.licenseServerUrl : ""; } // mặc định: DEFAULT_SERVER_URL trong LicenseManager.js
+});
+const licenseReady = licenseManager.init().catch((err) => { console.error("LicenseManager.init lỗi (coi như chưa kích hoạt):", err); });
+let licenseGateOpen = false;
+let licenseRelaunchScheduled = false;
+
+function openLicenseGate() {
+    licenseGateOpen = true;
+    const w = new BrowserWindow({
+        width: 540, height: 640, resizable: false, autoHideMenuBar: true, title: "MENU — Cần kích hoạt",
+        webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false }
+    });
+    w.loadFile(path.join(__dirname, "..", "ui", "license.html"));
+    // Đóng màn hình kích hoạt = thoát hẳn. app.exit (không qua before-quit) vì phiên này chưa khởi động gì cần dọn (MIDI, đóng DAW/YouTube...).
+    // (Khi vừa kích hoạt xong thì licenseRelaunchScheduled = true: để licenseManager.relaunch tự thoát, không exit đôi.)
+    w.on("closed", () => { if (!licenseRelaunchScheduled) app.exit(0); });
+}
+function relaunchAfterLicense() {
+    if (licenseRelaunchScheduled) return;
+    licenseRelaunchScheduled = true;
+    setTimeout(() => {
+        try { __companionDone = true; } catch (err) { /* không tự đóng DAW/YouTube của người dùng chỉ vì vừa kích hoạt xong */ }
+        licenseManager.relaunch(app);
+    }, 1500); // chừa 1,5 giây để màn hình kích hoạt kịp hiện "thành công"
+}
+// Đang chạy mà license mất hiệu lực (hết hạn / bị thu hồi / quá 72 giờ chưa xác minh được): báo rồi khởi động lại -> màn hình kích hoạt.
+function onLicenseLost(st) {
+    try { dialog.showMessageBoxSync({ type: "warning", title: "MENU — Cần kích hoạt", message: "License không còn hiệu lực.", detail: (st && st.message) || "", buttons: ["Đóng"] }); } catch (err) { console.error("Hộp thoại license lỗi:", err); }
+    try { __companionDone = true; } catch (err) { /* không tự động đóng DAW/YouTube của người dùng chỉ vì hết license */ }
+    licenseManager.relaunch(app); // relaunch + quit: đi qua before-quit như thoát bình thường (khôi phục DAW đang ẩn, đóng MIDI)
+}
+
 app.whenReady().then(async () => {
+    // LICENSE-01 — cổng kiểm tra: không qua được thì dừng ngay, mọi khối khởi động phía dưới không chạy.
+    await licenseReady;
+    if (!licenseManager.isLicensed()) { openLicenseGate(); return; }
+    licenseManager.startWatcher({ onLost: onLicenseLost });
+
     // Mặc định Electron sẽ TỪ CHỐI các quyền nhạy cảm (media, mic, midi...) nếu không khai báo rõ.
     // App này cần quyền mic để liệt kê tên soundcard, và quyền midi để gửi MIDI sang DAW.
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -887,6 +933,34 @@ ipcMain.handle("app-update-check", async () => { try { return await getAppUpdate
 ipcMain.handle("app-update-apply", async () => { try { return await getAppUpdater().apply(); } catch (e) { return { ok: false, reason: "ERROR", message: String((e && e.message) || e) }; } });
 ipcMain.handle("app-relaunch", async () => { try { return getAppUpdater().relaunch(app); } catch (e) { return { ok: false, message: String((e && e.message) || e) }; } });
 
+// LICENSE-01 — relay IPC cho màn hình kích hoạt (ui/license.html) và ô License trong Setup (ui/js/setupLicense.js). Logic thật ở app/LicenseManager.js.
+ipcMain.handle("license-status", async () => { try { await licenseReady; return licenseManager.getStatus(); } catch (e) { return { ok: false, licensed: false, message: String((e && e.message) || e) }; } });
+ipcMain.handle("license-activate", async (event, key) => {
+    try {
+        await licenseReady;
+        const r = await licenseManager.activate(key);
+        if (r && r.ok && licenseGateOpen) relaunchAfterLicense(); // đang ở màn hình kích hoạt: mở lại app đầy đủ
+        return r;
+    } catch (e) { return { ok: false, reason: "ERROR", message: String((e && e.message) || e) }; }
+});
+ipcMain.handle("license-refresh", async () => {
+    try {
+        await licenseReady;
+        await licenseManager.refresh();
+        const st = licenseManager.getStatus();
+        if (st.licensed && licenseGateOpen) relaunchAfterLicense();
+        return st;
+    } catch (e) { return { ok: false, licensed: false, message: String((e && e.message) || e) }; }
+});
+ipcMain.handle("license-copy-machine", async () => {
+    try {
+        const code = licenseManager.getStatus().machineCode;
+        if (!code) return { ok: false };
+        require("electron").clipboard.writeText(code);
+        return { ok: true };
+    } catch (e) { return { ok: false, message: String((e && e.message) || e) }; }
+});
+
 ipcMain.handle("admin-auth-verify", async (event, password) => {
     try {
         return AdminAuth.verify(password);
@@ -1191,7 +1265,7 @@ function getDawReadyWatcher() {
     }
     return dawReadyWatcher;
 }
-app.whenReady().then(() => { try { getDawReadyWatcher().start(); } catch (err) { console.error("DawReadyWatcher lỗi (bỏ qua):", err); } });
+app.whenReady().then(() => licenseReady).then(() => { if (!licenseManager.isLicensed()) return; /* LICENSE-01: chưa kích hoạt thì không tự ẩn DAW */ try { getDawReadyWatcher().start(); } catch (err) { console.error("DawReadyWatcher lỗi (bỏ qua):", err); } });
 app.on("before-quit", () => { try { if (dawReadyWatcher) dawReadyWatcher.stop(); } catch (err) { /* bỏ qua */ } });
 
 ipcMain.handle("effects-get-aot", (event) => {
@@ -1247,7 +1321,8 @@ function getSongDbSync() {
     }
     return __songDbSync;
 }
-app.whenReady().then(() => {
+app.whenReady().then(() => licenseReady).then(() => {
+    if (!licenseManager.isLicensed()) return; // LICENSE-01: chưa kích hoạt thì không tự đồng bộ Database
     const auto = () => { getSongDbSync().run().catch((e) => console.error("DB-SYNC-01 tự đồng bộ lỗi:", e)); };
     setTimeout(auto, 15000);
     const t = setInterval(auto, 10 * 60 * 1000);

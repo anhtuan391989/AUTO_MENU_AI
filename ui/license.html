@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <title>MENU — Cần kích hoạt</title>
+    <link rel="stylesheet" href="css/setup.css">
+    <style>
+        /* LICENSE-01 — màn hình duy nhất hiện ra khi chưa kích hoạt / hết hạn / bị thu hồi. Dùng lại token & nút của setup.css. */
+        body { display: flex; align-items: center; justify-content: center; padding: 18px; }
+        .gate-card { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 12px;
+            background: linear-gradient(180deg, #081523, #05101a); border: 1px solid rgba(0,180,255,.3); border-radius: 14px; padding: 20px; }
+        .gate-title { font-size: 18px; font-weight: 700; color: var(--cyan); }
+        .gate-notice { font-size: 13px; line-height: 1.5; color: var(--soon); background: rgba(255,180,84,.08);
+            border: 1px solid rgba(255,180,84,.3); border-radius: 8px; padding: 10px 12px; }
+        .gate-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+        .gate-machine { font-family: Consolas, monospace; font-size: 17px; letter-spacing: 1px; color: var(--cyan2); user-select: all; }
+        .gate-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        #gateKey { flex: 1; min-width: 220px; height: 34px; font-family: Consolas, monospace; text-transform: uppercase; }
+        .gate-ok { color: var(--ok); } .gate-bad { color: var(--danger); }
+    </style>
+</head>
+
+<body>
+    <div class="gate-card">
+        <div class="gate-title">🔒 MENU — Cần kích hoạt</div>
+        <div class="gate-notice" id="gateMessage">Đang kiểm tra license…</div>
+
+        <div>
+            <div class="gate-label">Mã máy của bạn (gửi mã này cho người cung cấp để nhận key)</div>
+            <div class="gate-row">
+                <span class="gate-machine" id="gateMachine">…</span>
+                <button id="btnGateCopy" class="setup-btn">📋 Sao chép</button>
+            </div>
+        </div>
+
+        <div>
+            <div class="gate-label">Nhập key kích hoạt</div>
+            <div class="gate-row">
+                <input type="text" id="gateKey" placeholder="MENU-XXXXX-XXXXX-XXXXX-XXXXX" maxlength="40" spellcheck="false" autocomplete="off">
+                <button id="btnGateActivate" class="setup-btn">🔑 Kích hoạt</button>
+            </div>
+        </div>
+
+        <div class="row-buttons">
+            <button id="btnGateRecheck" class="setup-btn" style="display:none;">🔄 Kiểm tra lại</button>
+        </div>
+        <div class="status-text" id="gateResult" style="display:none;"></div>
+        <p class="hint-text">Mỗi key chỉ dùng cho 1 máy và có thời hạn tính từ lúc kích hoạt. Cần kết nối Internet khi kích hoạt.</p>
+    </div>
+
+    <script src="js/licenseGate.js"></script>
+</body>
+
+</html>
