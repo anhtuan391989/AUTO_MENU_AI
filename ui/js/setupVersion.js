@@ -11,7 +11,7 @@
         if (typeof api().getAppVersion !== "function") { el.textContent = "Phiên bản: không đọc được (thiếu IPC)"; return; }
         Promise.resolve(api().getAppVersion()).then((r) => {
             if (!r || !r.ok) { el.textContent = "Phiên bản: không đọc được"; return; }
-            el.textContent = "Phiên bản: " + r.version + (r.commit ? " · bản dựng " + r.commit : "") + (r.isGit ? "" : " · (không phải git repo — không cập nhật được)");
+            el.textContent = "Phiên bản: " + r.version + (r.commit ? " · bản dựng " + r.commit : "") + (r.isGit || r.installed ? "" : " · (không phải git repo — không cập nhật được)");
         }).catch(() => { el.textContent = "Phiên bản: không đọc được"; });
     }
 

@@ -17,7 +17,7 @@ const path = require("path");
  * ==========================================================
  */
 
-const LOGS_DIR = path.resolve(__dirname, "..", "..", "logs"); // core/shared/../../logs = <project root>/logs
+const LOGS_DIR = require("./RuntimePaths").writableDir("logs"); // chạy từ mã nguồn: <project root>/logs (như cũ); bản cài .exe: %APPDATA%\automenu-ai\logs
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB
 
 class TelemetryLogger {

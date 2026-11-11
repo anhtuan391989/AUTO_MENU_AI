@@ -3,7 +3,9 @@
   "version": "1.0.1",
   "main": "app/main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --publish never",
+    "release": "electron-builder --win nsis --publish always"
   },
   "dependencies": {
     "boolean": "^3.2.0",
@@ -18,6 +20,7 @@
     "define-properties": "^1.2.1",
     "detect-node": "^2.1.0",
     "easymidi": "^3.2.0",
+    "electron-updater": "^6.8.11",
     "end-of-stream": "^1.4.5",
     "env-paths": "^2.2.1",
     "es-define-property": "^1.0.1",
@@ -71,10 +74,59 @@
     "yauzl": "^2.10.0"
   },
   "devDependencies": {
-    "electron": "^41.7.1"
+    "electron": "^41.7.1",
+    "electron-builder": "^26.18.0"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": ""
+  "description": "",
+  "build": {
+    "appId": "com.automenu.ai",
+    "productName": "AutoMenuAI",
+    "asar": false,
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "package.json",
+      "app/**/*",
+      "core/**/*",
+      "ui/**/*",
+      "ahk/**/*",
+      "data/songs.json",
+      "!**/*.zip",
+      "!**/*.patch",
+      "!**/*.md",
+      "!**/__pycache__/**",
+      "!**/*.pyc",
+      "!core/command-engine-ts/**",
+      "!app/app.zip"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "anhtuan391989",
+        "repo": "AUTO_MENU_AI",
+        "releaseType": "release"
+      }
+    ]
+  }
 }

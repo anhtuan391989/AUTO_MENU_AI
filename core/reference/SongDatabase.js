@@ -20,7 +20,8 @@ const path = require("path");
  * ==========================================================
  */
 
-const DATA_FILE = path.resolve(__dirname, "..", "..", "data", "songs.json"); // core/reference/../../data/songs.json = <project root>/data/songs.json
+const RuntimePaths = require("../shared/RuntimePaths");
+const DATA_FILE = path.join(RuntimePaths.writableDir("data"), "songs.json"); // chạy từ mã nguồn: <project root>/data/songs.json (như cũ); bản cài .exe: %APPDATA%\automenu-ai\data\songs.json
 
 class SongDatabase {
 
@@ -52,7 +53,12 @@ class SongDatabase {
 
         if (!fs.existsSync(this.filePath)) {
 
-            fs.writeFileSync(this.filePath, "[]\n", "utf-8");
+            const seed = path.join(RuntimePaths.bundledDir("data"), "songs.json");
+            if (RuntimePaths.isPackaged() && fs.existsSync(seed)) {
+                fs.copyFileSync(seed, this.filePath); // bản cài .exe: lần chạy đầu lấy danh sách bài hát mẫu đi kèm
+            } else {
+                fs.writeFileSync(this.filePath, "[]\n", "utf-8");
+            }
 
         }
 

@@ -973,8 +973,15 @@ ipcMain.handle("database-status", async () => {
 let __appUpdater = null;
 function getAppUpdater() {
     if (!__appUpdater) {
-        const { createAppUpdater, realExec } = require("./AppUpdater");
-        __appUpdater = createAppUpdater({ rootDir: path.join(__dirname, ".."), exec: realExec });
+        if (app.isPackaged) {
+            // APP-UPDATE-02 — bản cài .exe: cập nhật qua GitHub Releases (electron-updater), cùng nút bấm/IPC như bên dưới.
+            const { autoUpdater } = require("electron-updater");
+            const { createInstalledUpdater } = require("./InstalledUpdater");
+            __appUpdater = createInstalledUpdater({ autoUpdater, app });
+        } else {
+            const { createAppUpdater, realExec } = require("./AppUpdater");
+            __appUpdater = createAppUpdater({ rootDir: path.join(__dirname, ".."), exec: realExec });
+        }
     }
     return __appUpdater;
 }
