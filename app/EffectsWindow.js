@@ -8,6 +8,8 @@
    - Checkbox "Luôn hiển thị" (Always on Top):
        BẬT  -> cửa sổ luôn nổi và VẪN HIỆN khi menu thu xuống taskbar.
        TẮT  -> cửa sổ thường; tự ẩn khi menu thu xuống taskbar, tự hiện lại khi menu mở lại.
+   - Bảng CHỈ MỞ khi người dùng bấm nút HIỆU ỨNG trên Menu. "Luôn hiển thị" chỉ có nghĩa là luôn nổi trên mọi ứng dụng khác (Always on Top),
+     KHÔNG làm bảng tự mở cùng Menu (EFFECT-NO-AUTOOPEN-01: đã gỡ tính năng tự mở của EFFECT-AOT-PERSIST phần 2).
    - EFFECT-AOT-PERSIST: trạng thái "Luôn hiển thị" được GHI NHỚ qua các lần mở app (lần tích cuối cùng thắng). Việc đọc/ghi file do main.js
      tiêm vào (loadAlwaysOnTop / saveAlwaysOnTop) — module này không chạm file. Lỗi đọc/ghi không bao giờ làm hỏng cửa sổ.
    - EFFECT-POS-01: VỊ TRÍ cửa sổ được GHI NHỚ (lần kéo cuối cùng thắng): kéo xong thì lưu, lần mở sau hiện đúng chỗ cũ. Việc đọc/ghi file do main.js
@@ -203,15 +205,6 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
         return { ok: true, open: true };
     }
 
-    // EFFECT-AOT-PERSIST (phần 2): lúc Menu khởi động xong, NẾU lần tích cuối là "Luôn Hiện" thì tự mở Bảng Hiệu Ứng cùng Menu.
-    // Lần cuối bỏ tích (hoặc chưa từng tích) => KHÔNG làm gì, Menu mở bình thường. Đã mở sẵn => không mở thêm, không giành focus.
-    function openIfPinned() {
-        if (alwaysOnTop !== true) return { ok: true, open: alive(win), auto: false };
-        if (alive(win)) return { ok: true, open: true, auto: false };
-        const r = open();
-        return { ...r, auto: true };
-    }
-
     function close() {
         const w = win;
         win = null;
@@ -265,7 +258,7 @@ function createEffectsWindowManager({ BrowserWindow, screen, getMainWin, preload
         return alive(main) && !!sender && sender === main.webContents;
     }
 
-    return { open, openIfPinned, close, toggle, getAlwaysOnTop, setAlwaysOnTop, isFromEffects, isFromMain, isOpen: () => alive(win), getWebContents: () => (alive(win) ? win.webContents : null) };
+    return { open, close, toggle, getAlwaysOnTop, setAlwaysOnTop, isFromEffects, isFromMain, isOpen: () => alive(win), getWebContents: () => (alive(win) ? win.webContents : null) };
 }
 
 module.exports = { createEffectsWindowManager, computeInitialPosition, sanitizeSavedPosition, WIDTH, HEIGHT };
