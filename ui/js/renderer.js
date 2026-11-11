@@ -1286,8 +1286,31 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
         if (!window.electronAPI || typeof window.electronAPI.resizeWindow !== "function") return;
         const appEl = document.querySelector(".app");
         if (!appEl) return;
-        const height = Math.ceil(appEl.getBoundingClientRect().height);
+        // VERTICAL-EXPAND-FIT-01: chế độ dọc .app có max-height:100vh + cuộn => dùng scrollHeight (chiều cao nội dung THẬT) để cửa sổ giãn đủ; chế độ ngang giữ nguyên cách đo cũ.
+        const vertical = document.body.classList.contains("vertical-mode");
+        const height = Math.ceil(vertical ? appEl.scrollHeight : appEl.getBoundingClientRect().height);
         if (height > 0) window.electronAPI.resizeWindow(height);
+    }
+
+    /* VERTICAL-EXPAND-FIT-01 — phần MỞ RỘNG (6 núm) ở chế độ dọc bị che khuất. Chèn CSS bằng JS (không sửa HTML/CSS, cùng cách với CLOCK-VERTICAL-01):
+       (1) .mixer-grid xếp 2 cột => 6 núm cần 3 hàng, nhưng CSS gốc chỉ khai báo 2 hàng => hàng 3 (FX, HIỆU ỨNG) bị ép còn ~2px.
+       (2) index.html đặt cứng .app cao 920px (nhỏ hơn nội dung lúc mở rộng ~1168px) và thanh cuộn bị ẩn nên không thấy phần bị cắt.
+       Sửa: đủ 3 hàng; .app ôm sát nội dung (cửa sổ tự co/giãn theo syncWindowHeight); màn hình thấp hơn nội dung thì cuộn bên trong. */
+    try {
+        if (!document.getElementById("verticalExpandFitStyle")) {
+            const st = document.createElement("style");
+            st.id = "verticalExpandFitStyle";
+            st.textContent = "body.vertical-mode .mixer-grid{grid-template-rows:repeat(3,122px);}"
+                + "body.vertical-mode .app{height:auto !important;max-height:100vh;overflow-y:auto;}";
+            document.head.appendChild(st);
+        }
+    } catch (err) { console.error("VERTICAL-EXPAND-FIT-01 lỗi (bỏ qua):", err); }
+
+    // VERTICAL-EXPAND-FIT-01: nếu màn hình thấp hơn nội dung (cuộn bên trong), kéo xuống đáy để thấy đủ 6 núm khi MỞ RỘNG; thu gọn thì về đầu.
+    function scrollAppTo(bottom) {
+        const appEl = document.querySelector(".app");
+        if (!appEl || !document.body.classList.contains("vertical-mode")) return;
+        appEl.scrollTop = bottom ? appEl.scrollHeight : 0;
     }
 
     function setLabel(expanded) {
@@ -1314,6 +1337,7 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
         syncWindowHeight(); // display:grid đã áp dụng ngay, đo được chiều cao mới luôn
         // Thêm class "show" ở frame kế tiếp để CSS transition (opacity/translateY) chạy mượt — chỉ là animation.
         requestAnimationFrame(() => panel.classList.add("show"));
+        setTimeout(() => scrollAppTo(true), 300); // VERTICAL-EXPAND-FIT-01: đợi cửa sổ giãn xong rồi mới cuộn xuống đáy
         expandBtn.classList.add("active");
         expandBtn.setAttribute("aria-expanded", "true");
         setLabel(true);
@@ -1330,6 +1354,7 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
         setTimeout(() => {
             panel.classList.remove("expanded");
             syncWindowHeight(); // co cửa sổ lại đúng chiều cao thu gọn, hết khoảng trống thừa
+            scrollAppTo(false); // VERTICAL-EXPAND-FIT-01
         }, 200);
     }
 
@@ -1351,6 +1376,17 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
     // Đồng bộ chiều cao cửa sổ ngay khi tải trang xong (trạng thái mặc định = thu gọn)
     // để cửa sổ không còn to hơn nội dung như trước.
     requestAnimationFrame(syncWindowHeight);
+
+    // VERTICAL-EXPAND-FIT-01: bấm 📐 đổi dọc/ngang => đo lại để cửa sổ khớp chiều cao mới (trước đây chế độ dọc cao cứng 920px nên không cần).
+    if (typeof MutationObserver === "function") {
+        let lastVertical = document.body.classList.contains("vertical-mode");
+        new MutationObserver(() => {
+            const now = document.body.classList.contains("vertical-mode");
+            if (now === lastVertical) return;
+            lastVertical = now;
+            requestAnimationFrame(syncWindowHeight);
+        }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+    }
 })();
 
 /* ==========================================================

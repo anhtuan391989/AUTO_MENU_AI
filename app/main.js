@@ -99,9 +99,11 @@ function loadSavedMenuPosition(width, height) {
     }
 }
 
+let menuPosSuspendUntil = 0; // VERTICAL-EXPAND-FIT-01: đang tự đẩy cửa sổ lên khi giãn => tạm không lưu vị trí
 function saveMenuPositionNow() {
     try {
         if (!mainWin || mainWin.isDestroyed()) return;
+        if (Date.now() < menuPosSuspendUntil) return;
         if (mainWin.isMinimized() || mainWin.isMaximized() || mainWin.isFullScreen()) return; // lúc đó toạ độ không phải vị trí thật
         const [x, y] = mainWin.getPosition();
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -1134,9 +1136,31 @@ ipcMain.on("resize-window", (event, { height } = {}) => {
         if (typeof height !== "number" || !Number.isFinite(height)) return;
 
         const [currentWidth] = mainWin.getContentSize();
-        const clampedHeight = Math.max(200, Math.min(1000, Math.round(height))); // chặn giá trị bất thường, không tin tưởng dữ liệu renderer 100%
+        // VERTICAL-EXPAND-FIT-01: trần chiều cao = vùng làm việc THẬT của màn hình đang chứa Menu (trừ viền/thanh tiêu đề/thanh menu của cửa sổ),
+        // thay cho số cứng 1000 (chế độ dọc lúc MỞ RỘNG cần ~1195px, số cứng 1000 làm cửa sổ bị cắt). Không lấy được màn hình => dùng lại 1000 như cũ.
+        let maxHeight = 1000;
+        let workArea = null;
+        try {
+            const bounds = mainWin.getBounds();
+            const frameH = Math.max(0, bounds.height - mainWin.getContentBounds().height);
+            workArea = screen.getDisplayMatching(bounds).workArea;
+            if (workArea && Number.isFinite(workArea.height)) maxHeight = Math.max(200, workArea.height - frameH);
+        } catch { /* giữ 1000 */ }
+        const clampedHeight = Math.max(200, Math.min(maxHeight, Math.round(height))); // chặn giá trị bất thường, không tin tưởng dữ liệu renderer 100%
 
         mainWin.setContentSize(currentWidth, clampedHeight);
+
+        // Cửa sổ vừa giãn xuống có thể tràn đáy màn hình => đẩy lên vừa đủ để thấy hết (và không lưu vị trí tạm này làm "vị trí nhớ" của MENU-POS-MEMORY-01).
+        try {
+            if (workArea) {
+                const nb = mainWin.getBounds();
+                const overflow = nb.y + nb.height - (workArea.y + workArea.height);
+                if (overflow > 0) {
+                    menuPosSuspendUntil = Date.now() + 1000;
+                    mainWin.setPosition(nb.x, Math.max(workArea.y, nb.y - overflow));
+                }
+            }
+        } catch { /* bỏ qua: chỉ là chỉnh vị trí cho đẹp */ }
     } catch (err) {
         console.error("resize-window lỗi:", err);
     }

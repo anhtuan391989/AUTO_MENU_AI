@@ -13,7 +13,7 @@ function run(settings, displays, win) {
     const writes = [];
     const ctx = { console, Number, Math,
         readSettingsFile: () => settings, writeSettingsFile: (d) => { writes.push(d); return true; },
-        screen: { getAllDisplays: () => displays }, mainWin: win };
+        screen: { getAllDisplays: () => displays }, mainWin: win, menuPosSuspendUntil: 0 };
     vm.createContext(ctx);
     vm.runInContext(extract("loadSavedMenuPosition") + extract("saveMenuPositionNow") + ";this.load=loadSavedMenuPosition;this.save=saveMenuPositionNow;", ctx);
     return { ctx, writes };
