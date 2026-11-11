@@ -78,10 +78,48 @@ function writeSettingsFile(data) {
     }
 }
 
+// MENU-POS-MEMORY-01 — Ghi nhớ VỊ TRÍ cửa sổ Menu (x, y) ở lần dùng cuối: app-settings.json > menuWindowPosition = { x, y }.
+// Chỉ lưu/đọc toạ độ, KHÔNG đụng kích thước (chế độ dọc/ngang vẫn do menuVerticalMode lo). Dùng đúng readSettingsFile/writeSettingsFile có sẵn
+// (đọc-rồi-ghi lại toàn bộ file, chỉ đổi đúng 1 key). Mọi lỗi chỉ bị bỏ qua => Menu vẫn mở bình thường ở giữa màn hình như cũ.
+function loadSavedMenuPosition(width, height) {
+    try {
+        const s = readSettingsFile();
+        const p = s && s.menuWindowPosition;
+        if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+        const x = Math.round(p.x), y = Math.round(p.y);
+        // Chỉ dùng nếu phần thanh tiêu đề (góc trên-trái) vẫn nằm trong 1 màn hình đang cắm — tránh cửa sổ rơi ra ngoài khi đổi/tháo màn hình.
+        const visible = screen.getAllDisplays().some((d) => {
+            const a = d.workArea;
+            return x + 100 > a.x && x < a.x + a.width - 100 && y >= a.y - 10 && y < a.y + a.height - 50;
+        });
+        return visible ? { x, y } : null;
+    } catch (err) {
+        console.error("MENU-POS-MEMORY-01 đọc vị trí lỗi (bỏ qua):", err);
+        return null;
+    }
+}
+
+function saveMenuPositionNow() {
+    try {
+        if (!mainWin || mainWin.isDestroyed()) return;
+        if (mainWin.isMinimized() || mainWin.isMaximized() || mainWin.isFullScreen()) return; // lúc đó toạ độ không phải vị trí thật
+        const [x, y] = mainWin.getPosition();
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        const s = readSettingsFile() || {};
+        const cur = s.menuWindowPosition;
+        if (cur && cur.x === x && cur.y === y) return; // không đổi => khỏi ghi file
+        writeSettingsFile({ ...s, menuWindowPosition: { x, y } });
+    } catch (err) {
+        console.error("MENU-POS-MEMORY-01 lưu vị trí lỗi (bỏ qua):", err);
+    }
+}
+
 function createMainWindow() {
+    const savedPos = loadSavedMenuPosition(1200, 800);
     mainWin = new BrowserWindow({
         width: 1200,
         height: 800,
+        ...(savedPos ? { x: savedPos.x, y: savedPos.y } : {}),
         webPreferences: {
             preload: path.join(__dirname, "preload.js"),
             contextIsolation: true,
@@ -90,6 +128,17 @@ function createMainWindow() {
     });
 
     mainWin.loadFile(path.join(__dirname, "..", "ui", "index.html"));
+
+    // MENU-POS-MEMORY-01: lưu vị trí sau khi người dùng kéo xong (chờ 400ms không còn di chuyển mới ghi, để khỏi ghi file liên tục) và 1 lần nữa khi đóng.
+    let posSaveTimer = null;
+    mainWin.on("move", () => {
+        if (posSaveTimer) clearTimeout(posSaveTimer);
+        posSaveTimer = setTimeout(saveMenuPositionNow, 400);
+    });
+    mainWin.on("close", () => {
+        if (posSaveTimer) { clearTimeout(posSaveTimer); posSaveTimer = null; }
+        saveMenuPositionNow();
+    });
 
     // MENU-UI-01B — Always on Top MẶC ĐỊNH ON mỗi lần khởi động (không lưu qua phiên).
     // Đặt ngay sau khi tạo cửa sổ, rồi đặt lại ĐÚNG 1 LẦN khi trang tải xong (chỉ nếu người dùng
