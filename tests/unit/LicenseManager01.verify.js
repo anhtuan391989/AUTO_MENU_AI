@@ -173,6 +173,20 @@ const privOf = (kp) => kp.privateKey.export({ type: 'pkcs8', format: 'der' }).to
   ok(lost === 1 && lostStatus.code === 'REVOKED', 'bị thu hồi lúc đang chạy -> watcher báo mất đúng 1 lần', { lost, code: lostStatus && lostStatus.code });
   mWt.stopWatcher(); clock = t0;
 
+  console.log('== gói vĩnh viễn');
+  const dirL = path.join(tmp, 'userL'); fs.mkdirSync(dirL);
+  const mL = mk(dirL); await mL.init();
+  await mL.activate(await newKey('life'));
+  const stL = mL.getStatus();
+  ok(mL.isLicensed() && stL.plan === 'life' && stL.planLabel === 'Vĩnh viễn' && stL.daysLeft === null && /Vĩnh viễn/.test(stL.message), 'gói Vĩnh viễn: mở khoá, hiện "Vĩnh viễn", không đếm ngày');
+  clock = t0 + 5 * 365 * 24 * H; netDown = true;
+  ok(!mL.isLicensed() && mL.getStatus().code === 'NEED_ONLINE', 'vĩnh viễn vẫn phải xác minh online (offline quá 72 giờ -> khoá)');
+  netDown = false; clock = t0 + 3 * H;
+  const idL = db.prepare('SELECT id FROM licenses ORDER BY id DESC LIMIT 1').get().id;
+  await admin('/admin/license/revoke', { id: idL });
+  ok((await mL.refresh()).reason === 'REVOKED' && !mL.isLicensed(), 'THU HỒI key vĩnh viễn -> app khoá ở lần kiểm tra kế tiếp');
+  clock = t0;
+
   console.log('== khởi động lại');
   const rl = []; m1.relaunch({ relaunch: () => rl.push('relaunch'), quit: () => rl.push('quit') });
   ok(rl.join() === 'relaunch,quit', 'relaunch(app) = app.relaunch() rồi app.quit()');

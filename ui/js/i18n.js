@@ -98,6 +98,7 @@
     ["✅ License hợp lệ.", "✅ License is valid."],
     ["Chưa kích hoạt. Cần nhập key để sử dụng MENU.", "Not activated. Enter a key to use MENU."],
     ["Đã kích hoạt — gói {0}, còn {1} ngày (hết hạn {2}).", "Activated — {0} plan, {1} days left (expires {2})."],
+    ["Đã kích hoạt — gói Vĩnh viễn (không hết hạn).", "Activated — Lifetime plan (no expiry)."],
     ["Đã nối IPC", "IPC connected"],
     ["Chưa có IPC", "No IPC"],
     ["Dữ liệu thật nằm ở data/songs.json. Số liệu đọc trực tiếp từ file — chưa có bài thì hiện 0, không bịa số.", "Real data lives in data/songs.json. Figures are read directly from the file — with no songs it shows 0, no made-up numbers."],

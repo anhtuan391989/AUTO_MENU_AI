@@ -18,7 +18,7 @@ const RECHECK_MS = 6 * 3600 * 1000;     // kiểm tra lại với server mỗi 6
 const TICK_MS = 5 * 60 * 1000;          // đánh giá cục bộ mỗi 5 phút khi app đang chạy
 const CLOCK_SKEW_MS = 10 * 60 * 1000;   // dung sai đồng hồ trước khi coi là bị lùi giờ
 const FETCH_TIMEOUT_MS = 8000;
-const PLAN_LABEL = { '3d': '3 ngày', '3m': '3 tháng', '6m': '6 tháng', '1y': '1 năm' };
+const PLAN_LABEL = { '3d': '3 ngày', '3m': '3 tháng', '6m': '6 tháng', '1y': '1 năm', 'life': 'Vĩnh viễn' };
 // Lý do server trả về nghĩa là license thật sự không còn dùng được (khác lỗi tạm thời như SERVER_ERROR/mất mạng).
 const DEFINITIVE = new Set(['INVALID_KEY', 'REVOKED', 'EXPIRED', 'MACHINE_MISMATCH', 'NOT_ACTIVATED']);
 
@@ -162,6 +162,7 @@ function createLicenseManager(opts) {
         if (t < (cache.maxLocal || 0) - CLOCK_SKEW_MS) return out(false, 'NEED_ONLINE', 'Đồng hồ máy bị lùi so với lần dùng trước. Cần kết nối mạng để xác minh lại license.', info);
         if (t - (cache.lastOkLocal || 0) > GRACE_MS) return out(false, 'NEED_ONLINE', 'Đã quá 72 giờ chưa xác minh được license với server. Hãy kết nối mạng rồi bấm kiểm tra lại.', info);
         const graceLeftMs = Math.max(0, GRACE_MS - (t - cache.lastOkLocal));
+        if (p.plan === 'life') return out(true, 'LICENSED', 'Đã kích hoạt — gói Vĩnh viễn (không hết hạn).', Object.assign(info, { expiresAt: null, daysLeft: null, graceLeftHours: Math.floor(graceLeftMs / 3600000) }));
         return out(true, 'LICENSED', 'Đã kích hoạt — gói ' + info.planLabel + ', còn ' + Math.max(1, Math.ceil((p.expiresAt - t) / 86400000)) + ' ngày (hết hạn ' + fmtDate(p.expiresAt) + ').',
             Object.assign(info, { daysLeft: Math.max(1, Math.ceil((p.expiresAt - t) / 86400000)), graceLeftHours: Math.floor(graceLeftMs / 3600000) }));
     }

@@ -111,6 +111,20 @@ function fakeD1(db) {
   const rs = await Promise.all([call('/license/activate', { key: kr, machine: M1 }), call('/license/activate', { key: kr, machine: M2 })]);
   ok(rs.filter((r) => r.body.ok).length === 1 && rs.filter((r) => r.body.reason === 'MACHINE_MISMATCH').length === 1, '2 máy kích hoạt cùng lúc 1 key: đúng 1 máy thắng');
 
+  console.log('== gói vĩnh viễn (life)');
+  const kl = (await adm('/admin/license/create', { plan: 'life', note: 'vinh vien' })).body.keys[0].key;
+  const al = (await call('/license/activate', { key: kl, machine: M1 })).body;
+  ok(al.ok && JSON.parse(al.payload).plan === 'life' && JSON.parse(al.payload).expiresAt === W.FOREVER_TS && verify(al), 'key vĩnh viễn kích hoạt được, hạn = năm 3000, chữ ký hợp lệ');
+  ok((await call('/license/check', { key: kl, machine: M1 })).body.ok === true, 'key vĩnh viễn check OK');
+  ok((await call('/license/check', { key: kl, machine: M2 })).body.reason === 'MACHINE_MISMATCH', 'key vĩnh viễn vẫn chỉ 1 máy');
+  const idl = db.prepare('SELECT id FROM licenses ORDER BY id DESC LIMIT 1').get().id;
+  await adm('/admin/license/revoke', { id: idl });
+  ok((await call('/license/check', { key: kl, machine: M1 })).body.reason === 'REVOKED', 'THU HỒI key vĩnh viễn -> REVOKED');
+  await adm('/admin/license/restore', { id: idl });
+  ok((await call('/license/check', { key: kl, machine: M1 })).body.ok === true, 'khôi phục key vĩnh viễn -> dùng lại được');
+  await adm('/admin/license/unbind', { id: idl });
+  ok((await call('/license/activate', { key: kl, machine: M2 })).body.ok === true, 'đổi máy key vĩnh viễn OK');
+
   console.log('== tính hạn theo tháng');
   const d = (iso) => Date.parse(iso);
   ok(W.addPlan(d('2026-01-31T00:00:00Z'), '3m') === d('2026-04-30T00:00:00Z'), '31/01 + 3 tháng = 30/04');
@@ -118,6 +132,7 @@ function fakeD1(db) {
   ok(W.addPlan(d('2028-02-29T00:00:00Z'), '1y') === d('2029-02-28T00:00:00Z'), '29/02 + 1 năm = 28/02');
   ok(W.addPlan(d('2026-11-10T00:00:00Z'), '3d') === d('2026-11-13T00:00:00Z'), '3 ngày');
   ok(W.addPlan(0, 'abc') === null, 'gói lạ -> null');
+  ok(W.addPlan(123, 'life') === W.FOREVER_TS, 'gói life -> không hết hạn');
 
   console.log('\nLicenseServer01: ' + pass + ' đạt, ' + fail + ' lỗi');
   fs.rmSync(tmp, { recursive: true, force: true });
