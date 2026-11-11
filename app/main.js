@@ -1190,12 +1190,17 @@ ipcMain.on("telemetry-record", (event, record) => {
 // mọi kênh IPC nghiệp vụ hiện có (Key/BPM/NowPlaying/AI...) — không đụng, không đổi bất kỳ kênh
 // nào khác.
 // ================================
+// MENU-ASPECT-LOCK-01: chiều rộng "vừa khít" gần nhất mà renderer yêu cầu. Dùng làm gốc cho tỉ lệ khoá, để người dùng kéo cửa sổ rộng ra
+// rồi bấm MỞ RỘNG/THU GỌN thì cửa sổ quay về đúng cỡ vừa khít (không giữ chiều rộng do kéo).
+let menuFitWidth = null;
+
 ipcMain.on("resize-window", (event, { height, width } = {}) => {
     try {
         if (!mainWin || mainWin.isDestroyed()) return;
         if (typeof height !== "number" || !Number.isFinite(height)) return;
 
         let [currentWidth] = mainWin.getContentSize();
+        if (menuFitWidth !== null) currentWidth = menuFitWidth; // MENU-ASPECT-LOCK-01
         // MENU-WIDTH-FIT-01: chế độ dọc chỉ rộng 380px nhưng cửa sổ vẫn rộng ~1200 => thừa 2 bên. Renderer gửi thêm width (chỉ khi đổi dọc/ngang) để cửa sổ khớp.
         // Width là tuỳ chọn: không gửi (như trước đây) thì giữ nguyên chiều rộng hiện tại, kể cả khi người dùng tự kéo rộng/hẹp ở chế độ ngang.
         const wantWidth = (typeof width === "number" && Number.isFinite(width)) ? Math.max(300, Math.round(width)) : null;
@@ -1216,7 +1221,18 @@ ipcMain.on("resize-window", (event, { height, width } = {}) => {
             try { if (workArea && Number.isFinite(workArea.width)) maxWidth = Math.max(300, workArea.width - Math.max(0, mainWin.getBounds().width - mainWin.getContentBounds().width)); } catch { /* giữ wantWidth */ }
             currentWidth = Math.min(wantWidth, maxWidth);
         }
+        // MENU-ASPECT-LOCK-01: cỡ cửa sổ = cỡ vừa khít nội dung. Bỏ giới hạn cũ trước khi đổi cỡ (để thu gọn được), đổi cỡ, rồi khoá lại:
+        // tỉ lệ rộng:cao cố định (kéo cạnh/góc nào thì rộng và cao cùng đổi, không kéo lệch 1 bên được) và không cho nhỏ hơn cỡ vừa khít (khỏi cắt mất giao diện).
+        try { mainWin.setMinimumSize(0, 0); mainWin.setAspectRatio(0); } catch { /* bỏ qua */ }
         mainWin.setContentSize(currentWidth, clampedHeight);
+        menuFitWidth = currentWidth;
+        try {
+            const [fitW, fitH] = mainWin.getSize();
+            if (fitW > 0 && fitH > 0) {
+                mainWin.setAspectRatio(fitW / fitH);
+                mainWin.setMinimumSize(fitW, fitH);
+            }
+        } catch (err) { console.error("MENU-ASPECT-LOCK-01 lỗi (bỏ qua):", err); }
 
         // Cửa sổ vừa giãn xuống/ra có thể tràn đáy hoặc cạnh phải màn hình => đẩy lên/sang trái vừa đủ để thấy hết (và không lưu vị trí tạm này làm "vị trí nhớ" của MENU-POS-MEMORY-01).
         try {
