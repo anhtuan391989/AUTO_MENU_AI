@@ -1130,12 +1130,15 @@ ipcMain.on("telemetry-record", (event, record) => {
 // mọi kênh IPC nghiệp vụ hiện có (Key/BPM/NowPlaying/AI...) — không đụng, không đổi bất kỳ kênh
 // nào khác.
 // ================================
-ipcMain.on("resize-window", (event, { height } = {}) => {
+ipcMain.on("resize-window", (event, { height, width } = {}) => {
     try {
         if (!mainWin || mainWin.isDestroyed()) return;
         if (typeof height !== "number" || !Number.isFinite(height)) return;
 
-        const [currentWidth] = mainWin.getContentSize();
+        let [currentWidth] = mainWin.getContentSize();
+        // MENU-WIDTH-FIT-01: chế độ dọc chỉ rộng 380px nhưng cửa sổ vẫn rộng ~1200 => thừa 2 bên. Renderer gửi thêm width (chỉ khi đổi dọc/ngang) để cửa sổ khớp.
+        // Width là tuỳ chọn: không gửi (như trước đây) thì giữ nguyên chiều rộng hiện tại, kể cả khi người dùng tự kéo rộng/hẹp ở chế độ ngang.
+        const wantWidth = (typeof width === "number" && Number.isFinite(width)) ? Math.max(300, Math.round(width)) : null;
         // VERTICAL-EXPAND-FIT-01: trần chiều cao = vùng làm việc THẬT của màn hình đang chứa Menu (trừ viền/thanh tiêu đề/thanh menu của cửa sổ),
         // thay cho số cứng 1000 (chế độ dọc lúc MỞ RỘNG cần ~1195px, số cứng 1000 làm cửa sổ bị cắt). Không lấy được màn hình => dùng lại 1000 như cũ.
         let maxHeight = 1000;
@@ -1148,16 +1151,25 @@ ipcMain.on("resize-window", (event, { height } = {}) => {
         } catch { /* giữ 1000 */ }
         const clampedHeight = Math.max(200, Math.min(maxHeight, Math.round(height))); // chặn giá trị bất thường, không tin tưởng dữ liệu renderer 100%
 
+        if (wantWidth !== null) {
+            let maxWidth = wantWidth;
+            try { if (workArea && Number.isFinite(workArea.width)) maxWidth = Math.max(300, workArea.width - Math.max(0, mainWin.getBounds().width - mainWin.getContentBounds().width)); } catch { /* giữ wantWidth */ }
+            currentWidth = Math.min(wantWidth, maxWidth);
+        }
         mainWin.setContentSize(currentWidth, clampedHeight);
 
-        // Cửa sổ vừa giãn xuống có thể tràn đáy màn hình => đẩy lên vừa đủ để thấy hết (và không lưu vị trí tạm này làm "vị trí nhớ" của MENU-POS-MEMORY-01).
+        // Cửa sổ vừa giãn xuống/ra có thể tràn đáy hoặc cạnh phải màn hình => đẩy lên/sang trái vừa đủ để thấy hết (và không lưu vị trí tạm này làm "vị trí nhớ" của MENU-POS-MEMORY-01).
         try {
             if (workArea) {
                 const nb = mainWin.getBounds();
-                const overflow = nb.y + nb.height - (workArea.y + workArea.height);
-                if (overflow > 0) {
+                const overflowY = nb.y + nb.height - (workArea.y + workArea.height);
+                const overflowX = nb.x + nb.width - (workArea.x + workArea.width);
+                if (overflowY > 0 || overflowX > 0) {
                     menuPosSuspendUntil = Date.now() + 1000;
-                    mainWin.setPosition(nb.x, Math.max(workArea.y, nb.y - overflow));
+                    mainWin.setPosition(
+                        overflowX > 0 ? Math.max(workArea.x, nb.x - overflowX) : nb.x,
+                        overflowY > 0 ? Math.max(workArea.y, nb.y - overflowY) : nb.y
+                    );
                 }
             }
         } catch { /* bỏ qua: chỉ là chỉnh vị trí cho đẹp */ }

@@ -93,7 +93,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     sendTelemetry: (record) => ipcRenderer.send("telemetry-record", record),
 
     // ---- UI FINAL v2.0: "Menu ôm sát nội dung" — CHỈ đổi chiều cao cửa sổ chính ----
-    resizeWindow: (height) => ipcRenderer.send("resize-window", { height }),
+    resizeWindow: (height, width) => ipcRenderer.send("resize-window", { height, width }), // MENU-WIDTH-FIT-01: width là tuỳ chọn (chỉ truyền khi đổi dọc/ngang)
 
     // ---- TASK B — MENU RUNTIME: thu nhỏ cửa sổ chính thật (thay console.log("MINIMIZE")) ----
     minimizeWindow: () => ipcRenderer.send("minimize-window"),

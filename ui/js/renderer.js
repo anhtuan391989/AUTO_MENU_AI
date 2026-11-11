@@ -1282,6 +1282,7 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
     // Co/giãn cửa sổ THẬT (Electron BrowserWindow) khớp đúng chiều cao nội dung
     // thực tế (.app), dùng kênh IPC "resize-window" đã có sẵn ở app/main.js +
     // app/preload.js (electronAPI.resizeWindow) nhưng trước đây chưa được gọi.
+    let sizedForVertical = false; // MENU-WIDTH-FIT-01: cửa sổ đang bị thu hẹp cho chế độ dọc => khi về ngang phải trả lại 1200
     function syncWindowHeight() {
         if (!window.electronAPI || typeof window.electronAPI.resizeWindow !== "function") return;
         const appEl = document.querySelector(".app");
@@ -1289,7 +1290,11 @@ window.electronAPI?.onEffectsLibStop?.(() => SoundEffectEngine.stopAll());
         // VERTICAL-EXPAND-FIT-01: chế độ dọc .app có max-height:100vh + cuộn => dùng scrollHeight (chiều cao nội dung THẬT) để cửa sổ giãn đủ; chế độ ngang giữ nguyên cách đo cũ.
         const vertical = document.body.classList.contains("vertical-mode");
         const height = Math.ceil(vertical ? appEl.scrollHeight : appEl.getBoundingClientRect().height);
-        if (height > 0) window.electronAPI.resizeWindow(height);
+        // MENU-WIDTH-FIT-01: chế độ dọc => cửa sổ rộng đúng bề ngang Menu (max-width của .app, 380px) hết thừa 2 bên; quay lại ngang => trả về 1200 (chiều rộng gốc). Còn lại không gửi width (giữ nguyên như cũ).
+        let width;
+        if (vertical) { const mw = parseFloat(getComputedStyle(appEl).maxWidth); if (Number.isFinite(mw) && mw > 0) { width = Math.ceil(mw); sizedForVertical = true; } }
+        else if (sizedForVertical) { width = 1200; sizedForVertical = false; }
+        if (height > 0) window.electronAPI.resizeWindow(height, width);
     }
 
     /* VERTICAL-EXPAND-FIT-01 — phần MỞ RỘNG (6 núm) ở chế độ dọc bị che khuất. Chèn CSS bằng JS (không sửa HTML/CSS, cùng cách với CLOCK-VERTICAL-01):
