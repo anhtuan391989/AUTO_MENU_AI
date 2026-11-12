@@ -34,6 +34,11 @@
  *      giá trị tham khảo).
  *
  *   4. Không nguồn nào có gì -> null.
+ *
+ *   NGUỒN THỨ 3 — YouTube qua tiện ích trình duyệt (YoutubeExtensionSession), tham số TUỲ CHỌN thứ 3:
+ *   YouTube đang PHÁT (isPlaying) thắng SMTC (tiện ích biết chính xác video + vị trí thật, SMTC thì chỉ đoán),
+ *   nhưng vẫn thua MPC-HC đang Playing (quy tắc 1 giữ nguyên). YouTube chỉ TẠM DỪNG thì xếp sau SMTC / MPC-HC có dữ liệu.
+ *   Không truyền tham số thứ 3 (như các lời gọi cũ) => hành vi y hệt trước đây.
  * ==========================================================
  */
 
@@ -42,14 +47,19 @@ const MPC_STATE_PLAYING = 2;
 /**
  * @param {object|null} smtcSnapshot Snapshot gần nhất từ WindowsMediaSession ("change" event), hoặc null.
  * @param {object|null} mpcHcSnapshot Snapshot gần nhất từ MpcHcSession ("change" event), hoặc null.
- * @returns {{ snapshot: object, source: "smtc"|"mpc-hc" } | null}
+ * @param {object|null} [youtubeSnapshot] Snapshot gần nhất từ YoutubeExtensionSession ("change" event), hoặc null/bỏ trống.
+ * @returns {{ snapshot: object, source: "smtc"|"mpc-hc"|"youtube" } | null}
  */
-function resolveActiveSource(smtcSnapshot, mpcHcSnapshot) {
+function resolveActiveSource(smtcSnapshot, mpcHcSnapshot, youtubeSnapshot) {
 
     const mpcHcIsPlaying = !!mpcHcSnapshot && mpcHcSnapshot.state === MPC_STATE_PLAYING;
 
     if (mpcHcIsPlaying) {
         return { snapshot: mpcHcSnapshot, source: "mpc-hc" };
+    }
+
+    if (youtubeSnapshot && youtubeSnapshot.isPlaying === true) {
+        return { snapshot: youtubeSnapshot, source: "youtube" };
     }
 
     if (smtcSnapshot) {
@@ -58,6 +68,10 @@ function resolveActiveSource(smtcSnapshot, mpcHcSnapshot) {
 
     if (mpcHcSnapshot) {
         return { snapshot: mpcHcSnapshot, source: "mpc-hc" };
+    }
+
+    if (youtubeSnapshot) {
+        return { snapshot: youtubeSnapshot, source: "youtube" };
     }
 
     return null;

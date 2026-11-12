@@ -91,8 +91,14 @@ function segmentIndexAt(plan, sec) {
  *  - MPC-HC: vị trí thật từ lần poll gần nhất (+ thời gian trôi qua nếu đang Playing).
  *  - Nguồn khác (trình duyệt/SMTC): SMTC của Menu hiện KHÔNG có vị trí -> tính từ lúc Menu thấy bài bắt đầu (songStartedAtMs).
  */
-function estimatePositionSec({ source, mpcSnapshot, smtcSnapshot, songStartedAtMs, now }) {
+function estimatePositionSec({ source, mpcSnapshot, smtcSnapshot, youtubeSnapshot, songStartedAtMs, now }) {
     const t = typeof now === "number" ? now : Date.now();
+    // YouTube qua tiện ích: vị trí THẬT từng giây (tua là đúng ngay). Đang quảng cáo => chưa biết vị trí: trả null
+    // (bộ canh bỏ qua nhịp đó) — KHÔNG được rơi về đồng hồ tính từ lúc thấy bài, vì thời gian quảng cáo không phải thời gian bài.
+    if (source === "youtube") {
+        const clock = youtubeSnapshot ? NowPlayingClock.compute("youtube", youtubeSnapshot, t) : null;
+        return clock ? clock.positionSec : null;
+    }
     if (source === "mpc-hc" && mpcSnapshot && Number.isFinite(mpcSnapshot.positionMs) && mpcSnapshot.durationMs > 0) {
         const elapsedMs = mpcSnapshot.state === MPC_STATE_PLAYING && Number.isFinite(mpcSnapshot.timestamp) ? Math.max(0, t - mpcSnapshot.timestamp) : 0;
         return (mpcSnapshot.positionMs + elapsedMs) / 1000;

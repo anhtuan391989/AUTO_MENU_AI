@@ -29,7 +29,7 @@ function clamp(value, min, max) {
 }
 
 /**
- * @param {"smtc"|"mpc-hc"|null} source nguồn đang active (NowPlayingArbitrator.resolveActiveSource().source)
+ * @param {"smtc"|"mpc-hc"|"youtube"|null} source nguồn đang active (NowPlayingArbitrator.resolveActiveSource().source)
  * @param {object|null} snapshot snapshot MỚI NHẤT của chính nguồn đó (không phải bản cũ từ lần "change")
  * @param {number} [now] Date.now() (tiêm khi test)
  * @returns {{positionSec:number, durationSec:number, playing:boolean, source:string}|null}
@@ -56,6 +56,15 @@ function compute(source, snapshot, now) {
             ? snapshot.timelineUpdatedMs
             : (isFiniteNumber(snapshot.timestamp) ? snapshot.timestamp : t);
         const elapsedMs = playing ? Math.max(0, t - baseAtMs) * rate : 0;
+        const durationSec = snapshot.durationMs / 1000;
+        return { positionSec: clamp((snapshot.positionMs + elapsedMs) / 1000, 0, durationSec), durationSec, playing, source };
+    }
+
+    if (source === "youtube") {
+        // Tiện ích YouTube: positionMs = null khi đang chiếu quảng cáo => chưa có đồng hồ (không bịa số).
+        if (!isFiniteNumber(snapshot.positionMs) || !(snapshot.durationMs > 0)) return null;
+        const playing = snapshot.isPlaying === true;
+        const elapsedMs = playing && isFiniteNumber(snapshot.timestamp) ? Math.max(0, t - snapshot.timestamp) : 0;
         const durationSec = snapshot.durationMs / 1000;
         return { positionSec: clamp((snapshot.positionMs + elapsedMs) / 1000, 0, durationSec), durationSec, playing, source };
     }

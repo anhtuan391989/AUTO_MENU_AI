@@ -130,11 +130,12 @@ console.log("== D. main.js: bộ phát 'now-playing-position' ==");
         NowPlayingClock: { compute: (source, snap) => Clock.compute(source, snap, nowMs) },
         windowsMediaSession: { getLastSnapshot: () => ctx.__smtcLive },
         mpcHcSession: { getLatestSnapshot: () => ctx.__mpcLive },
+        youtubeSession: { getLatestSnapshot: () => ctx.__ytLive }, // YT-BRIDGE-01: nguồn thứ 3
         sendToRenderer: (ch, p) => sent.push({ ch, p }),
         Date: { now: () => nowMs }, Math, console: { log: (...a) => logs.push(a.join(" ")), error: (...a) => logs.push("ERR " + a.join(" ")) }
     });
     vm.runInContext(`
-        var latestSmtcSnapshot = null, latestMpcHcSnapshot = null, currentNowPlayingForSync = null;
+        var latestSmtcSnapshot = null, latestMpcHcSnapshot = null, latestYoutubeSnapshot = null, currentNowPlayingForSync = null;
         var lastClockSentKey = null, lastClockSentAt = 0, lastClockTimelineLog = null;
         var NOW_PLAYING_CLOCK_RESEND_MS = 3000;
         ${fnSrc}
@@ -189,6 +190,19 @@ console.log("== D. main.js: bộ phát 'now-playing-position' ==");
     tick();
     last = sent[sent.length - 1].p;
     ok(last && last.source === "mpc-hc" && last.hasTimeline === true && last.positionSec === 20 && last.durationSec === 180, "D12. MPC-HC đang phát -> lấy đồng hồ MPC-HC 20s / 180s", last);
+
+    // YT-BRIDGE-01: YouTube (tiện ích) đang phát thắng SMTC và cho đồng hồ THẬT; MPC-HC đang Playing vẫn thắng (D12 ở trên).
+    {
+        const keepMpc = ctx.latestMpcHcSnapshot, keepMpcLive = ctx.__mpcLive;
+        ctx.latestMpcHcSnapshot = null; ctx.__mpcLive = null;
+        ctx.latestYoutubeSnapshot = { isPlaying: true, title: "yt song" };
+        ctx.__ytLive = { isPlaying: true, positionMs: 43000, durationMs: 305000, timestamp: nowMs };
+        tick();
+        const y = sent[sent.length - 1].p;
+        ok(y && y.source === "youtube" && y.hasTimeline === true && y.positionSec === 43 && y.durationSec === 305, "D12b. YouTube đang phát -> đồng hồ THẬT 43s / 305s (nguồn youtube)", y);
+        ctx.latestYoutubeSnapshot = null; ctx.__ytLive = null;
+        ctx.latestMpcHcSnapshot = keepMpc; ctx.__mpcLive = keepMpcLive;
+    }
 
     // lỗi bất ngờ không văng ra ngoài
     ctx.__mpcLive = { get positionMs() { throw new Error("boom"); }, state: 2, durationMs: 1 };

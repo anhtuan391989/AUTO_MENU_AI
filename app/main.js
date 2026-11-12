@@ -243,6 +243,7 @@ const SetupLock = require("../core/shared/SetupLock"); // SETUP-LOCK-01
 const WindowsMediaSession = require("../core/integration/WindowsMediaSession");
 const MpcHcSession = require("../core/integration/MpcHcSession"); // Task C — nguồn thứ 2 (MPC-HC), file có sẵn nhưng trước đây chưa được require/dùng ở đây
 const NowPlayingArbitrator = require("../core/integration/NowPlayingArbitrator"); // Task C — quyết định SMTC hay MPC-HC đang active
+const YoutubeExtensionSession = require("../core/integration/YoutubeExtensionSession"); // YT-BRIDGE-01 — nguồn thứ 3: tiện ích YouTube (127.0.0.1:8765)
 const NowPlayingResolver = require("../core/reference/NowPlayingResolver");
 const SongMatcher = require("../core/reference/SongMatcher");
 // Task C — Key Server: HỎI server trước khi dò Key, và TỰ GỬI Key lên server sau khi dò xong.
@@ -394,8 +395,13 @@ app.whenReady().then(async () => {
     const windowsMediaSession = new WindowsMediaSession();
     const mpcHcSession = new MpcHcSession({ readSettingsFile });
 
+    // YT-BRIDGE-01 — nguồn thứ 3: tiện ích trình duyệt gửi video/tiêu đề/vị trí THẬT của YouTube về cổng localhost 8765.
+    // Chỉ cộng thêm 1 nguồn vào bộ chọn sẵn có; payload "now-playing-change" giữ nguyên shape. Không chạy tiện ích/ cổng bận => như cũ (SMTC).
+    const youtubeSession = new YoutubeExtensionSession();
+
     let latestSmtcSnapshot = null;
     let latestMpcHcSnapshot = null;
+    let latestYoutubeSnapshot = null;
     let smtcLayerAvailable = false;
     let mpcHcLayerAvailable = false;
 
@@ -409,6 +415,11 @@ app.whenReady().then(async () => {
 
         if (source === "smtc") {
             return NowPlayingResolver.resolve({ source: "smtc", title: snapshot.title, artist: snapshot.artist });
+        }
+
+        if (source === "youtube") {
+            // Tiêu đề YouTube đi cùng đường làm sạch như tiêu đề trình duyệt (SMTC); tiện ích không có tên kênh nên artist = null.
+            return NowPlayingResolver.resolve({ source: "smtc", title: snapshot.title, artist: null });
         }
 
         if (source === "mpc-hc" && snapshot.filePath) {
@@ -433,12 +444,13 @@ app.whenReady().then(async () => {
 
     const keyTimelineRunner = new KeyTimeline.KeyTimelineRunner({
         getPositionSec: () => {
-            const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
+            const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot, latestYoutubeSnapshot);
             return KeyTimeline.estimatePositionSec({
                 source: active ? active.source : null,
                 mpcSnapshot: mpcHcSession.getLatestSnapshot(),
                 // Snapshot SMTC MỚI NHẤT của lần poll gần nhất (latestSmtcSnapshot chỉ cập nhật khi đổi bài nên không có vị trí tươi).
                 smtcSnapshot: windowsMediaSession.getLastSnapshot(),
+                youtubeSnapshot: youtubeSession.getLatestSnapshot(), // YT-BRIDGE-01: vị trí THẬT từng giây của YouTube
                 songStartedAtMs: timelineSongStartedAtMs
             });
         },
@@ -472,7 +484,7 @@ app.whenReady().then(async () => {
 
     function dispatchUnifiedNowPlaying() {
 
-        const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
+        const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot, latestYoutubeSnapshot);
 
         if (!active) {
 
@@ -649,6 +661,27 @@ app.whenReady().then(async () => {
         dispatchUnifiedNowPlaying();
     });
 
+    // YT-BRIDGE-01 — sự kiện của nguồn YouTube. "change" phát khi đổi video / đổi tên / phát<->tạm dừng / mất kết nối (null).
+    youtubeSession.on("ready", (info) => {
+        console.log("[YoutubeExtension] READY", info);
+    });
+
+    youtubeSession.on("change", (snapshot) => {
+        console.log("[YoutubeExtension] SNAPSHOT", snapshot ? { videoId: snapshot.videoId, title: snapshot.title, isPlaying: snapshot.isPlaying, isAd: snapshot.isAd } : null);
+        latestYoutubeSnapshot = snapshot;
+        dispatchUnifiedNowPlaying();
+    });
+
+    youtubeSession.on("unavailable", (info) => {
+        // Cổng bận (vd HT DAW đang chạy) hoặc lỗi mở cổng: Menu vẫn chạy bình thường bằng SMTC/MPC-HC; module tự thử lại sau 15s.
+        console.log("[YoutubeExtension] UNAVAILABLE", info);
+        if (latestYoutubeSnapshot) { latestYoutubeSnapshot = null; dispatchUnifiedNowPlaying(); }
+    });
+
+    youtubeSession.on("error", (err) => {
+        console.log("[YoutubeExtension] ERROR", err && err.message);
+    });
+
     // ---- ĐỒNG HỒ BÀI ĐANG PHÁT (Claude C) ----
     // Hiện "01:23 / 04:05" cạnh NOW PLAYING và giúp MOD canh đúng phút. Vị trí/thời lượng THẬT lấy từ nguồn đang active:
     //   MPC-HC (Web Interface) hoặc trình duyệt (SMTC timeline, nếu trang web báo cho Windows). Nguồn không báo -> hasTimeline:false
@@ -665,14 +698,16 @@ app.whenReady().then(async () => {
 
         try {
 
-            const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot);
+            const active = NowPlayingArbitrator.resolveActiveSource(latestSmtcSnapshot, latestMpcHcSnapshot, latestYoutubeSnapshot);
             let payload = null;
             let key = "null";
 
             if (active && currentNowPlayingForSync) {
 
                 // Snapshot MỚI NHẤT của lần poll gần nhất (khác latestSmtcSnapshot/latestMpcHcSnapshot chỉ cập nhật khi đổi bài).
-                const live = active.source === "smtc" ? windowsMediaSession.getLastSnapshot() : mpcHcSession.getLatestSnapshot();
+                const live = active.source === "smtc" ? windowsMediaSession.getLastSnapshot()
+                    : active.source === "youtube" ? youtubeSession.getLatestSnapshot()
+                    : mpcHcSession.getLatestSnapshot();
                 const clock = NowPlayingClock.compute(active.source, live);
 
                 payload = clock
@@ -720,6 +755,9 @@ app.whenReady().then(async () => {
     console.log("[MpcHcSession] START");
     mpcHcSession.start();
 
+    console.log("[YoutubeExtension] START");
+    youtubeSession.start();
+
     // TASK A51 — SHUTDOWN SAFETY cho Now Playing: trước đây windowsMediaSession.stop()/
     // mpcHcSession.stop() KHÔNG BAO GIỜ được gọi lúc tắt app. windowsMediaSession.stop() giết
     // tiến trình con PowerShell (daemon đọc SMTC, spawn qua spawn("powershell.exe", ...,
@@ -746,6 +784,12 @@ app.whenReady().then(async () => {
             mpcHcSession.stop();
         } catch (err) {
             console.error("mpcHcSession.stop() lúc shutdown lỗi (bỏ qua, app vẫn thoát):", err.message);
+        }
+
+        try {
+            youtubeSession.stop(); // YT-BRIDGE-01: đóng cổng localhost 8765
+        } catch (err) {
+            console.error("youtubeSession.stop() lúc shutdown lỗi (bỏ qua, app vẫn thoát):", err.message);
         }
     });
 

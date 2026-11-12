@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "KHOI",
+  "version": "1.4.0",
+  "description": "Gửi bài YouTube đang phát (video, tiêu đề, trạng thái, thời gian) về AUTO MENU AI trên máy này.",
+  "permissions": [
+    "tabs",
+    "alarms"
+  ],
+  "host_permissions": [
+    "*://youtube.com/*",
+    "*://*.youtube.com/*",
+    "*://youtu.be/*",
+    "http://127.0.0.1:8765/*"
+  ],
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://youtube.com/*",
+        "*://*.youtube.com/*",
+        "*://youtu.be/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}

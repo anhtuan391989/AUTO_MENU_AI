@@ -1,0 +1,608 @@
+diff --git a/core/integration/YoutubeExtensionSession.js b/core/integration/YoutubeExtensionSession.js
+new file mode 100644
+index 0000000..c835d26
+--- /dev/null
++++ b/core/integration/YoutubeExtensionSession.js
+@@ -0,0 +1,262 @@
++/**
++ * ==========================================================
++ * Auto Menu AI — YouTube Extension Session (nguồn Now Playing thứ 3)
++ * core/integration/YoutubeExtensionSession.js
++ * ----------------------------------------------------------
++ * Nhận dữ liệu từ tiện ích trình duyệt "HT DAW - YouTube Tone Detection" (extensions/HT_YTB_Extension):
++ * mỗi ~1 giây tiện ích POST JSON tới http://127.0.0.1:8765/youtube gồm video_id, title, is_playing,
++ * current_time (giây), duration (giây), is_ad. Nhờ vậy Menu biết CHÍNH XÁC bài YouTube đang phát,
++ * đang chạy hay tạm dừng, vị trí thật (tua là thấy ngay) và biết khi nào là quảng cáo.
++ *
++ * Cùng "hợp đồng" với MpcHcSession / WindowsMediaSession: EventEmitter, KHÔNG BAO GIỜ throw ra ngoài.
++ *   events : "ready" ({port}) | "change" (snapshot|null) | "unavailable" ({reason}) | "error" (Error)
++ *   methods: start() | stop() | getLatestSnapshot() | getPort() | isListening()
++ *
++ * "change" chỉ phát khi đổi video / đổi tiêu đề / đổi đang-phát<->tạm-dừng / mất kết nối (null).
++ * Vị trí thay đổi mỗi giây KHÔNG phát "change" — dùng getLatestSnapshot() (giống MPC-HC).
++ *
++ * AN TOÀN (cổng localhost là cửa vào từ trình duyệt, nên kiểm tra chặt):
++ *   - Chỉ lắng nghe 127.0.0.1 (không ra mạng LAN).
++ *   - Chỉ nhận POST/OPTIONS tại đúng đường dẫn /youtube.
++ *   - Header Host phải là 127.0.0.1/localhost (chống DNS rebinding).
++ *   - Header Origin (nếu có) phải là chrome-extension:// hoặc moz-extension:// — một trang web thường gọi vào sẽ bị 403.
++ *   - Thân yêu cầu tối đa 16KB; mọi trường được ép kiểu + giới hạn độ dài; video_id đúng 11 ký tự [A-Za-z0-9_-].
++ *   - Cổng bận (vd HT DAW đang chạy cùng lúc) -> báo "unavailable", tự thử lại sau 15s, KHÔNG làm sập app.
++ *
++ * Tiện ích BẢN CŨ không gửi "duration" -> bỏ qua dữ liệu đó (ghi log 1 lần) để SMTC tiếp tục làm việc như trước,
++ * tránh mất đồng hồ bài. Cập nhật tiện ích (extensions/HT_YTB_Extension) là có đủ duration.
++ * ==========================================================
++ */
++"use strict";
++
++const EventEmitter = require("events");
++const http = require("http");
++
++const DEFAULT_PORT = 8765;
++const DEFAULT_HOST = "127.0.0.1";
++const MAX_BODY_BYTES = 16 * 1024;
++const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
++const HOST_RE = /^(127\.0\.0\.1|localhost)(:\d+)?$/i;
++const EXT_ORIGIN_RE = /^(chrome|moz)-extension:\/\//i;
++const MAX_TITLE_LEN = 300;
++const MAX_DURATION_SEC = 24 * 60 * 60;
++const OTHER_TAB_GUARD_MS = 3000;
++
++function isFiniteNumber(n) {
++    return typeof n === "number" && Number.isFinite(n);
++}
++
++class YoutubeExtensionSession extends EventEmitter {
++
++    /**
++     * @param {object} [opts]
++     * @param {number} [opts.port=8765]   0 = cổng ngẫu nhiên (dùng khi test)
++     * @param {string} [opts.host="127.0.0.1"]
++     * @param {number} [opts.staleMs=6000]  quá lâu không nhận được gì => coi như tab đã đóng / ngừng phát
++     * @param {number} [opts.retryMs=15000] cổng bận => thử lại sau chừng này
++     * @param {function} [opts.now]         Date.now (tiêm khi test)
++     */
++    constructor(opts) {
++        super();
++        const o = opts || {};
++        this._port = isFiniteNumber(o.port) ? o.port : DEFAULT_PORT;
++        this._host = o.host || DEFAULT_HOST;
++        this._staleMs = isFiniteNumber(o.staleMs) ? o.staleMs : 6000;
++        this._retryMs = isFiniteNumber(o.retryMs) ? o.retryMs : 15000;
++        this._now = typeof o.now === "function" ? o.now : () => Date.now();
++        this._server = null;
++        this._listening = false;
++        this._stopped = true;
++        this._retryTimer = null;
++        this._staleTimer = null;
++        this._snapshot = null;
++        this._lastSeenAt = 0;
++        this._lastEmittedKey = null;
++        this._warnedNoDuration = false;
++    }
++
++    getLatestSnapshot() { return this._snapshot ? { ...this._snapshot } : null; }
++    getPort() {
++        try { return this._server && this._server.address() ? this._server.address().port : this._port; } catch { return this._port; }
++    }
++    isListening() { return this._listening === true; }
++
++    start() {
++        try {
++            this._stopped = false;
++            this._listen();
++            if (!this._staleTimer) {
++                this._staleTimer = setInterval(() => this._checkStale(), 1000);
++                if (typeof this._staleTimer.unref === "function") this._staleTimer.unref();
++            }
++        } catch (err) {
++            this._safeEmitError(err);
++        }
++    }
++
++    stop() {
++        this._stopped = true;
++        try { if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; } } catch { /* bỏ qua */ }
++        try { if (this._staleTimer) { clearInterval(this._staleTimer); this._staleTimer = null; } } catch { /* bỏ qua */ }
++        try { if (this._server) { this._server.close(); } } catch { /* bỏ qua */ }
++        this._server = null;
++        this._listening = false;
++        this._snapshot = null;
++        this._lastEmittedKey = null;
++    }
++
++    _listen() {
++        if (this._server) return;
++        const server = http.createServer((req, res) => this._onRequest(req, res));
++        this._server = server;
++        server.on("error", (err) => {
++            this._listening = false;
++            try { server.close(); } catch { /* bỏ qua */ }
++            if (this._server === server) this._server = null;
++            const reason = err && err.code ? err.code : (err && err.message) || "unknown";
++            try { this.emit("unavailable", { reason }); } catch { /* listener lỗi không được lan ra */ }
++            if (!this._stopped && !this._retryTimer) {
++                this._retryTimer = setTimeout(() => { this._retryTimer = null; if (!this._stopped) this._listen(); }, this._retryMs);
++                if (typeof this._retryTimer.unref === "function") this._retryTimer.unref();
++            }
++        });
++        server.listen(this._port, this._host, () => {
++            this._listening = true;
++            try { this.emit("ready", { port: this.getPort() }); } catch { /* bỏ qua */ }
++        });
++    }
++
++    _safeEmitError(err) {
++        try { if (this.listenerCount("error") > 0) this.emit("error", err); } catch { /* bỏ qua */ }
++    }
++
++    _onRequest(req, res) {
++        const finish = (code, headers) => { try { res.writeHead(code, headers || {}); res.end(); } catch { /* bỏ qua */ } };
++        try {
++            const host = req.headers.host || "";
++            if (!HOST_RE.test(host)) return finish(403);
++
++            const origin = req.headers.origin;
++            const originOk = !origin || EXT_ORIGIN_RE.test(origin);
++            if (!originOk) return finish(403);
++
++            const cors = origin ? {
++                "Access-Control-Allow-Origin": origin,
++                "Access-Control-Allow-Methods": "POST, OPTIONS",
++                "Access-Control-Allow-Headers": "Content-Type",
++                "Access-Control-Allow-Private-Network": "true",
++                "Vary": "Origin"
++            } : {};
++
++            const pathOnly = String(req.url || "").split("?")[0];
++            if (pathOnly !== "/youtube") return finish(404, cors);
++            if (req.method === "OPTIONS") return finish(204, cors);
++            if (req.method !== "POST") return finish(405, cors);
++
++            let size = 0;
++            const chunks = [];
++            let aborted = false;
++            req.on("data", (c) => {
++                if (aborted) return;
++                size += c.length;
++                if (size > MAX_BODY_BYTES) { aborted = true; finish(413, { ...cors, "Connection": "close" }); try { req.destroy(); } catch { /* bỏ qua */ } return; }
++                chunks.push(c);
++            });
++            req.on("end", () => {
++                if (aborted) return;
++                let info = null;
++                try { info = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return finish(400, cors); }
++                try { this.ingest(info); } catch (err) { this._safeEmitError(err); }
++                finish(204, cors);
++            });
++            req.on("error", () => { /* kết nối đứt giữa chừng: bỏ qua */ });
++        } catch (err) {
++            this._safeEmitError(err);
++            finish(500);
++        }
++    }
++
++    /**
++     * Nhận 1 bản tin từ tiện ích. Công khai để test; KHÔNG throw.
++     * @returns {boolean} true nếu bản tin được chấp nhận làm trạng thái hiện tại
++     */
++    ingest(info) {
++        try {
++            if (!info || typeof info !== "object") return false;
++            const id = typeof info.video_id === "string" ? info.video_id : "";
++            if (!VIDEO_ID_RE.test(id)) return false;
++
++            const now = this._now();
++            const isAd = info.is_ad === true;
++            const isPlaying = info.is_playing === true;
++            let title = typeof info.title === "string" ? info.title.trim().slice(0, MAX_TITLE_LEN) : "";
++            const positionSec = !isAd && isFiniteNumber(info.current_time) && info.current_time >= 0 ? info.current_time : null;
++            let durationSec = !isAd && isFiniteNumber(info.duration) && info.duration > 0 && info.duration <= MAX_DURATION_SEC ? info.duration : null;
++
++            const prev = this._snapshot;
++            const prevFresh = !!prev && (now - this._lastSeenAt) <= OTHER_TAB_GUARD_MS;
++
++            // Nhiều tab YouTube cùng gửi: tab đang phát là "thật". Tab khác chỉ báo tạm dừng thì bỏ qua, để khỏi làm nhấp nháy.
++            if (prev && prevFresh && prev.isPlaying && !isPlaying && prev.videoId !== id) return false;
++
++            // Đang chiếu quảng cáo: giữ tên bài + thời lượng của bài chính (nếu cùng video), vị trí = chưa biết.
++            if (isAd && prev && prev.videoId === id) {
++                if (!title) title = prev.title;
++                if (durationSec === null) durationSec = prev.durationMs > 0 ? prev.durationMs / 1000 : null;
++            }
++
++            if (!title) return false;
++            if (durationSec === null) {
++                // Tiện ích bản cũ (không gửi duration): không dùng, để SMTC làm việc như trước (không mất đồng hồ bài).
++                // Chỉ cảnh báo khi bản tin KHÔNG có hẳn trường "duration" (bản cũ). Tiện ích mới luôn gửi trường này (null khi video chưa nạp xong) nên im lặng.
++                if (!isAd && !this._warnedNoDuration && !Object.prototype.hasOwnProperty.call(info, "duration")) {
++                    this._warnedNoDuration = true;
++                    console.log("[YoutubeExtension] Bản tin không có duration (tiện ích bản cũ?) — tạm bỏ qua, dùng nguồn khác. Hãy nạp lại tiện ích trong extensions/HT_YTB_Extension.");
++                }
++                return false;
++            }
++
++            const snapshot = {
++                source: "youtube",
++                videoId: id,
++                url: "https://www.youtube.com/watch?v=" + id,
++                title,
++                artist: null,
++                isPlaying,
++                isAd,
++                positionMs: positionSec === null ? null : Math.round(positionSec * 1000),
++                durationMs: Math.round(durationSec * 1000),
++                timestamp: now
++            };
++
++            this._snapshot = snapshot;
++            this._lastSeenAt = now;
++
++            const key = id + "|" + title + "|" + (isPlaying ? 1 : 0);
++            if (key !== this._lastEmittedKey) {
++                this._lastEmittedKey = key;
++                try { this.emit("change", { ...snapshot }); } catch { /* listener lỗi không được lan ra */ }
++            }
++            return true;
++        } catch (err) {
++            this._safeEmitError(err);
++            return false;
++        }
++    }
++
++    _checkStale() {
++        try {
++            if (!this._snapshot) return;
++            if (this._now() - this._lastSeenAt <= this._staleMs) return;
++            this._snapshot = null;
++            this._lastEmittedKey = null;
++            this.emit("change", null);
++        } catch (err) {
++            this._safeEmitError(err);
++        }
++    }
++}
++
++module.exports = YoutubeExtensionSession;
++module.exports.YoutubeExtensionSession = YoutubeExtensionSession;
++module.exports.DEFAULT_PORT = DEFAULT_PORT;
+diff --git a/extensions/HT_YTB_Extension/HUONG_DAN_CAI.txt b/extensions/HT_YTB_Extension/HUONG_DAN_CAI.txt
+new file mode 100644
+index 0000000..6f4a056
+--- /dev/null
++++ b/extensions/HT_YTB_Extension/HUONG_DAN_CAI.txt
+@@ -0,0 +1,16 @@
++TIEN ICH YOUTUBE CHO AUTO MENU AI  (ban 1.4.0)
++
++Tien ich gui ve AUTO MENU AI (ngay tren may ban, khong ra Internet): bai YouTube dang phat, dang chay hay tam dung,
++vi tri that (tua la thay ngay), thoi luong, va co dang chieu quang cao khong.
++
++CAI DAT (1 lan, Coc Coc / Chrome):
++1. Mo trinh duyet, vao dia chi:  chrome://extensions   (Coc Coc: coccoc://extensions)
++2. Bat "Che do danh cho nha phat trien" (Developer mode) o goc tren ben phai.
++3. Bam "Tai tien ich da giai nen" (Load unpacked) -> chon thu muc  extensions\HT_YTB_Extension  trong thu muc AUTO_MENU_AI.
++4. Neu truoc do da cai ban cu "HT DAW - YouTube Tone Detection": GO ban cu di (hoac bam nut nap lai), chi giu 1 ban.
++5. Mo lai AUTO MENU AI, mo 1 bai YouTube, bam phat.
++
++LUU Y:
++- Menu chi nhan du lieu tu cong 8765 tren chinh may nay. Neu app HT DAW dang chay cung luc va chiem cong 8765 thi Menu
++  van chay binh thuong bang cach cu (SMTC); dong HT DAW la Menu tu nhan lai trong ~15 giay.
++- Ban tien ich cu (1.3.1) khong gui "thoi luong" nen Menu tam bo qua no. Phai dung ban 1.4.0 nay.
+diff --git a/extensions/HT_YTB_Extension/content.js b/extensions/HT_YTB_Extension/content.js
+new file mode 100644
+index 0000000..8439373
+--- /dev/null
++++ b/extensions/HT_YTB_Extension/content.js
+@@ -0,0 +1,90 @@
++(() => {
++  'use strict';
++  let lastSignature = '';
++  let lastVideo = null;
++  let lastUrl = location.href;
++
++  function videoIdFromUrl() {
++    try {
++      const u = new URL(location.href);
++      if (u.hostname === 'youtu.be') return u.pathname.split('/').filter(Boolean)[0] || '';
++      if (u.pathname === '/watch') return u.searchParams.get('v') || '';
++      const p = u.pathname.split('/').filter(Boolean);
++      return p.length > 1 && ['shorts', 'live', 'embed', 'v'].includes(p[0]) ? p[1] : '';
++    } catch (_) { return ''; }
++  }
++
++  function getPlayingVideoTitle(id) {
++    // Prefer the title attached to the currently playing video. document.title can
++    // describe a playlist/container instead of the selected item in some YouTube views.
++    try {
++      const playerTitle = window.ytInitialPlayerResponse
++        && window.ytInitialPlayerResponse.videoDetails
++        && window.ytInitialPlayerResponse.videoDetails.title;
++      if (typeof playerTitle === 'string' && playerTitle.trim()) return playerTitle.trim();
++    } catch (_) {}
++    const selectors = [
++      'h1.ytd-watch-metadata yt-formatted-string',
++      'ytd-watch-metadata h1 yt-formatted-string',
++      'meta[itemprop="name"]',
++      'meta[name="title"]'
++    ];
++    for (const selector of selectors) {
++      const node = document.querySelector(selector);
++      const value = node && (node.content || node.textContent || '');
++      if (value && value.trim()) return value.trim();
++    }
++    return (document.title || '').replace(/\s*-\s*YouTube\s*$/i, '').trim() || id;
++  }
++
++  function sendState(force = false) {
++    const id = videoIdFromUrl();
++    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return;
++    const title = getPlayingVideoTitle(id);
++    const video = document.querySelector('video.html5-main-video, video');
++    const isPlaying = !!(video && !video.paused && !video.ended && video.readyState >= 2);
++    // Đang chiếu quảng cáo thì currentTime là của quảng cáo, không gửi để khỏi lệch mốc đổi tone.
++    const adShowing = !!document.querySelector('.html5-video-player.ad-showing');
++    const currentTime = (video && !adShowing && isFinite(video.currentTime)) ? video.currentTime : null;
++    // Thời lượng video (giây) để AUTO MENU AI hiện đồng hồ "00:43 / 05:05" và so đúng bản thu. Quảng cáo / phát trực tiếp (Infinity) => null.
++    const duration = (video && !adShowing && isFinite(video.duration) && video.duration > 0) ? video.duration : null;
++    const info = { video_id: id, url: `https://www.youtube.com/watch?v=${id}`, title, title_source: 'video', is_playing: isPlaying, current_time: currentTime, duration, is_ad: adShowing };
++    const timeBucket = currentTime === null ? 'ad-or-unknown' : Math.floor(currentTime);
++    const signature = `${id}|${title}|${isPlaying}|${adShowing}|${timeBucket}|${video ? video.readyState : 0}|${duration === null ? 'x' : Math.floor(duration)}`;
++    if (!force && signature === lastSignature) return;
++    lastSignature = signature;
++    try { chrome.runtime.sendMessage({ type: 'ht-youtube-state', info }); } catch (_) {}
++  }
++
++  function bindVideo(video) {
++    if (!video || video === lastVideo) return;
++    lastVideo = video;
++    ['play', 'playing', 'pause', 'ended', 'seeked', 'loadeddata', 'canplay', 'emptied'].forEach(evt =>
++      video.addEventListener(evt, () => sendState(true), { passive: true })
++    );
++  }
++
++  // The service worker requests a fresh player snapshot when a tab becomes active.
++  // Only this content script can authoritatively read video.paused/currentTime.
++  chrome.runtime.onMessage.addListener((message) => {
++    if (message && message.type === 'ht-request-youtube-state') {
++      lastSignature = '';
++      sendState(true);
++    }
++  });
++
++  // Detect YouTube SPA navigation and player state without waiting for the tab title event.
++  setInterval(() => {
++    if (location.href !== lastUrl) {
++      lastUrl = location.href;
++      lastSignature = '';
++      lastVideo = null;
++    }
++    bindVideo(document.querySelector('video.html5-main-video, video'));
++    sendState(false);
++  }, 1000);
++  // Gửi playhead mỗi 1 giây; sự kiện play/pause/seek vẫn được gửi ngay lập tức.
++  document.addEventListener('yt-navigate-finish', () => { lastSignature = ''; sendState(true); }, true);
++  window.addEventListener('popstate', () => { lastSignature = ''; sendState(true); }, true);
++  sendState(true);
++})();
+diff --git a/extensions/HT_YTB_Extension/manifest.json b/extensions/HT_YTB_Extension/manifest.json
+new file mode 100644
+index 0000000..c731b12
+--- /dev/null
++++ b/extensions/HT_YTB_Extension/manifest.json
+@@ -0,0 +1,32 @@
++{
++  "manifest_version": 3,
++  "name": "HT DAW - YouTube Tone Detection",
++  "version": "1.4.0",
++  "description": "Nhận Video ID, tiêu đề, trạng thái phát và thời gian YouTube để HT DAW phân tích Tone toàn bài.",
++  "permissions": [
++    "tabs",
++    "alarms"
++  ],
++  "host_permissions": [
++    "*://youtube.com/*",
++    "*://*.youtube.com/*",
++    "*://youtu.be/*",
++    "http://127.0.0.1:8765/*"
++  ],
++  "background": {
++    "service_worker": "service_worker.js"
++  },
++  "content_scripts": [
++    {
++      "matches": [
++        "*://youtube.com/*",
++        "*://*.youtube.com/*",
++        "*://youtu.be/*"
++      ],
++      "js": [
++        "content.js"
++      ],
++      "run_at": "document_start"
++    }
++  ]
++}
+diff --git a/extensions/HT_YTB_Extension/service_worker.js b/extensions/HT_YTB_Extension/service_worker.js
+new file mode 100644
+index 0000000..724ab59
+--- /dev/null
++++ b/extensions/HT_YTB_Extension/service_worker.js
+@@ -0,0 +1,51 @@
++const APP_ENDPOINT = 'http://127.0.0.1:8765/youtube';
++
++async function postInfo(info) {
++  if (!info || !/^[A-Za-z0-9_-]{11}$/.test(info.video_id || '')) return;
++  try {
++    await fetch(APP_ENDPOINT, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify(info),
++      cache: 'no-store'
++    });
++  } catch (_) { /* The desktop app may not be running yet. */ }
++}
++
++// Never synthesize playback state from chrome.tabs: tab metadata cannot tell
++// whether the actual YouTube video is playing or provide its playhead.
++async function requestPlayerState(tabId) {
++  if (!Number.isInteger(tabId)) return;
++  try {
++    await chrome.tabs.sendMessage(tabId, { type: 'ht-request-youtube-state' });
++  } catch (_) {
++    // Content script may not be injected yet. It will publish on its next poll.
++  }
++}
++
++async function inspectActiveTab() {
++  try {
++    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
++    if (tabs && tabs.length && Number.isInteger(tabs[0].id))
++      await requestPlayerState(tabs[0].id);
++  } catch (_) {}
++}
++
++chrome.runtime.onMessage.addListener((message, sender) => {
++  if (!message || message.type !== 'ht-youtube-state' || !sender.tab) return;
++  postInfo(message.info || {});
++});
++
++chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
++  if (changeInfo.url || changeInfo.status === 'complete') {
++    chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(tabs => {
++      const active = tabs && tabs[0];
++      if (active && active.id === tabId) requestPlayerState(tabId);
++    }).catch(() => {});
++  }
++});
++chrome.tabs.onActivated.addListener(activeInfo => requestPlayerState(activeInfo.tabId));
++chrome.windows.onFocusChanged.addListener(() => inspectActiveTab());
++chrome.alarms.create('ht-audio-youtube-watch', { periodInMinutes: 0.5 });
++chrome.alarms.onAlarm.addListener(() => inspectActiveTab());
++chrome.runtime.onInstalled.addListener(() => inspectActiveTab());
+diff --git a/tests/unit/YoutubeBridge01.verify.js b/tests/unit/YoutubeBridge01.verify.js
+new file mode 100644
+index 0000000..9487e13
+--- /dev/null
++++ b/tests/unit/YoutubeBridge01.verify.js
+@@ -0,0 +1,121 @@
++"use strict";
++/**
++ * YT-BRIDGE-01 — nguồn Now Playing thứ 3 (tiện ích YouTube -> 127.0.0.1:8765).
++ * Dùng máy chủ HTTP THẬT trên cổng ngẫu nhiên (port:0), gửi yêu cầu HTTP thật.
++ */
++const http = require("http");
++const path = require("path");
++const root = path.join(__dirname, "..", "..");
++const Session = require(path.join(root, "core/integration/YoutubeExtensionSession.js"));
++const Arb = require(path.join(root, "core/integration/NowPlayingArbitrator.js"));
++const Clock = require(path.join(root, "core/integration/NowPlayingClock.js"));
++const KT = require(path.join(root, "core/integration/KeyTimeline.js"));
++
++let pass = 0, fail = 0;
++function ok(c, m) { if (c) { pass++; console.log("  OK   " + m); } else { fail++; console.log("  FAIL " + m); } }
++const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
++
++function post(port, body, headers, pathname, method) {
++    return new Promise((resolve) => {
++        const data = typeof body === "string" ? body : JSON.stringify(body);
++        const req = http.request({ host: "127.0.0.1", port, path: pathname || "/youtube", method: method || "POST",
++            headers: Object.assign({ "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) }, headers || {}) },
++            (res) => { res.resume(); res.on("end", () => resolve(res.statusCode)); });
++        req.on("error", () => resolve(0));
++        req.end(data);
++    });
++}
++const msg = (o) => Object.assign({ video_id: "dQw4w9WgXcQ", title: "Bai Test - Ca Si", is_playing: true, current_time: 43.2, duration: 305, is_ad: false }, o || {});
++
++(async () => {
++    // ===== 1. Máy chủ + bản tin hợp lệ =====
++    const s = new Session({ port: 0, staleMs: 400 });
++    const events = [];
++    s.on("change", (x) => events.push(x));
++    let readyPort = null;
++    s.on("ready", (i) => { readyPort = i.port; });
++    s.start();
++    await sleep(150);
++    ok(s.isListening() && readyPort > 0, "mở cổng localhost thành công");
++    const port = readyPort;
++
++    ok(await post(port, msg()) === 204, "POST /youtube hợp lệ => 204");
++    await sleep(50);
++    const snap = s.getLatestSnapshot();
++    ok(snap && snap.videoId === "dQw4w9WgXcQ" && snap.title === "Bai Test - Ca Si" && snap.isPlaying === true && snap.positionMs === 43200 && snap.durationMs === 305000, "snapshot đúng: video/tiêu đề/đang phát/vị trí/thời lượng");
++    ok(events.length === 1 && events[0].source === "youtube", "phát 'change' 1 lần khi có bài mới");
++    await post(port, msg({ current_time: 44.2 })); await sleep(30);
++    ok(events.length === 1 && s.getLatestSnapshot().positionMs === 44200, "vị trí đổi mỗi giây KHÔNG phát 'change' nhưng getLatestSnapshot cập nhật");
++    await post(port, msg({ is_playing: false, current_time: 44.5 })); await sleep(30);
++    ok(events.length === 2 && events[1].isPlaying === false, "phát -> tạm dừng phát 'change'");
++
++    // ===== 2. Từ chối bản tin xấu =====
++    ok(await post(port, msg({ video_id: "abc" })) === 204 && s.getLatestSnapshot().videoId === "dQw4w9WgXcQ", "video_id sai định dạng bị bỏ qua (không đổi trạng thái)");
++    ok(await post(port, "{khong phai json") === 400, "JSON hỏng => 400");
++    ok(await post(port, msg(), { Origin: "https://evil.example" }) === 403, "Origin là trang web thường => 403");
++    ok(await post(port, msg(), { Host: "evil.example" }) === 403, "Host lạ (DNS rebinding) => 403");
++    ok(await post(port, msg(), { Origin: "chrome-extension://abcdefghijklmnop" }) === 204, "Origin là chrome-extension:// => chấp nhận");
++    await sleep(30);
++    const before = events.length; // từ đây chỉ còn bản tin XẤU: không được tạo thêm 'change'
++    ok(await post(port, msg(), {}, "/khac") === 404, "đường dẫn khác => 404");
++    ok(await post(port, "", {}, "/youtube", "GET") === 405, "GET => 405");
++    ok(await post(port, "", { Origin: "chrome-extension://abc" }, "/youtube", "OPTIONS") === 204, "OPTIONS (preflight) => 204");
++    ok(await post(port, "x".repeat(40000)) !== 204, "thân quá 16KB bị từ chối");
++    ok(events.length === before, "các bản tin xấu không tạo 'change' giả");
++
++    // ===== 3. Nhiều tab / quảng cáo / bản cũ không có duration =====
++    s.ingest(msg({ is_playing: true }));
++    ok(s.ingest(msg({ video_id: "AAAAAAAAAAA", title: "Tab nen", is_playing: false })) === false, "tab khác chỉ báo tạm dừng khi tab chính đang phát => bỏ qua");
++    ok(s.getLatestSnapshot().videoId === "dQw4w9WgXcQ", "vẫn giữ bài đang phát thật");
++    s.ingest(msg({ is_ad: true, current_time: null, duration: null }));
++    const ad = s.getLatestSnapshot();
++    ok(ad.isAd === true && ad.positionMs === null && ad.durationMs === 305000 && ad.title === "Bai Test - Ca Si", "đang quảng cáo: giữ tên + thời lượng bài chính, vị trí = chưa biết");
++    ok(s.ingest(msg({ video_id: "BBBBBBBBBBB", duration: undefined })) === false, "bản tin không có duration (tiện ích cũ) => bỏ qua, để SMTC làm việc");
++
++    // ===== 4. Quá hạn => mất kết nối =====
++    await sleep(1700);
++    ok(s.getLatestSnapshot() === null && events[events.length - 1] === null, "không nhận gì quá hạn => snapshot null + 'change'(null)");
++    s.stop();
++    await sleep(50);
++    ok(!s.isListening(), "stop() đóng cổng");
++
++    // ===== 5. Cổng bận không làm sập =====
++    const blocker = http.createServer(() => {});
++    await new Promise((r) => blocker.listen(0, "127.0.0.1", r));
++    const busy = new Session({ port: blocker.address().port, retryMs: 200 });
++    let unavailable = null;
++    busy.on("unavailable", (i) => { unavailable = i; });
++    let threw = false;
++    try { busy.start(); } catch { threw = true; }
++    await sleep(150);
++    ok(!threw && unavailable && unavailable.reason === "EADDRINUSE", "cổng bận => 'unavailable' EADDRINUSE, không throw");
++    let readyAgain = false;
++    busy.on("ready", () => { readyAgain = true; });
++    await new Promise((r) => blocker.close(r));
++    await sleep(700);
++    ok(readyAgain && busy.isListening(), "cổng được giải phóng => tự nhận lại sau vài trăm ms");
++    busy.stop();
++
++    // ===== 6. Bộ chọn nguồn (tương thích ngược) =====
++    const smtc = { title: "S" }, mpcPlay = { state: 2 }, mpcPause = { state: 1 };
++    const ytPlay = { isPlaying: true, title: "Y" }, ytPause = { isPlaying: false, title: "Y" };
++    ok(Arb.resolveActiveSource(smtc, null).source === "smtc" && Arb.resolveActiveSource(null, mpcPlay).source === "mpc-hc" && Arb.resolveActiveSource(null, null) === null, "gọi kiểu cũ (2 tham số) => y hệt trước");
++    ok(Arb.resolveActiveSource(smtc, null, ytPlay).source === "youtube", "YouTube đang phát thắng SMTC");
++    ok(Arb.resolveActiveSource(smtc, mpcPlay, ytPlay).source === "mpc-hc", "MPC-HC đang Playing vẫn thắng YouTube");
++    ok(Arb.resolveActiveSource(smtc, null, ytPause).source === "smtc", "YouTube tạm dừng nhường SMTC");
++    ok(Arb.resolveActiveSource(null, null, ytPause).source === "youtube", "chỉ có YouTube (tạm dừng) => vẫn dùng");
++    ok(Arb.resolveActiveSource(null, mpcPause, ytPause).source === "mpc-hc", "MPC-HC tạm dừng xếp trước YouTube tạm dừng (giữ thứ tự cũ)");
++
++    // ===== 7. Đồng hồ + mốc đổi Key =====
++    const base = { isPlaying: true, positionMs: 43000, durationMs: 305000, timestamp: 1000 };
++    const c = Clock.compute("youtube", base, 3000);
++    ok(c && Math.abs(c.positionSec - 45) < 1e-6 && c.durationSec === 305 && c.playing === true, "đồng hồ YouTube: vị trí cộng phần thời gian đã trôi khi đang phát");
++    ok(Clock.compute("youtube", Object.assign({}, base, { isPlaying: false }), 9000).positionSec === 43, "tạm dừng: đồng hồ đứng yên");
++    ok(Clock.compute("youtube", Object.assign({}, base, { positionMs: null })) === null, "quảng cáo (không có vị trí) => không có đồng hồ, không bịa số");
++    ok(Math.abs(KT.estimatePositionSec({ source: "youtube", youtubeSnapshot: base, songStartedAtMs: 0, now: 3000 }) - 45) < 1e-6, "mốc đổi Key lấy vị trí THẬT của YouTube");
++    ok(KT.estimatePositionSec({ source: "youtube", youtubeSnapshot: Object.assign({}, base, { positionMs: null }), songStartedAtMs: 0, now: 3000 }) === null, "đang quảng cáo: không canh mốc đổi Key (không rơi về đồng hồ tính từ lúc thấy bài)");
++    ok(KT.estimatePositionSec({ source: "smtc", smtcSnapshot: null, songStartedAtMs: 1000, now: 4000 }) === 3, "nguồn khác (SMTC không có vị trí) vẫn tính như cũ");
++
++    console.log("\n" + pass + " PASS, " + fail + " FAIL");
++    process.exit(fail ? 1 : 0);
++})().catch((e) => { console.error("LỖI TEST:", e); process.exit(2); });
