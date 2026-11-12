@@ -24,8 +24,8 @@ console.log('== 1. Một lần bấm lưu đủ cả 9 bộ ==');
   const e = env({ selectedDAW: 'Studio Pro 8' }); const r = e.click(); const m = e.st.dawMidiOutMappings['Studio Pro 8'] || {};
   const base = e.api.resolveDawProfile('Studio Pro 8');
   const expect = Object.values(base.bundles).reduce((n, b) => n + Object.keys(b.mappings).length, 0);
-  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 4 + 1 + 2 + 6 + 4 + 12, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 4 TUNE + 1 LOFI + 2 MIC VOLUME + 6 PRESET + 4 FX BUS + 12 KEY/SCALE)', Object.keys(m).length);
-  ok(m.MUSIC_ON && m.BEAT_INPUT_VOLUME && m.MUSIC_SELECT && m.MIC1_VOLUME && m.KEY_SCALE_MINOR && m.KEY_ROOT && m.TUNE_BYPASS && m.LOFI_STATE && m.PRESET_NORM && m.FX_BUS_DELAY_VOLUME && m.KEY_ROOT_AT4, 'có mặt đủ đại diện từng bộ');
+  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 4 + 1 + 1 + 2 + 6 + 4 + 12, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 4 TUNE + 1 LOFI + 1 BÈ + 2 MIC VOLUME + 6 PRESET + 4 FX BUS + 12 KEY/SCALE)', Object.keys(m).length);
+  ok(m.MUSIC_ON && m.BEAT_INPUT_VOLUME && m.MUSIC_SELECT && m.MIC1_VOLUME && m.KEY_SCALE_MINOR && m.KEY_ROOT && m.TUNE_BYPASS && m.LOFI_STATE && m.BE_STATE && m.PRESET_NORM && m.FX_BUS_DELAY_VOLUME && m.KEY_ROOT_AT4, 'có mặt đủ đại diện từng bộ');
   ok(Object.values(m).every((x) => x.source === 'USER_DEFINED'), 'đều đánh dấu USER_DEFINED');
   ok(base.quickFillLabel === 'Fender Studio Pro 8 MIDI', 'tên nút = "Fender Studio Pro 8 MIDI"');
 }
@@ -33,7 +33,7 @@ console.log('== 2. Studio One 7 cũng dùng cùng bộ; Cubase giữ các nút r
 {
   ok(env({ selectedDAW: 'Studio One 7' }).click().done === true, 'Studio One 7 -> lưu được');
   const c = env({ selectedDAW: 'Cubase 13' }); const r = c.click();
-  ok(r.done && Object.keys(c.st.dawMidiOutMappings['Cubase 13']).length === 17, 'Cubase (hàm gộp) -> 17 mapping (8 LIVE + 4 KNOB + 4 TUNE + 1 LOFI)');
+  ok(r.done && Object.keys(c.st.dawMidiOutMappings['Cubase 13']).length === 18, 'Cubase (hàm gộp) -> 18 mapping (8 LIVE + 4 KNOB + 4 TUNE + 1 LOFI + 1 BÈ)');
   ok(env({ selectedDAW: 'Logic' }).click().blocked === 'no-profile', 'DAW không có bộ -> chặn');
 }
 console.log('== 3. All-or-nothing, không đụng mapping khác, idempotent ==');

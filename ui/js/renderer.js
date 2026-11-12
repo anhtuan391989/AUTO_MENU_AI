@@ -655,7 +655,11 @@ const isTuneOffBtn = (b) => !!(b && b.dataset && b.dataset.tuneBtn === "1");
 // Bấm: nút SÁNG = LOFI BẬT (CC 127), bấm lần nữa: TẮT (CC 0). Không đổi HTML — JS nhận diện nút theo chữ "LOFI" một lần. Không lưu/khôi phục (Menu không đọc được trạng thái DAW): luôn mở ở TẮT.
 document.querySelectorAll(".preset-btn").forEach((b) => { if (!b.closest(".custom-modal") && b.textContent.trim() === "LOFI") b.dataset.lofiBtn = "1"; });
 const isLofiBtn = (b) => !!(b && b.dataset && b.dataset.lofiBtn === "1");
-const isIndependentPresetBtn = (b) => isTuneOffBtn(b) || isLofiBtn(b);
+// BE-BTN-01 — nút BÈ (hoà âm/bè): công tắc ON/OFF ĐỘC LẬP như LOFI (kết hợp được với NORM/RAP/REMIX/TUNE). Nhận diện theo id "harmonyBtn" (không dựa vào chữ, vì chữ đổi theo ngôn ngữ).
+// Mặc định TẮT khi mở app (Menu không đọc được trạng thái DAW). Bấm: sáng = BÈ BẬT, bấm lần nữa = TẮT. Qua ActionRegistry "BE" (BE_STATE) như LOFI.
+document.querySelectorAll(".preset-btn").forEach((b) => { if (b.id === "harmonyBtn") b.dataset.harmonyBtn = "1"; });
+const isHarmonyBtn = (b) => !!(b && b.dataset && b.dataset.harmonyBtn === "1");
+const isIndependentPresetBtn = (b) => isTuneOffBtn(b) || isLofiBtn(b) || isHarmonyBtn(b);
 let currentPresetName = "NORM"; // A95 — preset đang sáng (chỉ đổi khi BẤM; mở app không gửi gì); RAP giữ Verb dài TẮT nên knob FX không được bật lại bus này
 function renderTuneBtn(btn, tuneOn) {
     btn.classList.toggle("active", tuneOn);
@@ -675,6 +679,12 @@ document.querySelectorAll(".preset-btn").forEach(btn => {
             const lofiOnNow = !e.target.classList.contains("active"); // trạng thái ĐÍCH sau cú bấm
             e.target.classList.toggle("active", lofiOnNow);
             reportDawStateResult(e.target, "LOFI", window.ActionRegistry?.setDawControlState?.("LOFI", lofiOnNow, { reason: "menu-button" }));
+            return;
+        }
+        if (isHarmonyBtn(e.target)) { // BE-BTN-01
+            const beOnNow = !e.target.classList.contains("active"); // trạng thái ĐÍCH sau cú bấm
+            e.target.classList.toggle("active", beOnNow);
+            reportDawStateResult(e.target, "BE", window.ActionRegistry?.setDawControlState?.("BE", beOnNow, { reason: "menu-button" }));
             return;
         }
         // TASK A95 — NORM/RAP/REMIX chọn-một thật: nút trước TẮT (gửi OFF + hoàn tác hiệu ứng), nút mới SÁNG (gửi ON + áp hiệu ứng). Xem applyPresetTransition (actionRegistry.js).
@@ -2601,7 +2611,7 @@ function saveData() {
         tone: document.getElementById("toneSelector")?.value,
         modEnabled: document.getElementById("modPowerBtn")?.classList.contains("active"),
         preset: (() => { // A79: nút TUNE là công tắc bypass, không phải preset -> không lưu làm preset
-            const isTune = (b) => !!(b && b.dataset && (b.dataset.tuneBtn === "1" || b.dataset.lofiBtn === "1")); // A79/A94: TUNE và LOFI là công tắc, không lưu làm preset
+            const isTune = (b) => !!(b && b.dataset && (b.dataset.tuneBtn === "1" || b.dataset.lofiBtn === "1" || b.dataset.harmonyBtn === "1")); // A79/A94/BE-BTN-01: TUNE, LOFI và BÈ là công tắc, không lưu làm preset
             const a = document.querySelector(".preset-btn.active");
             if (a && !isTune(a)) return a.textContent.trim();
             return [...document.querySelectorAll(".preset-btn.active")].find(b => !isTune(b))?.textContent.trim();
@@ -2652,7 +2662,7 @@ function loadData() {
 
     if (data.preset) {
         document.querySelectorAll(".preset-btn").forEach(btn => {
-            if (btn.dataset && (btn.dataset.tuneBtn === "1" || btn.dataset.lofiBtn === "1")) return; // A79/A94: TUNE/LOFI không khôi phục (không có phản hồi từ DAW) — luôn mở ở TUNE ON / LOFI TẮT
+            if (btn.dataset && (btn.dataset.tuneBtn === "1" || btn.dataset.lofiBtn === "1" || btn.dataset.harmonyBtn === "1")) return; // A79/A94/BE-BTN-01: TUNE/LOFI/BÈ không khôi phục (không có phản hồi từ DAW) — luôn mở ở TUNE ON / LOFI TẮT
             btn.classList.remove("active");
             if (btn.textContent.trim() === data.preset) {
                 btn.classList.add("active");

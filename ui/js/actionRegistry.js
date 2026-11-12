@@ -141,6 +141,9 @@ const ACTIONS = Object.freeze({
     // TASK A94 — nút LOFI = công tắc ON/OFF ĐỘC LẬP (kết hợp được với NORM/RAP/REMIX; chỉ riêng LOFI). MỘT CC kiểu BYPASS (giống TUNE): nút SÁNG = LOFI BẬT => gửi 0; nút TẮT = LOFI TẮT => gửi 127 (đảo so với bản đầu theo cách nối thật của người dùng).
     // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_LOFI cũ (tương thích ngược).
     LOFI_STATE: "LOFI_STATE",
+    // BE-BTN-01 — nút BÈ (hoà âm/bè) = công tắc ON/OFF ĐỘC LẬP như LOFI, kiểu BYPASS: nút SÁNG = BÈ BẬT => gửi 0; nút TẮT => gửi 127.
+    // Mặc định (mọi DAW): kênh 15, CC 104 — không trùng bộ kênh 15 đã dùng (20-37, 85-95, 102-103). Mapping Khói tự lưu luôn thắng.
+    BE_STATE: "BE_STATE",
     // TASK A96 — popup chuột phải nút MUSIC: (1) nút AUDIO CHILL = công tắc ON/OFF (sáng = BẬT = 127, tắt = TẮT = 0; đã đảo theo cách nối thật của Khói) — kênh 15 CC 94;
     // (2) knob AUDIO CHILL = điều khiển 1 tham số VST bằng CC 0..127 tuyến tính — kênh 15 CC 95. Hai điều khiển ĐỘC LẬP nhau (knob xoay được dù nút bật hay tắt).
     AUDIO_CHILL_STATE: "AUDIO_CHILL_STATE",
@@ -159,6 +162,7 @@ const DAW_STATE_CONTROLS = Object.freeze({
     FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" }),
     TUNE: Object.freeze({ on: "TUNE_BYPASS", off: "TUNE_BYPASS", values: Object.freeze({ on: 127, off: 0 }), legacy: "PRESET_TUNE_OFF", label: "TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — cả 4 plugin Auto-Tune)" }), // TASK A79/A94
     LOFI: Object.freeze({ on: "LOFI_STATE", off: "LOFI_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "PRESET_LOFI", label: "LOFI (ON/OFF độc lập, kết hợp được với preset khác)" }), // TASK A94
+    BE: Object.freeze({ on: "BE_STATE", off: "BE_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "BE_STATE", label: "BÈ (ON/OFF độc lập kiểu bypass: sáng = BẬT = gửi 0; tắt = gửi 127)" }), // BE-BTN-01
     AUDIO_CHILL: Object.freeze({ on: "AUDIO_CHILL_STATE", off: "AUDIO_CHILL_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "AUDIO_CHILL_STATE", label: "AUDIO CHILL (ON/OFF kiểu bypass: sáng = BẬT = gửi 0; tắt = TẮT = gửi 127; độc lập với knob)" })
 });
 
@@ -290,6 +294,10 @@ function getMidiOutMapping(action) {
     if (action === "LOFI_STATE") {
         const cubase = /^cubase/i.test(String(daw).trim());
         return { kind: "cc", channel: 16, number: cubase ? 119 : 118, value: 127, source: "DEFAULT_PRESET" };
+    }
+    // BE-BTN-01 — preset mặc định nút BÈ: kênh 15, CC 104, mọi DAW. Giá trị gửi do nút quyết định (0 = BẬT, 127 = TẮT).
+    if (action === "BE_STATE") {
+        return { kind: "cc", channel: 15, number: 104, value: 127, source: "DEFAULT_PRESET" };
     }
     // TASK A92 — preset mặc định SCALE gửi tới Auto-Tune (Studio One/Studio Pro): kênh 15, CC 26 (Major=0, Minor=5). Khớp bộ "scale" trong DAW_MIDI_PROFILES (setup.js).
     // Chỉ khi chưa lưu mapping riêng (mapping đã lưu luôn thắng). KEY gốc KHÔNG có mặc định CC: vẫn gửi bằng nốt MIDI như cũ (KEY_ROOT chỉ dùng CC khi người dùng tự lưu CC 27). Cubase chưa có bộ CC kiểm chứng nên không có mặc định.

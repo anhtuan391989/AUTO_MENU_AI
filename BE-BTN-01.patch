@@ -1,0 +1,291 @@
+diff --git a/tests/unit/BeBtn01.verify.js b/tests/unit/BeBtn01.verify.js
+new file mode 100644
+index 0000000..645d284
+--- /dev/null
++++ b/tests/unit/BeBtn01.verify.js
+@@ -0,0 +1,71 @@
++/** BeBtn01.verify.js — BE-BTN-01: nút BÈ = công tắc ON/OFF độc lập (như LOFI), thứ tự nút mới, CC mặc định tự nối.
++ *  Chạy: node tests/unit/BeBtn01.verify.js */
++'use strict';
++const fs = require('fs'), path = require('path'), vm = require('vm');
++let pass = 0, fail = 0;
++const ok = (c, l) => { if (c) { pass++; console.log('  OK  ', l); } else { fail++; console.error('  FAIL ', l); } };
++const rd = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
++function makeAR(daw, saved) {
++    const sent = [];
++    const win = { appSettings: {}, getLastMidiSendResult: () => null };
++    const sb = { window: win, console, setTimeout, clearTimeout, Promise,
++        getSetting: (k) => (k === 'selectedDAW' ? daw : k === 'dawMidiOutMappings' ? (saved || {}) : undefined), saveSetting: () => {},
++        sendMidiCC: async (n, v, ch) => { sent.push([n, v, ch]); return true; } };
++    vm.createContext(sb); vm.runInContext(rd('ui/js/actionRegistry.js'), sb, { filename: 'actionRegistry.js' });
++    return Object.assign({}, win.ActionRegistry, { __sent: sent });
++}
++(async () => {
++    console.log('== 1. HTML: thứ tự nút + nút BÈ ==');
++    const html = rd('ui/index.html');
++    const grid = html.slice(html.indexOf('<section class="preset-grid">'), html.indexOf('</section>', html.indexOf('<section class="preset-grid">')));
++    const order = [...grid.matchAll(/<button[^>]*>\s*(?:<span class="icon"[^>]*><\/span><span class="text">)?([^<]+)/g)].map((m) => m[1].trim());
++    ok(JSON.stringify(order.slice(0, 7)) === JSON.stringify(['NORM', 'RAP', 'REMIX', 'LOFI', 'TUNE OFF', 'BÈ', 'EFFECT']) && grid.lastIndexOf('EXPAND') > grid.indexOf('EFFECT'), 'thứ tự: NORM RAP REMIX LOFI TUNE BÈ EFFECT EXPAND — ' + order.slice(0, 7).join(' '));
++    ok(/id="harmonyBtn" class="preset-btn"/.test(grid), 'nút BÈ có id harmonyBtn, class preset-btn');
++    const css = rd('ui/css/style.css');
++    ok(/\.preset-grid \{[^}]*grid-template-columns: repeat\(3,1fr\) repeat\(4,\.74fr\) 1fr/.test(css), 'lưới 8 cột: 3 nút đầu 1fr, 4 nút nhỏ .74fr, MỞ RỘNG 1fr');
++
++    console.log('== 2. actionRegistry: BÈ 1 CC, bật=0 / tắt=127, mặc định kênh 15 CC104 ==');
++    let AR = makeAR('Studio Pro 8');
++    const d = AR.DAW_STATE_CONTROLS.BE;
++    ok(AR.ACTIONS.BE_STATE === 'BE_STATE' && d && d.on === 'BE_STATE' && d.off === 'BE_STATE' && d.values.on === 0 && d.values.off === 127, 'control BE: 1 action, bật gửi 0, tắt gửi 127');
++    let r = await AR.setDawControlState('BE', true, {});
++    ok(r.ok && JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 0, 14]), 'BÈ BẬT -> CC104 = 0, kênh 15 (index 14), không cần Setup');
++    r = await AR.setDawControlState('BE', false, {});
++    ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([104, 127, 14]), 'BÈ TẮT -> CC104 = 127');
++    AR = makeAR('Cubase 14'); await AR.setDawControlState('BE', true, {});
++    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 0, 14]), 'Cubase: cũng kênh 15 CC104');
++    AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { BE_STATE: { kind: 'cc', channel: 15, number: 77, value: 127 } } }); await AR.setDawControlState('BE', true, {});
++    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([77, 0, 14]), 'mapping người dùng đã lưu luôn thắng mặc định');
++
++    console.log('== 3. renderer: BÈ độc lập (mã thật, DOM giả) ==');
++    const src = rd('ui/js/renderer.js');
++    const i0 = src.indexOf('const PRESET_NAME_TO_ACTION'); const i1 = src.indexOf('ensurePresetLit();\n\n// MIDI-DAW-CONTROL-01');
++    ok(i0 > 0 && i1 > i0, 'tìm thấy khối xử lý nút Preset');
++    class Btn { constructor(t, id) { this.textContent = t; this.id = id || ''; this.dataset = {}; this.cls = new Set(); this.h = [];
++        this.classList = { add: (c) => this.cls.add(c), remove: (c) => this.cls.delete(c), contains: (c) => this.cls.has(c), toggle: (c, f) => { if (f === undefined ? !this.cls.has(c) : f) this.cls.add(c); else this.cls.delete(c); } }; }
++        closest() { return null; } addEventListener(e, f) { this.h.push(f); } click() { this.h.forEach((f) => f({ target: this })); } }
++    const btns = [new Btn('NORM'), new Btn('RAP'), new Btn('REMIX'), new Btn('LOFI'), new Btn('TUNE OFF'), new Btn('BÈ', 'harmonyBtn')];
++    const B = Object.fromEntries(btns.map((b) => [b.textContent, b])); B.NORM.cls.add('active');
++    const calls = [];
++    const sb = { console, Promise, window: { ActionRegistry: { setDawControlState: async (c, on) => { calls.push([c, on]); return { ok: true }; }, executeAction: async (a) => { calls.push(['exec', a]); return { ok: true }; }, ACTIONS: {} } },
++        document: { querySelectorAll: (q) => (q === '.preset-btn' ? btns : []), getElementById: () => null }, saveData() {}, reportDawStateResult() {} };
++    sb.window.document = sb.document; vm.createContext(sb);
++    vm.runInContext(src.slice(i0, i1) + '\nthis.__lit = ensurePresetLit;', sb);
++    ok(B['BÈ'].dataset.harmonyBtn === '1' && B.LOFI.dataset.lofiBtn === '1', 'BÈ được nhận diện theo id, không theo chữ');
++    B['BÈ'].click();
++    ok(B['BÈ'].cls.has('active') && B.NORM.cls.has('active') && JSON.stringify(calls[calls.length - 1]) === JSON.stringify(['BE', true]), 'bấm BÈ: BÈ sáng + NORM VẪN sáng, gửi BE BẬT');
++    B.RAP.click();
++    ok(B.RAP.cls.has('active') && !B.NORM.cls.has('active') && B['BÈ'].cls.has('active'), 'chọn RAP: NORM tắt, RAP sáng, BÈ VẪN sáng (kết hợp)');
++    B['BÈ'].click();
++    ok(!B['BÈ'].cls.has('active') && B.RAP.cls.has('active') && JSON.stringify(calls[calls.length - 1]) === JSON.stringify(['BE', false]), 'bấm BÈ lần 2: BÈ tắt (gửi OFF), RAP vẫn sáng');
++    B.LOFI.click(); B['BÈ'].click();
++    ok(B.LOFI.cls.has('active') && B['BÈ'].cls.has('active'), 'BÈ và LOFI bật cùng lúc, độc lập nhau');
++    B.NORM.cls.delete('active'); B.RAP.cls.delete('active'); B.REMIX.cls.delete('active'); sb.__lit();
++    ok(B.NORM.cls.has('active'), 'ensurePresetLit: nhóm NORM/RAP/REMIX luôn có 1 nút sáng, không kéo BÈ vào');
++    ok(/b\.dataset\.harmonyBtn === "1"\)\)\.*|harmonyBtn === "1"/.test(src) && (src.match(/harmonyBtn === "1"/g) || []).length >= 3, 'BÈ không bị lưu/khôi phục làm preset (saveData/loadData)');
++
++    console.log('== 4. Setup: dòng BE_STATE, nhóm bảo vệ trùng CC, bộ gợi ý CC104 ==');
++    const setup = rd('ui/js/setup.js');
++    ok(/action: "BE_STATE"/.test(setup) && /MIDI_CONFLICT_GUARD_SET\.add\("BE_STATE"\)/.test(setup) && (setup.match(/BE_STATE: 104/g) || []).length === 2 && /if \(action === "BE_STATE"\)/.test(setup), 'Setup: có dòng BE_STATE, nhóm bảo vệ, 2 bộ gợi ý (Studio One / Cubase) CC104');
++    console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})();
+diff --git a/tests/unit/DawQuickFillAll01.verify.js b/tests/unit/DawQuickFillAll01.verify.js
+index 724b318..59a381b 100644
+--- a/tests/unit/DawQuickFillAll01.verify.js
++++ b/tests/unit/DawQuickFillAll01.verify.js
+@@ -24,8 +24,8 @@ console.log('== 1. Một lần bấm lưu đủ cả 9 bộ ==');
+   const e = env({ selectedDAW: 'Studio Pro 8' }); const r = e.click(); const m = e.st.dawMidiOutMappings['Studio Pro 8'] || {};
+   const base = e.api.resolveDawProfile('Studio Pro 8');
+   const expect = Object.values(base.bundles).reduce((n, b) => n + Object.keys(b.mappings).length, 0);
+-  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 4 + 1 + 2 + 6 + 4 + 12, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 4 TUNE + 1 LOFI + 2 MIC VOLUME + 6 PRESET + 4 FX BUS + 12 KEY/SCALE)', Object.keys(m).length);
+-  ok(m.MUSIC_ON && m.BEAT_INPUT_VOLUME && m.MUSIC_SELECT && m.MIC1_VOLUME && m.KEY_SCALE_MINOR && m.KEY_ROOT && m.TUNE_BYPASS && m.LOFI_STATE && m.PRESET_NORM && m.FX_BUS_DELAY_VOLUME && m.KEY_ROOT_AT4, 'có mặt đủ đại diện từng bộ');
++  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 4 + 1 + 1 + 2 + 6 + 4 + 12, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 4 TUNE + 1 LOFI + 1 BÈ + 2 MIC VOLUME + 6 PRESET + 4 FX BUS + 12 KEY/SCALE)', Object.keys(m).length);
++  ok(m.MUSIC_ON && m.BEAT_INPUT_VOLUME && m.MUSIC_SELECT && m.MIC1_VOLUME && m.KEY_SCALE_MINOR && m.KEY_ROOT && m.TUNE_BYPASS && m.LOFI_STATE && m.BE_STATE && m.PRESET_NORM && m.FX_BUS_DELAY_VOLUME && m.KEY_ROOT_AT4, 'có mặt đủ đại diện từng bộ');
+   ok(Object.values(m).every((x) => x.source === 'USER_DEFINED'), 'đều đánh dấu USER_DEFINED');
+   ok(base.quickFillLabel === 'Fender Studio Pro 8 MIDI', 'tên nút = "Fender Studio Pro 8 MIDI"');
+ }
+@@ -33,7 +33,7 @@ console.log('== 2. Studio One 7 cũng dùng cùng bộ; Cubase giữ các nút r
+ {
+   ok(env({ selectedDAW: 'Studio One 7' }).click().done === true, 'Studio One 7 -> lưu được');
+   const c = env({ selectedDAW: 'Cubase 13' }); const r = c.click();
+-  ok(r.done && Object.keys(c.st.dawMidiOutMappings['Cubase 13']).length === 17, 'Cubase (hàm gộp) -> 17 mapping (8 LIVE + 4 KNOB + 4 TUNE + 1 LOFI)');
++  ok(r.done && Object.keys(c.st.dawMidiOutMappings['Cubase 13']).length === 18, 'Cubase (hàm gộp) -> 18 mapping (8 LIVE + 4 KNOB + 4 TUNE + 1 LOFI + 1 BÈ)');
+   ok(env({ selectedDAW: 'Logic' }).click().blocked === 'no-profile', 'DAW không có bộ -> chặn');
+ }
+ console.log('== 3. All-or-nothing, không đụng mapping khác, idempotent ==');
+diff --git a/ui/css/style.css b/ui/css/style.css
+index 9a5ca3e..60c7b80 100644
+--- a/ui/css/style.css
++++ b/ui/css/style.css
+@@ -50,7 +50,7 @@ body { background: radial-gradient(circle at top, #0b2036, #020813 65%); font-fa
+ /* =====================================
+ 3. PRESET, ANALYZER & CONTROL
+ ===================================== */
+-.preset-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; margin-bottom: 2px; }
++.preset-grid { display: grid; grid-template-columns: repeat(3,1fr) repeat(4,.74fr) 1fr; gap: 6px; margin-bottom: 2px; } /* BE-BTN-01: NORM RAP REMIX | LOFI TUNE BÈ HIỆU ỨNG (nhỏ lại) | MỞ RỘNG — 3 nút đầu và MỞ RỘNG giữ đúng cỡ cũ (1/7 hàng) */
+ .preset-btn { height: 31px; border: 1px solid rgba(0,180,255,.25); border-radius: 8px; background: linear-gradient(180deg,#0a1826,#07111c); color: #fff; font-weight: 800; font-size: 12px; cursor: pointer; transition: all 0.3s ease; position: relative; overflow: hidden; }
+ .preset-btn.active { background: linear-gradient(90deg,#00bfff,#39e3ff); color: #00131c; box-shadow: 0 0 15px rgba(0, 191, 255, 0.4); }
+ 
+diff --git a/ui/index.html b/ui/index.html
+index 8185c9c..cc6e04a 100644
+--- a/ui/index.html
++++ b/ui/index.html
+@@ -142,10 +142,11 @@
+ 
+         <section class="preset-grid">
+             <button class="preset-btn active">NORM</button>
+-            <button class="preset-btn">LOFI</button>
+             <button class="preset-btn">RAP</button>
+             <button class="preset-btn">REMIX</button>
++            <button class="preset-btn">LOFI</button>
+             <button class="preset-btn">TUNE OFF</button>
++            <button id="harmonyBtn" class="preset-btn">BÈ</button>
+             <button id="effectPopupBtn" class="preset-sound-btn" onclick="openEffectModal()" style="background: rgba(0,210,255,0.12); border-color: #00d2ff;">
+                 <span class="icon"></span><span class="text">EFFECT</span>
+             </button>
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index 751b288..e2699a5 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -141,6 +141,9 @@ const ACTIONS = Object.freeze({
+     // TASK A94 — nút LOFI = công tắc ON/OFF ĐỘC LẬP (kết hợp được với NORM/RAP/REMIX; chỉ riêng LOFI). MỘT CC kiểu BYPASS (giống TUNE): nút SÁNG = LOFI BẬT => gửi 0; nút TẮT = LOFI TẮT => gửi 127 (đảo so với bản đầu theo cách nối thật của người dùng).
+     // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_LOFI cũ (tương thích ngược).
+     LOFI_STATE: "LOFI_STATE",
++    // BE-BTN-01 — nút BÈ (hoà âm/bè) = công tắc ON/OFF ĐỘC LẬP như LOFI, kiểu BYPASS: nút SÁNG = BÈ BẬT => gửi 0; nút TẮT => gửi 127.
++    // Mặc định (mọi DAW): kênh 15, CC 104 — không trùng bộ kênh 15 đã dùng (20-37, 85-95, 102-103). Mapping Khói tự lưu luôn thắng.
++    BE_STATE: "BE_STATE",
+     // TASK A96 — popup chuột phải nút MUSIC: (1) nút AUDIO CHILL = công tắc ON/OFF (sáng = BẬT = 127, tắt = TẮT = 0; đã đảo theo cách nối thật của Khói) — kênh 15 CC 94;
+     // (2) knob AUDIO CHILL = điều khiển 1 tham số VST bằng CC 0..127 tuyến tính — kênh 15 CC 95. Hai điều khiển ĐỘC LẬP nhau (knob xoay được dù nút bật hay tắt).
+     AUDIO_CHILL_STATE: "AUDIO_CHILL_STATE",
+@@ -159,6 +162,7 @@ const DAW_STATE_CONTROLS = Object.freeze({
+     FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" }),
+     TUNE: Object.freeze({ on: "TUNE_BYPASS", off: "TUNE_BYPASS", values: Object.freeze({ on: 127, off: 0 }), legacy: "PRESET_TUNE_OFF", label: "TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — cả 4 plugin Auto-Tune)" }), // TASK A79/A94
+     LOFI: Object.freeze({ on: "LOFI_STATE", off: "LOFI_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "PRESET_LOFI", label: "LOFI (ON/OFF độc lập, kết hợp được với preset khác)" }), // TASK A94
++    BE: Object.freeze({ on: "BE_STATE", off: "BE_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "BE_STATE", label: "BÈ (ON/OFF độc lập kiểu bypass: sáng = BẬT = gửi 0; tắt = gửi 127)" }), // BE-BTN-01
+     AUDIO_CHILL: Object.freeze({ on: "AUDIO_CHILL_STATE", off: "AUDIO_CHILL_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "AUDIO_CHILL_STATE", label: "AUDIO CHILL (ON/OFF kiểu bypass: sáng = BẬT = gửi 0; tắt = TẮT = gửi 127; độc lập với knob)" })
+ });
+ 
+@@ -291,6 +295,10 @@ function getMidiOutMapping(action) {
+         const cubase = /^cubase/i.test(String(daw).trim());
+         return { kind: "cc", channel: 16, number: cubase ? 119 : 118, value: 127, source: "DEFAULT_PRESET" };
+     }
++    // BE-BTN-01 — preset mặc định nút BÈ: kênh 15, CC 104, mọi DAW. Giá trị gửi do nút quyết định (0 = BẬT, 127 = TẮT).
++    if (action === "BE_STATE") {
++        return { kind: "cc", channel: 15, number: 104, value: 127, source: "DEFAULT_PRESET" };
++    }
+     // TASK A92 — preset mặc định SCALE gửi tới Auto-Tune (Studio One/Studio Pro): kênh 15, CC 26 (Major=0, Minor=5). Khớp bộ "scale" trong DAW_MIDI_PROFILES (setup.js).
+     // Chỉ khi chưa lưu mapping riêng (mapping đã lưu luôn thắng). KEY gốc KHÔNG có mặc định CC: vẫn gửi bằng nốt MIDI như cũ (KEY_ROOT chỉ dùng CC khi người dùng tự lưu CC 27). Cubase chưa có bộ CC kiểm chứng nên không có mặc định.
+     if ((action === "KEY_SCALE_MAJOR" || action === "KEY_SCALE_MINOR") && !/^cubase/i.test(String(daw).trim())) {
+diff --git a/ui/js/i18n.js b/ui/js/i18n.js
+index 53a28fb..dd1f3c4 100644
+--- a/ui/js/i18n.js
++++ b/ui/js/i18n.js
+@@ -645,6 +645,10 @@
+     ["TUNE ON/OFF — BYPASS Auto-Tune 2 (nút TUNE gửi cả 4)", "TUNE ON/OFF — BYPASS Auto-Tune 2 (TUNE button sends all 4)"],
+     ["TUNE ON/OFF — BYPASS Auto-Tune 3 (nút TUNE gửi cả 4)", "TUNE ON/OFF — BYPASS Auto-Tune 3 (TUNE button sends all 4)"],
+     ["TUNE ON/OFF — BYPASS Auto-Tune 4 (nút TUNE gửi cả 4)", "TUNE ON/OFF — BYPASS Auto-Tune 4 (TUNE button sends all 4)"],
++    ["BÈ ON/OFF kiểu bypass (nút sáng = BÈ bật = gửi 0; tắt = gửi 127) — kênh 15 CC 104", "HARMONY ON/OFF bypass-style (lit button = HARMONY on = sends 0; off = sends 127) — channel 15 CC 104"],
++    ["BÈ (ON/OFF độc lập kiểu bypass: sáng = BẬT = gửi 0; tắt = gửi 127)", "HARMONY (independent bypass-style ON/OFF: lit = on = sends 0; off = sends 127)"],
++    ["Điền + lưu bộ BÈ ON/OFF gợi ý — {0}", "Fill + save suggested HARMONY ON/OFF set — {0}"],
++    ["BÈ", "HARMONY"],
+     ["LOFI ON/OFF kiểu bypass (nút sáng = LOFI bật = gửi 0; tắt = gửi 127) — kết hợp với preset khác", "LOFI ON/OFF bypass-style (lit button = LOFI on = sends 0; off = sends 127) — combine with other presets"],
+     ["AUDIO CHILL — nút ON/OFF kiểu bypass (nút sáng = bật = gửi 0; tắt = gửi 127)", "AUDIO CHILL — ON/OFF button, bypass-style (lit = on = sends 0; off = sends 127)", ["AUDIO CHILL — nút ON/OFF (sáng = bật = gửi 127; tắt = gửi 0)"]],
+     ["AUDIO CHILL — knob điều khiển 1 VST (CC 0..127)", "AUDIO CHILL — knob controlling 1 VST (CC 0..127)"],
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 616ace3..398c2f5 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -655,7 +655,11 @@ const isTuneOffBtn = (b) => !!(b && b.dataset && b.dataset.tuneBtn === "1");
+ // Bấm: nút SÁNG = LOFI BẬT (CC 127), bấm lần nữa: TẮT (CC 0). Không đổi HTML — JS nhận diện nút theo chữ "LOFI" một lần. Không lưu/khôi phục (Menu không đọc được trạng thái DAW): luôn mở ở TẮT.
+ document.querySelectorAll(".preset-btn").forEach((b) => { if (!b.closest(".custom-modal") && b.textContent.trim() === "LOFI") b.dataset.lofiBtn = "1"; });
+ const isLofiBtn = (b) => !!(b && b.dataset && b.dataset.lofiBtn === "1");
+-const isIndependentPresetBtn = (b) => isTuneOffBtn(b) || isLofiBtn(b);
++// BE-BTN-01 — nút BÈ (hoà âm/bè): công tắc ON/OFF ĐỘC LẬP như LOFI (kết hợp được với NORM/RAP/REMIX/TUNE). Nhận diện theo id "harmonyBtn" (không dựa vào chữ, vì chữ đổi theo ngôn ngữ).
++// Mặc định TẮT khi mở app (Menu không đọc được trạng thái DAW). Bấm: sáng = BÈ BẬT, bấm lần nữa = TẮT. Qua ActionRegistry "BE" (BE_STATE) như LOFI.
++document.querySelectorAll(".preset-btn").forEach((b) => { if (b.id === "harmonyBtn") b.dataset.harmonyBtn = "1"; });
++const isHarmonyBtn = (b) => !!(b && b.dataset && b.dataset.harmonyBtn === "1");
++const isIndependentPresetBtn = (b) => isTuneOffBtn(b) || isLofiBtn(b) || isHarmonyBtn(b);
+ let currentPresetName = "NORM"; // A95 — preset đang sáng (chỉ đổi khi BẤM; mở app không gửi gì); RAP giữ Verb dài TẮT nên knob FX không được bật lại bus này
+ function renderTuneBtn(btn, tuneOn) {
+     btn.classList.toggle("active", tuneOn);
+@@ -677,6 +681,12 @@ document.querySelectorAll(".preset-btn").forEach(btn => {
+             reportDawStateResult(e.target, "LOFI", window.ActionRegistry?.setDawControlState?.("LOFI", lofiOnNow, { reason: "menu-button" }));
+             return;
+         }
++        if (isHarmonyBtn(e.target)) { // BE-BTN-01
++            const beOnNow = !e.target.classList.contains("active"); // trạng thái ĐÍCH sau cú bấm
++            e.target.classList.toggle("active", beOnNow);
++            reportDawStateResult(e.target, "BE", window.ActionRegistry?.setDawControlState?.("BE", beOnNow, { reason: "menu-button" }));
++            return;
++        }
+         // TASK A95 — NORM/RAP/REMIX chọn-một thật: nút trước TẮT (gửi OFF + hoàn tác hiệu ứng), nút mới SÁNG (gửi ON + áp hiệu ứng). Xem applyPresetTransition (actionRegistry.js).
+         const prevLit = [...document.querySelectorAll(".preset-btn")].find(b => !isIndependentPresetBtn(b) && !b.closest(".custom-modal") && b.classList.contains("active"));
+         const prevName = prevLit ? prevLit.textContent.trim() : null;
+@@ -2601,7 +2611,7 @@ function saveData() {
+         tone: document.getElementById("toneSelector")?.value,
+         modEnabled: document.getElementById("modPowerBtn")?.classList.contains("active"),
+         preset: (() => { // A79: nút TUNE là công tắc bypass, không phải preset -> không lưu làm preset
+-            const isTune = (b) => !!(b && b.dataset && (b.dataset.tuneBtn === "1" || b.dataset.lofiBtn === "1")); // A79/A94: TUNE và LOFI là công tắc, không lưu làm preset
++            const isTune = (b) => !!(b && b.dataset && (b.dataset.tuneBtn === "1" || b.dataset.lofiBtn === "1" || b.dataset.harmonyBtn === "1")); // A79/A94/BE-BTN-01: TUNE, LOFI và BÈ là công tắc, không lưu làm preset
+             const a = document.querySelector(".preset-btn.active");
+             if (a && !isTune(a)) return a.textContent.trim();
+             return [...document.querySelectorAll(".preset-btn.active")].find(b => !isTune(b))?.textContent.trim();
+@@ -2652,7 +2662,7 @@ function loadData() {
+ 
+     if (data.preset) {
+         document.querySelectorAll(".preset-btn").forEach(btn => {
+-            if (btn.dataset && (btn.dataset.tuneBtn === "1" || btn.dataset.lofiBtn === "1")) return; // A79/A94: TUNE/LOFI không khôi phục (không có phản hồi từ DAW) — luôn mở ở TUNE ON / LOFI TẮT
++            if (btn.dataset && (btn.dataset.tuneBtn === "1" || btn.dataset.lofiBtn === "1" || btn.dataset.harmonyBtn === "1")) return; // A79/A94/BE-BTN-01: TUNE/LOFI/BÈ không khôi phục (không có phản hồi từ DAW) — luôn mở ở TUNE ON / LOFI TẮT
+             btn.classList.remove("active");
+             if (btn.textContent.trim() === data.preset) {
+                 btn.classList.add("active");
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index b104795..425c934 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -710,6 +710,8 @@ const DAW_MIDI_ACTIONS = [
+     { action: "TUNE_BYPASS_4", label: "TUNE ON/OFF — BYPASS Auto-Tune 4 (nút TUNE gửi cả 4)" },
+     // TASK A94 — nút LOFI: ON/OFF độc lập, kết hợp được với NORM/RAP/REMIX. 1 CC kiểu bypass: 0 = LOFI bật (nút sáng), 127 = LOFI tắt (mặc định kênh 16 CC 118 / Cubase 119).
+     { action: "LOFI_STATE", label: "LOFI ON/OFF kiểu bypass (nút sáng = LOFI bật = gửi 0; tắt = gửi 127) — kết hợp với preset khác" },
++    // BE-BTN-01 — nút BÈ: ON/OFF độc lập kiểu bypass (sáng = bật = gửi 0; tắt = gửi 127). Mặc định kênh 15 CC 104.
++    { action: "BE_STATE", label: "BÈ ON/OFF kiểu bypass (nút sáng = BÈ bật = gửi 0; tắt = gửi 127) — kênh 15 CC 104" },
+     // TASK A96 — popup chuột phải MUSIC: nút AUDIO CHILL (sáng = bật = 127, tắt = 0) và knob AUDIO CHILL (CC 0..127). Mặc định kênh 15 CC 94 / 95.
+     { action: "AUDIO_CHILL_STATE", label: "AUDIO CHILL — nút ON/OFF kiểu bypass (nút sáng = bật = gửi 0; tắt = gửi 127)" },
+     { action: "AUDIO_CHILL_KNOB", label: "AUDIO CHILL — knob điều khiển 1 VST (CC 0..127)" },
+@@ -747,6 +749,7 @@ function findDawStateMappingConflict(action, mapping) {
+ const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME", "RETUNE_SPEED_MIC1", "RETUNE_SPEED_MIC2", "MIC1_VOLUME", "MIC2_VOLUME", "FX_BUS_DELAY_VOLUME", "FX_BUS_VERB_SHORT_VOLUME", "FX_BUS_VERB_LONG_VOLUME", "FX_BUS_COM_VERB_VOLUME", "KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_ROOT"]);
+ const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
+ const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "TUNE_BYPASS_2", "TUNE_BYPASS_3", "TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2", "AUDIO_CHILL_STATE", "AUDIO_CHILL_KNOB"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
++MIDI_CONFLICT_GUARD_SET.add("BE_STATE"); // BE-BTN-01: nút BÈ cũng thuộc nhóm bảo vệ trùng CC
+ function findMidiOutMappingConflict(action, mapping) {
+     for (const { action: other } of DAW_MIDI_ACTIONS) {
+         if (other === action) continue;
+@@ -792,6 +795,9 @@ function getDawMidiOutMapping(action) {
+     if (action === "AUDIO_CHILL_STATE" || action === "AUDIO_CHILL_KNOB") { // A96 — khớp getMidiOutMapping() ở actionRegistry.js
+         return { kind: "cc", channel: 15, number: action === "AUDIO_CHILL_STATE" ? 94 : 95, value: action === "AUDIO_CHILL_STATE" ? 127 : 64, source: "DEFAULT_PRESET" };
+     }
++    if (action === "BE_STATE") { // BE-BTN-01 — khớp getMidiOutMapping() ở actionRegistry.js
++        return { kind: "cc", channel: 15, number: 104, value: 127, source: "DEFAULT_PRESET" };
++    }
+     if (action === "LOFI_STATE") { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
+         const cubase = /^cubase/i.test(String(daw).trim());
+         return { kind: "cc", channel: 16, number: cubase ? 119 : 118, value: 127, source: "DEFAULT_PRESET" };
+@@ -847,6 +853,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
+                 TUNE_BYPASS_3: Object.freeze({ kind: "cc", channel: 15, number: 90, value: 127 }),
+                 TUNE_BYPASS_4: Object.freeze({ kind: "cc", channel: 15, number: 91, value: 127 }) }) }),
+             lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 118 }) }), // A94
++            be: Object.freeze({ title: "BÈ ON/OFF", count: 1, mappings: dawQfMake(15, 127, { BE_STATE: 104 }) }), // BE-BTN-01
+             // PRESET-CC-01 — 4 CC (kênh 16, giá trị 127) cho 4 nút Preset NORM/LOFI/RAP/REMIX: mỗi nút gửi 1 CC riêng; trong Studio Pro gán từng CC vào macro/preset
+             // (bật-tắt plugin hoặc đặt thông số cài sẵn). Dùng CC 114–117: không trùng LIVE 102–109, CHỌN TRACK 110–112, TUNE 113; tránh CC 120–127 (lệnh hệ thống MIDI).
+             preset: Object.freeze({ title: "PRESET NORM/LOFI/RAP/REMIX", count: 6, mappings: Object.freeze({ ...dawQfMake(16, 127, { PRESET_NORM: 114, PRESET_LOFI: 115, PRESET_RAP: 116, PRESET_REMIX: 117 }), REMIX_PLUGIN_1: Object.freeze({ kind: "cc", channel: 15, number: 92, value: 0 }), REMIX_PLUGIN_2: Object.freeze({ kind: "cc", channel: 15, number: 93, value: 0 }) }) }), // A95: +2 CC plugin REMIX (kênh 15)
+@@ -888,6 +895,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
+                 TUNE_BYPASS_3: Object.freeze({ kind: "cc", channel: 15, number: 90, value: 127 }),
+                 TUNE_BYPASS_4: Object.freeze({ kind: "cc", channel: 15, number: 91, value: 127 }) }) }), // A82
+             lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 119 }) }), // A94
++            be: Object.freeze({ title: "BÈ ON/OFF", count: 1, mappings: dawQfMake(15, 127, { BE_STATE: 104 }) }), // BE-BTN-01
+         }),
+     }),
+ });
+@@ -1002,6 +1010,7 @@ function initDawMidiOutputMappingSection() {
+             ${profile.bundles.select ? `<button class="setup-btn" id="btnFillSelectCc">Điền + lưu bộ CHỌN TRACK gợi ý — ${profile.name}</button>` : ""}
+             ${profile.bundles.tune ? `<button class="setup-btn" id="btnFillTuneCc">Điền + lưu bộ TUNE BYPASS gợi ý — ${profile.name}</button>` : ""}
+             ${profile.bundles.lofi ? `<button class="setup-btn" id="btnFillLofiCc">Điền + lưu bộ LOFI ON/OFF gợi ý — ${profile.name}</button>` : ""}
++            ${profile.bundles.be ? `<button class="setup-btn" id="btnFillBeCc">Điền + lưu bộ BÈ ON/OFF gợi ý — ${profile.name}</button>` : ""}
+             ${profile.bundles.micvol ? `<button class="setup-btn" id="btnFillMicVolCc">Điền + lưu bộ MIC VOLUME gợi ý — ${profile.name}</button>` : ""}
+             ${profile.bundles.preset ? `<button class="setup-btn" id="btnFillPresetCc">Điền + lưu bộ PRESET (NORM/LOFI/RAP/REMIX) gợi ý — ${profile.name}</button>` : ""}
+             ${profile.bundles.fxbus ? `<button class="setup-btn" id="btnFillFxBusCc">Điền + lưu bộ FX BUS VOLUME gợi ý — ${profile.name}</button>` : ""}
+@@ -1052,6 +1061,8 @@ function initDawMidiOutputMappingSection() {
+             if (tuneBtn) tuneBtn.addEventListener("click", () => runQuickFill("tune"));
+             const lofiBtn = liveBox.querySelector("#btnFillLofiCc");
+             if (lofiBtn) lofiBtn.addEventListener("click", () => runQuickFill("lofi"));
++            const beBtn = liveBox.querySelector("#btnFillBeCc"); // BE-BTN-01
++            if (beBtn) beBtn.addEventListener("click", () => runQuickFill("be"));
+             const micVolBtn = liveBox.querySelector("#btnFillMicVolCc");
+             if (micVolBtn) micVolBtn.addEventListener("click", () => runQuickFill("micvol"));
+             const presetBtn = liveBox.querySelector("#btnFillPresetCc");
