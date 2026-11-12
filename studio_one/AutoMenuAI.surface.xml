@@ -154,6 +154,10 @@
     <Control name="audioChillKnob" title="AUDIO CHILL Knob (0..127)" type="knob" options="receive public">
       <MidiMessage status="#BE" address="95"/>
     </Control>
+    <!-- CC 104 (kenh 15 = #BE; khac CC 104 kenh 16 = Mic1 ON) -->
+    <Control name="harmonyOnOff" title="BE = Harmony Player Auto-Tune On/Off (127=bat/sang, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="104"/>
+    </Control>
     <!-- CC 118 -->
     <Control name="lofiOnOff" title="LOFI Bypass (0=LOFI bat/nut sang, 127=LOFI tat)" type="button" options="receive public">
       <MidiMessage status="#BF" address="118"/>

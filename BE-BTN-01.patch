@@ -1,10 +1,25 @@
+diff --git a/studio_one/AutoMenuAI.surface.xml b/studio_one/AutoMenuAI.surface.xml
+index 527925b..7eba1e6 100644
+--- a/studio_one/AutoMenuAI.surface.xml
++++ b/studio_one/AutoMenuAI.surface.xml
+@@ -154,6 +154,10 @@
+     <Control name="audioChillKnob" title="AUDIO CHILL Knob (0..127)" type="knob" options="receive public">
+       <MidiMessage status="#BE" address="95"/>
+     </Control>
++    <!-- CC 104 (kenh 15 = #BE; khac CC 104 kenh 16 = Mic1 ON) -->
++    <Control name="harmonyOnOff" title="BE = Harmony Player Auto-Tune On/Off (127=bat/sang, 0=tat)" type="button" options="receive public">
++      <MidiMessage status="#BE" address="104"/>
++    </Control>
+     <!-- CC 118 -->
+     <Control name="lofiOnOff" title="LOFI Bypass (0=LOFI bat/nut sang, 127=LOFI tat)" type="button" options="receive public">
+       <MidiMessage status="#BF" address="118"/>
 diff --git a/tests/unit/BeBtn01.verify.js b/tests/unit/BeBtn01.verify.js
 new file mode 100644
-index 0000000..645d284
+index 0000000..8a056a4
 --- /dev/null
 +++ b/tests/unit/BeBtn01.verify.js
-@@ -0,0 +1,71 @@
-+/** BeBtn01.verify.js — BE-BTN-01: nút BÈ = công tắc ON/OFF độc lập (như LOFI), thứ tự nút mới, CC mặc định tự nối.
+@@ -0,0 +1,74 @@
++/** BeBtn01.verify.js — BE-BTN-01: nút BÈ = Harmony Player Auto-Tune, công tắc ON/OFF độc lập (như LOFI), thứ tự nút mới, CC mặc định tự nối.
 + *  Chạy: node tests/unit/BeBtn01.verify.js */
 +'use strict';
 +const fs = require('fs'), path = require('path'), vm = require('vm');
@@ -30,18 +45,18 @@ index 0000000..645d284
 +    const css = rd('ui/css/style.css');
 +    ok(/\.preset-grid \{[^}]*grid-template-columns: repeat\(3,1fr\) repeat\(4,\.74fr\) 1fr/.test(css), 'lưới 8 cột: 3 nút đầu 1fr, 4 nút nhỏ .74fr, MỞ RỘNG 1fr');
 +
-+    console.log('== 2. actionRegistry: BÈ 1 CC, bật=0 / tắt=127, mặc định kênh 15 CC104 ==');
++    console.log('== 2. actionRegistry: BÈ = Harmony Player, 1 CC, bật=127 / tắt=0, mặc định kênh 15 CC104 ==');
 +    let AR = makeAR('Studio Pro 8');
 +    const d = AR.DAW_STATE_CONTROLS.BE;
-+    ok(AR.ACTIONS.BE_STATE === 'BE_STATE' && d && d.on === 'BE_STATE' && d.off === 'BE_STATE' && d.values.on === 0 && d.values.off === 127, 'control BE: 1 action, bật gửi 0, tắt gửi 127');
++    ok(AR.ACTIONS.BE_STATE === 'BE_STATE' && d && d.on === 'BE_STATE' && d.off === 'BE_STATE' && d.values.on === 127 && d.values.off === 0, 'control BE: 1 action, bật gửi 127, tắt gửi 0');
 +    let r = await AR.setDawControlState('BE', true, {});
-+    ok(r.ok && JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 0, 14]), 'BÈ BẬT -> CC104 = 0, kênh 15 (index 14), không cần Setup');
++    ok(r.ok && JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 127, 14]), 'BÈ BẬT -> CC104 = 127, kênh 15 (index 14), không cần Setup');
 +    r = await AR.setDawControlState('BE', false, {});
-+    ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([104, 127, 14]), 'BÈ TẮT -> CC104 = 127');
++    ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([104, 0, 14]), 'BÈ TẮT -> CC104 = 0');
 +    AR = makeAR('Cubase 14'); await AR.setDawControlState('BE', true, {});
-+    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 0, 14]), 'Cubase: cũng kênh 15 CC104');
++    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 127, 14]), 'Cubase: cũng kênh 15 CC104');
 +    AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { BE_STATE: { kind: 'cc', channel: 15, number: 77, value: 127 } } }); await AR.setDawControlState('BE', true, {});
-+    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([77, 0, 14]), 'mapping người dùng đã lưu luôn thắng mặc định');
++    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([77, 127, 14]), 'mapping người dùng đã lưu luôn thắng mặc định');
 +
 +    console.log('== 3. renderer: BÈ độc lập (mã thật, DOM giả) ==');
 +    const src = rd('ui/js/renderer.js');
@@ -70,6 +85,9 @@ index 0000000..645d284
 +    ok(B.NORM.cls.has('active'), 'ensurePresetLit: nhóm NORM/RAP/REMIX luôn có 1 nút sáng, không kéo BÈ vào');
 +    ok(/b\.dataset\.harmonyBtn === "1"\)\)\.*|harmonyBtn === "1"/.test(src) && (src.match(/harmonyBtn === "1"/g) || []).length >= 3, 'BÈ không bị lưu/khôi phục làm preset (saveData/loadData)');
 +
++    console.log('== 3b. Studio One surface ==');
++    const surf = rd('studio_one/AutoMenuAI.surface.xml');
++    ok(/<Control name="harmonyOnOff"[^>]*>\s*<MidiMessage status="#BE" address="104"\/>/.test(surf) && /<Control name="mic1On"[^>]*>\s*<MidiMessage status="#BF" address="104"\/>/.test(surf), 'surface Studio One: harmonyOnOff = kênh 15 (#BE) CC104, không đè Mic1 ON (kênh 16 CC104)');
 +    console.log('== 4. Setup: dòng BE_STATE, nhóm bảo vệ trùng CC, bộ gợi ý CC104 ==');
 +    const setup = rd('ui/js/setup.js');
 +    ok(/action: "BE_STATE"/.test(setup) && /MIDI_CONFLICT_GUARD_SET\.add\("BE_STATE"\)/.test(setup) && (setup.match(/BE_STATE: 104/g) || []).length === 2 && /if \(action === "BE_STATE"\)/.test(setup), 'Setup: có dòng BE_STATE, nhóm bảo vệ, 2 bộ gợi ý (Studio One / Cubase) CC104');
@@ -130,32 +148,33 @@ index 8185c9c..cc6e04a 100644
                  <span class="icon"></span><span class="text">EFFECT</span>
              </button>
 diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
-index 751b288..e2699a5 100644
+index 751b288..62d6024 100644
 --- a/ui/js/actionRegistry.js
 +++ b/ui/js/actionRegistry.js
-@@ -141,6 +141,9 @@ const ACTIONS = Object.freeze({
+@@ -141,6 +141,10 @@ const ACTIONS = Object.freeze({
      // TASK A94 — nút LOFI = công tắc ON/OFF ĐỘC LẬP (kết hợp được với NORM/RAP/REMIX; chỉ riêng LOFI). MỘT CC kiểu BYPASS (giống TUNE): nút SÁNG = LOFI BẬT => gửi 0; nút TẮT = LOFI TẮT => gửi 127 (đảo so với bản đầu theo cách nối thật của người dùng).
      // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_LOFI cũ (tương thích ngược).
      LOFI_STATE: "LOFI_STATE",
-+    // BE-BTN-01 — nút BÈ (hoà âm/bè) = công tắc ON/OFF ĐỘC LẬP như LOFI, kiểu BYPASS: nút SÁNG = BÈ BẬT => gửi 0; nút TẮT => gửi 127.
++    // BE-BTN-01 — nút BÈ = bật/tắt HARMONY PLAYER của Auto-Tune Pro (nút nguồn "Harmony Player"), công tắc ON/OFF ĐỘC LẬP như LOFI.
++    // Đây là nút BẬT (không phải bypass): nút SÁNG = Harmony Player BẬT => gửi 127; nút TẮT => gửi 0.
 +    // Mặc định (mọi DAW): kênh 15, CC 104 — không trùng bộ kênh 15 đã dùng (20-37, 85-95, 102-103). Mapping Khói tự lưu luôn thắng.
 +    BE_STATE: "BE_STATE",
      // TASK A96 — popup chuột phải nút MUSIC: (1) nút AUDIO CHILL = công tắc ON/OFF (sáng = BẬT = 127, tắt = TẮT = 0; đã đảo theo cách nối thật của Khói) — kênh 15 CC 94;
      // (2) knob AUDIO CHILL = điều khiển 1 tham số VST bằng CC 0..127 tuyến tính — kênh 15 CC 95. Hai điều khiển ĐỘC LẬP nhau (knob xoay được dù nút bật hay tắt).
      AUDIO_CHILL_STATE: "AUDIO_CHILL_STATE",
-@@ -159,6 +162,7 @@ const DAW_STATE_CONTROLS = Object.freeze({
+@@ -159,6 +163,7 @@ const DAW_STATE_CONTROLS = Object.freeze({
      FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" }),
      TUNE: Object.freeze({ on: "TUNE_BYPASS", off: "TUNE_BYPASS", values: Object.freeze({ on: 127, off: 0 }), legacy: "PRESET_TUNE_OFF", label: "TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — cả 4 plugin Auto-Tune)" }), // TASK A79/A94
      LOFI: Object.freeze({ on: "LOFI_STATE", off: "LOFI_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "PRESET_LOFI", label: "LOFI (ON/OFF độc lập, kết hợp được với preset khác)" }), // TASK A94
-+    BE: Object.freeze({ on: "BE_STATE", off: "BE_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "BE_STATE", label: "BÈ (ON/OFF độc lập kiểu bypass: sáng = BẬT = gửi 0; tắt = gửi 127)" }), // BE-BTN-01
++    BE: Object.freeze({ on: "BE_STATE", off: "BE_STATE", values: Object.freeze({ on: 127, off: 0 }), legacy: "BE_STATE", label: "BÈ = Harmony Player Auto-Tune (ON/OFF độc lập: sáng = BẬT = gửi 127; tắt = gửi 0)" }), // BE-BTN-01
      AUDIO_CHILL: Object.freeze({ on: "AUDIO_CHILL_STATE", off: "AUDIO_CHILL_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "AUDIO_CHILL_STATE", label: "AUDIO CHILL (ON/OFF kiểu bypass: sáng = BẬT = gửi 0; tắt = TẮT = gửi 127; độc lập với knob)" })
  });
  
-@@ -291,6 +295,10 @@ function getMidiOutMapping(action) {
+@@ -291,6 +296,10 @@ function getMidiOutMapping(action) {
          const cubase = /^cubase/i.test(String(daw).trim());
          return { kind: "cc", channel: 16, number: cubase ? 119 : 118, value: 127, source: "DEFAULT_PRESET" };
      }
-+    // BE-BTN-01 — preset mặc định nút BÈ: kênh 15, CC 104, mọi DAW. Giá trị gửi do nút quyết định (0 = BẬT, 127 = TẮT).
++    // BE-BTN-01 — preset mặc định nút BÈ (Harmony Player): kênh 15, CC 104, mọi DAW. Giá trị gửi do nút quyết định (127 = BẬT, 0 = TẮT).
 +    if (action === "BE_STATE") {
 +        return { kind: "cc", channel: 15, number: 104, value: 127, source: "DEFAULT_PRESET" };
 +    }
@@ -163,15 +182,15 @@ index 751b288..e2699a5 100644
      // Chỉ khi chưa lưu mapping riêng (mapping đã lưu luôn thắng). KEY gốc KHÔNG có mặc định CC: vẫn gửi bằng nốt MIDI như cũ (KEY_ROOT chỉ dùng CC khi người dùng tự lưu CC 27). Cubase chưa có bộ CC kiểm chứng nên không có mặc định.
      if ((action === "KEY_SCALE_MAJOR" || action === "KEY_SCALE_MINOR") && !/^cubase/i.test(String(daw).trim())) {
 diff --git a/ui/js/i18n.js b/ui/js/i18n.js
-index 53a28fb..dd1f3c4 100644
+index 53a28fb..98eb166 100644
 --- a/ui/js/i18n.js
 +++ b/ui/js/i18n.js
 @@ -645,6 +645,10 @@
      ["TUNE ON/OFF — BYPASS Auto-Tune 2 (nút TUNE gửi cả 4)", "TUNE ON/OFF — BYPASS Auto-Tune 2 (TUNE button sends all 4)"],
      ["TUNE ON/OFF — BYPASS Auto-Tune 3 (nút TUNE gửi cả 4)", "TUNE ON/OFF — BYPASS Auto-Tune 3 (TUNE button sends all 4)"],
      ["TUNE ON/OFF — BYPASS Auto-Tune 4 (nút TUNE gửi cả 4)", "TUNE ON/OFF — BYPASS Auto-Tune 4 (TUNE button sends all 4)"],
-+    ["BÈ ON/OFF kiểu bypass (nút sáng = BÈ bật = gửi 0; tắt = gửi 127) — kênh 15 CC 104", "HARMONY ON/OFF bypass-style (lit button = HARMONY on = sends 0; off = sends 127) — channel 15 CC 104"],
-+    ["BÈ (ON/OFF độc lập kiểu bypass: sáng = BẬT = gửi 0; tắt = gửi 127)", "HARMONY (independent bypass-style ON/OFF: lit = on = sends 0; off = sends 127)"],
++    ["BÈ = Harmony Player Auto-Tune ON/OFF (nút sáng = bật = gửi 127; tắt = gửi 0) — kênh 15 CC 104", "HARMONY = Auto-Tune Harmony Player ON/OFF (lit button = on = sends 127; off = sends 0) — channel 15 CC 104"],
++    ["BÈ = Harmony Player Auto-Tune (ON/OFF độc lập: sáng = BẬT = gửi 127; tắt = gửi 0)", "HARMONY = Auto-Tune Harmony Player (independent ON/OFF: lit = on = sends 127; off = sends 0)"],
 +    ["Điền + lưu bộ BÈ ON/OFF gợi ý — {0}", "Fill + save suggested HARMONY ON/OFF set — {0}"],
 +    ["BÈ", "HARMONY"],
      ["LOFI ON/OFF kiểu bypass (nút sáng = LOFI bật = gửi 0; tắt = gửi 127) — kết hợp với preset khác", "LOFI ON/OFF bypass-style (lit button = LOFI on = sends 0; off = sends 127) — combine with other presets"],
@@ -226,15 +245,15 @@ index 616ace3..398c2f5 100644
              if (btn.textContent.trim() === data.preset) {
                  btn.classList.add("active");
 diff --git a/ui/js/setup.js b/ui/js/setup.js
-index b104795..425c934 100644
+index b104795..41c0c56 100644
 --- a/ui/js/setup.js
 +++ b/ui/js/setup.js
 @@ -710,6 +710,8 @@ const DAW_MIDI_ACTIONS = [
      { action: "TUNE_BYPASS_4", label: "TUNE ON/OFF — BYPASS Auto-Tune 4 (nút TUNE gửi cả 4)" },
      // TASK A94 — nút LOFI: ON/OFF độc lập, kết hợp được với NORM/RAP/REMIX. 1 CC kiểu bypass: 0 = LOFI bật (nút sáng), 127 = LOFI tắt (mặc định kênh 16 CC 118 / Cubase 119).
      { action: "LOFI_STATE", label: "LOFI ON/OFF kiểu bypass (nút sáng = LOFI bật = gửi 0; tắt = gửi 127) — kết hợp với preset khác" },
-+    // BE-BTN-01 — nút BÈ: ON/OFF độc lập kiểu bypass (sáng = bật = gửi 0; tắt = gửi 127). Mặc định kênh 15 CC 104.
-+    { action: "BE_STATE", label: "BÈ ON/OFF kiểu bypass (nút sáng = BÈ bật = gửi 0; tắt = gửi 127) — kênh 15 CC 104" },
++    // BE-BTN-01 — nút BÈ = Harmony Player của Auto-Tune: ON/OFF độc lập (sáng = bật = gửi 127; tắt = gửi 0). Mặc định kênh 15 CC 104.
++    { action: "BE_STATE", label: "BÈ = Harmony Player Auto-Tune ON/OFF (nút sáng = bật = gửi 127; tắt = gửi 0) — kênh 15 CC 104" },
      // TASK A96 — popup chuột phải MUSIC: nút AUDIO CHILL (sáng = bật = 127, tắt = 0) và knob AUDIO CHILL (CC 0..127). Mặc định kênh 15 CC 94 / 95.
      { action: "AUDIO_CHILL_STATE", label: "AUDIO CHILL — nút ON/OFF kiểu bypass (nút sáng = bật = gửi 0; tắt = gửi 127)" },
      { action: "AUDIO_CHILL_KNOB", label: "AUDIO CHILL — knob điều khiển 1 VST (CC 0..127)" },

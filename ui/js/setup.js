@@ -710,8 +710,8 @@ const DAW_MIDI_ACTIONS = [
     { action: "TUNE_BYPASS_4", label: "TUNE ON/OFF — BYPASS Auto-Tune 4 (nút TUNE gửi cả 4)" },
     // TASK A94 — nút LOFI: ON/OFF độc lập, kết hợp được với NORM/RAP/REMIX. 1 CC kiểu bypass: 0 = LOFI bật (nút sáng), 127 = LOFI tắt (mặc định kênh 16 CC 118 / Cubase 119).
     { action: "LOFI_STATE", label: "LOFI ON/OFF kiểu bypass (nút sáng = LOFI bật = gửi 0; tắt = gửi 127) — kết hợp với preset khác" },
-    // BE-BTN-01 — nút BÈ: ON/OFF độc lập kiểu bypass (sáng = bật = gửi 0; tắt = gửi 127). Mặc định kênh 15 CC 104.
-    { action: "BE_STATE", label: "BÈ ON/OFF kiểu bypass (nút sáng = BÈ bật = gửi 0; tắt = gửi 127) — kênh 15 CC 104" },
+    // BE-BTN-01 — nút BÈ = Harmony Player của Auto-Tune: ON/OFF độc lập (sáng = bật = gửi 127; tắt = gửi 0). Mặc định kênh 15 CC 104.
+    { action: "BE_STATE", label: "BÈ = Harmony Player Auto-Tune ON/OFF (nút sáng = bật = gửi 127; tắt = gửi 0) — kênh 15 CC 104" },
     // TASK A96 — popup chuột phải MUSIC: nút AUDIO CHILL (sáng = bật = 127, tắt = 0) và knob AUDIO CHILL (CC 0..127). Mặc định kênh 15 CC 94 / 95.
     { action: "AUDIO_CHILL_STATE", label: "AUDIO CHILL — nút ON/OFF kiểu bypass (nút sáng = bật = gửi 0; tắt = gửi 127)" },
     { action: "AUDIO_CHILL_KNOB", label: "AUDIO CHILL — knob điều khiển 1 VST (CC 0..127)" },
