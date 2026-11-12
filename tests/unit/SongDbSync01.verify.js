@@ -37,7 +37,7 @@ const mk = (srv, enabled = true) => createSongDbServerSync({ keyServerSync: new 
   const L = SongDatabase.load(), by = (t) => L.find((s) => s.title === t);
   ok(by('Bài Server Có') && by('Bài Server Có').key === 'G Minor' && by('Bài Server Có').bpm === null, 'bài server được thêm vào máy với Key đúng (G Minor), BPM trống');
   ok(by('Bài Chung').key === 'F# Major' && by('Bài Chung').bpm === 90, 'bài thiếu Key được điền từ server, giữ BPM của máy');
-  ok(by('Bài Cả Hai').key === 'C Major' && by('Bài Cả Hai').bpm === 80, 'KHÔNG ghi đè Key/BPM đã có trên máy');
+  ok(by('Bài Cả Hai').key === 'A Minor' && by('Bài Cả Hai').bpm === 80 && r.updated === 1, 'DB-REALTIME-01: Server là nguồn chuẩn -> Key đổi theo Server (A Minor), BPM của máy giữ nguyên', JSON.stringify(r));
   ok(srv.songs.some((s) => s.title === 'Bài Máy Có' && s.key === 'D' && s.mode === 'major'), 'bài chỉ có ở máy đã được gửi lên server (D major)');
   ok(srv.songs.length === 4, 'server không bị nhân đôi/thêm rác (4 bài)', srv.songs.length);
 
@@ -63,7 +63,7 @@ const mk = (srv, enabled = true) => createSongDbServerSync({ keyServerSync: new 
   ok([a, b].filter((x) => x.error && /Đang đồng bộ/.test(x.error)).length === 1, 'hai lượt chạy chồng: lượt thứ 2 bị từ chối, không gửi trùng');
 
   const main = fs.readFileSync(path.join(root, 'app/main.js'), 'utf8');
-  ok(/type === "sync"/.test(main) && /setTimeout\(auto, 15000\)/.test(main) && /10 \* 60 \* 1000/.test(main), 'main.js: nút Đồng bộ + tự chạy sau 15 giây và mỗi 10 phút');
+  ok(/type === "sync"/.test(main) && /setTimeout\(full, 15000\)/.test(main) && /10 \* 60 \* 1000/.test(main) && /20 \* 1000/.test(main), 'main.js: nút Đồng bộ + tự chạy sau 15 giây, mỗi 10 phút (đầy đủ) và mỗi 20 giây (nhanh)');
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })();

@@ -316,6 +316,8 @@ function analyzeUnknownSongFile(snapshot, source, title, artist, payload) {
 }
 
 let currentNowPlayingForSync = null;
+// DB-REALTIME-01: hàm làm tươi "bài đang phát" (gửi lại now-playing-change) — gán bên trong khối Now Playing, dùng khi Server đổi Key.
+let refreshNowPlayingKey = null;
 // MIDI CONTROL CORE v1.0 — wiring MỚI, độc lập hoàn toàn với AIBootstrap/EventBus ở trên.
 // KHÔNG viết lại CommandEngine/capabilityRegistry (core/command-engine-js/), chỉ nối chúng
 // vào runtime thật. Toàn bộ lỗi bên trong CommandRuntime tự bắt, không throw ra ngoài.
@@ -652,6 +654,8 @@ app.whenReady().then(async () => {
         }
 
     }
+
+    refreshNowPlayingKey = dispatchUnifiedNowPlaying; // DB-REALTIME-01
 
     windowsMediaSession.on("ready", () => {
         console.log("[WindowsMediaSession] READY");
@@ -1571,7 +1575,7 @@ function broadcastEffectsLibrary() {
     }
 }
 
-// DB-SYNC-01 — đồng bộ 2 chiều songs.json <-> Key Server. Tự chạy sau khi mở app (15 giây) rồi mỗi 10 phút; nút "Đồng bộ" trong Setup chạy ngay.
+// DB-SYNC-01 — đồng bộ 2 chiều songs.json <-> Key Server. Tự chạy sau khi mở app (15 giây) rồi mỗi 10 phút (+ lượt nhanh mỗi 20 giây, DB-REALTIME-01); nút "Đồng bộ" trong Setup chạy ngay.
 let __songDbSync = null;
 function getSongDbSync() {
     if (!__songDbSync) {
@@ -1583,12 +1587,32 @@ function getSongDbSync() {
     }
     return __songDbSync;
 }
+// DB-REALTIME-01 — lượt NHANH mỗi 20 giây (kéo + Key theo Server + kiểm xoá vài bài); lượt ĐẦY ĐỦ (có đẩy lên Server) giữ ở 15 giây sau khi mở app rồi mỗi 10 phút.
+// Server là nguồn chuẩn: Key sửa trên Server -> Menu đổi theo, và nếu đó là bài ĐANG PHÁT thì làm tươi hiển thị ngay.
+function refreshPlayingKeyAfterSync(r) {
+    try {
+        if (!r || !r.ok) return; // lượt đồng bộ lỗi/đang tắt/đang chạy -> không làm gì
+        const cur = currentNowPlayingForSync;
+        if (!cur || !cur.title || typeof refreshNowPlayingKey !== "function") return;
+        const { normalizeTitle } = require("../core/integration/KeyServerSync");
+        if (r && Array.isArray(r.updatedTitles) && r.updatedTitles.includes(normalizeTitle(cur.title))) { refreshNowPlayingKey(); return; }
+        if (!cur.serverKey) return; // Key bài này không lấy từ Server -> không cần hỏi lại
+        keyServerSync.lookup(cur.title, cur.artist || "", { force: true, durationSec: cur.durationSec || undefined }).then((res) => {
+            const now = currentNowPlayingForSync;
+            if (!res || !res.found || !res.key || !now || now.title !== cur.title || now.artist !== cur.artist) return;
+            if (now.serverKey !== res.key) { now.serverKey = res.key; refreshNowPlayingKey(); }
+        }).catch(() => {});
+    } catch (e) { console.error("DB-REALTIME-01 làm tươi bài đang phát lỗi:", e); }
+}
 app.whenReady().then(() => licenseReady).then(() => {
     if (!licenseManager.isLicensed()) return; // LICENSE-01: chưa kích hoạt thì không tự đồng bộ Database
-    const auto = () => { getSongDbSync().run().catch((e) => console.error("DB-SYNC-01 tự đồng bộ lỗi:", e)); };
-    setTimeout(auto, 15000);
-    const t = setInterval(auto, 10 * 60 * 1000);
+    const full = () => { getSongDbSync().run().then(refreshPlayingKeyAfterSync).catch((e) => console.error("DB-SYNC-01 tự đồng bộ lỗi:", e)); };
+    const fast = () => { getSongDbSync().run({ light: true }).then(refreshPlayingKeyAfterSync).catch((e) => console.error("DB-REALTIME-01 đồng bộ nhanh lỗi:", e)); };
+    setTimeout(full, 15000);
+    const t = setInterval(full, 10 * 60 * 1000);
     if (t && t.unref) t.unref();
+    const t2 = setInterval(fast, 20 * 1000);
+    if (t2 && t2.unref) t2.unref();
 });
 
 // DB-SETUP-01 — Setup > Database: thống kê / nhập / xuất / dựng lại / xoá đệm. Chỉ cửa sổ Setup được gọi.

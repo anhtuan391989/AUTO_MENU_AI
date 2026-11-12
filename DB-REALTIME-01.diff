@@ -1,0 +1,193 @@
+diff --git a/app/main.js b/app/main.js
+index 9e3bf3a..e79ceb3 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -316,6 +316,8 @@ function analyzeUnknownSongFile(snapshot, source, title, artist, payload) {
+ }
+ 
+ let currentNowPlayingForSync = null;
++// DB-REALTIME-01: hàm làm tươi "bài đang phát" (gửi lại now-playing-change) — gán bên trong khối Now Playing, dùng khi Server đổi Key.
++let refreshNowPlayingKey = null;
+ // MIDI CONTROL CORE v1.0 — wiring MỚI, độc lập hoàn toàn với AIBootstrap/EventBus ở trên.
+ // KHÔNG viết lại CommandEngine/capabilityRegistry (core/command-engine-js/), chỉ nối chúng
+ // vào runtime thật. Toàn bộ lỗi bên trong CommandRuntime tự bắt, không throw ra ngoài.
+@@ -653,6 +655,8 @@ app.whenReady().then(async () => {
+ 
+     }
+ 
++    refreshNowPlayingKey = dispatchUnifiedNowPlaying; // DB-REALTIME-01
++
+     windowsMediaSession.on("ready", () => {
+         console.log("[WindowsMediaSession] READY");
+         smtcLayerAvailable = true;
+@@ -1571,7 +1575,7 @@ function broadcastEffectsLibrary() {
+     }
+ }
+ 
+-// DB-SYNC-01 — đồng bộ 2 chiều songs.json <-> Key Server. Tự chạy sau khi mở app (15 giây) rồi mỗi 10 phút; nút "Đồng bộ" trong Setup chạy ngay.
++// DB-SYNC-01 — đồng bộ 2 chiều songs.json <-> Key Server. Tự chạy sau khi mở app (15 giây) rồi mỗi 10 phút (+ lượt nhanh mỗi 20 giây, DB-REALTIME-01); nút "Đồng bộ" trong Setup chạy ngay.
+ let __songDbSync = null;
+ function getSongDbSync() {
+     if (!__songDbSync) {
+@@ -1583,12 +1587,32 @@ function getSongDbSync() {
+     }
+     return __songDbSync;
+ }
++// DB-REALTIME-01 — lượt NHANH mỗi 20 giây (kéo + Key theo Server + kiểm xoá vài bài); lượt ĐẦY ĐỦ (có đẩy lên Server) giữ ở 15 giây sau khi mở app rồi mỗi 10 phút.
++// Server là nguồn chuẩn: Key sửa trên Server -> Menu đổi theo, và nếu đó là bài ĐANG PHÁT thì làm tươi hiển thị ngay.
++function refreshPlayingKeyAfterSync(r) {
++    try {
++        if (!r || !r.ok) return; // lượt đồng bộ lỗi/đang tắt/đang chạy -> không làm gì
++        const cur = currentNowPlayingForSync;
++        if (!cur || !cur.title || typeof refreshNowPlayingKey !== "function") return;
++        const { normalizeTitle } = require("../core/integration/KeyServerSync");
++        if (r && Array.isArray(r.updatedTitles) && r.updatedTitles.includes(normalizeTitle(cur.title))) { refreshNowPlayingKey(); return; }
++        if (!cur.serverKey) return; // Key bài này không lấy từ Server -> không cần hỏi lại
++        keyServerSync.lookup(cur.title, cur.artist || "", { force: true, durationSec: cur.durationSec || undefined }).then((res) => {
++            const now = currentNowPlayingForSync;
++            if (!res || !res.found || !res.key || !now || now.title !== cur.title || now.artist !== cur.artist) return;
++            if (now.serverKey !== res.key) { now.serverKey = res.key; refreshNowPlayingKey(); }
++        }).catch(() => {});
++    } catch (e) { console.error("DB-REALTIME-01 làm tươi bài đang phát lỗi:", e); }
++}
+ app.whenReady().then(() => licenseReady).then(() => {
+     if (!licenseManager.isLicensed()) return; // LICENSE-01: chưa kích hoạt thì không tự đồng bộ Database
+-    const auto = () => { getSongDbSync().run().catch((e) => console.error("DB-SYNC-01 tự đồng bộ lỗi:", e)); };
+-    setTimeout(auto, 15000);
+-    const t = setInterval(auto, 10 * 60 * 1000);
++    const full = () => { getSongDbSync().run().then(refreshPlayingKeyAfterSync).catch((e) => console.error("DB-SYNC-01 tự đồng bộ lỗi:", e)); };
++    const fast = () => { getSongDbSync().run({ light: true }).then(refreshPlayingKeyAfterSync).catch((e) => console.error("DB-REALTIME-01 đồng bộ nhanh lỗi:", e)); };
++    setTimeout(full, 15000);
++    const t = setInterval(full, 10 * 60 * 1000);
+     if (t && t.unref) t.unref();
++    const t2 = setInterval(fast, 20 * 1000);
++    if (t2 && t2.unref) t2.unref();
+ });
+ 
+ // DB-SETUP-01 — Setup > Database: thống kê / nhập / xuất / dựng lại / xoá đệm. Chỉ cửa sổ Setup được gọi.
+diff --git a/core/integration/KeyServerSync.js b/core/integration/KeyServerSync.js
+index dafee86..f0eff80 100644
+--- a/core/integration/KeyServerSync.js
++++ b/core/integration/KeyServerSync.js
+@@ -30,7 +30,7 @@ const DEFAULT_SERVER_URL = 'https://menu-key-server.matuotluuly.workers.dev';
+ 
+ const LOOKUP_TIMEOUT_MS = 2000;
+ const SUBMIT_TIMEOUT_MS = 5000;
+-const HIT_TTL_MS = 2 * 60 * 1000;    // bài đã có trên server: nhớ 2 phút (ngắn để Key vừa SỬA trên server sớm tới Menu)
++const HIT_TTL_MS = 20 * 1000;        // bài đã có trên server: nhớ 20 giây (DB-REALTIME-01: ngắn để Key vừa SỬA trên server tới Menu gần như ngay)
+ const MISS_TTL_MS = 60 * 1000;       // bài chưa có: hỏi lại sau 60 giây
+ const ERROR_TTL_MS = 15 * 1000;      // server lỗi/chậm: thử lại sau 15 giây
+ const SUBMIT_RETRY_COOLDOWN_MS = 30 * 1000;
+diff --git a/core/integration/SongDbServerSync.js b/core/integration/SongDbServerSync.js
+index c255752..d1aabf8 100644
+--- a/core/integration/SongDbServerSync.js
++++ b/core/integration/SongDbServerSync.js
+@@ -5,7 +5,8 @@
+  * Đồng bộ HAI CHIỀU giữa data/songs.json (máy này) và Key Server (Cloudflare):
+  *   - KÉO (pull) : bài có trên server mà máy chưa có -> thêm vào songs.json;
+  *                  bài máy có nhưng chưa có Key -> điền Key từ server.
+- *                  KHÔNG BAO GIỜ ghi đè Key/BPM đã có trên máy.
++ *                  DB-REALTIME-01 (phương án A): Server là NGUỒN CHUẨN — Key trên Server khác Key trên máy thì máy đổi theo Server.
++ *                  BPM chỉ có ở máy nên KHÔNG BAO GIỜ bị đụng tới.
+  *   - ĐẨY (push) : bài máy có Key mà server chưa có -> gửi lên (dùng KeyServerSync.submit:
+  *                  tự hỏi server trước, không gửi trùng).
+  * Giới hạn của server hiện tại: /list chỉ trả 100–200 bài mới nhất, không có ca sĩ/BPM
+@@ -22,7 +23,8 @@ const MAX_PUSH_PER_RUN = 25;      // mỗi lượt chỉ đẩy tối đa 25 bà
+ const LIST_TIMEOUT_MS = 8000;
+ // DB-SYNC-02 — Server là nguồn chuẩn: bài nào Server đã XOÁ thì máy cũng xoá theo (trước đây chỉ thêm, không xoá, và còn đẩy bài đã xoá ngược lên Server).
+ // /list của Server chỉ trả 100 bài mới nhất -> "không có trong /list" CHƯA đủ để kết luận đã xoá: phải hỏi Server từng bài (theo ID, rồi theo tên) mới xoá.
+-const MAX_VERIFY_PER_RUN = 30;       // mỗi lượt kiểm tối đa 30 bài (mỗi bài 1-3 request); lượt sau kiểm tiếp
++const MAX_VERIFY_PER_RUN = 30;
++const MAX_VERIFY_PER_LIGHT_RUN = 5;  // DB-REALTIME-01: lượt nhanh chỉ kiểm tối đa 5 bài (tiết kiệm request Cloudflare); lượt đầy đủ (10 phút) kiểm tiếp       // mỗi lượt kiểm tối đa 30 bài (mỗi bài 1-3 request); lượt sau kiểm tiếp
+ const MAX_REMOVE_FRACTION = 0.5;     // một lượt không xoá quá 50% số bài (khi > 10 bài): chống Server rỗng/nhầm Server làm mất cả kho
+ const REMOVED_BACKUP_FILE = 'songs.removed-by-sync.json'; // bài bị xoá được chép sang đây (kèm BPM chỉ có ở máy) để khôi phục khi cần
+ // Bài "từ Server" = đã có songId (Server từng biết) hoặc ghi chú nguồn: server. Bài chỉ có ở máy (chưa có songId) vẫn được đẩy lên như cũ.
+@@ -73,7 +75,9 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
+         } catch (e) { logger.warn && logger.warn('[SongDbServerSync] không ghi được bản sao bài đã xoá:', e && e.message); }
+     }
+ 
+-    async function run() {
++    async function run(opts) {
++        // DB-REALTIME-01: { light:true } = lượt NHANH (chạy mỗi ~20 giây): chỉ kéo + cập nhật Key + kiểm xoá vài bài, KHÔNG đẩy lên (đẩy tốn nhiều request).
++        const light = !!(opts && opts.light);
+         if (!isEnabled()) return (last = { at: now(), ok: false, error: 'Đồng bộ đang TẮT (keyServerAutoSync=false).' });
+         if (running) return { ok: false, error: 'Đang đồng bộ, vui lòng chờ.' };
+         running = true;
+@@ -85,7 +89,8 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
+             let songs = db.load();
+             const byTitle = new Map();
+             songs.forEach((s, i) => { const k = normalizeTitle(s.title); if (k && !byTitle.has(k)) byTitle.set(k, i); });
+-            let pulled = 0, filled = 0, changed = false;
++            let pulled = 0, filled = 0, updated = 0, changed = false;
++            const updatedTitles = [];
+             const serverTitles = new Set();
+             for (const it of got.list) {
+                 const title = String((it && it.title) || '').trim();
+@@ -100,9 +105,16 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
+                     byTitle.set(nk, songs.length - 1); pulled++; changed = true;
+                 } else {
+                     const s = songs[byTitle.get(nk)];
+-                    if (dsec > 0 && s.durationSec !== dsec && (!s.songId || !it.songId || s.songId === it.songId)) { s.durationSec = dsec; changed = true; } // chỉ khi cùng bản ghi
++                    const sameRecord = !s.songId || !it.songId || s.songId === it.songId; // khác songId = bản thu khác (MV/Karaoke...) -> không đụng
++                    // DB-REALTIME-01: không cùng songId mà độ dài lệch > 3 giây = rất có thể là BẢN THU KHÁC cùng tên -> không đổi Key/độ dài (giống luật DB-MATCH-ID-02)
++                    const durClash = dsec > 0 && s.durationSec > 0 && Math.abs(s.durationSec - dsec) > 3 && !(s.songId && it.songId && s.songId === it.songId);
++                    if (dsec > 0 && s.durationSec !== dsec && sameRecord && !durClash) { s.durationSec = dsec; changed = true; } // chỉ khi cùng bản ghi
+                     if (!String(s.key || '').trim()) { s.key = key; filled++; changed = true; }
+-                    if (!s.songId && it.songId) { s.songId = it.songId; changed = true; } // nhớ ID server để lần sau dò theo ID
++                    else if (sameRecord && !durClash && String(s.key).trim() !== key) { // DB-REALTIME-01: Server là nguồn chuẩn -> đổi Key theo Server (BPM giữ nguyên)
++                        logger.log && logger.log('[SongDbServerSync] Key "' + s.title + '": ' + s.key + ' -> ' + key + ' (theo Server)');
++                        s.key = key; updated++; updatedTitles.push(nk); changed = true;
++                    }
++                    if (!s.songId && it.songId && !durClash) { s.songId = it.songId; changed = true; } // nhớ ID server để lần sau dò theo ID (không nhận ID của bản thu khác độ dài)
+                 }
+             }
+             if (changed) db.save(songs);
+@@ -114,7 +126,7 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
+             const gone = new Set();
+             let verifyLeft = 0, idsLearned = false, durLearned = false;
+             for (let i = 0; i < toCheck.length; i++) {
+-                if (i >= MAX_VERIFY_PER_RUN) { verifyLeft = toCheck.length - i; break; }
++                if (i >= (light ? MAX_VERIFY_PER_LIGHT_RUN : MAX_VERIFY_PER_RUN)) { verifyLeft = toCheck.length - i; break; }
+                 const v = await verifyOnServer(toCheck[i]);
+                 if (v.state === 'deleted') gone.add(toCheck[i]);
+                 else if (v.state === 'unknown') { verifyLeft = toCheck.length - i; break; } // Server không trả lời rõ: dừng, giữ nguyên các bài còn lại
+@@ -137,7 +149,7 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
+ 
+             // ---- ĐẨY ----
+             let pushed = 0, pending = 0, failed = 0, idsChanged = false;
+-            for (const s of songs) {
++            for (const s of (light ? [] : songs)) {
+                 const nk = normalizeTitle(s.title);
+                 if (nk.length < 3 || !String(s.key || '').trim() || serverTitles.has(nk)) continue;
+                 if (fromServer(s)) continue; // DB-SYNC-02: bài vốn từ Server mà Server không có = Server đã xoá -> KHÔNG đẩy ngược lên (trước đây làm bài đã xoá sống lại)
+@@ -150,7 +162,7 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
+                 else if (!r.ok && r.reason !== 'cooldown') failed++;
+             }
+             if (idsChanged) db.save(songs);
+-            last = { at: now(), ok: true, pulled, filled, pushed, pending, failed, removed, removeBlocked, verifyLeft, serverCount: got.list.length };
++            last = { at: now(), ok: true, light, pulled, filled, updated, updatedTitles, pushed, pending, failed, removed, removeBlocked, verifyLeft, serverCount: got.list.length };
+             return last;
+         } catch (err) {
+             logger.error && logger.error('[SongDbServerSync] lỗi:', err);
+diff --git a/tests/unit/SongDbSync01.verify.js b/tests/unit/SongDbSync01.verify.js
+index 1382160..b18e575 100644
+--- a/tests/unit/SongDbSync01.verify.js
++++ b/tests/unit/SongDbSync01.verify.js
+@@ -37,7 +37,7 @@ const mk = (srv, enabled = true) => createSongDbServerSync({ keyServerSync: new
+   const L = SongDatabase.load(), by = (t) => L.find((s) => s.title === t);
+   ok(by('Bài Server Có') && by('Bài Server Có').key === 'G Minor' && by('Bài Server Có').bpm === null, 'bài server được thêm vào máy với Key đúng (G Minor), BPM trống');
+   ok(by('Bài Chung').key === 'F# Major' && by('Bài Chung').bpm === 90, 'bài thiếu Key được điền từ server, giữ BPM của máy');
+-  ok(by('Bài Cả Hai').key === 'C Major' && by('Bài Cả Hai').bpm === 80, 'KHÔNG ghi đè Key/BPM đã có trên máy');
++  ok(by('Bài Cả Hai').key === 'A Minor' && by('Bài Cả Hai').bpm === 80 && r.updated === 1, 'DB-REALTIME-01: Server là nguồn chuẩn -> Key đổi theo Server (A Minor), BPM của máy giữ nguyên', JSON.stringify(r));
+   ok(srv.songs.some((s) => s.title === 'Bài Máy Có' && s.key === 'D' && s.mode === 'major'), 'bài chỉ có ở máy đã được gửi lên server (D major)');
+   ok(srv.songs.length === 4, 'server không bị nhân đôi/thêm rác (4 bài)', srv.songs.length);
+ 
+@@ -63,7 +63,7 @@ const mk = (srv, enabled = true) => createSongDbServerSync({ keyServerSync: new
+   ok([a, b].filter((x) => x.error && /Đang đồng bộ/.test(x.error)).length === 1, 'hai lượt chạy chồng: lượt thứ 2 bị từ chối, không gửi trùng');
+ 
+   const main = fs.readFileSync(path.join(root, 'app/main.js'), 'utf8');
+-  ok(/type === "sync"/.test(main) && /setTimeout\(auto, 15000\)/.test(main) && /10 \* 60 \* 1000/.test(main), 'main.js: nút Đồng bộ + tự chạy sau 15 giây và mỗi 10 phút');
++  ok(/type === "sync"/.test(main) && /setTimeout\(full, 15000\)/.test(main) && /10 \* 60 \* 1000/.test(main) && /20 \* 1000/.test(main), 'main.js: nút Đồng bộ + tự chạy sau 15 giây, mỗi 10 phút (đầy đủ) và mỗi 20 giây (nhanh)');
+   fs.rmSync(tmp, { recursive: true, force: true });
+   console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
+ })();

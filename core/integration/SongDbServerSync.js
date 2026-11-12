@@ -5,7 +5,8 @@
  * Đồng bộ HAI CHIỀU giữa data/songs.json (máy này) và Key Server (Cloudflare):
  *   - KÉO (pull) : bài có trên server mà máy chưa có -> thêm vào songs.json;
  *                  bài máy có nhưng chưa có Key -> điền Key từ server.
- *                  KHÔNG BAO GIỜ ghi đè Key/BPM đã có trên máy.
+ *                  DB-REALTIME-01 (phương án A): Server là NGUỒN CHUẨN — Key trên Server khác Key trên máy thì máy đổi theo Server.
+ *                  BPM chỉ có ở máy nên KHÔNG BAO GIỜ bị đụng tới.
  *   - ĐẨY (push) : bài máy có Key mà server chưa có -> gửi lên (dùng KeyServerSync.submit:
  *                  tự hỏi server trước, không gửi trùng).
  * Giới hạn của server hiện tại: /list chỉ trả 100–200 bài mới nhất, không có ca sĩ/BPM
@@ -22,7 +23,8 @@ const MAX_PUSH_PER_RUN = 25;      // mỗi lượt chỉ đẩy tối đa 25 bà
 const LIST_TIMEOUT_MS = 8000;
 // DB-SYNC-02 — Server là nguồn chuẩn: bài nào Server đã XOÁ thì máy cũng xoá theo (trước đây chỉ thêm, không xoá, và còn đẩy bài đã xoá ngược lên Server).
 // /list của Server chỉ trả 100 bài mới nhất -> "không có trong /list" CHƯA đủ để kết luận đã xoá: phải hỏi Server từng bài (theo ID, rồi theo tên) mới xoá.
-const MAX_VERIFY_PER_RUN = 30;       // mỗi lượt kiểm tối đa 30 bài (mỗi bài 1-3 request); lượt sau kiểm tiếp
+const MAX_VERIFY_PER_RUN = 30;
+const MAX_VERIFY_PER_LIGHT_RUN = 5;  // DB-REALTIME-01: lượt nhanh chỉ kiểm tối đa 5 bài (tiết kiệm request Cloudflare); lượt đầy đủ (10 phút) kiểm tiếp       // mỗi lượt kiểm tối đa 30 bài (mỗi bài 1-3 request); lượt sau kiểm tiếp
 const MAX_REMOVE_FRACTION = 0.5;     // một lượt không xoá quá 50% số bài (khi > 10 bài): chống Server rỗng/nhầm Server làm mất cả kho
 const REMOVED_BACKUP_FILE = 'songs.removed-by-sync.json'; // bài bị xoá được chép sang đây (kèm BPM chỉ có ở máy) để khôi phục khi cần
 // Bài "từ Server" = đã có songId (Server từng biết) hoặc ghi chú nguồn: server. Bài chỉ có ở máy (chưa có songId) vẫn được đẩy lên như cũ.
@@ -73,7 +75,9 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
         } catch (e) { logger.warn && logger.warn('[SongDbServerSync] không ghi được bản sao bài đã xoá:', e && e.message); }
     }
 
-    async function run() {
+    async function run(opts) {
+        // DB-REALTIME-01: { light:true } = lượt NHANH (chạy mỗi ~20 giây): chỉ kéo + cập nhật Key + kiểm xoá vài bài, KHÔNG đẩy lên (đẩy tốn nhiều request).
+        const light = !!(opts && opts.light);
         if (!isEnabled()) return (last = { at: now(), ok: false, error: 'Đồng bộ đang TẮT (keyServerAutoSync=false).' });
         if (running) return { ok: false, error: 'Đang đồng bộ, vui lòng chờ.' };
         running = true;
@@ -85,7 +89,8 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
             let songs = db.load();
             const byTitle = new Map();
             songs.forEach((s, i) => { const k = normalizeTitle(s.title); if (k && !byTitle.has(k)) byTitle.set(k, i); });
-            let pulled = 0, filled = 0, changed = false;
+            let pulled = 0, filled = 0, updated = 0, changed = false;
+            const updatedTitles = [];
             const serverTitles = new Set();
             for (const it of got.list) {
                 const title = String((it && it.title) || '').trim();
@@ -100,9 +105,16 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
                     byTitle.set(nk, songs.length - 1); pulled++; changed = true;
                 } else {
                     const s = songs[byTitle.get(nk)];
-                    if (dsec > 0 && s.durationSec !== dsec && (!s.songId || !it.songId || s.songId === it.songId)) { s.durationSec = dsec; changed = true; } // chỉ khi cùng bản ghi
+                    const sameRecord = !s.songId || !it.songId || s.songId === it.songId; // khác songId = bản thu khác (MV/Karaoke...) -> không đụng
+                    // DB-REALTIME-01: không cùng songId mà độ dài lệch > 3 giây = rất có thể là BẢN THU KHÁC cùng tên -> không đổi Key/độ dài (giống luật DB-MATCH-ID-02)
+                    const durClash = dsec > 0 && s.durationSec > 0 && Math.abs(s.durationSec - dsec) > 3 && !(s.songId && it.songId && s.songId === it.songId);
+                    if (dsec > 0 && s.durationSec !== dsec && sameRecord && !durClash) { s.durationSec = dsec; changed = true; } // chỉ khi cùng bản ghi
                     if (!String(s.key || '').trim()) { s.key = key; filled++; changed = true; }
-                    if (!s.songId && it.songId) { s.songId = it.songId; changed = true; } // nhớ ID server để lần sau dò theo ID
+                    else if (sameRecord && !durClash && String(s.key).trim() !== key) { // DB-REALTIME-01: Server là nguồn chuẩn -> đổi Key theo Server (BPM giữ nguyên)
+                        logger.log && logger.log('[SongDbServerSync] Key "' + s.title + '": ' + s.key + ' -> ' + key + ' (theo Server)');
+                        s.key = key; updated++; updatedTitles.push(nk); changed = true;
+                    }
+                    if (!s.songId && it.songId && !durClash) { s.songId = it.songId; changed = true; } // nhớ ID server để lần sau dò theo ID (không nhận ID của bản thu khác độ dài)
                 }
             }
             if (changed) db.save(songs);
@@ -114,7 +126,7 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
             const gone = new Set();
             let verifyLeft = 0, idsLearned = false, durLearned = false;
             for (let i = 0; i < toCheck.length; i++) {
-                if (i >= MAX_VERIFY_PER_RUN) { verifyLeft = toCheck.length - i; break; }
+                if (i >= (light ? MAX_VERIFY_PER_LIGHT_RUN : MAX_VERIFY_PER_RUN)) { verifyLeft = toCheck.length - i; break; }
                 const v = await verifyOnServer(toCheck[i]);
                 if (v.state === 'deleted') gone.add(toCheck[i]);
                 else if (v.state === 'unknown') { verifyLeft = toCheck.length - i; break; } // Server không trả lời rõ: dừng, giữ nguyên các bài còn lại
@@ -137,7 +149,7 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
 
             // ---- ĐẨY ----
             let pushed = 0, pending = 0, failed = 0, idsChanged = false;
-            for (const s of songs) {
+            for (const s of (light ? [] : songs)) {
                 const nk = normalizeTitle(s.title);
                 if (nk.length < 3 || !String(s.key || '').trim() || serverTitles.has(nk)) continue;
                 if (fromServer(s)) continue; // DB-SYNC-02: bài vốn từ Server mà Server không có = Server đã xoá -> KHÔNG đẩy ngược lên (trước đây làm bài đã xoá sống lại)
@@ -150,7 +162,7 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
                 else if (!r.ok && r.reason !== 'cooldown') failed++;
             }
             if (idsChanged) db.save(songs);
-            last = { at: now(), ok: true, pulled, filled, pushed, pending, failed, removed, removeBlocked, verifyLeft, serverCount: got.list.length };
+            last = { at: now(), ok: true, light, pulled, filled, updated, updatedTitles, pushed, pending, failed, removed, removeBlocked, verifyLeft, serverCount: got.list.length };
             return last;
         } catch (err) {
             logger.error && logger.error('[SongDbServerSync] lỗi:', err);
