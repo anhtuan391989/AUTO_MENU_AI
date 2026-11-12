@@ -299,6 +299,7 @@
     ["Bộ nhớ", "Memory"],
     ["Mặc định", "Default"],
     ["Tự áp dụng", "Auto Apply"],
+    ["Tự bật Tune khi chốt Key", "Auto Tune on Key Lock"],
     ["Chạy Calibration AI", "Run AI Calibration"],
     ["Gỡ lỗi", "Debug"],
     ["Bật log debug", "Enable debug log"],

@@ -28,6 +28,13 @@
         if (!aa || !dbg) return;
         var th = field(["Threshold", "Ngưỡng"], "input[type=range]"), cf = field(["Confidence", "Độ tin cậy"], "input[type=range]");
         var c = cfg();
+        // TUNE-ON-LOCK-01 — ô "Tự bật Tune khi chốt Key": lưu riêng setting tuneOnKeyLock (boolean, mặc định TẮT = như cũ); Menu đọc lại ≤ 2 giây.
+        var tl = field(["Auto Tune on Key Lock", "Tự bật Tune khi chốt Key"]);
+        if (tl) {
+            tl.disabled = false;
+            tl.checked = (typeof getSetting === "function" ? getSetting("tuneOnKeyLock", false) : false) === true;
+            tl.addEventListener("change", function () { if (typeof setSetting === "function") setSetting("tuneOnKeyLock", tl.checked); });
+        }
         // A115 — hiện SỐ cạnh mỗi thanh: vị trí 0–100 và giá trị thật đang áp vào KeyEngine (cùng công thức với renderer.js).
         var toMin = function (v) { return v >= 50 ? 0.55 + (v - 50) / 50 * 0.15 : 0.55 - (50 - v) / 50 * 0.10; };
         var toLock = function (v) { return v >= 50 ? 0.80 + (v - 50) / 50 * 0.12 : 0.80 - (50 - v) / 50 * 0.10; };

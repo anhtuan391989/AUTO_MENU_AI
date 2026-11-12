@@ -669,6 +669,7 @@ document.querySelectorAll(".preset-btn").forEach((b) => { if (isTuneOffBtn(b)) r
 document.querySelectorAll(".preset-btn").forEach(btn => {
     btn.addEventListener("click", (e) => {
         if (isTuneOffBtn(e.target)) {
+            __tuneUserOverrideKey = String(lastNowPlayingKey); // TUNE-ON-LOCK-01: người dùng tự bấm -> app KHÔNG tự đổi Tune nữa cho tới khi đổi bài
             const tuneOnNow = !e.target.classList.contains("active"); // trạng thái ĐÍCH sau cú bấm
             renderTuneBtn(e.target, tuneOnNow);
             const bypassOn = !tuneOnNow; // TUNE OFF = Bypass BẬT
@@ -1878,7 +1879,61 @@ function __aiCoreCfg() {
 }
 try { setInterval(__aiCoreCfg, 2000); } catch (e) {} // A114: áp Ngưỡng/Độ tin cậy ngay cả khi Debug tắt
 
+// TUNE-ON-LOCK-01 — Setup > Lõi AI > "Tự bật Tune khi chốt Key" (mặc định TẮT = hành vi cũ, không đụng gì).
+// BẬT: đổi bài mà chưa có Key -> nếu Tune đang BẬT thì chuyển TẮT (đang TẮT thì giữ nguyên); đổi bài mà đã có Key (Database/Server) hoặc khi Key được CHỐT
+// (AI chốt / Database / Key tay) -> Tune BẬT, và chỉ bật SAU khi Key đã gửi xong xuống plugin. Người dùng tự bấm nút Tune giữa bài -> giữ lựa chọn tới khi đổi bài.
+// Dùng đúng đường bấm nút Tune có sẵn (renderTuneBtn + ActionRegistry.setDawControlState("TUNE", bypass)); không đổi HTML/giao diện Menu.
+let __tuneUserOverrideKey = null;   // bài (title|artist) mà người dùng đã tự bấm Tune
+let __keySendInFlight = null;       // Promise của lệnh gửi Key gần nhất (resolve true/false)
+let __tuneCfgCache = { t: 0, v: false };
+function __tuneOnLockEnabled() {
+    const now = Date.now();
+    if (now - __tuneCfgCache.t < 2000) return __tuneCfgCache.v;
+    let v = false;
+    try { const st = window.electronAPI?.loadSettingsSync?.(); v = !!(st && typeof st === "object" && st.tuneOnKeyLock === true); } catch (e) {}
+    __tuneCfgCache = { t: now, v };
+    return v;
+}
+function __tuneUserOverridden() { return __tuneUserOverrideKey !== null && __tuneUserOverrideKey === String(lastNowPlayingKey); }
+function __setTuneAuto(on, reason) {
+    try {
+        const b = document.querySelector('.preset-btn[data-tune-btn="1"]');
+        if (!b || b.classList.contains("active") === on) return; // không có nút / đã đúng trạng thái -> không gửi gì
+        renderTuneBtn(b, on);
+        console.log(`[Tune-On-Lock] ${on ? "BẬT" : "TẮT"} Tune (${reason})`);
+        reportDawStateResult(b, "TUNE", window.ActionRegistry?.setDawControlState?.("TUNE", !on, { reason: "tune-on-lock:" + reason })); // Tune ON = Bypass TẮT
+    } catch (e) { /* không ảnh hưởng luồng Key */ }
+}
+function __keyLockedForTune() { // "đã chốt Key" = đúng điều kiện Menu thôi hiện LISTENING
+    const src = getActiveSourceName();
+    if (src === "manual") return !!keySource.manual.committedKey;
+    if (src === "songDb") return !__dbBypass.pending && !!keySource.songDb.value;
+    return keyEverDetected === true;
+}
+function __tuneMaybeOn() {
+    try {
+        if (!__tuneOnLockEnabled() || __tuneUserOverridden() || !__keyLockedForTune()) return;
+        Promise.resolve(__keySendInFlight).catch(() => false).then((ok) => {
+            if (ok === false) return; // gửi Key xuống plugin thất bại -> không bật Tune
+            if (!__tuneOnLockEnabled() || __tuneUserOverridden() || !__keyLockedForTune()) return; // trạng thái có thể đã đổi trong lúc chờ
+            __setTuneAuto(true, "key-locked");
+        });
+    } catch (e) {}
+}
+function __tuneOnSongChange(payload) {
+    try {
+        __tuneUserOverrideKey = null;
+        if (!__tuneOnLockEnabled()) return;
+        if (payload && payload.databaseMatch && payload.databaseMatch.key) { __tuneMaybeOn(); return; } // bài đã có Key ngay -> bật (sau khi Key gửi xong)
+        __setTuneAuto(false, "song-change-no-key"); // chưa có Key: đang BẬT -> TẮT; đang TẮT -> giữ nguyên
+    } catch (e) {}
+}
 function applyActiveKeyToPlugin(sourceLabel) {
+    const __r = __applyActiveKeyToPluginCore(sourceLabel);
+    __tuneMaybeOn(); // TUNE-ON-LOCK-01: sau khi lõi chạy xong (lệnh gửi Key, nếu có, đã được khởi động)
+    return __r;
+}
+function __applyActiveKeyToPluginCore(sourceLabel) {
 
     const value = getActiveKeyValue();
     const source = getActiveSourceName();
@@ -1937,7 +1992,7 @@ function applyActiveKeyToPlugin(sourceLabel) {
     // TASK MIDI-01 — correlation ID cho 1 lần áp dụng Key (đọc bởi midiDiag trong appSettings.js); AI_KEY_READY ≠ MIDI_SEND_ATTEMPTED.
     try { window.__midiCorrelation = { id: `k${Date.now().toString(36)}-${(window.__midiCorrSeq = (window.__midiCorrSeq || 0) + 1)}`, key: value, caller: sourceLabel || null };
           if (typeof midiDiag === "function") midiDiag("AI_KEY_READY", { key: value, caller: sourceLabel || null }); } catch (e) {}
-    sendKeyToAutotune(sendValue).then((result) => {
+    __keySendInFlight = sendKeyToAutotune(sendValue).then((result) => { // TUNE-ON-LOCK-01: nhớ lệnh gửi để bật Tune SAU khi Key đã vào plugin
 
         if (typeof aiRecordPluginSend === "function") aiRecordPluginSend(value, result, sourceLabel); // TASK AI-KEY-FAST-07 (chỉ đếm/log)
         try { if (typeof midiDiag === "function") midiDiag("PLUGIN_SEND_RESULT", { key: value, ok: !!result.ok, driver: result.driverUsed || null, status: result.status || null, midi: result.midi || null, confirmation: result.confirmation || null }); } catch (e) {}
@@ -1951,6 +2006,7 @@ function applyActiveKeyToPlugin(sourceLabel) {
         }
 
         refreshKeySourceDisplay();
+        return result.ok === true; // TUNE-ON-LOCK-01
 
     });
 
@@ -2267,7 +2323,9 @@ function dispatchNowPlayingPayload(payload) {
 
     const key = payload ? `${payload.title || ""}|${payload.artist || ""}` : null;
 
+    let __songChangedTune = false; // TUNE-ON-LOCK-01
     if (key !== lastNowPlayingKey) {
+        __songChangedTune = true;
         console.log("[NowPlaying] Song Changed");
         __dbBypassClear(); // TASK AUTO-RELISTEN-01: bài mới -> Database lại có hiệu lực
         cancelManualOverride();
@@ -2290,6 +2348,8 @@ function dispatchNowPlayingPayload(payload) {
     } else {
         onSongDatabaseMiss();
     }
+
+    if (__songChangedTune) __tuneOnSongChange(payload); // TUNE-ON-LOCK-01: chạy SAU khi AI/Database đã được reset cho bài mới
 
 }
 
