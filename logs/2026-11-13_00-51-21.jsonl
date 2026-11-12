@@ -1,0 +1,15 @@
+{"event":"FX_AUTO","musicState":"SOURCE_UNAVAILABLE","actionState":"IDLE","target":null,"lastResult":null,"lastDbfs":null,"levelStats":{"n":0,"finite":0,"min":null,"avg":null,"max":null,"digitalSilence":0},"msSinceFrame":null,"framesSeen":0,"timestamp":1794505881967}
+{"event":"FX_AUTO","musicState":"UNKNOWN","actionState":"IDLE","target":null,"lastResult":null,"lastDbfs":null,"levelStats":{"n":5,"finite":0,"min":null,"avg":null,"max":null,"digitalSilence":5},"msSinceFrame":9,"framesSeen":5,"timestamp":1794505884594}
+{"event":"FX_AUTO","musicState":"MUSIC_SILENT","actionState":"IDLE","target":null,"lastResult":null,"lastDbfs":null,"levelStats":{"n":1,"finite":0,"min":null,"avg":null,"max":null,"digitalSilence":1},"msSinceFrame":3,"framesSeen":151,"timestamp":1794505887957}
+{"event":"FX_AUTO","musicState":"MUSIC_SILENT","actionState":"IDLE","target":false,"lastResult":null,"lastDbfs":null,"levelStats":{"n":1,"finite":0,"min":null,"avg":null,"max":null,"digitalSilence":1},"msSinceFrame":3,"framesSeen":151,"timestamp":1794505887957}
+{"time":1.5,"top1":null,"top2":null,"confidence":0,"margin":0,"stability":0,"top1Stable":0,"decisionScore":0,"votes":0,"window":0,"locked":false}
+{"event":"FIRST_EVIDENCE","frame":342}
+{"event":"FIRST_PROVISIONAL","frame":345,"key":"B Minor","confidence":0.9070413265517095}
+{"event":"KEY_LONG_GATE","why":"no-long-key","long":null,"locked":null,"streak":0,"groupStreak":0,"longSeconds":0.3,"confidence":null,"margin":null,"groupMargin":null,"modal":null,"timestamp":1794505890749}
+{"time":3,"top1":"B Minor","top2":"B Major","confidence":0.8059623359951773,"margin":0.30639119126390957,"stability":1,"top1Stable":0,"decisionScore":0.8310959974781135,"votes":1,"window":1,"locked":false,"highConfidenceStreak":0}
+{"event":"FX_AUTO","musicState":"MUSIC_PRESENT","actionState":"IDLE","target":false,"lastResult":null,"lastDbfs":-22.8,"levelStats":{"n":75,"finite":75,"min":-55.4,"avg":-36.7,"max":-14.1,"digitalSilence":0},"msSinceFrame":4,"framesSeen":432,"timestamp":1794505891698}
+{"event":"FX_AUTO","musicState":"MUSIC_PRESENT","actionState":"IDLE","target":true,"lastResult":null,"lastDbfs":-22.8,"levelStats":{"n":75,"finite":75,"min":-55.4,"avg":-36.7,"max":-14.1,"digitalSilence":0},"msSinceFrame":5,"framesSeen":432,"timestamp":1794505891698}
+{"event":"FX_AUTO","musicState":"MUSIC_PRESENT","actionState":"SEND_SENT_UNCONFIRMED","target":true,"lastResult":{"ok":true,"partial":false,"reason":null},"lastDbfs":-23.9,"levelStats":{"n":66,"finite":66,"min":-55.4,"avg":-27.5,"max":-14.1,"digitalSilence":0},"msSinceFrame":128,"framesSeen":452,"timestamp":1794505892087}
+{"event":"TOP1_CHANGED","from":"B Minor","to":"F# Minor","time":4.5}
+{"time":4.5,"top1":"F# Minor","top2":"D Major","confidence":0.6594486652122038,"margin":0.1805834398372711,"stability":0.25,"top1Stable":0,"decisionScore":0.49368120523583303,"votes":1,"window":2,"locked":false,"highConfidenceStreak":0}
+{"event":"KEY_LONG_GATE","why":"streak","long":"6-Minor","locked":null,"streak":1,"groupStreak":1,"longSeconds":2.3,"confidence":0.493,"margin":0.079,"groupMargin":0.079,"modal":0.221,"timestamp":1794505892750}
