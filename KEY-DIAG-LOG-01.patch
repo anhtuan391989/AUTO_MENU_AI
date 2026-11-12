@@ -1,0 +1,54 @@
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 4501fbc..32c2066 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -2315,6 +2315,11 @@ function startAiRealtimeLoop() {
+ 
+         window.__keyDetectStopWatcher = null;
+ 
++        try { // KEY-DIAG-LOG-01 (chỉ ghi nhật ký)
++            const __t2 = result.top2 ? (notes[result.top2.root] + " " + result.top2.mode) : null;
++            __keyDiagLog("KEY_LOG", { key: result.key, key2: __t2, confidence: result.confidence ?? null, margin: result.margin ?? null,
++                bassAgreement: result.bassAgreement ?? null, lockMs: (__aiDiagState && __aiDiagState.t0 != null) ? Math.round(performance.now() - __aiDiagState.t0) : null });
++        } catch (e) {}
+         keySource.ai.value = result.key;
+         if (__dbBypass.pending) { // TASK AUTO-RELISTEN-01 + AUTO-DETECT-TRUST-01: AI chỉ thay Database khi đáng tin hơn
+             __dbBypass.pending = false;
+@@ -2365,6 +2370,29 @@ function startAiRealtimeLoop() {
+ // Điểm DUY NHẤT xử lý "quay lại Auto" — dùng cho: nút autoDetectBtn có sẵn, dropdown chọn lại
+ // "AI Key Detect" + SEND, và khởi động lần đầu. Huỷ Manual (nếu có), áp NGAY nguồn hiện có
+ // hiệu lực (Song Database nếu có, không thì đợi AI), đảm bảo vòng dò AI đang chạy.
++// KEY-DIAG-LOG-01 — CHỈ GHI NHẬT KÝ (logs/*.jsonl qua kênh Telemetry có sẵn), KHÔNG đổi hành vi dò Key.
++// KEY_LOG        : mỗi lần AI CHỐT Key (Key, Key sát nhất, margin, tin cậy, nốt trầm, thời gian chốt, Key ghi trong tên bài nếu có).
++// KEY_LOG_MANUAL : mỗi lần người dùng GỬI Key tay thành công (đáp án thật do người dùng biết) + Key AI lúc đó.
++// Công cụ đọc: tools/key_log_report.js. Tắt chung với nhật ký AI (setting aiDiagLogEnabled).
++function __keyTitleHint(text) { // "... Key: G Major" / "Key: F#m" trong tên bài -> "G Major"; không có -> null
++    try {
++        const m = String(text || "").replace(/♯/g, "#").replace(/♭/g, "b").match(/\bkey\s*[:：-]?\s*([A-Ga-g])\s*([#b]?)\s*(major|minor|maj|min|m)?\b/i);
++        if (!m) return null;
++        const root = m[1].toUpperCase() + (m[2] || "");
++        const mode = /^m(in(or)?)?$/i.test(m[3] || "") ? "Minor" : "Major";
++        return root + " " + mode;
++    } catch (e) { return null; }
++}
++function __keyDiagLog(event, extra) {
++    try {
++        const enabled = typeof getSetting === "function" ? getSetting("aiDiagLogEnabled", true) : true;
++        if (enabled === false || enabled === "false") return;
++        if (!window.electronAPI || typeof window.electronAPI.sendTelemetry !== "function") return;
++        const song = typeof lastNowPlayingKey !== "undefined" ? lastNowPlayingKey : null;
++        window.electronAPI.sendTelemetry(Object.assign({ event, song, titleHint: __keyTitleHint(song), timestamp: Date.now() }, extra));
++    } catch (e) { /* nhật ký không được ảnh hưởng luồng chính */ }
++}
++
+ // KEY-MANUAL-HOLD-01 — Người dùng đã GỬI Key tay thành công (Manual đang hiệu lực): bấm Tự dò / chọn "AI Key Detect" + GỬI
+ // / AI dò lại (kết nối lại nguồn âm thanh) KHÔNG được đổi Key tay. AI vẫn chạy nền; Key tay giữ tới khi ĐỔI BÀI
+ // (dispatchNowPlayingPayload nhả Manual + __releaseManualForNewSong) hoặc Manual hết hạn như cũ. Không gửi gì xuống Auto-Tune.
+@@ -2484,6 +2512,7 @@ applyKeyBtn?.addEventListener("click", () => {
+             // CHỈ commit Manual state khi Auto-Tune xác nhận nhận được Key (Mục 6: preview -> validate -> committed).
+             keySource.manual.committedKey = selectedKey;
+             keySource.manual.active = true;
++            __keyDiagLog("KEY_LOG_MANUAL", { key: selectedKey, aiKey: keySource.ai.value ?? null }); // KEY-DIAG-LOG-01
+             reportManualStateSnapshot(); // TASK B3-C — Manual Key vừa BẬT thật (đã được Auto-Tune xác nhận), báo Core ngay
+ 
+             setStatus("dot-key", "online"); // xanh: đã gửi thành công (qua MIDI hoặc click)
