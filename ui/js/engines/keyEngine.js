@@ -165,6 +165,12 @@ const KeyEngine = (() => {
     const OOK_TICKS = 4;              // ... liên tục ≥ 4 tick (1.6 s) => nghi chuyển điệu thật: neo lại bộ tích luỹ dài hạn vào đoạn ngắn
     const LONG_ANCHOR_MASS_S = 2;     // "khối lượng" bằng chứng của điểm neo (giây tương đương) — dữ liệu mới lấn át điểm neo sau vài giây
     const LONG_LOCK_MIN_MODAL = 0.2;  // khoá thẳng theo dài hạn chỉ khi có bằng chứng quãng 3 rõ (hợp âm thiếu quãng 3 = mập mờ Major/Minor, không khoá)
+    // KEY-FALLBACK-LOCK-01 — ĐƯỜNG DỰ PHÒNG (lớp bảo hiểm thứ 2, sau KEY-GROUP-LOCK-01): nghe đủ FALLBACK_LOCK_LONG_S giây nhạc mà CHƯA khoá Key nào
+    // (bài khó/đổi tone: vote/adaptive/long-term đều không đạt ngưỡng) => khoá theo Key dài hạn đang dẫn đầu ổn định (≥ LONG_LOCK_TICKS tick, tính theo NHÓM
+    // relative khi RELATIVE_GROUP_ENABLED, và confidence ≥ MIN_CONFIDENCE). Chỉ chạy khi lastLockedKey === null nên KHÔNG đụng bài đã chốt bình thường.
+    // Đặt FALLBACK_LOCK_ENABLED = false để tắt.
+    const FALLBACK_LOCK_ENABLED = true;
+    const FALLBACK_LOCK_LONG_S = 180; // theo yêu cầu người dùng ("hết bài 3 phút"). Muốn chốt sớm hơn: đổi số này (đề nghị của Claude B: 25).
     const LONG_FIRST_LOCK_S = 8;      // khoá LẦN ĐẦU: chờ ≥ 8 s nhạc, trừ khi tín hiệu "đứng yên" (1 hợp âm giữ lâu: ngắn ≈ dài)
     const LONG_STATIONARY_COS = 0.97; // cosine(ngắn, dài) ≥ 0.97 => không có gì để lấy trung bình, khoá sớm vẫn đúng
     // TASK AI-KEY-ENGINE-COMPLETE-01 — lối tắt "đứng yên" (1 hợp âm giữ lâu) CHỈ hợp lệ sau LONG_STATIONARY_MIN_S giây nhạc tích luỹ.
@@ -884,6 +890,21 @@ const KeyEngine = (() => {
             // TASK AI-ALG-05 — cập nhật Key dài hạn; nếu nó dẫn đầu ổn định mà Key chưa khoá/khác Key đang khoá -> khoá theo bằng chứng dài hạn
             // (cần khi hợp âm đang chơi không bao giờ trùng Key của cả đoạn — nếu không sẽ không bao giờ khoá được).
             updateLongState();
+
+            // KEY-FALLBACK-LOCK-01 — đường dự phòng (xem chú thích ở hằng FALLBACK_LOCK_ENABLED)
+            const __fbStreak = RELATIVE_GROUP_ENABLED ? longState.groupStreak : longState.streak;
+            if (FALLBACK_LOCK_ENABLED && lastLockedKey === null && hasMusicalContent && longState.key && longState.result
+                && longSeconds >= FALLBACK_LOCK_LONG_S && __fbStreak >= LONG_LOCK_TICKS && longState.result.confidence >= MIN_CONFIDENCE) {
+                const fr = longState.result;
+                longLockFiredKey = longState.key; fastPathLastFiredKey = longState.key; lastLockedKey = longState.key;
+                sendTelemetry({
+                    event: "LOCK", time: parseFloat(formatElapsedSeconds(elapsed)), key: fr.key, decisionScore: fr.confidence, reason: "fallback-timeout",
+                    longSeconds: +longSeconds.toFixed(1), margin: fr.margin, frame: frameCounter, framesToStable: frameCounter,
+                    firstEvidenceAt, firstEvidenceFrame, firstProvisionalAt, firstProvisionalFrame
+                });
+                onWinner(fr, longState.streak, stopBoth);
+                return;
+            }
             const __longStreakForLock = RELATIVE_GROUP_ENABLED ? longState.groupStreak : longState.streak; // KEY-GROUP-LOCK-01
             const __longIsRelOfLocked = RELATIVE_GROUP_ENABLED && sameScaleGroupKey(longState.key, lastLockedKey); // chỉ đổi nhãn Trưởng<->Thứ của cùng bộ nốt: không chốt lại (không gửi lại Plugin)
             // KEY-GROUP-LOCK-01 — CHỈ GHI LOG (không đổi quyết định): vì sao chưa chốt Key bằng bằng chứng dài hạn. 1 bản ghi / ~2 s. Đọc: logs/*.jsonl, event=KEY_LONG_GATE.
