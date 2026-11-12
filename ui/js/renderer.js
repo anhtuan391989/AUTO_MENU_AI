@@ -2271,6 +2271,7 @@ function dispatchNowPlayingPayload(payload) {
         console.log("[NowPlaying] Song Changed");
         __dbBypassClear(); // TASK AUTO-RELISTEN-01: bài mới -> Database lại có hiệu lực
         cancelManualOverride();
+        __releaseManualKeyForNewSong(); // KEY-MANUAL-HOLD-01: đổi bài -> Key tay + Mod tay quay về tự động
         lastNowPlayingKey = key;
     }
 
@@ -2364,7 +2365,28 @@ function startAiRealtimeLoop() {
 // Điểm DUY NHẤT xử lý "quay lại Auto" — dùng cho: nút autoDetectBtn có sẵn, dropdown chọn lại
 // "AI Key Detect" + SEND, và khởi động lần đầu. Huỷ Manual (nếu có), áp NGAY nguồn hiện có
 // hiệu lực (Song Database nếu có, không thì đợi AI), đảm bảo vòng dò AI đang chạy.
+// KEY-MANUAL-HOLD-01 — Người dùng đã GỬI Key tay thành công (Manual đang hiệu lực): bấm Tự dò / chọn "AI Key Detect" + GỬI
+// / AI dò lại (kết nối lại nguồn âm thanh) KHÔNG được đổi Key tay. AI vẫn chạy nền; Key tay giữ tới khi ĐỔI BÀI
+// (dispatchNowPlayingPayload nhả Manual + __releaseManualForNewSong) hoặc Manual hết hạn như cũ. Không gửi gì xuống Auto-Tune.
+function isManualKeyHeld() {
+    return !!(keySource.manual && keySource.manual.active && keySource.manual.committedKey);
+}
+function __holdManualKey(reason) {
+    const k = keySource.manual.committedKey;
+    keySource.manual.selectedKey = k; // dropdown quay lại đúng Key tay đã gửi (không để kẹt nhãn "AI Key Detect")
+    if (keySelector && k) keySelector.value = k;
+    console.log(`[Manual Hold] ${reason} — giữ Key tay ${k}; AI chạy nền, không gửi Auto-Tune. Tự về Auto khi đổi bài.`);
+}
+// Đổi bài: trả Key tay + Mod tay về tự động (cancelManualOverride() đã tắt cờ Manual ngay trước đó).
+function __releaseManualKeyForNewSong() {
+    keySource.manual.selectedKey = null;
+    if (keySelector) keySelector.value = "AI Key Detect";
+    if (typeof isManualOverrideActive === "function" && isManualOverrideActive() && typeof turnManualOverrideOff === "function") turnManualOverrideOff();
+}
+
 function triggerAiKeyDetect() {
+
+    if (isManualKeyHeld()) { __holdManualKey("Tự dò"); return; } // KEY-MANUAL-HOLD-01
 
     cancelManualOverride();
     if (keySource.manual) keySource.manual.selectedKey = null; // người dùng chủ động quay về Auto: nhả lựa chọn Key tay
@@ -3036,9 +3058,11 @@ function resetAiDisplaysToListening() {
 }
 
 document.getElementById("autoDetectBtn")?.addEventListener("click", () => { // A119: Chế độ Auto-Key — nút AUTO DETECT (kể cả bấm tự động khi đổi bài) kích hoạt Auto-Key dò + Send
+    if (!__autoDetectInternal && isManualKeyHeld()) return; // KEY-MANUAL-HOLD-01: đang giữ Key tay -> Auto-Key không dò + Send đè
     if (typeof runAutoKeyDetect === "function") runAutoKeyDetect("AUTO DETECT");
 });
 document.getElementById("autoDetectBtn")?.addEventListener("click", () => {
+    if (!__autoDetectInternal && isManualKeyHeld()) { __holdManualKey("AUTO DETECT"); return; } // KEY-MANUAL-HOLD-01: không reset AI/Key khi đang giữ Key tay
     console.log("RESET AI SCAN — reset BPM + KEY + MOD, dò lại từ đầu trên CÙNG nguồn SYSTEM_AUDIO đang chạy");
 
     // TASK AUTO-RELISTEN-01 — người dùng bấm AUTO DETECT khi bài đang dùng Key Database: đánh dấu "chờ AI chốt".

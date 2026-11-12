@@ -277,6 +277,44 @@ const keyServerSync = new KeyServerSync({
 // DB-MATCH-ID-02: { title, sec } của bài đang phát, cập nhật ngay khi nhận sự kiện (trước khi tra Database/Server).
 let nowPlayingDurationHint = null;
 // Bài đang phát (đã chuẩn hoá) do CHÍNH main process theo dõi — renderer không được tự khai tên bài khi gửi lên server.
+// KEY-ANALYZE-01 — bài đang phát từ MPC-HC (có đường dẫn file thật) mà cả Database lẫn Key Server đều chưa có Key:
+// phân tích CẢ file bằng core/key_detector.py ở nền (không chặn app), có kết quả đáng tin thì đưa vào đúng đường
+// "Song Database" sẵn có của renderer (Manual vẫn ưu tiên cao nhất) và lưu lên Key Server để lần sau ra ngay.
+// Python/librosa chưa cài => im lặng bỏ qua (AI nghe trực tiếp vẫn chạy như cũ).
+let __keyAnalyzer = null;
+function getKeyAnalyzer() {
+    if (!__keyAnalyzer) {
+        const { createKeyAnalyzer } = require("./keyAnalyzer");
+        __keyAnalyzer = createKeyAnalyzer({ logger: console });
+    }
+    return __keyAnalyzer;
+}
+const __analyzedByFile = new Map(); // filePath -> { key, confidence } (chỉ trong RAM, kết quả đáng tin)
+function analyzeUnknownSongFile(snapshot, source, title, artist, payload) {
+    try {
+        if (source !== "mpc-hc" || !snapshot || !snapshot.filePath) return;
+        const fp = snapshot.filePath;
+        const deliver = (res) => {
+            const cur = currentNowPlayingForSync;
+            if (!cur || cur.title !== title || cur.artist !== artist) return; // đã đổi bài -> bỏ
+            cur.serverKey = res.key;
+            console.log(`[KeyAnalyze] ${title}: ${res.key} (tin cậy ${Math.round(res.confidence * 100)}%)`);
+            if (mainWin && !mainWin.isDestroyed()) {
+                mainWin.webContents.send("now-playing-change", { ...payload, databaseMatch: { key: res.key, bpm: null, source: "analyzer" } });
+            }
+        };
+        if (__analyzedByFile.has(fp)) { deliver(__analyzedByFile.get(fp)); return; }
+        getKeyAnalyzer().analyzeFile(fp).then((res) => {
+            if (!res || !res.ok) { console.log("[KeyAnalyze] bỏ qua: " + (res && res.reason)); return; }
+            if (!res.reliable) { console.log("[KeyAnalyze] độ tin cậy thấp -> không dùng, để AI nghe trực tiếp"); return; }
+            __analyzedByFile.set(fp, { key: res.key, confidence: res.confidence });
+            deliver(res);
+            keyServerSync.submit({ title, artist, key: res.key, confidence: res.confidence, durationSec: res.durationSec || (snapshot.durationMs > 0 ? snapshot.durationMs / 1000 : null) })
+                .catch(() => {});
+        }).catch(() => {});
+    } catch (e) { /* không ảnh hưởng luồng Now Playing */ }
+}
+
 let currentNowPlayingForSync = null;
 // MIDI CONTROL CORE v1.0 — wiring MỚI, độc lập hoàn toàn với AIBootstrap/EventBus ở trên.
 // KHÔNG viết lại CommandEngine/capabilityRegistry (core/command-engine-js/), chỉ nối chúng
@@ -585,7 +623,7 @@ app.whenReady().then(async () => {
             const askedTitle = resolved.title;
             const askedArtist = resolved.artist || "";
             keyServerSync.lookup(askedTitle, askedArtist).then((r) => {
-                if (!r || !r.found || !r.key) return;
+                if (!r || !r.found || !r.key) { analyzeUnknownSongFile(snapshot, source, askedTitle, askedArtist, payload); return; } // KEY-ANALYZE-01: Server cũng chưa có -> phân tích cả file ở nền
                 const cur = currentNowPlayingForSync;
                 // Kết quả đến muộn của bài cũ -> bỏ.
                 if (!cur || cur.title !== askedTitle || cur.artist !== askedArtist) return;
@@ -1203,6 +1241,32 @@ function getKeyCorrector() {
     }
     return __keyCorrector;
 }
+// KEY-ANALYZE-01 — kiểm tra môi trường phân tích (Python/librosa/ffmpeg) và phân tích bản ghi âm do Menu gửi lên (YouTube).
+ipcMain.handle("key-analyzer-status", async (event) => {
+    try {
+        if (!mainWin || mainWin.isDestroyed() || event.sender !== mainWin.webContents) return { ok: false, reason: "not-allowed" };
+        return await getKeyAnalyzer().status();
+    } catch (err) { return { ok: false, reason: "error" }; }
+});
+ipcMain.handle("key-analyze-recording", async (event, data) => {
+    try {
+        if (!mainWin || mainWin.isDestroyed() || event.sender !== mainWin.webContents) return { ok: false, reason: "not-allowed" };
+        const cur = currentNowPlayingForSync;
+        if (!cur || !cur.title) return { ok: false, reason: "no-song" };
+        const title = cur.title, artist = cur.artist || "";
+        const res = await getKeyAnalyzer().analyzeRecording(data && data.wav);
+        if (!res || !res.ok) return res || { ok: false, reason: "error" };
+        const now = currentNowPlayingForSync;
+        if (!now || now.title !== title || (now.artist || "") !== artist) return { ok: false, reason: "song-changed" }; // đã đổi bài trong lúc phân tích
+        if (!res.reliable) return { ok: true, reliable: false, key: res.key, confidence: res.confidence };
+        now.serverKey = res.key;
+        keyServerSync.submit({ title, artist, key: res.key, confidence: res.confidence, durationSec: now.durationSec }).catch(() => {});
+        return { ok: true, reliable: true, key: res.key, confidence: res.confidence, title };
+    } catch (err) {
+        console.error("key-analyze-recording lỗi (không ảnh hưởng app):", err && err.message);
+        return { ok: false, reason: "error" };
+    }
+});
 ipcMain.handle("server-correct-key", async (event, data) => {
     try {
         if (!mainWin || mainWin.isDestroyed() || event.sender !== mainWin.webContents) return { ok: false, reason: "not-allowed" };
