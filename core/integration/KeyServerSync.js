@@ -211,7 +211,8 @@ class KeyServerSync {
             try { json = await res.json(); } catch (e) { json = null; }
             return { ok: !!res.ok, status: res.status, json };
         } catch (e) {
-            return { ok: false, error: (e && e.name === 'AbortError') ? 'timeout' : String((e && e.message) || e) };
+            const __c = e && e.cause, __code = __c && (__c.code || __c.errno || __c.name); // DB-STATUS-ERR-01: lý do thật của "fetch failed"
+            return { ok: false, error: (e && e.name === 'AbortError') ? 'timeout' : String((e && e.message) || e) + (__code ? ' (' + __code + ')' : '') };
         } finally {
             if (timer) clearTimeout(timer);
         }

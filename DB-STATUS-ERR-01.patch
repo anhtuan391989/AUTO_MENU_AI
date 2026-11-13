@@ -1,0 +1,48 @@
+diff --git a/core/integration/KeyServerSync.js b/core/integration/KeyServerSync.js
+index f0eff80..1733835 100644
+--- a/core/integration/KeyServerSync.js
++++ b/core/integration/KeyServerSync.js
+@@ -211,7 +211,8 @@ class KeyServerSync {
+             try { json = await res.json(); } catch (e) { json = null; }
+             return { ok: !!res.ok, status: res.status, json };
+         } catch (e) {
+-            return { ok: false, error: (e && e.name === 'AbortError') ? 'timeout' : String((e && e.message) || e) };
++            const __c = e && e.cause, __code = __c && (__c.code || __c.errno || __c.name); // DB-STATUS-ERR-01: lý do thật của "fetch failed"
++            return { ok: false, error: (e && e.name === 'AbortError') ? 'timeout' : String((e && e.message) || e) + (__code ? ' (' + __code + ')' : '') };
+         } finally {
+             if (timer) clearTimeout(timer);
+         }
+diff --git a/core/integration/ServerHealth.js b/core/integration/ServerHealth.js
+index 6c49bf0..2d85a2c 100644
+--- a/core/integration/ServerHealth.js
++++ b/core/integration/ServerHealth.js
+@@ -6,6 +6,16 @@
+  */
+ 'use strict';
+ 
++// DB-STATUS-ERR-01 — Node/Electron fetch chỉ báo "fetch failed"; lý do thật (ENOTFOUND = DNS, ECONNRESET/ETIMEDOUT = mạng/tường lửa,
++// CERT_HAS_EXPIRED/UNABLE_TO_VERIFY_LEAF_SIGNATURE = sai giờ máy/chứng chỉ...) nằm trong err.cause. Ghép vào để ô Database hiện đúng nguyên nhân.
++function describeFetchError(err) {
++    if (err && err.name === 'AbortError') return 'TIMEOUT';
++    const msg = String((err && err.message) || err);
++    const c = err && err.cause;
++    const code = c && (c.code || c.errno || c.name);
++    return code ? msg + ' (' + code + ')' : msg;
++}
++
+ async function pingServer({ url, fetchImpl, timeoutMs = 3000, now = Date.now } = {}) {
+     const started = now();
+     if (!url || typeof fetchImpl !== 'function') return { ok: false, status: null, ms: 0, error: 'NOT_CONFIGURED' };
+@@ -17,10 +27,10 @@ async function pingServer({ url, fetchImpl, timeoutMs = 3000, now = Date.now } =
+         const status = Number(res && res.status);
+         return { ok: Number.isFinite(status) && status < 500, status: Number.isFinite(status) ? status : null, ms: now() - started, error: null };
+     } catch (err) {
+-        return { ok: false, status: null, ms: now() - started, error: (err && err.name === 'AbortError') ? 'TIMEOUT' : String((err && err.message) || err) };
++        return { ok: false, status: null, ms: now() - started, error: describeFetchError(err) };
+     } finally {
+         if (timer) clearTimeout(timer);
+     }
+ }
+ 
+-module.exports = { pingServer };
++module.exports = { pingServer, describeFetchError };
