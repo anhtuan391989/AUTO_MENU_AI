@@ -565,6 +565,9 @@ app.whenReady().then(async () => {
 
                 databaseMatch = { key: song.key, bpm: song.bpm || null };
                 console.log(`[NowPlaying] Database Match (source=${source})`);
+                // KEY-TIMELINE-DBHIT-01: bài trong Database máy mà có mã server (kéo về từ Key Server) vẫn phải nạp "kế hoạch lên tone" (MOD theo đoạn).
+                // Trước đây chỉ nhánh "Database Miss" gọi ensureKeyTimeline => bài đã đồng bộ về máy chỉ có Key đoạn đầu, không bao giờ báo lên tone.
+                if (song.songId) ensureKeyTimeline(song.songId, resolved.title, resolved.artist || "").catch(() => {});
 
             } else {
 
