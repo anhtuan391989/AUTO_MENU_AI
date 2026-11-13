@@ -1,0 +1,120 @@
+diff --git a/tests/unit/YtKeyNoDup01.verify.js b/tests/unit/YtKeyNoDup01.verify.js
+new file mode 100644
+index 0000000..5940952
+--- /dev/null
++++ b/tests/unit/YtKeyNoDup01.verify.js
+@@ -0,0 +1,26 @@
++// YT-KEY-NODUP-01 — yt-key không cho thêm bài trùng (đã có trên server). Chạy: node tests/unit/YtKeyNoDup01.verify.js
++const fs = require("fs"), path = require("path"), vm = require("vm");
++const src = fs.readFileSync(path.join(__dirname, "../../yt-key/popup.js"), "utf8");
++let pass = 0, fail = 0;
++const ok = (c, m) => { if (c) { pass++; console.log("PASS", m); } else { fail++; console.log("FAIL", m); } };
++new vm.Script(src); ok(true, "popup.js cú pháp hợp lệ");
++ok(/\/song-full\?id=/.test(src), "hỏi server /song-full");
++ok(/tongDoan > 0/.test(src), "trùng = bài đã có đoạn Key");
++ok((src.match(/if \(await baiDaCoTrenServer\(id\)\)/g) || []).length === 2, "chặn cả Lưu Thông Tin và Thêm Đoạn");
++ok(/ghiNhoBaiVuaThem\(id\)/.test(src), "bài vừa nhập xong vẫn nhập tiếp được đoạn sau");
++// chạy thật hàm baiDaCoTrenServer với server giả
++const store = {};
++const ctx = { console, Date, encodeURIComponent, document: { addEventListener() {}, getElementById: () => null }, chrome: { storage: { session: { get: async () => store, set: async (o) => Object.assign(store, o) } } }, fetch: null };
++vm.createContext(ctx); vm.runInContext(src.replace(/document\.getElementById\("btn[\s\S]*$/, "") , ctx);
++(async () => {
++  ctx.fetch = async () => ({ ok: true, json: async () => ({ tongDoan: 3 }) });
++  ok(await vm.runInContext("baiDaCoTrenServer('AAAAAAAAAAA')", ctx) === true, "bài có 3 đoạn -> trùng (chặn)");
++  ctx.fetch = async () => ({ ok: true, json: async () => ({ tongDoan: 0 }) });
++  ok(await vm.runInContext("baiDaCoTrenServer('BBBBBBBBBBB')", ctx) === false, "bài mới -> cho thêm");
++  await vm.runInContext("ghiNhoBaiVuaThem('AAAAAAAAAAA')", ctx);
++  ctx.fetch = async () => ({ ok: true, json: async () => ({ tongDoan: 3 }) });
++  ok(await vm.runInContext("baiDaCoTrenServer('AAAAAAAAAAA')", ctx) === false, "bài vừa tự thêm -> nhập tiếp được");
++  ctx.fetch = async () => { throw new Error("net"); };
++  ok(await vm.runInContext("baiDaCoTrenServer('CCCCCCCCCCC')", ctx) === false, "lỗi mạng -> không chặn nhầm");
++  console.log(`\n${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})();
+diff --git a/yt-key/popup.js b/yt-key/popup.js
+index 19cdae5..dfee567 100644
+--- a/yt-key/popup.js
++++ b/yt-key/popup.js
+@@ -51,6 +51,47 @@ async function guiServer(duongDan, body) {
+   return data;
+ }
+ 
++/* ── YT-KEY-NODUP-01: KHÔNG cho thêm bài hát trùng (bài đã có đoạn Key trên server) ──
++   Hỏi server (/song-full) xem songId đã có đoạn Key chưa. Bài MỚI do chính popup này vừa tạo (trong 30 phút, cùng cửa sổ server dùng)
++   vẫn nhập tiếp được các đoạn sau. Bài đã có từ trước -> chặn, hiện thông báo, khoá 2 nút lưu. Không đổi HTML. Lỗi mạng -> không chặn (server vẫn tự kiểm). */
++const CUA_SO_BAI_VUA_THEM_MS = 30 * 60 * 1000;
++async function docBaiVuaThem() {
++  try { const o = await chrome.storage.session.get("baiVuaThem"); return o.baiVuaThem || {}; } catch (e) { return {}; }
++}
++async function ghiNhoBaiVuaThem(songId) {
++  try {
++    const m = await docBaiVuaThem();
++    m[songId] = Date.now();
++    await chrome.storage.session.set({ baiVuaThem: m });
++  } catch (e) {}
++}
++async function baiDaCoTrenServer(songId) {
++  if (!songId) return false;
++  const m = await docBaiVuaThem();
++  if (m[songId] && (Date.now() - m[songId]) < CUA_SO_BAI_VUA_THEM_MS) return false; // bài mới vừa nhập, đang nhập tiếp các đoạn
++  try {
++    const res = await fetch(`${SERVER}/song-full?id=${encodeURIComponent(songId)}`);
++    if (!res.ok) return false;
++    const d = await res.json();
++    return !!(d && d.tongDoan > 0);
++  } catch (e) { return false; }
++}
++const THONG_BAO_TRUNG = "⛔ Bài này ĐÃ CÓ trên server — không cho thêm bài trùng.";
++function khoaNutLuu(khoa) {
++  ["btnLuuThongTin", "btnThemDoan"].forEach((id) => { const b = document.getElementById(id); if (b) b.disabled = !!khoa; });
++}
++async function kiemTraBaiTrung() {
++  try {
++    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
++    const id = tab && tab.url ? layId(tab.url) : null;
++    if (!id) return false;
++    const trung = await baiDaCoTrenServer(id);
++    khoaNutLuu(trung);
++    if (trung) hienThongBao(THONG_BAO_TRUNG, true);
++    return trung;
++  } catch (e) { return false; }
++}
++
+ function layId(link) {
+   const kq = link.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
+   return kq ? kq[1] : null;
+@@ -216,6 +257,7 @@ document.getElementById("btnLuuThongTin").onclick = async () => {
+   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+   const id = layId(tab.url);
+   if (!id) return hienThongBao("❌ Chưa mở YouTube!", true);
++  if (await baiDaCoTrenServer(id)) { khoaNutLuu(true); return hienThongBao(THONG_BAO_TRUNG, true); } // YT-KEY-NODUP-01
+   const data = await guiServer("/set-song-info", {
+     songId: id,
+     title: document.getElementById("tenBai").value.trim() || null,
+@@ -234,6 +276,7 @@ document.getElementById("btnThemDoan").onclick = async () => {
+   const khoa = document.getElementById("khoa").value.trim();
+   const cheDo = document.getElementById("cheDo").value;
+   if (!khoa) return hienThongBao("❌ Chưa nhập khóa!", true);
++  if (await baiDaCoTrenServer(id)) { khoaNutLuu(true); return hienThongBao(THONG_BAO_TRUNG, true); } // YT-KEY-NODUP-01
+   if (isNaN(start) || isNaN(end) || start >= end) return hienThongBao("❌ Giây kết thúc phải lớn hơn bắt đầu!", true);
+   const data = await guiServer("/add-segment", {
+     songId: id, startSec: start, endSec: end, key: khoa, mode: cheDo, weight: 1.0,
+@@ -242,6 +285,7 @@ document.getElementById("btnThemDoan").onclick = async () => {
+     totalDurationSec: parseInt(document.getElementById("tongThoiLuong").value) || null
+   });
+   if (data.ok) {
++    await ghiNhoBaiVuaThem(id); // YT-KEY-NODUP-01: bài mới vừa nhập -> cho nhập tiếp các đoạn sau
+     const sv = data.segment || {};
+     const hienKey = sv.key ? `${sv.key} ${sv.mode === "minor" ? "Phụ" : "Trưởng"}` : `${khoa} ${cheDo === "major" ? "Trưởng" : "Phụ"}`;
+     hienThongBao(`✅ Đã lưu${data.baiDaBiet ? " (bài đã biết — cập nhật)" : ""}!\n${start} → ${end} giây\nKhóa: ${hienKey}`, false);
+@@ -258,4 +302,4 @@ document.getElementById("btnThemDoan").onclick = async () => {
+ document.getElementById("btnTuLay").onclick = tuDongDien;
+ 
+ /* ── Tự động điền ngay khi mở popup ── */
+-document.addEventListener("DOMContentLoaded", tuDongDien);
++document.addEventListener("DOMContentLoaded", async () => { await tuDongDien(); await kiemTraBaiTrung(); }); // YT-KEY-NODUP-01
+diff --git "a/\341\272\242nh/HI\341\273\206U \341\273\250NG/HI\341\273\206U \341\273\250NG.zip" "b/\341\272\242nh/HI\341\273\206U \341\273\250NG/HI\341\273\206U \341\273\250NG.zip"
+index 1eab16c..3534ae7 100644
+Binary files "a/\341\272\242nh/HI\341\273\206U \341\273\250NG/HI\341\273\206U \341\273\250NG.zip" and "b/\341\272\242nh/HI\341\273\206U \341\273\250NG/HI\341\273\206U \341\273\250NG.zip" differ
+diff --git "a/\341\272\242nh/Macros.zip" "b/\341\272\242nh/Macros.zip"
+index f8c9a73..7db071d 100644
+Binary files "a/\341\272\242nh/Macros.zip" and "b/\341\272\242nh/Macros.zip" differ

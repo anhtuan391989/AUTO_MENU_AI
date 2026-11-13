@@ -142,7 +142,7 @@ const ACTIONS = Object.freeze({
     // Có preset mặc định (xem getMidiOutMapping). Chưa có mapping thì rơi về PRESET_LOFI cũ (tương thích ngược).
     LOFI_STATE: "LOFI_STATE",
     // BE-BTN-01 — nút BÈ = bật/tắt HARMONY PLAYER của Auto-Tune Pro (nút nguồn "Harmony Player"), công tắc ON/OFF ĐỘC LẬP như LOFI.
-    // Đây là nút BẬT (không phải bypass): nút SÁNG = Harmony Player BẬT => gửi 127; nút TẮT => gửi 0.
+    // Đây là nút BẬT (không phải bypass): nút SÁNG = Harmony Player BẬT => gửi 0; nút TẮT => gửi 127 (đã thử thực tế: Auto-Tune nhận ngược nên đảo giá trị — BE-BTN-02).
     // Mặc định (mọi DAW): kênh 15, CC 104 — không trùng bộ kênh 15 đã dùng (20-37, 85-95, 102-103). Mapping Khói tự lưu luôn thắng.
     BE_STATE: "BE_STATE",
     // TASK A96 — popup chuột phải nút MUSIC: (1) nút AUDIO CHILL = công tắc ON/OFF (sáng = BẬT = 127, tắt = TẮT = 0; đã đảo theo cách nối thật của Khói) — kênh 15 CC 94;
@@ -163,7 +163,7 @@ const DAW_STATE_CONTROLS = Object.freeze({
     FX: Object.freeze({ on: "FX_ON", off: "FX_OFF", legacy: "MONITOR_FX", label: "FX (Mute 4 bus)" }),
     TUNE: Object.freeze({ on: "TUNE_BYPASS", off: "TUNE_BYPASS", values: Object.freeze({ on: 127, off: 0 }), legacy: "PRESET_TUNE_OFF", label: "TUNE (ON = Bypass TẮT, OFF = Bypass BẬT — cả 4 plugin Auto-Tune)" }), // TASK A79/A94
     LOFI: Object.freeze({ on: "LOFI_STATE", off: "LOFI_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "PRESET_LOFI", label: "LOFI (ON/OFF độc lập, kết hợp được với preset khác)" }), // TASK A94
-    BE: Object.freeze({ on: "BE_STATE", off: "BE_STATE", values: Object.freeze({ on: 127, off: 0 }), legacy: "BE_STATE", label: "BÈ = Harmony Player Auto-Tune (ON/OFF độc lập: sáng = BẬT = gửi 127; tắt = gửi 0)" }), // BE-BTN-01
+    BE: Object.freeze({ on: "BE_STATE", off: "BE_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "BE_STATE", label: "BÈ = Harmony Player Auto-Tune (ON/OFF độc lập: sáng = BẬT = gửi 0; tắt = gửi 127)" }), // BE-BTN-01
     AUDIO_CHILL: Object.freeze({ on: "AUDIO_CHILL_STATE", off: "AUDIO_CHILL_STATE", values: Object.freeze({ on: 0, off: 127 }), legacy: "AUDIO_CHILL_STATE", label: "AUDIO CHILL (ON/OFF kiểu bypass: sáng = BẬT = gửi 0; tắt = TẮT = gửi 127; độc lập với knob)" })
 });
 
@@ -277,7 +277,7 @@ function getMidiOutMapping(action) {
     if (/^REMIX_PLUGIN_[12]$/.test(String(action))) { // A95 — kênh 15, CC 92/93 (không trùng bộ KNOB 85-88, TUNE 89-91)
         return { kind: "cc", channel: 15, number: 91 + Number(String(action).slice(-1)), value: 0, source: "DEFAULT_PRESET" };
     }
-    if ((action === "PRESET_NORM" || action === "PRESET_RAP" || action === "PRESET_REMIX") && !/^cubase/i.test(String(daw).trim())) { // A95 — bộ PRESET kênh 16: NORM 114, RAP 116, REMIX 117 (127 = BẬT, 0 = TẮT)
+    if ((action === "PRESET_NORM" || action === "PRESET_RAP" || action === "PRESET_REMIX") && !/^cubase/i.test(String(daw).trim())) { // A95 — bộ PRESET kênh 16: NORM 114, RAP 116, REMIX 117 (0 = BẬT, 127 = TẮT — đảo theo thực tế Auto-Tune)
         return { kind: "cc", channel: 16, number: action === "PRESET_NORM" ? 114 : (action === "PRESET_RAP" ? 116 : 117), value: 127, source: "DEFAULT_PRESET" };
     }
     // TASK A81 — preset mặc định cho nút TUNE (tự chứa trong hàm này để các test cắt hàm vẫn chạy). Studio One/Studio Pro: kênh 16 CC 113; Cubase: CC 118. Giá trị gửi do nút quyết định (127 bypass bật / 0 tắt).. Mapping đã lưu luôn thắng (dòng trên).
@@ -291,12 +291,12 @@ function getMidiOutMapping(action) {
     if (action === "AUDIO_CHILL_STATE" || action === "AUDIO_CHILL_KNOB") { // A96 — mặc định cho mọi DAW: kênh 15, CC 94 (nút) / CC 95 (knob); không trùng KNOB 85-88, TUNE 89-91, REMIX 92-93
         return { kind: "cc", channel: 15, number: action === "AUDIO_CHILL_STATE" ? 94 : 95, value: action === "AUDIO_CHILL_STATE" ? 127 : 64, source: "DEFAULT_PRESET" };
     }
-    // TASK A94 — preset mặc định nút LOFI (ON/OFF độc lập): Studio One/Studio Pro kênh 16 CC 118 (114 đã là PRESET NORM); Cubase CC 119. Giá trị gửi do nút quyết định (127 = BẬT, 0 = TẮT).
+    // TASK A94 — preset mặc định nút LOFI (ON/OFF độc lập): Studio One/Studio Pro kênh 16 CC 118 (114 đã là PRESET NORM); Cubase CC 119. Giá trị gửi do nút quyết định (0 = BẬT, 127 = TẮT — đảo theo thực tế Auto-Tune).
     if (action === "LOFI_STATE") {
         const cubase = /^cubase/i.test(String(daw).trim());
         return { kind: "cc", channel: 16, number: cubase ? 119 : 118, value: 127, source: "DEFAULT_PRESET" };
     }
-    // BE-BTN-01 — preset mặc định nút BÈ (Harmony Player): kênh 15, CC 104, mọi DAW. Giá trị gửi do nút quyết định (127 = BẬT, 0 = TẮT).
+    // BE-BTN-01 — preset mặc định nút BÈ (Harmony Player): kênh 15, CC 104, mọi DAW. Giá trị gửi do nút quyết định (0 = BẬT, 127 = TẮT — đảo theo thực tế Auto-Tune).
     if (action === "BE_STATE") {
         return { kind: "cc", channel: 15, number: 104, value: 127, source: "DEFAULT_PRESET" };
     }

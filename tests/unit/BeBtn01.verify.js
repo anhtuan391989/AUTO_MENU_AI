@@ -24,18 +24,18 @@ function makeAR(daw, saved) {
     const css = rd('ui/css/style.css');
     ok(/\.preset-grid \{[^}]*grid-template-columns: repeat\(3,1fr\) repeat\(4,\.74fr\) 1fr/.test(css), 'lưới 8 cột: 3 nút đầu 1fr, 4 nút nhỏ .74fr, MỞ RỘNG 1fr');
 
-    console.log('== 2. actionRegistry: BÈ = Harmony Player, 1 CC, bật=127 / tắt=0, mặc định kênh 15 CC104 ==');
+    console.log('== 2. actionRegistry: BÈ = Harmony Player, 1 CC, bật=0 / tắt=127 (đảo theo thực tế Auto-Tune), mặc định kênh 15 CC104 ==');
     let AR = makeAR('Studio Pro 8');
     const d = AR.DAW_STATE_CONTROLS.BE;
-    ok(AR.ACTIONS.BE_STATE === 'BE_STATE' && d && d.on === 'BE_STATE' && d.off === 'BE_STATE' && d.values.on === 127 && d.values.off === 0, 'control BE: 1 action, bật gửi 127, tắt gửi 0');
+    ok(AR.ACTIONS.BE_STATE === 'BE_STATE' && d && d.on === 'BE_STATE' && d.off === 'BE_STATE' && d.values.on === 0 && d.values.off === 127, 'control BE: 1 action, bật gửi 0, tắt gửi 127');
     let r = await AR.setDawControlState('BE', true, {});
-    ok(r.ok && JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 127, 14]), 'BÈ BẬT -> CC104 = 127, kênh 15 (index 14), không cần Setup');
+    ok(r.ok && JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 0, 14]), 'BÈ BẬT -> CC104 = 0, kênh 15 (index 14), không cần Setup');
     r = await AR.setDawControlState('BE', false, {});
-    ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([104, 0, 14]), 'BÈ TẮT -> CC104 = 0');
+    ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([104, 127, 14]), 'BÈ TẮT -> CC104 = 127');
     AR = makeAR('Cubase 14'); await AR.setDawControlState('BE', true, {});
-    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 127, 14]), 'Cubase: cũng kênh 15 CC104');
+    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 0, 14]), 'Cubase: cũng kênh 15 CC104');
     AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { BE_STATE: { kind: 'cc', channel: 15, number: 77, value: 127 } } }); await AR.setDawControlState('BE', true, {});
-    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([77, 127, 14]), 'mapping người dùng đã lưu luôn thắng mặc định');
+    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([77, 0, 14]), 'mapping người dùng đã lưu luôn thắng mặc định');
 
     console.log('== 3. renderer: BÈ độc lập (mã thật, DOM giả) ==');
     const src = rd('ui/js/renderer.js');

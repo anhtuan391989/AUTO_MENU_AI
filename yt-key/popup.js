@@ -51,6 +51,47 @@ async function guiServer(duongDan, body) {
   return data;
 }
 
+/* ── YT-KEY-NODUP-01: KHÔNG cho thêm bài hát trùng (bài đã có đoạn Key trên server) ──
+   Hỏi server (/song-full) xem songId đã có đoạn Key chưa. Bài MỚI do chính popup này vừa tạo (trong 30 phút, cùng cửa sổ server dùng)
+   vẫn nhập tiếp được các đoạn sau. Bài đã có từ trước -> chặn, hiện thông báo, khoá 2 nút lưu. Không đổi HTML. Lỗi mạng -> không chặn (server vẫn tự kiểm). */
+const CUA_SO_BAI_VUA_THEM_MS = 30 * 60 * 1000;
+async function docBaiVuaThem() {
+  try { const o = await chrome.storage.session.get("baiVuaThem"); return o.baiVuaThem || {}; } catch (e) { return {}; }
+}
+async function ghiNhoBaiVuaThem(songId) {
+  try {
+    const m = await docBaiVuaThem();
+    m[songId] = Date.now();
+    await chrome.storage.session.set({ baiVuaThem: m });
+  } catch (e) {}
+}
+async function baiDaCoTrenServer(songId) {
+  if (!songId) return false;
+  const m = await docBaiVuaThem();
+  if (m[songId] && (Date.now() - m[songId]) < CUA_SO_BAI_VUA_THEM_MS) return false; // bài mới vừa nhập, đang nhập tiếp các đoạn
+  try {
+    const res = await fetch(`${SERVER}/song-full?id=${encodeURIComponent(songId)}`);
+    if (!res.ok) return false;
+    const d = await res.json();
+    return !!(d && d.tongDoan > 0);
+  } catch (e) { return false; }
+}
+const THONG_BAO_TRUNG = "⛔ Bài này ĐÃ CÓ trên server — không cho thêm bài trùng.";
+function khoaNutLuu(khoa) {
+  ["btnLuuThongTin", "btnThemDoan"].forEach((id) => { const b = document.getElementById(id); if (b) b.disabled = !!khoa; });
+}
+async function kiemTraBaiTrung() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const id = tab && tab.url ? layId(tab.url) : null;
+    if (!id) return false;
+    const trung = await baiDaCoTrenServer(id);
+    khoaNutLuu(trung);
+    if (trung) hienThongBao(THONG_BAO_TRUNG, true);
+    return trung;
+  } catch (e) { return false; }
+}
+
 function layId(link) {
   const kq = link.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
   return kq ? kq[1] : null;
@@ -216,6 +257,7 @@ document.getElementById("btnLuuThongTin").onclick = async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const id = layId(tab.url);
   if (!id) return hienThongBao("❌ Chưa mở YouTube!", true);
+  if (await baiDaCoTrenServer(id)) { khoaNutLuu(true); return hienThongBao(THONG_BAO_TRUNG, true); } // YT-KEY-NODUP-01
   const data = await guiServer("/set-song-info", {
     songId: id,
     title: document.getElementById("tenBai").value.trim() || null,
@@ -234,6 +276,7 @@ document.getElementById("btnThemDoan").onclick = async () => {
   const khoa = document.getElementById("khoa").value.trim();
   const cheDo = document.getElementById("cheDo").value;
   if (!khoa) return hienThongBao("❌ Chưa nhập khóa!", true);
+  if (await baiDaCoTrenServer(id)) { khoaNutLuu(true); return hienThongBao(THONG_BAO_TRUNG, true); } // YT-KEY-NODUP-01
   if (isNaN(start) || isNaN(end) || start >= end) return hienThongBao("❌ Giây kết thúc phải lớn hơn bắt đầu!", true);
   const data = await guiServer("/add-segment", {
     songId: id, startSec: start, endSec: end, key: khoa, mode: cheDo, weight: 1.0,
@@ -242,6 +285,7 @@ document.getElementById("btnThemDoan").onclick = async () => {
     totalDurationSec: parseInt(document.getElementById("tongThoiLuong").value) || null
   });
   if (data.ok) {
+    await ghiNhoBaiVuaThem(id); // YT-KEY-NODUP-01: bài mới vừa nhập -> cho nhập tiếp các đoạn sau
     const sv = data.segment || {};
     const hienKey = sv.key ? `${sv.key} ${sv.mode === "minor" ? "Phụ" : "Trưởng"}` : `${khoa} ${cheDo === "major" ? "Trưởng" : "Phụ"}`;
     hienThongBao(`✅ Đã lưu${data.baiDaBiet ? " (bài đã biết — cập nhật)" : ""}!\n${start} → ${end} giây\nKhóa: ${hienKey}`, false);
@@ -258,4 +302,4 @@ document.getElementById("btnThemDoan").onclick = async () => {
 document.getElementById("btnTuLay").onclick = tuDongDien;
 
 /* ── Tự động điền ngay khi mở popup ── */
-document.addEventListener("DOMContentLoaded", tuDongDien);
+document.addEventListener("DOMContentLoaded", async () => { await tuDongDien(); await kiemTraBaiTrung(); }); // YT-KEY-NODUP-01

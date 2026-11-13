@@ -147,7 +147,7 @@
       <MidiMessage status="#BE" address="93"/>
     </Control>
     <!-- CC 94 -->
-    <Control name="audioChillOnOff" title="AUDIO CHILL On/Off (127=bat/sang, 0=tat)" type="button" options="receive public">
+    <Control name="audioChillOnOff" title="AUDIO CHILL On/Off (0=bat/sang, 127=tat)" type="button" options="receive public">
       <MidiMessage status="#BE" address="94"/>
     </Control>
     <!-- CC 95 -->
@@ -155,7 +155,7 @@
       <MidiMessage status="#BE" address="95"/>
     </Control>
     <!-- CC 104 (kenh 15 = #BE; khac CC 104 kenh 16 = Mic1 ON) -->
-    <Control name="harmonyOnOff" title="BE = Harmony Player Auto-Tune On/Off (127=bat/sang, 0=tat)" type="button" options="receive public">
+    <Control name="harmonyOnOff" title="BE = Harmony Player Auto-Tune On/Off (0=bat/sang, 127=tat)" type="button" options="receive public">
       <MidiMessage status="#BE" address="104"/>
     </Control>
     <!-- CC 118 -->
