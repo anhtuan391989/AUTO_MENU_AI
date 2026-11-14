@@ -33,7 +33,7 @@ function makeAR(daw, saved) {
     r = await AR.setDawControlState('BE', false, {});
     ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([104, 127, 14]), 'BÈ TẮT -> CC104 = 127');
     AR = makeAR('Cubase 14'); await AR.setDawControlState('BE', true, {});
-    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 0, 14]), 'Cubase: cũng kênh 15 CC104');
+    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([14, 0, 0]), 'Cubase (C63): kênh 1 CC14 (núm BẬT BÈ trong MIDI Remote)');
     AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { BE_STATE: { kind: 'cc', channel: 15, number: 77, value: 127 } } }); await AR.setDawControlState('BE', true, {});
     ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([77, 0, 14]), 'mapping người dùng đã lưu luôn thắng mặc định');
 
@@ -69,6 +69,6 @@ function makeAR(daw, saved) {
     ok(/<Control name="harmonyOnOff"[^>]*>\s*<MidiMessage status="#BE" address="104"\/>/.test(surf) && /<Control name="mic1On"[^>]*>\s*<MidiMessage status="#BF" address="104"\/>/.test(surf), 'surface Studio One: harmonyOnOff = kênh 15 (#BE) CC104, không đè Mic1 ON (kênh 16 CC104)');
     console.log('== 4. Setup: dòng BE_STATE, nhóm bảo vệ trùng CC, bộ gợi ý CC104 ==');
     const setup = rd('ui/js/setup.js');
-    ok(/action: "BE_STATE"/.test(setup) && /MIDI_CONFLICT_GUARD_SET\.add\("BE_STATE"\)/.test(setup) && (setup.match(/BE_STATE: 104/g) || []).length === 2 && /if \(action === "BE_STATE"\)/.test(setup), 'Setup: có dòng BE_STATE, nhóm bảo vệ, 2 bộ gợi ý (Studio One / Cubase) CC104');
+    ok(/action: "BE_STATE"/.test(setup) && /MIDI_CONFLICT_GUARD_SET\.add\("BE_STATE"\)/.test(setup) && (setup.match(/BE_STATE: 104/g) || []).length === 1 && /BE_STATE: 14\b/.test(setup) && /if \(action === "BE_STATE"\)/.test(setup), 'Setup: có dòng BE_STATE, nhóm bảo vệ, 2 bộ gợi ý (Studio One CC104 / Cubase CC14)');
     console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })();

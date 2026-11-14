@@ -771,6 +771,13 @@ function getDawMidiOutMapping(action) {
     if (!daw) return null;
     const all = getSetting("dawMidiOutMappings") || {};
     if (all[daw] && all[daw][action]) return all[daw][action];
+    // C63 — CUBASE (MIDI Remote "loopMIDI Port", kênh 1): bảng CC lấy từ file .midiremote thật của người dùng (Ảnh/PDL TOOL AI S1) + MAPPING.png.
+    // Đứng TRƯỚC các preset mặc định bên dưới; mapping người dùng đã lưu vẫn thắng (dòng trên). Cột: [CC, value]. Chưa chạy thật trên Cubase = UNVERIFIED.
+    if (/^cubase/i.test(String(daw).trim())) {
+        const CUBASE_C63 = { BEAT_INPUT_VOLUME: [4, 127], MIC1_VOLUME: [5, 127], FX_BUS_DELAY_VOLUME: [1, 127], FX_BUS_VERB_LONG_VOLUME: [2, 127], FX_BUS_VERB_SHORT_VOLUME: [3, 127], FX_BUS_COM_VERB_VOLUME: [11, 127], RETUNE_SPEED_MIC1: [17, 127],
+            KEY_ROOT: [15, 0], KEY_SCALE_MAJOR: [16, 0], KEY_SCALE_MINOR: [16, 5], LOFI_STATE: [20, 127], REMIX_PLUGIN_1: [21, 0], BE_STATE: [14, 127], TUNE_BYPASS: [22, 127], MIC1_ON: [24, 0], MIC1_OFF: [24, 127] };
+        if (Object.prototype.hasOwnProperty.call(CUBASE_C63, action)) return { kind: "cc", channel: 1, number: CUBASE_C63[action][0], value: CUBASE_C63[action][1], source: "DEFAULT_PRESET" };
+    }
     // TASK A81 — preset MIDI mặc định cho nút TUNE (khớp getDefaultPresetMapping() ở actionRegistry.js): Setup hiển thị đúng thứ Menu sẽ gửi.
     if (action === "TUNE_BYPASS") {
         const cubase = /^cubase/i.test(String(daw).trim());
@@ -821,7 +828,7 @@ const DAW_QF_S1_LIVE = Object.freeze({
 });
 // KEY-SCALE-CC-02 — Scale Auto-Tune là DANH SÁCH 29 mục điều khiển bằng 1 CC: Major/Minor dùng CHUNG CC, khác GIÁ TRỊ.
 // Chỉ 2 action này được phép trùng CC/Note (khi khác giá trị); mọi action khác vẫn phải có CC riêng.
-const KEY_SCALE_SHARED_SET = new Set(["KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_SCALE_MAJOR_MIC2", "KEY_SCALE_MINOR_MIC2", "KEY_SCALE_MAJOR_AT3", "KEY_SCALE_MINOR_AT3", "KEY_SCALE_MAJOR_AT4", "KEY_SCALE_MINOR_AT4"]); // A93/A94: Major/Minor của mỗi Auto-Tune dùng chung 1 CC (mic 2: 32, AT3: 34, AT4: 36)
+const KEY_SCALE_SHARED_SET = new Set(["MIC1_ON", "MIC1_OFF", "KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_SCALE_MAJOR_MIC2", "KEY_SCALE_MINOR_MIC2", "KEY_SCALE_MAJOR_AT3", "KEY_SCALE_MINOR_AT3", "KEY_SCALE_MAJOR_AT4", "KEY_SCALE_MINOR_AT4"]); // A93/A94: Major/Minor của mỗi Auto-Tune dùng chung 1 CC (mic 2: 32, AT3: 34, AT4: 36)
 function midiClashKey(action, m) {
     const base = `${m.kind}|${Number(m.channel)}|${Number(m.number)}`;
     return KEY_SCALE_SHARED_SET.has(action) ? `${base}|v${Number(m.kind === "note" ? m.velocity : m.value)}` : base;
@@ -884,18 +891,29 @@ const DAW_MIDI_PROFILES = Object.freeze({
     "cubase": Object.freeze({
         id: "cubase",
         name: "Cubase",
+        quickFillLabel: "Cubase MIDI Remote (loopMIDI Port, kênh 1)", // QUICKFILL-ALL-01: 1 nút điền toàn bộ
         match: /^cubase/i,
-        origin: "Quy ước CC gợi ý của AUTO_MENU_AI — KHÔNG phải mặc định của Cubase (tránh CC 7/10/12/13/23/24/64 đã thấy trong Generic Remote/MIDI Remote). Cubase không tự nhận: phải gán trong MIDI Remote hoặc Generic Remote.",
-        versionStatus: Object.freeze({ "cubase 13": "CHỈ CÓ BẰNG CHỨNG FILE, CHƯA CHẠY THẬT" }),
+        origin: "C63 — bảng CC lấy từ file .midiremote THẬT của người dùng (Ảnh/PDL TOOL AI S1): cổng 'loopMIDI Port', kênh 1, 19 núm CC (1-5, 8-12, 14-18, 20-22, 24). Chỉ gồm các núm Cubase ĐÃ có; Master/MIC 2/MUSIC/FX on-off/Preset NORM-RAP/Auto-Key/Audio Chill chưa có núm nên chưa có CC.",
+        versionStatus: Object.freeze({ "cubase 13": "CC khớp file MIDI Remote; CHƯA chạy thật trên Cubase" }),
         defaultStatus: "UNVERIFIED",
         bundles: Object.freeze({
-            live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, { MUSIC_ON: 110, MUSIC_OFF: 111, MIC1_ON: 112, MIC1_OFF: 113, MIC2_ON: 114, MIC2_OFF: 115, FX_ON: 116, FX_OFF: 117 }) }),
-            knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 85, MASTER_OUTPUT_VOLUME: 86, RETUNE_SPEED_MIC1: 87, RETUNE_SPEED_MIC2: 88 }) }),
-            tune: Object.freeze({ title: "TUNE BYPASS", count: 4, mappings: Object.freeze({ ...dawQfMake(16, 127, { TUNE_BYPASS: 118 }), TUNE_BYPASS_2: Object.freeze({ kind: "cc", channel: 15, number: 89, value: 127 }),
-                TUNE_BYPASS_3: Object.freeze({ kind: "cc", channel: 15, number: 90, value: 127 }),
-                TUNE_BYPASS_4: Object.freeze({ kind: "cc", channel: 15, number: 91, value: 127 }) }) }), // A82
-            lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 119 }) }), // A94
-            be: Object.freeze({ title: "BÈ ON/OFF", count: 1, mappings: dawQfMake(15, 127, { BE_STATE: 104 }) }), // BE-BTN-01
+            // MIC 1 ON/OFF = nút Mute của track Mic (CC 24): ON = bỏ mute (0), OFF = mute (127). Cùng 1 CC, khác giá trị.
+            live: Object.freeze({ title: "MIC 1 ON/OFF (Mute)", count: 2, mappings: Object.freeze({
+                MIC1_ON: Object.freeze({ kind: "cc", channel: 1, number: 24, value: 0 }),
+                MIC1_OFF: Object.freeze({ kind: "cc", channel: 1, number: 24, value: 127 }),
+            }) }),
+            knob: Object.freeze({ title: "KNOB (NHẠC, MIC, Retune Speed)", count: 3, mappings: dawQfMake(1, 127, { BEAT_INPUT_VOLUME: 4, MIC1_VOLUME: 5, RETUNE_SPEED_MIC1: 17 }) }),
+            fxbus: Object.freeze({ title: "FX BUS VOLUME", count: 4, mappings: dawQfMake(1, 127, { FX_BUS_DELAY_VOLUME: 1, FX_BUS_VERB_LONG_VOLUME: 2, FX_BUS_VERB_SHORT_VOLUME: 3, FX_BUS_COM_VERB_VOLUME: 11 }) }),
+            // Key gốc = CC 15 (Menu tự tính giá trị theo nốt); Scale = CC 16 (Major=0, Minor=5 — danh sách Scale của Auto-Tune, CHƯA kiểm chứng trên Cubase).
+            scale: Object.freeze({ title: "KEY + SCALE", count: 3, mappings: Object.freeze({
+                KEY_ROOT: Object.freeze({ kind: "cc", channel: 1, number: 15, value: 0 }),
+                KEY_SCALE_MAJOR: Object.freeze({ kind: "cc", channel: 1, number: 16, value: 0 }),
+                KEY_SCALE_MINOR: Object.freeze({ kind: "cc", channel: 1, number: 16, value: 5 }),
+            }) }),
+            tune: Object.freeze({ title: "TUNE BYPASS", count: 1, mappings: dawQfMake(1, 127, { TUNE_BYPASS: 22 }) }),
+            lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(1, 127, { LOFI_STATE: 20 }) }),
+            preset: Object.freeze({ title: "REMIX (Bypass)", count: 1, mappings: dawQfMake(1, 0, { REMIX_PLUGIN_1: 21 }) }),
+            be: Object.freeze({ title: "BÈ ON/OFF", count: 1, mappings: dawQfMake(1, 127, { BE_STATE: 14 }) }),
         }),
     }),
 });

@@ -271,6 +271,13 @@ function getMidiOutMapping(action) {
     if (!daw) return null;
     const all = (typeof getSetting === "function" ? getSetting("dawMidiOutMappings") : {}) || {};
     if (all[daw] && all[daw][action]) return all[daw][action];
+    // C63 — CUBASE (MIDI Remote "loopMIDI Port", kênh 1): bảng CC lấy từ file .midiremote thật của người dùng (Ảnh/PDL TOOL AI S1) + MAPPING.png.
+    // Đứng TRƯỚC các preset mặc định bên dưới; mapping người dùng đã lưu vẫn thắng (dòng trên). Cột: [CC, value]. Chưa chạy thật trên Cubase = UNVERIFIED.
+    if (/^cubase/i.test(String(daw).trim())) {
+        const CUBASE_C63 = { BEAT_INPUT_VOLUME: [4, 127], MIC1_VOLUME: [5, 127], FX_BUS_DELAY_VOLUME: [1, 127], FX_BUS_VERB_LONG_VOLUME: [2, 127], FX_BUS_VERB_SHORT_VOLUME: [3, 127], FX_BUS_COM_VERB_VOLUME: [11, 127], RETUNE_SPEED_MIC1: [17, 127],
+            KEY_ROOT: [15, 0], KEY_SCALE_MAJOR: [16, 0], KEY_SCALE_MINOR: [16, 5], LOFI_STATE: [20, 127], REMIX_PLUGIN_1: [21, 0], BE_STATE: [14, 127], TUNE_BYPASS: [22, 127], MIC1_ON: [24, 0], MIC1_OFF: [24, 127] };
+        if (Object.prototype.hasOwnProperty.call(CUBASE_C63, action)) return { kind: "cc", channel: 1, number: CUBASE_C63[action][0], value: CUBASE_C63[action][1], source: "DEFAULT_PRESET" };
+    }
     if (/^TUNE_BYPASS_[234]$/.test(String(action))) { // A94 — bypass riêng Auto-Tune 2/3/4: kênh 15, CC 89/90/91 (không trùng bộ KNOB 85-88)
         return { kind: "cc", channel: 15, number: 87 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
     }

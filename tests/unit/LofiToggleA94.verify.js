@@ -24,7 +24,7 @@ function makeAR(daw, saved) {
     r = await AR.setDawControlState('LOFI', false, {});
     ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([118, 127, 15]), 'LOFI TẮT -> CC118 = 127 = 0');
     AR = makeAR('Cubase 14'); await AR.setDawControlState('LOFI', true, {});
-    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([119, 0, 15]), 'Cubase: CC119 (bật = 0)');
+    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([20, 0, 0]), 'Cubase (C63): kênh 1 CC20 (núm LOFI Bypass), bật = 0');
     AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { LOFI_STATE: { kind: 'cc', channel: 16, number: 90, value: 127 } } }); await AR.setDawControlState('LOFI', true, {});
     ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([90, 0, 15]), 'mapping người dùng đã lưu luôn thắng mặc định');
 
@@ -56,7 +56,7 @@ function makeAR(daw, saved) {
 
     console.log('== 3. Setup/Surface ==');
     const setup = rd('ui/js/setup.js');
-    ok(/action: "LOFI_STATE"/.test(setup) && /"TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2", "AUDIO_CHILL_STATE", "AUDIO_CHILL_KNOB"\]/.test(setup) && /LOFI_STATE: 118/.test(setup) && /LOFI_STATE: 119/.test(setup), 'Setup: có dòng LOFI_STATE, nhóm bảo vệ trùng CC, bộ gợi ý Studio One 118 / Cubase 119');
+    ok(/action: "LOFI_STATE"/.test(setup) && /"TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2", "AUDIO_CHILL_STATE", "AUDIO_CHILL_KNOB"\]/.test(setup) && /LOFI_STATE: 118/.test(setup) && /LOFI_STATE: 20\b/.test(setup), 'Setup: có dòng LOFI_STATE, nhóm bảo vệ trùng CC, bộ gợi ý Studio One 118 / Cubase 119');
     ok(/name="lofiOnOff"[\s\S]{0,160}address="118"/.test(rd('studio_one/AutoMenuAI.surface.xml')), 'surface AutoMenuAI có control LOFI CC118');
     console.log('== 4. A94: Auto-Tune 3 / 4 có CC riêng mặc định (kênh 16, CC34-37) ==');
     { const A = makeAR('Studio Pro 8'); const g = (n) => A.getMidiOutMapping(n);

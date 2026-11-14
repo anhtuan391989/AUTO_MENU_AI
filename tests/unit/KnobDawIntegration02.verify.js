@@ -12,7 +12,10 @@ const code = setup.slice(a1, a2) + '\n' + setup.slice(b1, b2) + '\nreturn {DAW_M
 
 const KNOBS = { BEAT_INPUT_VOLUME: 'musicKnob', MASTER_OUTPUT_VOLUME: 'masterKnob', RETUNE_SPEED_MIC1: 'retune1', RETUNE_SPEED_MIC2: 'retune2' };
 const S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_MIC1: 22, RETUNE_SPEED_MIC2: 23 };
-const CB = { BEAT_INPUT_VOLUME: 85, MASTER_OUTPUT_VOLUME: 86, RETUNE_SPEED_MIC1: 87, RETUNE_SPEED_MIC2: 88 };
+// C63 — Cubase dùng bảng CC của file .midiremote thật: kênh 1, NHẠC=4, MIC=5, Retune Speed=17 (Cubase chưa có núm Master / Retune 2).
+const CB = { BEAT_INPUT_VOLUME: 4, MIC1_VOLUME: 5, RETUNE_SPEED_MIC1: 17 };
+const CB_TURN = { BEAT_INPUT_VOLUME: 4, RETUNE_SPEED_MIC1: 17 }; // 2 núm có đường cong 0-100 -> CC của Menu
+const CHAN = (d) => (/^cubase/i.test(d) ? 1 : 15);
 const FAMILY = (d) => (/^cubase/i.test(d) ? CB : S1);
 const DAWS = ['Studio One 5', 'Studio One 6', 'Studio One 7', 'Studio Pro 8', 'Cubase 10', 'Cubase 11', 'Cubase 12', 'Cubase 13', 'Cubase 14', 'Cubase 15'];
 
@@ -54,14 +57,14 @@ function env(init = {}, { portOk = true } = {}) {
     const prof = e.api.resolveDawProfile(d);
     ok(prof && prof.id === (/^cubase/i.test(d) ? 'cubase' : 'studio-one'), `[4][5] "${d}" nhận đúng profile ${/^cubase/i.test(d) ? 'cubase' : 'studio-one'}`, prof && prof.id);
     const r = e.fill('knob'); const m = (e.st.dawMidiOutMappings || {})[d] || {};
-    ok(r.done && Object.keys(m).length === 4 && Object.entries(FAMILY(d)).every(([a, n]) => m[a] && m[a].kind === 'cc' && m[a].channel === 15 && m[a].number === n && m[a].source === 'USER_DEFINED'), `[2][3] "${d}": KNOB điền đúng 4 mapping CC ${Object.values(FAMILY(d)).join('/')} kênh 15`, m);
+    ok(r.done && Object.keys(m).length === Object.keys(FAMILY(d)).length && Object.entries(FAMILY(d)).every(([a, n]) => m[a] && m[a].kind === 'cc' && m[a].channel === CHAN(d) && m[a].number === n && m[a].source === 'USER_DEFINED'), `[2][3] "${d}": KNOB điền đúng ${Object.keys(FAMILY(d)).length} mapping CC ${Object.values(FAMILY(d)).join('/')} kênh ${CHAN(d)}`, m);
     ok(e.sent.length === 0, `[3] "${d}": điền nhanh KHÔNG gửi MIDI`);
   }
   // 3 giá trị 0/25/50/75/100 -> CC 0/32/64/95/127, tăng/giảm, đúng channel index, mỗi Knob đúng CC riêng
   for (const d of ['Studio Pro 8', 'Cubase 13']) {
     const e = env({ selectedDAW: d }); e.fill('knob');
     let allOk = true; const rows = [];
-    for (const [a, num] of Object.entries(FAMILY(d))) {
+    for (const [a, num] of Object.entries(/^cubase/i.test(d) ? CB_TURN : FAMILY(d))) {
       e.sent.length = 0;
       // FSP8-MIDI-SYNC-FAST-02 (THAY ĐỔI SPEC CÓ CHỦ ĐÍCH): riêng MUSIC trên Studio Pro 8 dùng neo 50→64, 90→97, 100→127 => 75→85 (không còn 95). Mọi Knob/DAW khác giữ nguyên.
       const calib = d === 'Studio Pro 8' && (a === 'BEAT_INPUT_VOLUME' || a === 'MASTER_OUTPUT_VOLUME'); // MASTER-CURVE-01: Master dùng cùng đường cong fader
@@ -70,7 +73,7 @@ function env(init = {}, { portOk = true } = {}) {
       for (const [v, cc0] of [[0, 0], [25, 32], [50, 64], [75, calib ? 85 : 95], [100, 127], [50, 64], [0, 0]]) {
         const cc = retuneFsp8 ? RT[v] : cc0;
         const r = await e.turn(e.AR.ACTIONS[a], v); const last = e.sent[e.sent.length - 1];
-        if (!r.ok || !last || last.n !== num || last.v !== cc || last.ch !== 14) { allOk = false; rows.push([a, v, cc, last, r]); }
+        if (!r.ok || !last || last.n !== num || last.v !== cc || last.ch !== CHAN(d) - 1) { allOk = false; rows.push([a, v, cc, last, r]); }
       }
     }
     ok(allOk, `[2] "${d}": 0/25/50/75/100 -> CC 0/32/64/95/127 (riêng MUSIC trên Studio Pro 8: 75->85, xem FSP8-MIDI-SYNC-FAST-02) (kênh 15 = index 14), đúng CC riêng từng Knob; tăng/giảm đúng chiều`, rows[0]);
@@ -85,8 +88,8 @@ function env(init = {}, { portOk = true } = {}) {
     ok(['Studio Pro 8', 'Cubase 13', 'Studio One 5', 'Cubase 10'].every((d) => JSON.stringify(e.st.dawMidiOutMappings[d]) === snaps[d]) && Object.keys(e.st.dawMidiOutMappings).length === 4, '[3] quay về Studio Pro 8: mapping 4 DAW còn nguyên, không ghi chéo');
     e.sent.length = 0; await e.turn('MASTER_OUTPUT_VOLUME', 100);
     ok(e.sent.length === 1 && e.sent[0].n === 21 && e.sent[0].ch === 14, '[3] Studio Pro 8 gửi CC21 (không dùng CC86 của Cubase)', e.sent);
-    e.st.selectedDAW = 'Cubase 10'; e.sent.length = 0; await e.turn('MASTER_OUTPUT_VOLUME', 100);
-    ok(e.sent.length === 1 && e.sent[0].n === 86, '[3] Cubase 10 gửi CC86 (không dùng CC21)', e.sent);
+    e.st.selectedDAW = 'Cubase 10'; e.fill('knob'); e.sent.length = 0; await e.turn('BEAT_INPUT_VOLUME', 100);
+    ok(e.sent.length === 1 && e.sent[0].n === 4 && e.sent[0].ch === 0, '[3] Cubase 10 gửi CC4 kênh 1 (không dùng CC21 của Studio One)', e.sent);
   }
   // 6 xung đột với LIVE 102–109 và mapping sẵn có
   {
@@ -94,9 +97,9 @@ function env(init = {}, { portOk = true } = {}) {
     const r = e.fill('knob'); const m = e.st.dawMidiOutMappings['Studio One 7'];
     ok(r.done && JSON.stringify(Object.fromEntries(Object.keys(JSON.parse(live)).map((k) => [k, m[k]]))) === live, '[6] điền KNOB sau LIVE: 8 mapping LIVE (CC102–109 kênh 16) không đổi');
     ok(Object.values(S1).every((n) => n < 102) && Object.values(CB).every((n) => n < 102 || n > 109) && !Object.values({ ...S1, ...CB }).some((n) => n >= 102 && n <= 109), '[6] CC Knob (20–23, 85–88) không rơi vào 102–109');
-    const f = env({ selectedDAW: 'Cubase 12', dawMidiOutMappings: { 'Cubase 12': { MONITOR_FX: { kind: 'cc', channel: 15, number: 86, value: 127 } } } });
+    const f = env({ selectedDAW: 'Cubase 12', dawMidiOutMappings: { 'Cubase 12': { MONITOR_FX: { kind: 'cc', channel: 1, number: 4, value: 127 } } } });
     const rr = f.fill('knob');
-    ok(rr.blocked === 'conflict' && rr.plan.conflicts.some(([a, o]) => a === 'MASTER_OUTPUT_VOLUME' && o === 'MONITOR_FX') && f.st.dawMidiOutMappings['Cubase 12'].BEAT_INPUT_VOLUME === undefined, '[6] trùng mapping hiện có -> chặn, không ghi một phần');
+    ok(rr.blocked === 'conflict' && rr.plan.conflicts.some(([a, o]) => a === 'BEAT_INPUT_VOLUME' && o === 'MONITOR_FX') && f.st.dawMidiOutMappings['Cubase 12'].BEAT_INPUT_VOLUME === undefined, '[6] trùng mapping hiện có -> chặn, không ghi một phần');
     const g = env({ selectedDAW: 'Studio Pro 8', dawMidiOutMappings: { 'Studio Pro 8': { BEAT_INPUT_VOLUME: { kind: 'cc', channel: 15, number: 99, value: 50, source: 'USER_DEFINED' } } } });
     let ask = null; const plan = g.api.planDawProfileFill(g.api.resolveDawProfile('Studio Pro 8'), 'knob', g.api.getDawMidiOutMapping, g.A); ask = plan.overwrite;
     ok(ask.length === 1 && ask[0] === 'BEAT_INPUT_VOLUME', '[6] mapping tay của Knob sẽ bị ghi đè -> liệt kê để xác nhận (không ghi đè âm thầm)');

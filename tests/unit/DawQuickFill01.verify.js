@@ -51,10 +51,10 @@ const KNOB_S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_
   const m = e.st.dawMidiOutMappings['Cubase 13'];
   const prof = e.api.DAW_MIDI_PROFILES.cubase, s1 = e.api.DAW_MIDI_PROFILES['studio-one'];
   const nums = Object.values(m).map((x) => x.number);
-  const reserved = [7, 10, 12, 13, 23, 24, 64];
-  ok(Object.keys(m).length === 12 && e.api.resolveDawProfile('Cubase 13') === prof && prof !== s1, '[2] Cubase 13 dùng profile Cubase riêng (12 mapping)');
-  ok(nums.every((n) => !reserved.includes(n)) && new Set(nums.map((n, i) => n + '|' + (i < 8 ? 16 : 15))).size === 12, '[2] CC Cubase không trùng CC đã biết (7/10/12/13/23/24/64) và không trùng nhau');
-  ok(Object.keys(LIVE_S1).every((a) => m[a].number !== LIVE_S1[a]) && /Quy ước CC gợi ý của AUTO_MENU_AI/.test(prof.origin) && /KHÔNG phải mặc định của Cubase/.test(prof.origin), '[2] Cubase khác số Studio One và được ghi rõ là quy ước AUTO_MENU_AI, không phải mặc định Cubase');
+  const surfaceCc = [1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 20, 21, 22, 24]; // C63 — 19 núm CC trong file .midiremote thật (kênh 1)
+  ok(Object.keys(m).length === 5 && e.api.resolveDawProfile('Cubase 13') === prof && prof !== s1, '[2] Cubase 13 dùng profile Cubase riêng (C63: MIC1 ON/OFF + 3 KNOB = 5 mapping)');
+  ok(nums.every((n) => surfaceCc.includes(n)) && Object.values(m).every((x) => x.channel === 1) && m.MIC1_ON.number === 24 && m.MIC1_OFF.number === 24 && m.MIC1_ON.value === 0 && m.MIC1_OFF.value === 127, '[2] mọi CC Cubase nằm trong 19 núm của file MIDI Remote, kênh 1; MIC1 ON/OFF = CC24 giá trị 0/127');
+  ok(m.BEAT_INPUT_VOLUME.number === 4 && m.MIC1_VOLUME.number === 5 && m.RETUNE_SPEED_MIC1.number === 17 && /\.midiremote/.test(prof.origin) && /loopMIDI Port/.test(prof.origin), '[2] KNOB Cubase = CC4/5/17 và origin ghi rõ nguồn là file .midiremote thật');
   ok(e.api.dawProfileVersionStatus(prof, 'Cubase 13') !== 'UNVERIFIED' && e.api.dawProfileVersionStatus(prof, 'Cubase 12') === 'UNVERIFIED' && e.api.dawProfileVersionStatus(prof, 'Cubase 15') === 'UNVERIFIED', '[2] Cubase 13 có bằng chứng file; 12/14/15 gắn UNVERIFIED');
 }
 // 3 Studio One -> Cubase -> Studio One giữ nguyên
@@ -167,7 +167,7 @@ const KNOB_S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_
   const e = env({ selectedDAW: 'Cubase 13', dawMidiOutMappings: { 'Cubase 13': JSON.parse(JSON.stringify(store)) } });
   e.click('live'); e.click('knob');
   const m = e.st.dawMidiOutMappings['Cubase 13'];
-  ok(Object.keys(store).every((k) => JSON.stringify(m[k]) === JSON.stringify(store[k])) && Object.keys(m).length === 15, '[11] MONITOR_FX/FX_SEND_*/PLAY (ngoài 2 bộ) giữ nguyên, thêm đúng 12 mapping');
+  ok(Object.keys(store).every((k) => JSON.stringify(m[k]) === JSON.stringify(store[k])) && Object.keys(m).length === 8, '[11] MONITOR_FX/FX_SEND_*/PLAY (ngoài 2 bộ) giữ nguyên, thêm đúng 5 mapping (C63)');
   ok(!/FX_SEND_REVERB|FX_SEND_DELAY|MONITOR_FX|TRANSPORT/.test(setup.slice(setup.indexOf('const DAW_QF_S1_LIVE'), setup.indexOf('// S8 — 3 hàng PLAY/STOP/RECORD'))), '[11] static: khối profile không nhắc tới action ngoài hai bộ');
 }
 // 12 an toàn khởi động/đổi DAW + phạm vi sửa

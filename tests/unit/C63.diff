@@ -1,0 +1,451 @@
+diff --git a/tests/unit/BeBtn01.verify.js b/tests/unit/BeBtn01.verify.js
+index c0bc78b..2307374 100644
+--- a/tests/unit/BeBtn01.verify.js
++++ b/tests/unit/BeBtn01.verify.js
+@@ -33,7 +33,7 @@ function makeAR(daw, saved) {
+     r = await AR.setDawControlState('BE', false, {});
+     ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([104, 127, 14]), 'BÈ TẮT -> CC104 = 127');
+     AR = makeAR('Cubase 14'); await AR.setDawControlState('BE', true, {});
+-    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 0, 14]), 'Cubase: cũng kênh 15 CC104');
++    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([14, 0, 0]), 'Cubase (C63): kênh 1 CC14 (núm BẬT BÈ trong MIDI Remote)');
+     AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { BE_STATE: { kind: 'cc', channel: 15, number: 77, value: 127 } } }); await AR.setDawControlState('BE', true, {});
+     ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([77, 0, 14]), 'mapping người dùng đã lưu luôn thắng mặc định');
+ 
+@@ -69,6 +69,6 @@ function makeAR(daw, saved) {
+     ok(/<Control name="harmonyOnOff"[^>]*>\s*<MidiMessage status="#BE" address="104"\/>/.test(surf) && /<Control name="mic1On"[^>]*>\s*<MidiMessage status="#BF" address="104"\/>/.test(surf), 'surface Studio One: harmonyOnOff = kênh 15 (#BE) CC104, không đè Mic1 ON (kênh 16 CC104)');
+     console.log('== 4. Setup: dòng BE_STATE, nhóm bảo vệ trùng CC, bộ gợi ý CC104 ==');
+     const setup = rd('ui/js/setup.js');
+-    ok(/action: "BE_STATE"/.test(setup) && /MIDI_CONFLICT_GUARD_SET\.add\("BE_STATE"\)/.test(setup) && (setup.match(/BE_STATE: 104/g) || []).length === 2 && /if \(action === "BE_STATE"\)/.test(setup), 'Setup: có dòng BE_STATE, nhóm bảo vệ, 2 bộ gợi ý (Studio One / Cubase) CC104');
++    ok(/action: "BE_STATE"/.test(setup) && /MIDI_CONFLICT_GUARD_SET\.add\("BE_STATE"\)/.test(setup) && (setup.match(/BE_STATE: 104/g) || []).length === 1 && /BE_STATE: 14\b/.test(setup) && /if \(action === "BE_STATE"\)/.test(setup), 'Setup: có dòng BE_STATE, nhóm bảo vệ, 2 bộ gợi ý (Studio One CC104 / Cubase CC14)');
+     console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
+ })();
+diff --git a/tests/unit/CubaseMidiC63.verify.js b/tests/unit/CubaseMidiC63.verify.js
+new file mode 100644
+index 0000000..640eef3
+--- /dev/null
++++ b/tests/unit/CubaseMidiC63.verify.js
+@@ -0,0 +1,150 @@
++/**
++ * C63 — MIDI cho CUBASE: Menu gửi đúng CC của file MIDI Remote THẬT (Ảnh/PDL TOOL AI S1/*.midiremote), kênh 1.
++ * Kiểm bằng mô phỏng phần mềm (MIDI giả) + đối chiếu với file .midiremote, KHÔNG phải Cubase thật.
++ * Chạy: node tests/unit/CubaseMidiC63.verify.js
++ */
++"use strict";
++const fs = require("fs"), path = require("path"), vm = require("vm"), zlib = require("zlib");
++const ROOT = process.env.AUTOMENU_ROOT || path.resolve(__dirname, "../..");
++const rd = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
++let pass = 0, fail = 0;
++const ok = (c, m) => { if (c) { pass++; console.log("  OK   " + m); } else { fail++; console.log("  FAIL " + m); } };
++
++// ---- 1. CC thật của Cubase: giải nén file .midiremote (zlib sau phần đầu "Steinberg Resource File") ----
++function surfaceCcs() {
++    const f = path.join(ROOT, "Ảnh", "PDL TOOL AI S1", "MIDI PV2 PDL STUDIO.midiremote");
++    const buf = fs.readFileSync(f);
++    let json = null;
++    for (let off = 0; off < 64 && !json; off++) { try { json = JSON.parse(zlib.inflateSync(buf.subarray(off)).toString("utf8")); } catch (e) { /* thử offset kế */ } }
++    if (!json) return null;
++    const o = new Map(json.objects.internal.map((x) => [x.id, x]));
++    const out = new Map(); // cc -> channel(1-based)
++    for (const x of o.values()) if (x.type === "MidiBindingToControlChange") out.set(x.members.ControlChangeNumber, x.members.ChannelNumber + 1);
++    return { ccs: out, port: [...o.values()].find((x) => x.type === "DetectionInputNameFilterEquals")?.members.FilterValue };
++}
++const SURF = surfaceCcs();
++
++// ---- 2. ActionRegistry (Menu) ----
++function makeAR(daw, saved) {
++    const sent = [];
++    const win = { appSettings: {}, getLastMidiSendResult: () => null };
++    const sb = { window: win, console, setTimeout, clearTimeout, Promise,
++        getSetting: (k) => (k === "selectedDAW" ? daw : k === "dawMidiOutMappings" ? (saved || {}) : undefined), saveSetting: () => {},
++        sendMidiCC: async (n, v, ch) => { sent.push({ n, v, ch }); return true; } };
++    vm.createContext(sb);
++    vm.runInContext(rd("ui/js/actionRegistry.js"), sb, { filename: "actionRegistry.js" });
++    makeAR.lastSent = sent;
++    return win.ActionRegistry;
++}
++
++const EXPECT = { // action -> [CC, value]  (bảng C63)
++    BEAT_INPUT_VOLUME: [4, 127], MIC1_VOLUME: [5, 127], FX_BUS_DELAY_VOLUME: [1, 127], FX_BUS_VERB_LONG_VOLUME: [2, 127], FX_BUS_VERB_SHORT_VOLUME: [3, 127],
++    FX_BUS_COM_VERB_VOLUME: [11, 127], RETUNE_SPEED_MIC1: [17, 127], KEY_ROOT: [15, 0], KEY_SCALE_MAJOR: [16, 0], KEY_SCALE_MINOR: [16, 5],
++    LOFI_STATE: [20, 127], REMIX_PLUGIN_1: [21, 0], BE_STATE: [14, 127], TUNE_BYPASS: [22, 127], MIC1_ON: [24, 0], MIC1_OFF: [24, 127],
++};
++
++(async () => {
++    console.log("== A. File .midiremote thật làm chuẩn ==");
++    ok(!!SURF && SURF.ccs.size === 19, "đọc được file .midiremote: 19 núm CC");
++    ok(SURF && SURF.port === "loopMIDI Port", "Cubase chỉ nhận input tên đúng 'loopMIDI Port' (ghi nhận để hướng dẫn đặt tên cổng)");
++    ok(SURF && [...SURF.ccs.values()].every((c) => c === 1), "mọi núm Cubase đều ở kênh 1");
++
++    console.log("== B. Mỗi action Cubase của Menu trỏ vào một núm CÓ THẬT trong file ==");
++    const AR = makeAR("Cubase 13", {});
++    for (const [a, [cc, val]] of Object.entries(EXPECT)) {
++        const m = AR.getMidiOutMapping(a);
++        ok(!!m && m.kind === "cc" && m.channel === 1 && m.number === cc && m.value === val, `${a} -> kênh 1 CC${cc} (value ${val})`);
++        ok(!!SURF && SURF.ccs.has(cc), `${a}: CC${cc} tồn tại trong file MIDI Remote`);
++    }
++    {
++        const nums = {};
++        for (const [a, [cc, val]] of Object.entries(EXPECT)) { const k = cc + "|" + (/^(MIC1_(ON|OFF)|KEY_SCALE_(MAJOR|MINOR))$/.test(a) ? val : "x"); (nums[k] = nums[k] || []).push(a); }
++        ok(Object.values(nums).every((l) => l.length === 1), "không có 2 action Cubase nào trùng CC (trừ MIC1 ON/OFF = CC24 và Scale Major/Minor = CC16: cùng CC, khác giá trị)");
++    }
++    ok(AR.getMidiOutMapping("MASTER_OUTPUT_VOLUME") === null && AR.getMidiOutMapping("MIC2_VOLUME") === null, "Master / MIC 2 chưa có núm trong Cubase -> KHÔNG tự bịa CC (null)");
++
++    console.log("== C. Mapping người dùng đã lưu luôn thắng; DAW khác không bị ảnh hưởng ==");
++    {
++        const saved = { "Cubase 13": { TUNE_BYPASS: { kind: "cc", channel: 5, number: 99, value: 127, source: "USER_DEFINED" } } };
++        const m = makeAR("Cubase 13", saved).getMidiOutMapping("TUNE_BYPASS");
++        ok(m.number === 99 && m.channel === 5, "mapping đã lưu thắng bảng mặc định Cubase");
++        const s1 = makeAR("Studio One 7", {});
++        ok(s1.getMidiOutMapping("TUNE_BYPASS").number === 113 && s1.getMidiOutMapping("TUNE_BYPASS").channel === 16, "Studio One: TUNE vẫn kênh 16 CC113 như cũ");
++        ok(s1.getMidiOutMapping("KEY_SCALE_MINOR").number === 26 && s1.getMidiOutMapping("KEY_ROOT") === null, "Studio One: Scale CC26, Key gốc chưa có CC như cũ");
++        ok(s1.getMidiOutMapping("BEAT_INPUT_VOLUME") === null && s1.getMidiOutMapping("MIC1_ON") === null, "Studio One: không bị bảng Cubase tràn sang");
++    }
++
++    console.log("== D. Gửi MIDI thật qua Menu (giả lập) ==");
++    {
++        const a = makeAR("Cubase 13", {}); const SENT = makeAR.lastSent;
++        await a.setDawControlState("TUNE", true, {}); // giữ nguyên quy ước giá trị của Menu (values.on = 127), chỉ đổi số CC/kênh
++        ok(JSON.stringify(SENT[0]) === JSON.stringify({ n: 22, v: 127, ch: 0 }), "setDawControlState(TUNE, true) -> CC22 = 127, kênh 1 (giá trị theo đúng quy ước Menu cũ, không đổi)");
++        SENT.length = 0; await a.setDawControlState("TUNE", false, {});
++        ok(JSON.stringify(SENT[0]) === JSON.stringify({ n: 22, v: 0, ch: 0 }), "setDawControlState(TUNE, false) -> CC22 = 0, kênh 1");
++        SENT.length = 0; await a.setDawControlState("LOFI", true, {});
++        ok(JSON.stringify(SENT[0]) === JSON.stringify({ n: 20, v: 0, ch: 0 }), "nút LOFI bật -> CC20 = 0, kênh 1");
++        SENT.length = 0; await a.setDawControlState("BE", true, {});
++        ok(JSON.stringify(SENT[0]) === JSON.stringify({ n: 14, v: 0, ch: 0 }), "nút BÈ bật -> CC14 = 0, kênh 1");
++    }
++
++    console.log("== E. setup.js cho cùng kết quả với actionRegistry.js (Setup hiển thị đúng thứ Menu gửi) ==");
++    {
++        const setup = rd("ui/js/setup.js");
++        const b1 = setup.indexOf("function getDawMidiOutMapping"), b2 = setup.indexOf("// S8 — 3 hàng PLAY/STOP/RECORD");
++        const sb = { getSetting: (k) => (k === "selectedDAW" ? "Cubase 13" : undefined) };
++        vm.createContext(sb);
++        vm.runInContext(setup.slice(b1, b2) + "\nthis.f = getDawMidiOutMapping;", sb);
++        let same = true;
++        for (const [a, [cc, val]] of Object.entries(EXPECT)) { const m = sb.f(a); if (!m || m.number !== cc || m.value !== val || m.channel !== 1) { same = false; console.log("   lệch:", a, JSON.stringify(m)); } }
++        ok(same, "16 action: Setup (getDawMidiOutMapping) khớp Menu (getMidiOutMapping)");
++    }
++
++    console.log("== F. Hồ sơ điền nhanh Cubase: hợp lệ, không trùng, chỉ dùng CC có thật ==");
++    {
++        const setup = rd("ui/js/setup.js");
++        const a1 = setup.indexOf("const DAW_QF_S1_LIVE"), a2 = setup.indexOf("// S8 — 3 hàng PLAY/STOP/RECORD");
++        const sb = { getSetting: () => undefined };
++        vm.createContext(sb);
++        vm.runInContext(setup.slice(a1, a2) + "\nthis.P = DAW_MIDI_PROFILES; this.v = validateDawProfileBundle; this.all = dawProfileAllInOne;", sb);
++        const prof = sb.P.cubase, all = sb.all(prof).bundles.all;
++        ok(Object.keys(all.mappings).length === 16 && all.count === 16, "gộp tất cả: 16 mapping, khớp bảng C63");
++        const errs = sb.v(all);
++        ok(errs.length === 0, "validateDawProfileBundle(Cubase) không có lỗi (kể cả MIC1 ON/OFF dùng chung CC24 khác giá trị)", errs);
++        let allMatch = true;
++        for (const [a, [cc, val]] of Object.entries(EXPECT)) { const m = all.mappings[a]; if (!m || m.number !== cc || m.channel !== 1 || (a.startsWith("KEY_SCALE") || /^(MIC1_ON|MIC1_OFF|REMIX_PLUGIN_1|KEY_ROOT)$/.test(a) ? m.value !== val : false)) allMatch = false; }
++        ok(allMatch, "bộ điền nhanh khớp bảng CC của Menu");
++        ok(Object.values(all.mappings).every((m) => SURF && SURF.ccs.has(m.number)), "mọi CC trong bộ điền nhanh đều là núm có thật trong file MIDI Remote");
++    }
++
++    console.log("== G. SoundShifter (MOD) theo DAW ==");
++    function mk(daw) {
++        const sent = [];
++        const sb = { console: { log() {}, warn() {}, error() {} }, Promise, Math, JSON, Number, Array, Error, Set, Date, setTimeout: (f) => { f(); return 0; }, clearTimeout() {},
++            getSetting: (k) => (k === "midiOutputPort" ? "loopMIDI Port" : k === "selectedDAW" ? daw : undefined), getCoordinate: () => null,
++            sendMidiCC: async (cc, v) => { sent.push([cc, v]); return true; }, sendMidiNotePulse: async () => true, window: {} };
++        vm.createContext(sb);
++        vm.runInContext(rd("ui/js/vocalCommandRouter.js") + "\nthis.R = { step: sendToneStepToSoundShifter, power: setSoundShifterPower, reset: resetSoundShifterToDefault };", sb);
++        return { R: sb.R, sent };
++    }
++    {
++        const s1 = mk("Studio One 7");
++        await s1.R.power(true);
++        ok(s1.sent[0][0] === 24 && s1.sent[0][1] === 0 && s1.sent[1][0] === 22 && s1.sent[1][1] === 64, "Studio One: MOD ON vẫn CC24 (bypass TẮT=0) rồi CC22 = 64 như cũ");
++        const none = mk(undefined);
++        await none.R.step(1);
++        ok(none.sent.length === 1 && none.sent[0][0] === 22 && none.sent[0][1] === 69, "chưa chọn DAW: giữ hành vi cũ CC22 = 69 (+1 bán cung)");
++        const cb = mk("Cubase 13");
++        await cb.R.power(true);
++        ok(cb.sent[0][0] === 25 && cb.sent[0][1] === 0, "Cubase: MOD ON -> Bypass SoundShifter TẮT = CC25 giá trị 0");
++        ok(cb.sent[1][0] === 8 && cb.sent[1][1] === 64, "Cubase: MOD ON -> PitchShift về 0 = CC8 giá trị 64");
++        cb.sent.length = 0; await cb.R.step(2);
++        ok(cb.sent.length === 1 && cb.sent[0][0] === 8 && cb.sent[0][1] === 74, "Cubase: tone +2 -> CC8 = 74");
++        cb.sent.length = 0; await cb.R.reset();
++        ok(cb.sent.every(([cc]) => cc === 8 || cc === 25) && cb.sent[cb.sent.length - 1][0] === 25 && cb.sent[cb.sent.length - 1][1] === 127, "Cubase: MOD OFF -> về 0 rồi Bypass BẬT (CC25 = 127)");
++        ok(!cb.sent.some(([cc]) => cc === 22 || cc === 24), "Cubase: MOD KHÔNG còn đụng CC22 (TẮT TUNE) và CC24 (TẮT MIC)");
++        ok(SURF && SURF.ccs.has(8) && !SURF.ccs.has(25), "CC8 có thật trong MIDI Remote (PitchShift); CC25 CHƯA có -> cần thêm 1 núm CC25 cho Bypass SoundShifter");
++    }
++
++    console.log(`\nKẾT QUẢ: ${pass} PASS / ${fail} FAIL`);
++    process.exit(fail ? 1 : 0);
++})();
+diff --git a/tests/unit/DawQuickFill01.verify.js b/tests/unit/DawQuickFill01.verify.js
+index 6b0b4ac..40b3659 100644
+--- a/tests/unit/DawQuickFill01.verify.js
++++ b/tests/unit/DawQuickFill01.verify.js
+@@ -51,10 +51,10 @@ const KNOB_S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_
+   const m = e.st.dawMidiOutMappings['Cubase 13'];
+   const prof = e.api.DAW_MIDI_PROFILES.cubase, s1 = e.api.DAW_MIDI_PROFILES['studio-one'];
+   const nums = Object.values(m).map((x) => x.number);
+-  const reserved = [7, 10, 12, 13, 23, 24, 64];
+-  ok(Object.keys(m).length === 12 && e.api.resolveDawProfile('Cubase 13') === prof && prof !== s1, '[2] Cubase 13 dùng profile Cubase riêng (12 mapping)');
+-  ok(nums.every((n) => !reserved.includes(n)) && new Set(nums.map((n, i) => n + '|' + (i < 8 ? 16 : 15))).size === 12, '[2] CC Cubase không trùng CC đã biết (7/10/12/13/23/24/64) và không trùng nhau');
+-  ok(Object.keys(LIVE_S1).every((a) => m[a].number !== LIVE_S1[a]) && /Quy ước CC gợi ý của AUTO_MENU_AI/.test(prof.origin) && /KHÔNG phải mặc định của Cubase/.test(prof.origin), '[2] Cubase khác số Studio One và được ghi rõ là quy ước AUTO_MENU_AI, không phải mặc định Cubase');
++  const surfaceCc = [1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 20, 21, 22, 24]; // C63 — 19 núm CC trong file .midiremote thật (kênh 1)
++  ok(Object.keys(m).length === 5 && e.api.resolveDawProfile('Cubase 13') === prof && prof !== s1, '[2] Cubase 13 dùng profile Cubase riêng (C63: MIC1 ON/OFF + 3 KNOB = 5 mapping)');
++  ok(nums.every((n) => surfaceCc.includes(n)) && Object.values(m).every((x) => x.channel === 1) && m.MIC1_ON.number === 24 && m.MIC1_OFF.number === 24 && m.MIC1_ON.value === 0 && m.MIC1_OFF.value === 127, '[2] mọi CC Cubase nằm trong 19 núm của file MIDI Remote, kênh 1; MIC1 ON/OFF = CC24 giá trị 0/127');
++  ok(m.BEAT_INPUT_VOLUME.number === 4 && m.MIC1_VOLUME.number === 5 && m.RETUNE_SPEED_MIC1.number === 17 && /\.midiremote/.test(prof.origin) && /loopMIDI Port/.test(prof.origin), '[2] KNOB Cubase = CC4/5/17 và origin ghi rõ nguồn là file .midiremote thật');
+   ok(e.api.dawProfileVersionStatus(prof, 'Cubase 13') !== 'UNVERIFIED' && e.api.dawProfileVersionStatus(prof, 'Cubase 12') === 'UNVERIFIED' && e.api.dawProfileVersionStatus(prof, 'Cubase 15') === 'UNVERIFIED', '[2] Cubase 13 có bằng chứng file; 12/14/15 gắn UNVERIFIED');
+ }
+ // 3 Studio One -> Cubase -> Studio One giữ nguyên
+@@ -167,7 +167,7 @@ const KNOB_S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_
+   const e = env({ selectedDAW: 'Cubase 13', dawMidiOutMappings: { 'Cubase 13': JSON.parse(JSON.stringify(store)) } });
+   e.click('live'); e.click('knob');
+   const m = e.st.dawMidiOutMappings['Cubase 13'];
+-  ok(Object.keys(store).every((k) => JSON.stringify(m[k]) === JSON.stringify(store[k])) && Object.keys(m).length === 15, '[11] MONITOR_FX/FX_SEND_*/PLAY (ngoài 2 bộ) giữ nguyên, thêm đúng 12 mapping');
++  ok(Object.keys(store).every((k) => JSON.stringify(m[k]) === JSON.stringify(store[k])) && Object.keys(m).length === 8, '[11] MONITOR_FX/FX_SEND_*/PLAY (ngoài 2 bộ) giữ nguyên, thêm đúng 5 mapping (C63)');
+   ok(!/FX_SEND_REVERB|FX_SEND_DELAY|MONITOR_FX|TRANSPORT/.test(setup.slice(setup.indexOf('const DAW_QF_S1_LIVE'), setup.indexOf('// S8 — 3 hàng PLAY/STOP/RECORD'))), '[11] static: khối profile không nhắc tới action ngoài hai bộ');
+ }
+ // 12 an toàn khởi động/đổi DAW + phạm vi sửa
+diff --git a/tests/unit/DawQuickFillAll01.verify.js b/tests/unit/DawQuickFillAll01.verify.js
+index 59a381b..a14f1c9 100644
+--- a/tests/unit/DawQuickFillAll01.verify.js
++++ b/tests/unit/DawQuickFillAll01.verify.js
+@@ -33,7 +33,7 @@ console.log('== 2. Studio One 7 cũng dùng cùng bộ; Cubase giữ các nút r
+ {
+   ok(env({ selectedDAW: 'Studio One 7' }).click().done === true, 'Studio One 7 -> lưu được');
+   const c = env({ selectedDAW: 'Cubase 13' }); const r = c.click();
+-  ok(r.done && Object.keys(c.st.dawMidiOutMappings['Cubase 13']).length === 18, 'Cubase (hàm gộp) -> 18 mapping (8 LIVE + 4 KNOB + 4 TUNE + 1 LOFI + 1 BÈ)');
++  ok(r.done && Object.keys(c.st.dawMidiOutMappings['Cubase 13']).length === 16, 'Cubase (hàm gộp, C63) -> 16 mapping (2 MIC1 + 3 KNOB + 4 FX BUS + 3 KEY/SCALE + 1 TUNE + 1 LOFI + 1 REMIX + 1 BÈ)');
+   ok(env({ selectedDAW: 'Logic' }).click().blocked === 'no-profile', 'DAW không có bộ -> chặn');
+ }
+ console.log('== 3. All-or-nothing, không đụng mapping khác, idempotent ==');
+diff --git a/tests/unit/KnobDawIntegration02.verify.js b/tests/unit/KnobDawIntegration02.verify.js
+index 917fab2..15c2a69 100644
+--- a/tests/unit/KnobDawIntegration02.verify.js
++++ b/tests/unit/KnobDawIntegration02.verify.js
+@@ -12,7 +12,10 @@ const code = setup.slice(a1, a2) + '\n' + setup.slice(b1, b2) + '\nreturn {DAW_M
+ 
+ const KNOBS = { BEAT_INPUT_VOLUME: 'musicKnob', MASTER_OUTPUT_VOLUME: 'masterKnob', RETUNE_SPEED_MIC1: 'retune1', RETUNE_SPEED_MIC2: 'retune2' };
+ const S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_MIC1: 22, RETUNE_SPEED_MIC2: 23 };
+-const CB = { BEAT_INPUT_VOLUME: 85, MASTER_OUTPUT_VOLUME: 86, RETUNE_SPEED_MIC1: 87, RETUNE_SPEED_MIC2: 88 };
++// C63 — Cubase dùng bảng CC của file .midiremote thật: kênh 1, NHẠC=4, MIC=5, Retune Speed=17 (Cubase chưa có núm Master / Retune 2).
++const CB = { BEAT_INPUT_VOLUME: 4, MIC1_VOLUME: 5, RETUNE_SPEED_MIC1: 17 };
++const CB_TURN = { BEAT_INPUT_VOLUME: 4, RETUNE_SPEED_MIC1: 17 }; // 2 núm có đường cong 0-100 -> CC của Menu
++const CHAN = (d) => (/^cubase/i.test(d) ? 1 : 15);
+ const FAMILY = (d) => (/^cubase/i.test(d) ? CB : S1);
+ const DAWS = ['Studio One 5', 'Studio One 6', 'Studio One 7', 'Studio Pro 8', 'Cubase 10', 'Cubase 11', 'Cubase 12', 'Cubase 13', 'Cubase 14', 'Cubase 15'];
+ 
+@@ -54,14 +57,14 @@ function env(init = {}, { portOk = true } = {}) {
+     const prof = e.api.resolveDawProfile(d);
+     ok(prof && prof.id === (/^cubase/i.test(d) ? 'cubase' : 'studio-one'), `[4][5] "${d}" nhận đúng profile ${/^cubase/i.test(d) ? 'cubase' : 'studio-one'}`, prof && prof.id);
+     const r = e.fill('knob'); const m = (e.st.dawMidiOutMappings || {})[d] || {};
+-    ok(r.done && Object.keys(m).length === 4 && Object.entries(FAMILY(d)).every(([a, n]) => m[a] && m[a].kind === 'cc' && m[a].channel === 15 && m[a].number === n && m[a].source === 'USER_DEFINED'), `[2][3] "${d}": KNOB điền đúng 4 mapping CC ${Object.values(FAMILY(d)).join('/')} kênh 15`, m);
++    ok(r.done && Object.keys(m).length === Object.keys(FAMILY(d)).length && Object.entries(FAMILY(d)).every(([a, n]) => m[a] && m[a].kind === 'cc' && m[a].channel === CHAN(d) && m[a].number === n && m[a].source === 'USER_DEFINED'), `[2][3] "${d}": KNOB điền đúng ${Object.keys(FAMILY(d)).length} mapping CC ${Object.values(FAMILY(d)).join('/')} kênh ${CHAN(d)}`, m);
+     ok(e.sent.length === 0, `[3] "${d}": điền nhanh KHÔNG gửi MIDI`);
+   }
+   // 3 giá trị 0/25/50/75/100 -> CC 0/32/64/95/127, tăng/giảm, đúng channel index, mỗi Knob đúng CC riêng
+   for (const d of ['Studio Pro 8', 'Cubase 13']) {
+     const e = env({ selectedDAW: d }); e.fill('knob');
+     let allOk = true; const rows = [];
+-    for (const [a, num] of Object.entries(FAMILY(d))) {
++    for (const [a, num] of Object.entries(/^cubase/i.test(d) ? CB_TURN : FAMILY(d))) {
+       e.sent.length = 0;
+       // FSP8-MIDI-SYNC-FAST-02 (THAY ĐỔI SPEC CÓ CHỦ ĐÍCH): riêng MUSIC trên Studio Pro 8 dùng neo 50→64, 90→97, 100→127 => 75→85 (không còn 95). Mọi Knob/DAW khác giữ nguyên.
+       const calib = d === 'Studio Pro 8' && (a === 'BEAT_INPUT_VOLUME' || a === 'MASTER_OUTPUT_VOLUME'); // MASTER-CURVE-01: Master dùng cùng đường cong fader
+@@ -70,7 +73,7 @@ function env(init = {}, { portOk = true } = {}) {
+       for (const [v, cc0] of [[0, 0], [25, 32], [50, 64], [75, calib ? 85 : 95], [100, 127], [50, 64], [0, 0]]) {
+         const cc = retuneFsp8 ? RT[v] : cc0;
+         const r = await e.turn(e.AR.ACTIONS[a], v); const last = e.sent[e.sent.length - 1];
+-        if (!r.ok || !last || last.n !== num || last.v !== cc || last.ch !== 14) { allOk = false; rows.push([a, v, cc, last, r]); }
++        if (!r.ok || !last || last.n !== num || last.v !== cc || last.ch !== CHAN(d) - 1) { allOk = false; rows.push([a, v, cc, last, r]); }
+       }
+     }
+     ok(allOk, `[2] "${d}": 0/25/50/75/100 -> CC 0/32/64/95/127 (riêng MUSIC trên Studio Pro 8: 75->85, xem FSP8-MIDI-SYNC-FAST-02) (kênh 15 = index 14), đúng CC riêng từng Knob; tăng/giảm đúng chiều`, rows[0]);
+@@ -85,8 +88,8 @@ function env(init = {}, { portOk = true } = {}) {
+     ok(['Studio Pro 8', 'Cubase 13', 'Studio One 5', 'Cubase 10'].every((d) => JSON.stringify(e.st.dawMidiOutMappings[d]) === snaps[d]) && Object.keys(e.st.dawMidiOutMappings).length === 4, '[3] quay về Studio Pro 8: mapping 4 DAW còn nguyên, không ghi chéo');
+     e.sent.length = 0; await e.turn('MASTER_OUTPUT_VOLUME', 100);
+     ok(e.sent.length === 1 && e.sent[0].n === 21 && e.sent[0].ch === 14, '[3] Studio Pro 8 gửi CC21 (không dùng CC86 của Cubase)', e.sent);
+-    e.st.selectedDAW = 'Cubase 10'; e.sent.length = 0; await e.turn('MASTER_OUTPUT_VOLUME', 100);
+-    ok(e.sent.length === 1 && e.sent[0].n === 86, '[3] Cubase 10 gửi CC86 (không dùng CC21)', e.sent);
++    e.st.selectedDAW = 'Cubase 10'; e.fill('knob'); e.sent.length = 0; await e.turn('BEAT_INPUT_VOLUME', 100);
++    ok(e.sent.length === 1 && e.sent[0].n === 4 && e.sent[0].ch === 0, '[3] Cubase 10 gửi CC4 kênh 1 (không dùng CC21 của Studio One)', e.sent);
+   }
+   // 6 xung đột với LIVE 102–109 và mapping sẵn có
+   {
+@@ -94,9 +97,9 @@ function env(init = {}, { portOk = true } = {}) {
+     const r = e.fill('knob'); const m = e.st.dawMidiOutMappings['Studio One 7'];
+     ok(r.done && JSON.stringify(Object.fromEntries(Object.keys(JSON.parse(live)).map((k) => [k, m[k]]))) === live, '[6] điền KNOB sau LIVE: 8 mapping LIVE (CC102–109 kênh 16) không đổi');
+     ok(Object.values(S1).every((n) => n < 102) && Object.values(CB).every((n) => n < 102 || n > 109) && !Object.values({ ...S1, ...CB }).some((n) => n >= 102 && n <= 109), '[6] CC Knob (20–23, 85–88) không rơi vào 102–109');
+-    const f = env({ selectedDAW: 'Cubase 12', dawMidiOutMappings: { 'Cubase 12': { MONITOR_FX: { kind: 'cc', channel: 15, number: 86, value: 127 } } } });
++    const f = env({ selectedDAW: 'Cubase 12', dawMidiOutMappings: { 'Cubase 12': { MONITOR_FX: { kind: 'cc', channel: 1, number: 4, value: 127 } } } });
+     const rr = f.fill('knob');
+-    ok(rr.blocked === 'conflict' && rr.plan.conflicts.some(([a, o]) => a === 'MASTER_OUTPUT_VOLUME' && o === 'MONITOR_FX') && f.st.dawMidiOutMappings['Cubase 12'].BEAT_INPUT_VOLUME === undefined, '[6] trùng mapping hiện có -> chặn, không ghi một phần');
++    ok(rr.blocked === 'conflict' && rr.plan.conflicts.some(([a, o]) => a === 'BEAT_INPUT_VOLUME' && o === 'MONITOR_FX') && f.st.dawMidiOutMappings['Cubase 12'].BEAT_INPUT_VOLUME === undefined, '[6] trùng mapping hiện có -> chặn, không ghi một phần');
+     const g = env({ selectedDAW: 'Studio Pro 8', dawMidiOutMappings: { 'Studio Pro 8': { BEAT_INPUT_VOLUME: { kind: 'cc', channel: 15, number: 99, value: 50, source: 'USER_DEFINED' } } } });
+     let ask = null; const plan = g.api.planDawProfileFill(g.api.resolveDawProfile('Studio Pro 8'), 'knob', g.api.getDawMidiOutMapping, g.A); ask = plan.overwrite;
+     ok(ask.length === 1 && ask[0] === 'BEAT_INPUT_VOLUME', '[6] mapping tay của Knob sẽ bị ghi đè -> liệt kê để xác nhận (không ghi đè âm thầm)');
+diff --git a/tests/unit/LofiToggleA94.verify.js b/tests/unit/LofiToggleA94.verify.js
+index cf86ffa..2d38832 100644
+--- a/tests/unit/LofiToggleA94.verify.js
++++ b/tests/unit/LofiToggleA94.verify.js
+@@ -24,7 +24,7 @@ function makeAR(daw, saved) {
+     r = await AR.setDawControlState('LOFI', false, {});
+     ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([118, 127, 15]), 'LOFI TẮT -> CC118 = 127 = 0');
+     AR = makeAR('Cubase 14'); await AR.setDawControlState('LOFI', true, {});
+-    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([119, 0, 15]), 'Cubase: CC119 (bật = 0)');
++    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([20, 0, 0]), 'Cubase (C63): kênh 1 CC20 (núm LOFI Bypass), bật = 0');
+     AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { LOFI_STATE: { kind: 'cc', channel: 16, number: 90, value: 127 } } }); await AR.setDawControlState('LOFI', true, {});
+     ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([90, 0, 15]), 'mapping người dùng đã lưu luôn thắng mặc định');
+ 
+@@ -56,7 +56,7 @@ function makeAR(daw, saved) {
+ 
+     console.log('== 3. Setup/Surface ==');
+     const setup = rd('ui/js/setup.js');
+-    ok(/action: "LOFI_STATE"/.test(setup) && /"TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2", "AUDIO_CHILL_STATE", "AUDIO_CHILL_KNOB"\]/.test(setup) && /LOFI_STATE: 118/.test(setup) && /LOFI_STATE: 119/.test(setup), 'Setup: có dòng LOFI_STATE, nhóm bảo vệ trùng CC, bộ gợi ý Studio One 118 / Cubase 119');
++    ok(/action: "LOFI_STATE"/.test(setup) && /"TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2", "AUDIO_CHILL_STATE", "AUDIO_CHILL_KNOB"\]/.test(setup) && /LOFI_STATE: 118/.test(setup) && /LOFI_STATE: 20\b/.test(setup), 'Setup: có dòng LOFI_STATE, nhóm bảo vệ trùng CC, bộ gợi ý Studio One 118 / Cubase 119');
+     ok(/name="lofiOnOff"[\s\S]{0,160}address="118"/.test(rd('studio_one/AutoMenuAI.surface.xml')), 'surface AutoMenuAI có control LOFI CC118');
+     console.log('== 4. A94: Auto-Tune 3 / 4 có CC riêng mặc định (kênh 16, CC34-37) ==');
+     { const A = makeAR('Studio Pro 8'); const g = (n) => A.getMidiOutMapping(n);
+diff --git a/tests/unit/TuneOffBypassA79.verify.js b/tests/unit/TuneOffBypassA79.verify.js
+index c72733f..b88ab63 100644
+--- a/tests/unit/TuneOffBypassA79.verify.js
++++ b/tests/unit/TuneOffBypassA79.verify.js
+@@ -41,7 +41,7 @@ function makeAR2(daw, saved) {
+     const m = a.getMidiOutMapping('TUNE_BYPASS');
+     ok(m && m.kind === 'cc' && m.channel === 16 && m.number === 113 && m.value === 127, 'Studio One: TUNE_BYPASS mặc định = CC113 kênh16 (không cần Setup)');
+     ok(a.getDawStateMode('TUNE') === 'explicit', 'mode = explicit ngay khi chưa lưu gì (đã có preset)');
+-    ok(makeAR2('Cubase 13', {}).getMidiOutMapping('TUNE_BYPASS').number === 118, 'Cubase: CC118');
++    ok(makeAR2('Cubase 13', {}).getMidiOutMapping('TUNE_BYPASS').number === 22, 'Cubase (C63): CC22 (núm TẮT TUNE trong MIDI Remote)');
+     const own = { 'Studio One 7': { TUNE_BYPASS: { kind: 'cc', channel: 1, number: 7, value: 100 } } };
+     ok(makeAR2('Studio One 7', own).getMidiOutMapping('TUNE_BYPASS').number === 7, 'mapping người dùng đã lưu thắng preset mặc định');
+     ok(makeAR2('Studio One 7', {}).getMidiOutMapping('DAW_PLAY') === null, 'action khác không bị gán mặc định');
+@@ -71,7 +71,7 @@ const s = rd('ui/js/setup.js');
+ ok(/action: "TUNE_BYPASS"/.test(s), 'Setup có 1 dòng mapping TUNE_BYPASS');
+ 
+ ok(/tune: Object\.freeze\(\{ title: "TUNE BYPASS", count: 4, mappings: Object\.freeze\(\{ \.\.\.dawQfMake\(16, 127, \{ TUNE_BYPASS: 113 \}\)/.test(s), 'bộ CC gợi ý Studio One: TUNE_BYPASS=113 (kênh 16)');
+-ok(/TUNE_BYPASS: 118/.test(s) && /btnFillTuneCc/.test(s), 'bộ CC Cubase + nút điền nhanh btnFillTuneCc');
++ok(/TUNE_BYPASS: 22\b/.test(s) && /btnFillTuneCc/.test(s), 'bộ CC Cubase + nút điền nhanh btnFillTuneCc');
+ 
+ // --- 4. HTML không đổi ---
+ ok(/<button class="preset-btn">TUNE OFF<\/button>/.test(rd('ui/index.html')), 'index.html giữ nguyên nút TUNE OFF');
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index be553a5..677fa53 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -271,6 +271,13 @@ function getMidiOutMapping(action) {
+     if (!daw) return null;
+     const all = (typeof getSetting === "function" ? getSetting("dawMidiOutMappings") : {}) || {};
+     if (all[daw] && all[daw][action]) return all[daw][action];
++    // C63 — CUBASE (MIDI Remote "loopMIDI Port", kênh 1): bảng CC lấy từ file .midiremote thật của người dùng (Ảnh/PDL TOOL AI S1) + MAPPING.png.
++    // Đứng TRƯỚC các preset mặc định bên dưới; mapping người dùng đã lưu vẫn thắng (dòng trên). Cột: [CC, value]. Chưa chạy thật trên Cubase = UNVERIFIED.
++    if (/^cubase/i.test(String(daw).trim())) {
++        const CUBASE_C63 = { BEAT_INPUT_VOLUME: [4, 127], MIC1_VOLUME: [5, 127], FX_BUS_DELAY_VOLUME: [1, 127], FX_BUS_VERB_LONG_VOLUME: [2, 127], FX_BUS_VERB_SHORT_VOLUME: [3, 127], FX_BUS_COM_VERB_VOLUME: [11, 127], RETUNE_SPEED_MIC1: [17, 127],
++            KEY_ROOT: [15, 0], KEY_SCALE_MAJOR: [16, 0], KEY_SCALE_MINOR: [16, 5], LOFI_STATE: [20, 127], REMIX_PLUGIN_1: [21, 0], BE_STATE: [14, 127], TUNE_BYPASS: [22, 127], MIC1_ON: [24, 0], MIC1_OFF: [24, 127] };
++        if (Object.prototype.hasOwnProperty.call(CUBASE_C63, action)) return { kind: "cc", channel: 1, number: CUBASE_C63[action][0], value: CUBASE_C63[action][1], source: "DEFAULT_PRESET" };
++    }
+     if (/^TUNE_BYPASS_[234]$/.test(String(action))) { // A94 — bypass riêng Auto-Tune 2/3/4: kênh 15, CC 89/90/91 (không trùng bộ KNOB 85-88)
+         return { kind: "cc", channel: 15, number: 87 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
+     }
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index f55842a..95ebec9 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -771,6 +771,13 @@ function getDawMidiOutMapping(action) {
+     if (!daw) return null;
+     const all = getSetting("dawMidiOutMappings") || {};
+     if (all[daw] && all[daw][action]) return all[daw][action];
++    // C63 — CUBASE (MIDI Remote "loopMIDI Port", kênh 1): bảng CC lấy từ file .midiremote thật của người dùng (Ảnh/PDL TOOL AI S1) + MAPPING.png.
++    // Đứng TRƯỚC các preset mặc định bên dưới; mapping người dùng đã lưu vẫn thắng (dòng trên). Cột: [CC, value]. Chưa chạy thật trên Cubase = UNVERIFIED.
++    if (/^cubase/i.test(String(daw).trim())) {
++        const CUBASE_C63 = { BEAT_INPUT_VOLUME: [4, 127], MIC1_VOLUME: [5, 127], FX_BUS_DELAY_VOLUME: [1, 127], FX_BUS_VERB_LONG_VOLUME: [2, 127], FX_BUS_VERB_SHORT_VOLUME: [3, 127], FX_BUS_COM_VERB_VOLUME: [11, 127], RETUNE_SPEED_MIC1: [17, 127],
++            KEY_ROOT: [15, 0], KEY_SCALE_MAJOR: [16, 0], KEY_SCALE_MINOR: [16, 5], LOFI_STATE: [20, 127], REMIX_PLUGIN_1: [21, 0], BE_STATE: [14, 127], TUNE_BYPASS: [22, 127], MIC1_ON: [24, 0], MIC1_OFF: [24, 127] };
++        if (Object.prototype.hasOwnProperty.call(CUBASE_C63, action)) return { kind: "cc", channel: 1, number: CUBASE_C63[action][0], value: CUBASE_C63[action][1], source: "DEFAULT_PRESET" };
++    }
+     // TASK A81 — preset MIDI mặc định cho nút TUNE (khớp getDefaultPresetMapping() ở actionRegistry.js): Setup hiển thị đúng thứ Menu sẽ gửi.
+     if (action === "TUNE_BYPASS") {
+         const cubase = /^cubase/i.test(String(daw).trim());
+@@ -821,7 +828,7 @@ const DAW_QF_S1_LIVE = Object.freeze({
+ });
+ // KEY-SCALE-CC-02 — Scale Auto-Tune là DANH SÁCH 29 mục điều khiển bằng 1 CC: Major/Minor dùng CHUNG CC, khác GIÁ TRỊ.
+ // Chỉ 2 action này được phép trùng CC/Note (khi khác giá trị); mọi action khác vẫn phải có CC riêng.
+-const KEY_SCALE_SHARED_SET = new Set(["KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_SCALE_MAJOR_MIC2", "KEY_SCALE_MINOR_MIC2", "KEY_SCALE_MAJOR_AT3", "KEY_SCALE_MINOR_AT3", "KEY_SCALE_MAJOR_AT4", "KEY_SCALE_MINOR_AT4"]); // A93/A94: Major/Minor của mỗi Auto-Tune dùng chung 1 CC (mic 2: 32, AT3: 34, AT4: 36)
++const KEY_SCALE_SHARED_SET = new Set(["MIC1_ON", "MIC1_OFF", "KEY_SCALE_MAJOR", "KEY_SCALE_MINOR", "KEY_SCALE_MAJOR_MIC2", "KEY_SCALE_MINOR_MIC2", "KEY_SCALE_MAJOR_AT3", "KEY_SCALE_MINOR_AT3", "KEY_SCALE_MAJOR_AT4", "KEY_SCALE_MINOR_AT4"]); // A93/A94: Major/Minor của mỗi Auto-Tune dùng chung 1 CC (mic 2: 32, AT3: 34, AT4: 36)
+ function midiClashKey(action, m) {
+     const base = `${m.kind}|${Number(m.channel)}|${Number(m.number)}`;
+     return KEY_SCALE_SHARED_SET.has(action) ? `${base}|v${Number(m.kind === "note" ? m.velocity : m.value)}` : base;
+@@ -884,18 +891,29 @@ const DAW_MIDI_PROFILES = Object.freeze({
+     "cubase": Object.freeze({
+         id: "cubase",
+         name: "Cubase",
++        quickFillLabel: "Cubase MIDI Remote (loopMIDI Port, kênh 1)", // QUICKFILL-ALL-01: 1 nút điền toàn bộ
+         match: /^cubase/i,
+-        origin: "Quy ước CC gợi ý của AUTO_MENU_AI — KHÔNG phải mặc định của Cubase (tránh CC 7/10/12/13/23/24/64 đã thấy trong Generic Remote/MIDI Remote). Cubase không tự nhận: phải gán trong MIDI Remote hoặc Generic Remote.",
+-        versionStatus: Object.freeze({ "cubase 13": "CHỈ CÓ BẰNG CHỨNG FILE, CHƯA CHẠY THẬT" }),
++        origin: "C63 — bảng CC lấy từ file .midiremote THẬT của người dùng (Ảnh/PDL TOOL AI S1): cổng 'loopMIDI Port', kênh 1, 19 núm CC (1-5, 8-12, 14-18, 20-22, 24). Chỉ gồm các núm Cubase ĐÃ có; Master/MIC 2/MUSIC/FX on-off/Preset NORM-RAP/Auto-Key/Audio Chill chưa có núm nên chưa có CC.",
++        versionStatus: Object.freeze({ "cubase 13": "CC khớp file MIDI Remote; CHƯA chạy thật trên Cubase" }),
+         defaultStatus: "UNVERIFIED",
+         bundles: Object.freeze({
+-            live: Object.freeze({ title: "LIVE ON/OFF", count: 8, mappings: dawQfMake(16, 127, { MUSIC_ON: 110, MUSIC_OFF: 111, MIC1_ON: 112, MIC1_OFF: 113, MIC2_ON: 114, MIC2_OFF: 115, FX_ON: 116, FX_OFF: 117 }) }),
+-            knob: Object.freeze({ title: "KNOB", count: 4, mappings: dawQfMake(15, 127, { BEAT_INPUT_VOLUME: 85, MASTER_OUTPUT_VOLUME: 86, RETUNE_SPEED_MIC1: 87, RETUNE_SPEED_MIC2: 88 }) }),
+-            tune: Object.freeze({ title: "TUNE BYPASS", count: 4, mappings: Object.freeze({ ...dawQfMake(16, 127, { TUNE_BYPASS: 118 }), TUNE_BYPASS_2: Object.freeze({ kind: "cc", channel: 15, number: 89, value: 127 }),
+-                TUNE_BYPASS_3: Object.freeze({ kind: "cc", channel: 15, number: 90, value: 127 }),
+-                TUNE_BYPASS_4: Object.freeze({ kind: "cc", channel: 15, number: 91, value: 127 }) }) }), // A82
+-            lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 119 }) }), // A94
+-            be: Object.freeze({ title: "BÈ ON/OFF", count: 1, mappings: dawQfMake(15, 127, { BE_STATE: 104 }) }), // BE-BTN-01
++            // MIC 1 ON/OFF = nút Mute của track Mic (CC 24): ON = bỏ mute (0), OFF = mute (127). Cùng 1 CC, khác giá trị.
++            live: Object.freeze({ title: "MIC 1 ON/OFF (Mute)", count: 2, mappings: Object.freeze({
++                MIC1_ON: Object.freeze({ kind: "cc", channel: 1, number: 24, value: 0 }),
++                MIC1_OFF: Object.freeze({ kind: "cc", channel: 1, number: 24, value: 127 }),
++            }) }),
++            knob: Object.freeze({ title: "KNOB (NHẠC, MIC, Retune Speed)", count: 3, mappings: dawQfMake(1, 127, { BEAT_INPUT_VOLUME: 4, MIC1_VOLUME: 5, RETUNE_SPEED_MIC1: 17 }) }),
++            fxbus: Object.freeze({ title: "FX BUS VOLUME", count: 4, mappings: dawQfMake(1, 127, { FX_BUS_DELAY_VOLUME: 1, FX_BUS_VERB_LONG_VOLUME: 2, FX_BUS_VERB_SHORT_VOLUME: 3, FX_BUS_COM_VERB_VOLUME: 11 }) }),
++            // Key gốc = CC 15 (Menu tự tính giá trị theo nốt); Scale = CC 16 (Major=0, Minor=5 — danh sách Scale của Auto-Tune, CHƯA kiểm chứng trên Cubase).
++            scale: Object.freeze({ title: "KEY + SCALE", count: 3, mappings: Object.freeze({
++                KEY_ROOT: Object.freeze({ kind: "cc", channel: 1, number: 15, value: 0 }),
++                KEY_SCALE_MAJOR: Object.freeze({ kind: "cc", channel: 1, number: 16, value: 0 }),
++                KEY_SCALE_MINOR: Object.freeze({ kind: "cc", channel: 1, number: 16, value: 5 }),
++            }) }),
++            tune: Object.freeze({ title: "TUNE BYPASS", count: 1, mappings: dawQfMake(1, 127, { TUNE_BYPASS: 22 }) }),
++            lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(1, 127, { LOFI_STATE: 20 }) }),
++            preset: Object.freeze({ title: "REMIX (Bypass)", count: 1, mappings: dawQfMake(1, 0, { REMIX_PLUGIN_1: 21 }) }),
++            be: Object.freeze({ title: "BÈ ON/OFF", count: 1, mappings: dawQfMake(1, 127, { BE_STATE: 14 }) }),
+         }),
+     }),
+ });
+diff --git a/ui/js/vocalCommandRouter.js b/ui/js/vocalCommandRouter.js
+index 91b10b3..def5169 100644
+--- a/ui/js/vocalCommandRouter.js
++++ b/ui/js/vocalCommandRouter.js
+@@ -46,6 +46,17 @@ const SOUNDSHIFTER_UP_CC = 22;     // CC của núm Semitones (đã học trong
+ const SOUNDSHIFTER_SEMITONE_CC = SOUNDSHIFTER_UP_CC;
+ const SOUNDSHIFTER_DOWN_CC = 23;   // không còn dùng (núm tuyệt đối không cần nút ▼)
+ const SOUNDSHIFTER_TOGGLE_CC = 24; // CC của nút Bypass đã học trong Studio One
++// C63 — CC của SoundShifter THEO DAW. Studio One/Studio Pro giữ 22 (Semitones) / 24 (Bypass) như cũ. Cubase: file MIDI Remote thật dùng CC 22 = TẮT TUNE và
++// CC 24 = TẮT MIC (Mute) nên KHÔNG được dùng lại 22/24 cho SoundShifter — núm PitchShift của Cubase là CC 8 (kênh 1). Nút Bypass SoundShifter chưa có núm
++// trong file MIDI Remote: dùng CC 25 (còn trống) — phải thêm 1 núm CC 25 vào MIDI Remote rồi gán vào Bypass của SoundShifter (UNVERIFIED trên Cubase thật).
++const SOUNDSHIFTER_CUBASE_SEMITONE_CC = 8;
++const SOUNDSHIFTER_CUBASE_TOGGLE_CC = 25;
++function _soundShifterCcs() {
++    let daw = "";
++    try { daw = String((typeof getSetting === "function" ? getSetting("selectedDAW") : "") || "").trim(); } catch (e) { daw = ""; }
++    if (/^cubase/i.test(daw)) return { semitone: SOUNDSHIFTER_CUBASE_SEMITONE_CC, toggle: SOUNDSHIFTER_CUBASE_TOGGLE_CC };
++    return { semitone: SOUNDSHIFTER_SEMITONE_CC, toggle: SOUNDSHIFTER_TOGGLE_CC };
++}
+ // MOD-BYPASS-01 — CC trên là nút BYPASS của SoundShifter (127 = BYPASS BẬT = plugin bị bỏ qua, 0 = BYPASS TẮT = plugin hoạt động).
+ // Yêu cầu: MOD ON -> Bypass TẮT (SoundShifter chạy); MOD OFF -> Bypass BẬT (SoundShifter bị bỏ qua). Nên giá trị gửi là NGƯỢC với "bật/tắt".
+ // Nếu nút học trong DAW là kiểu Power/Enable (127 = chạy) thì đổi hằng này thành false để quay về 127 = bật, 0 = tắt.
+@@ -64,7 +75,7 @@ async function _sendSoundShifterAbsolute(semitones) {
+     }
+     const target = Math.max(-SOUNDSHIFTER_RANGE, Math.min(SOUNDSHIFTER_RANGE, Math.round(semitones)));
+     let sent = false;
+-    try { sent = await sendMidiCC(SOUNDSHIFTER_SEMITONE_CC, soundShifterSemitoneToCC(target)); } catch (e) { sent = false; }
++    try { sent = await sendMidiCC(_soundShifterCcs().semitone, soundShifterSemitoneToCC(target)); } catch (e) { sent = false; }
+     if (!sent) return { ok: false, driverUsed: "midi", detail: "Gửi MIDI CC thất bại giữa chừng (SoundShifter)." };
+     soundShifterState.semitones = target;
+     return { ok: true, driverUsed: "midi", semitones: target, clamped: target !== Math.round(semitones) };
+@@ -85,7 +96,7 @@ async function setSoundShifterPower(isOn) {
+     }
+ 
+     const value = (isOn !== SOUNDSHIFTER_TOGGLE_IS_BYPASS) ? 127 : 0; // bypass-kiểu: ON->0, OFF->127 | power-kiểu: ON->127, OFF->0
+-    const sent = await sendMidiCC(SOUNDSHIFTER_TOGGLE_CC, value);
++    const sent = await sendMidiCC(_soundShifterCcs().toggle, value);
+     if (!sent) return { ok: false, driverUsed: "midi", detail: "Gửi MIDI CC thất bại (cổng MIDI có thể đã bị rút/đổi tên)." };
+     if (isOn) {
+         const zero = await _sendSoundShifterAbsolute(0);

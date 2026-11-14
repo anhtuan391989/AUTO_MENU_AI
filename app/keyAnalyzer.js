@@ -1,7 +1,9 @@
 // ==================================================
 // AUTO_MENU_AI — KEY-ANALYZE-01
 // Đường dẫn: app/keyAnalyzer.js
-// Phân tích Key CẢ BÀI bằng core/key_detector.py (Chroma CQT + Krumhansl, Python/librosa) ở nền.
+// Phân tích Key CẢ BÀI ở nền bằng Python. Hai bộ dò (KEY-ANALYZE-02):
+//  - "fast"   = core/fast_key_detector.py (lấy mẫu cả bài + FFT, ~2 giây/bài gồm cả khởi động Python, mặc định cho file nhạc trên máy)
+//  - "classic"= core/key_detector.py (Chroma CQT + Krumhansl, Python/librosa; dùng cho bản ghi âm và làm dự phòng)
 // Chạy ở main process. Không đụng keyEngine.js, không đụng giao diện.
 // Nguyên tắc:
 //  - Không bao giờ throw: luôn trả { ok, reason, ... }.
@@ -44,6 +46,7 @@ function createKeyAnalyzer(deps) {
     const fsx = d.fs || fs;
     const log = d.logger || { log() {}, error() {} };
     const scriptPath = d.scriptPath || path.join(__dirname, "..", "core", "key_detector.py");
+    const fastScriptPath = d.fastScriptPath || path.join(__dirname, "..", "core", "fast_key_detector.py");
     const timeoutMs = Number.isFinite(d.timeoutMs) ? d.timeoutMs : DEFAULT_TIMEOUT_MS;
     const tmpDir = d.tmpDir || os.tmpdir();
 
@@ -81,16 +84,15 @@ function createKeyAnalyzer(deps) {
     async function status() {
         const py = await findPython();
         if (!py) return { ok: false, reason: "no-python" };
-        const r = await run(py.cmd, py.pre.concat(["-c", "import librosa, numpy, soundfile"]));
+        const r = await run(py.cmd, py.pre.concat(["-c", "import librosa, numpy, soundfile, scipy"]));
         if (r.code !== 0) return { ok: false, reason: "no-librosa", detail: String(r.stderr || "").slice(-300) };
         const f = await run("ffmpeg", ["-version"]);
         return { ok: true, python: py.cmd, ffmpeg: !f.spawnError && f.code === 0 };
     }
 
-    async function analyzeNow(filePath) {
-        const py = await findPython();
-        if (!py) return { ok: false, reason: "no-python" };
-        const r = await run(py.cmd, py.pre.concat([scriptPath, filePath, "--json"]));
+    // Chạy 1 script dò key, trả { ok, key, confidence, reliable, durationSec } hoặc { ok:false, reason }
+    async function runDetector(py, script, filePath) {
+        const r = await run(py.cmd, py.pre.concat([script, filePath, "--json"]));
         if (r.timedOut) return { ok: false, reason: "timeout" };
         if (r.spawnError) return { ok: false, reason: "spawn-error", detail: r.spawnError };
         if (r.code !== 0) {
@@ -105,16 +107,33 @@ function createKeyAnalyzer(deps) {
         return { ok: true, key, confidence: Number.isFinite(conf) ? conf : 0, reliable: j.is_reliable === true, durationSec: Number(j.duration_sec) || null };
     }
 
+    // engine "fast" (mặc định): thử bộ dò nhanh trước; lỗi (không phải timeout) thì tự rơi về "classic".
+    async function analyzeNow(filePath, engine) {
+        const py = await findPython();
+        if (!py) return { ok: false, reason: "no-python" };
+        if (engine !== "classic") {
+            const fast = await runDetector(py, fastScriptPath, filePath);
+            if (fast.ok) return Object.assign(fast, { engine: "fast" });
+            if (fast.reason === "timeout") return fast;
+            log.log("[KeyAnalyze] bộ dò nhanh lỗi (" + fast.reason + ") -> thử bộ dò classic");
+        }
+        const res = await runDetector(py, scriptPath, filePath);
+        return res.ok ? Object.assign(res, { engine: "classic" }) : res;
+    }
+
     // Phân tích 1 file. Mọi lời gọi xếp hàng nối đuôi; cùng filePath đang chờ thì dùng chung kết quả.
-    function analyzeFile(filePath) {
+    // opts.engine: "fast" (mặc định) | "classic"
+    function analyzeFile(filePath, opts) {
         try {
+            const engine = opts && opts.engine === "classic" ? "classic" : "fast";
+            const pkey = engine + "|" + filePath;
             if (typeof filePath !== "string" || !filePath.trim()) return Promise.resolve({ ok: false, reason: "no-file" });
             if (!fsx.existsSync(filePath)) return Promise.resolve({ ok: false, reason: "file-missing" });
-            if (pending.has(filePath)) return pending.get(filePath);
-            const p = queue.then(() => analyzeNow(filePath)).catch((e) => ({ ok: false, reason: "error", detail: String((e && e.message) || e) }));
+            if (pending.has(pkey)) return pending.get(pkey);
+            const p = queue.then(() => analyzeNow(filePath, engine)).catch((e) => ({ ok: false, reason: "error", detail: String((e && e.message) || e) }));
             queue = p.then(() => {}, () => {});
-            pending.set(filePath, p);
-            p.then(() => pending.delete(filePath), () => pending.delete(filePath));
+            pending.set(pkey, p);
+            p.then(() => pending.delete(pkey), () => pending.delete(pkey));
             return p;
         } catch (e) { return Promise.resolve({ ok: false, reason: "error" }); }
     }
@@ -127,7 +146,7 @@ function createKeyAnalyzer(deps) {
             if (buf.length < 44 + 44100 * 2 * 10) return { ok: false, reason: "too-short" }; // < ~10 giây mono 44.1k 16-bit
             tmp = path.join(tmpDir, "automenu-key-" + Date.now() + "-" + Math.floor(Math.random() * 1e6) + ".wav");
             fsx.writeFileSync(tmp, buf);
-            return await analyzeFile(tmp);
+            return await analyzeFile(tmp, { engine: "classic" }); // bản ghi âm (YouTube) giữ bộ dò classic: bộ nhanh chưa kiểm chứng trên đoạn ghi ngắn
         } catch (e) {
             return { ok: false, reason: "error", detail: String((e && e.message) || e) };
         } finally {

@@ -46,6 +46,17 @@ const SOUNDSHIFTER_UP_CC = 22;     // CC của núm Semitones (đã học trong 
 const SOUNDSHIFTER_SEMITONE_CC = SOUNDSHIFTER_UP_CC;
 const SOUNDSHIFTER_DOWN_CC = 23;   // không còn dùng (núm tuyệt đối không cần nút ▼)
 const SOUNDSHIFTER_TOGGLE_CC = 24; // CC của nút Bypass đã học trong Studio One
+// C63 — CC của SoundShifter THEO DAW. Studio One/Studio Pro giữ 22 (Semitones) / 24 (Bypass) như cũ. Cubase: file MIDI Remote thật dùng CC 22 = TẮT TUNE và
+// CC 24 = TẮT MIC (Mute) nên KHÔNG được dùng lại 22/24 cho SoundShifter — núm PitchShift của Cubase là CC 8 (kênh 1). Nút Bypass SoundShifter chưa có núm
+// trong file MIDI Remote: dùng CC 25 (còn trống) — phải thêm 1 núm CC 25 vào MIDI Remote rồi gán vào Bypass của SoundShifter (UNVERIFIED trên Cubase thật).
+const SOUNDSHIFTER_CUBASE_SEMITONE_CC = 8;
+const SOUNDSHIFTER_CUBASE_TOGGLE_CC = 25;
+function _soundShifterCcs() {
+    let daw = "";
+    try { daw = String((typeof getSetting === "function" ? getSetting("selectedDAW") : "") || "").trim(); } catch (e) { daw = ""; }
+    if (/^cubase/i.test(daw)) return { semitone: SOUNDSHIFTER_CUBASE_SEMITONE_CC, toggle: SOUNDSHIFTER_CUBASE_TOGGLE_CC };
+    return { semitone: SOUNDSHIFTER_SEMITONE_CC, toggle: SOUNDSHIFTER_TOGGLE_CC };
+}
 // MOD-BYPASS-01 — CC trên là nút BYPASS của SoundShifter (127 = BYPASS BẬT = plugin bị bỏ qua, 0 = BYPASS TẮT = plugin hoạt động).
 // Yêu cầu: MOD ON -> Bypass TẮT (SoundShifter chạy); MOD OFF -> Bypass BẬT (SoundShifter bị bỏ qua). Nên giá trị gửi là NGƯỢC với "bật/tắt".
 // Nếu nút học trong DAW là kiểu Power/Enable (127 = chạy) thì đổi hằng này thành false để quay về 127 = bật, 0 = tắt.
@@ -64,7 +75,7 @@ async function _sendSoundShifterAbsolute(semitones) {
     }
     const target = Math.max(-SOUNDSHIFTER_RANGE, Math.min(SOUNDSHIFTER_RANGE, Math.round(semitones)));
     let sent = false;
-    try { sent = await sendMidiCC(SOUNDSHIFTER_SEMITONE_CC, soundShifterSemitoneToCC(target)); } catch (e) { sent = false; }
+    try { sent = await sendMidiCC(_soundShifterCcs().semitone, soundShifterSemitoneToCC(target)); } catch (e) { sent = false; }
     if (!sent) return { ok: false, driverUsed: "midi", detail: "Gửi MIDI CC thất bại giữa chừng (SoundShifter)." };
     soundShifterState.semitones = target;
     return { ok: true, driverUsed: "midi", semitones: target, clamped: target !== Math.round(semitones) };
@@ -85,7 +96,7 @@ async function setSoundShifterPower(isOn) {
     }
 
     const value = (isOn !== SOUNDSHIFTER_TOGGLE_IS_BYPASS) ? 127 : 0; // bypass-kiểu: ON->0, OFF->127 | power-kiểu: ON->127, OFF->0
-    const sent = await sendMidiCC(SOUNDSHIFTER_TOGGLE_CC, value);
+    const sent = await sendMidiCC(_soundShifterCcs().toggle, value);
     if (!sent) return { ok: false, driverUsed: "midi", detail: "Gửi MIDI CC thất bại (cổng MIDI có thể đã bị rút/đổi tên)." };
     if (isOn) {
         const zero = await _sendSoundShifterAbsolute(0);
