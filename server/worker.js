@@ -1,6 +1,10 @@
 // ============================================================
 //  AUTO_MENU_AI — Key Server (Cloudflare Worker + D1)
-//  Phiên bản: 2.0 (hoàn chỉnh, 2 chiều, hỗ trợ MENU & Auto-Tune)
+//  Phiên bản: 2.5 (hoàn chỉnh, 2 chiều, hỗ trợ MENU & Auto-Tune)
+//  [A92] Thêm: thời lượng YouTube qua Data API (YOUTUBE_API_KEY), tự điền thời lượng khi thiếu, /count
+//  [A93] Thêm: tự điền thời lượng cho bài của Menu (ID app_xxxx) bằng cách tìm theo TÊN trên YouTube, chạy nền, chỉ lưu khi tên khớp đúng
+//  [A94] Thêm: bài trùng tên (vd bản Menu app_xxxx + bản Extension ID YouTube) dùng chung thời lượng — chỉ điền chỗ trống, KHÔNG xoá/gộp dòng nào
+//  [A95] Sửa: /list không còn văng lỗi 1101 (HTML) — luôn trả JSON, có truy vấn dự phòng. Thêm: nút "Sua Key" + "Xoa" ngay cạnh "Ngay them" ở mỗi bài.
 // ============================================================
 
 export default {
@@ -77,11 +81,26 @@ export default {
           if (tuChoi) return tuChoi;
         }
 
+        // [A92] Thiếu thời lượng và ID là ID YouTube -> tự lấy (lỗi thì bỏ qua, vẫn lưu bình thường).
+        let giayLuu = totalDurationSec || null;
+        if (!giayLuu && laIdYouTube(String(songId))) {
+          try { const kq = await layThoiLuongYouTube(String(songId), env); if (kq.ok) giayLuu = kq.giay; } catch (_) {}
+        }
+
         await env.DB.prepare(`
           INSERT OR REPLACE INTO song_info
           (song_id, title, total_duration_sec, note, updated_at)
           VALUES (?, ?, ?, ?, strftime('%s','now') * 1000)
-        `).bind(songId, title || null, totalDurationSec || null, note || null).run();
+        `).bind(songId, title || null, giayLuu, note || null).run();
+
+        // [A93] Bài của Menu (ID app_xxxx) chưa có thời lượng -> chạy NỀN tìm theo tên trên YouTube (không làm chậm phản hồi cho Menu).
+        if (!giayLuu && title && !laIdYouTube(String(songId)) && ctx && ctx.waitUntil) {
+          ctx.waitUntil(tuDienThoiLuongTheoTen(env, String(songId), String(title)));
+        }
+        // [A94] Đã có thời lượng -> chép sang các bài trùng tên đang trống (chạy nền).
+        if (giayLuu && ctx && ctx.waitUntil) {
+          ctx.waitUntil(chepThoiLuongChoBaiCungTen(env, String(songId)));
+        }
 
         return Response.json({ ok: true, message: "da cap nhat thong tin" }, { headers: corsHeaders });
       } catch (e) {
@@ -92,9 +111,9 @@ export default {
     // ========== [4] THÊM 1 ĐOẠN KHÓA — MENU / EXTENSION GỬI LÊN ==========
     // [A83] Quy tắc:
     //  - Bài MỚI (chưa có đoạn Key nào): lưu NGAY, KHÔNG cần mật khẩu. Server cập nhật luôn, Menu tra thấy ngay.
-    //  - Bài ĐÃ BIẾT (đã có đoạn Key từ trước, quá ${CUA_SO_BAI_MOI_PHUT} phút): thêm/sửa bằng tay CẦN mật khẩu quản trị (ADMIN_TOKEN),
+    //  - Bài ĐÃ BIẾT (đã có đoạn Key từ trước, quá CUA_SO_BAI_MOI_PHUT phút): thêm/sửa bằng tay CẦN mật khẩu quản trị (ADMIN_TOKEN),
     //    gửi trong header Authorization: Bearer <mật khẩu> (hoặc X-Admin-Token).
-    //  - Trong ${CUA_SO_BAI_MOI_PHUT} phút đầu sau khi bài được tạo, vẫn thêm được các đoạn tiếp theo của CHÍNH bài đó không cần mật khẩu
+    //  - Trong CUA_SO_BAI_MOI_PHUT phút đầu sau khi bài được tạo, vẫn thêm được các đoạn tiếp theo của CHÍNH bài đó không cần mật khẩu
     //    (để nhập nhiều đoạn liên tiếp cho bài mới).
     //  - Key nhập tự do ("Am", "Ebm", "F#", "Bb minor"...) được chuẩn hoá về dạng server dùng (C..B, dấu thăng) + major/minor;
     //    không hiểu được thì báo lỗi rõ ràng thay vì lưu sai.
@@ -140,12 +159,26 @@ export default {
           const coInfo = await env.DB.prepare(`SELECT song_id as songId, title FROM song_info WHERE song_id = ?`).bind(songId).first();
           if (!coInfo) {
             const dur = parseInt(body.totalDurationSec, 10);
+            // [A92] Thiếu thời lượng và ID là ID YouTube -> tự lấy (lỗi thì bỏ qua).
+            let durGiay = Number.isFinite(dur) && dur > 0 ? dur : null;
+            if (!durGiay && laIdYouTube(songId)) {
+              try { const kqTl = await layThoiLuongYouTube(songId, env); if (kqTl.ok) durGiay = kqTl.giay; } catch (_) {}
+            }
             await env.DB.prepare(`
               INSERT OR REPLACE INTO song_info
               (song_id, title, total_duration_sec, note, updated_at)
               VALUES (?, ?, ?, ?, strftime('%s','now') * 1000)
-            `).bind(songId, tenBai, Number.isFinite(dur) && dur > 0 ? dur : null, "nguon: extension").run();
+            `).bind(songId, tenBai, durGiay, "nguon: extension").run();
             taoThongTin = true;
+            // [A93] ID không phải YouTube mà vẫn thiếu thời lượng -> tìm nền theo tên.
+            if (!durGiay && !laIdYouTube(songId) && ctx && ctx.waitUntil) {
+              ctx.waitUntil(tuDienThoiLuongTheoTen(env, songId, tenBai));
+            }
+            // [A94] Bài mới (vd từ Extension, ID YouTube) có/lấy được thời lượng -> chép sang bài trùng tên đang trống; chưa có -> mượn từ bài trùng tên.
+            if (ctx && ctx.waitUntil) {
+              if (durGiay) ctx.waitUntil(chepThoiLuongChoBaiCungTen(env, songId));
+              else if (laIdYouTube(songId)) ctx.waitUntil(tuDienThoiLuongBai(env, songId, tenBai));
+            }
           }
         }
 
@@ -171,6 +204,14 @@ export default {
         FROM song_info WHERE song_id = ?
       `).bind(songId).first();
 
+      // [A92] Bài có dòng thông tin nhưng CHƯA có thời lượng -> tự lấy từ YouTube (chỉ điền chỗ trống, không ghi đè). Lỗi thì bỏ qua.
+      if (info && !(Number(info.totalSec) > 0) && laIdYouTube(songId)) {
+        try {
+          const kq = await layThoiLuongYouTube(songId, env);
+          if (kq.ok) { await luuThoiLuong(env, songId, kq.giay, true); info.totalSec = kq.giay; }
+        } catch (_) {}
+      }
+
       const { results: segments } = await env.DB.prepare(`
         SELECT start_sec as startSec, end_sec as endSec, key, mode
         FROM song_key_segments WHERE song_id = ? ORDER BY start_sec ASC
@@ -192,7 +233,9 @@ export default {
 
       return Response.json({
         songId,
-        thongTin: info || { songId, title: "Chua dat ten", totalSec: null },
+        thongTin: info
+          ? Object.assign({}, info, { tongThoiLuong: info.totalSec ? giaySangPhutGiay(info.totalSec) : null })
+          : { songId, title: "Chua dat ten", totalSec: null, tongThoiLuong: null },
         tongDoan: segments.length,
         doans: segments.map(s => ({
           startSec: s.startSec,
@@ -238,29 +281,68 @@ export default {
 
     // ========== [7] DANH SÁCH TẤT CẢ BÀI ==========
     // Thêm trường "key" (Key của đoạn đầu tiên, vd "D minor") để hiện cạnh tên bài. Các trường cũ giữ nguyên.
+    // [A95] Bọc try/catch: lỗi D1 không còn làm Worker văng (Error 1101 / trang HTML) mà trả JSON {error} để trang hiện đúng nguyên nhân.
+    //       Truy vấn chính có cột ngày thêm (MIN(s.created_at)); nếu lỗi thì thử lại truy vấn dự phòng KHÔNG có cột đó.
     if (url.pathname === "/list") {
-      const { results } = await env.DB.prepare(`
-        SELECT i.song_id as songId, i.title, i.total_duration_sec as tongGiay,
-               COUNT(s.id) as soDoan, i.updated_at,
-               (SELECT s2.key FROM song_key_segments s2 WHERE s2.song_id = i.song_id ORDER BY s2.start_sec ASC LIMIT 1) as key1,
-               (SELECT s3.mode FROM song_key_segments s3 WHERE s3.song_id = i.song_id ORDER BY s3.start_sec ASC LIMIT 1) as mode1
-        FROM song_info i
-        LEFT JOIN song_key_segments s ON i.song_id = s.song_id
-        GROUP BY i.song_id ORDER BY i.updated_at DESC LIMIT 100
-      `).all();
+      try {
+        // OLD-KEY-02: ?all=1 = xem TOAN BO bai (toi da 5000); ?q=ten = loc theo ten bai. Khong tham so = nhu cu (100 bai moi nhat).
+        const xemHet = url.searchParams.get("all") === "1";
+        const gioiHan = xemHet ? 5000 : 100;
+        const tuKhoa = chuanHoaTen(url.searchParams.get("q") || "");
+        let results;
+        try {
+          const r1 = await env.DB.prepare(`
+            SELECT i.song_id as songId, i.title, i.total_duration_sec as tongGiay,
+                   COUNT(s.id) as soDoan, i.updated_at, MIN(s.created_at) as ngayDoanDau,
+                   (SELECT s2.key FROM song_key_segments s2 WHERE s2.song_id = i.song_id ORDER BY s2.start_sec ASC LIMIT 1) as key1,
+                   (SELECT s3.mode FROM song_key_segments s3 WHERE s3.song_id = i.song_id ORDER BY s3.start_sec ASC LIMIT 1) as mode1
+            FROM song_info i
+            LEFT JOIN song_key_segments s ON i.song_id = s.song_id
+            GROUP BY i.song_id ORDER BY i.updated_at DESC LIMIT ${gioiHan}
+          `).all();
+          results = r1.results;
+        } catch (_) {
+          const r2 = await env.DB.prepare(`
+            SELECT i.song_id as songId, i.title, i.total_duration_sec as tongGiay,
+                   COUNT(s.id) as soDoan, i.updated_at, NULL as ngayDoanDau,
+                   (SELECT s2.key FROM song_key_segments s2 WHERE s2.song_id = i.song_id ORDER BY s2.start_sec ASC LIMIT 1) as key1,
+                   (SELECT s3.mode FROM song_key_segments s3 WHERE s3.song_id = i.song_id ORDER BY s3.start_sec ASC LIMIT 1) as mode1
+            FROM song_info i
+            LEFT JOIN song_key_segments s ON i.song_id = s.song_id
+            GROUP BY i.song_id ORDER BY i.updated_at DESC LIMIT ${gioiHan}
+          `).all();
+          results = r2.results;
+        }
+        results = results || [];
+        if (tuKhoa) results = results.filter(r => chuanHoaTen(r.title).includes(tuKhoa));
 
-      return Response.json({
-        tongBai: results.length,
-        danhSach: results.map(r => ({
-          songId: r.songId,
-          title: r.title || "Chua dat ten",
-          tongThoiLuong: r.tongGiay ? giaySangPhutGiay(r.tongGiay) : "Chua cap nhat",
-          soDoan: r.soDoan,
-          key: r.key1 || null,
-          mode: r.mode1 || null,
-          keyHienThi: r.key1 ? (r.key1 + " " + (r.mode1 === "minor" ? "Minor" : "Major")) : null
-        }))
-      }, { headers: corsHeaders });
+        // [A93] Điền dần thời lượng cho bài cũ còn trống (tối đa 2 bài mỗi lần mở danh sách, chạy nền, không ghi đè bài đã có).
+        if (ctx && ctx.waitUntil) {
+          const trong = (xemHet || tuKhoa) ? [] : results.filter(r => !(Number(r.tongGiay) > 0) && !daThuGanDay(r.songId)).slice(0, 2);
+          if (trong.length) {
+            ctx.waitUntil((async () => {
+              for (const r of trong) { await tuDienThoiLuongBai(env, r.songId, r.title); }
+            })());
+          }
+        }
+
+        return Response.json({
+          tongBai: results.length,
+          danhSach: results.map(r => ({
+            songId: r.songId,
+            title: r.title || "Chua dat ten",
+            tongThoiLuong: r.tongGiay ? giaySangPhutGiay(r.tongGiay) : "Chua cap nhat",
+            tongGiay: Number(r.tongGiay) > 0 ? Number(r.tongGiay) : 0,
+            themNgay: Number(r.ngayDoanDau) > 1e12 ? Number(r.ngayDoanDau) : (Number(r.updated_at) > 1e12 ? Number(r.updated_at) : 0),
+            soDoan: r.soDoan,
+            key: r.key1 || null,
+            mode: r.mode1 || null,
+            keyHienThi: r.key1 ? (r.key1 + " " + (r.mode1 === "minor" ? "Minor" : "Major")) : null
+          }))
+        }, { headers: corsHeaders });
+      } catch (e) {
+        return Response.json({ error: "loi_danh_sach: " + ((e && e.message) || e) }, { status: 500, headers: corsHeaders });
+      }
     }
 
     // ========== [9] SỬA KEY BÀI HÁT — CẦN MẬT KHẨU QUẢN TRỊ (ADMIN_TOKEN) ==========
@@ -438,7 +520,7 @@ export default {
           const tuChoi = kiemTraQuyenSua(request, env, corsHeaders);
           if (tuChoi) return tuChoi;
         }
-        const kq = await layThoiLuongYouTube(songId);
+        const kq = await layThoiLuongYouTube(songId, env);
         if (!kq.ok) {
           return Response.json({ error: "khong_lay_duoc_tu_youtube", chiTiet: kq.loi, message: "Server khong lay duoc thoi luong tu YouTube. Dung /set-duration de nhap tay." }, { status: 502, headers: corsHeaders });
         }
@@ -495,7 +577,7 @@ export default {
         const lamNgay = ungVien.slice(0, limit);
         const ketQua = [];
         for (const r of lamNgay) {
-          const kq = await layThoiLuongYouTube(r.songId);
+          const kq = await layThoiLuongYouTube(r.songId, env);
           if (kq.ok) {
             await luuThoiLuong(env, r.songId, kq.giay, true);
             ketQua.push({ songId: r.songId, title: r.title || null, ok: true, durationSec: kq.giay });
@@ -525,7 +607,7 @@ export default {
         const songId = String(url.searchParams.get("id") || "").trim();
         if (!songId) return Response.json({ error: "thieu id bai hat" }, { status: 400, headers: corsHeaders });
         if (laIdYouTube(songId)) {
-          const kq = await layThoiLuongYouTube(songId);
+          const kq = await layThoiLuongYouTube(songId, env);
           if (!kq.ok) return Response.json({ error: "khong_lay_duoc_tu_youtube", chiTiet: kq.loi }, { status: 502, headers: corsHeaders });
           return Response.json({ ok: true, cach: "id", ungVien: [{ videoId: songId, title: null, durationSec: kq.giay, format: giaySangPhutGiay(kq.giay) }] }, { headers: corsHeaders });
         }
@@ -537,6 +619,23 @@ export default {
         const kq = await timYouTubeTheoTen(ten);
         if (!kq.ok) return Response.json({ error: "khong_tim_duoc_tren_youtube", chiTiet: kq.loi, message: "Khong tim duoc tren YouTube. Nhap thoi luong bang tay." }, { status: 502, headers: corsHeaders });
         return Response.json({ ok: true, cach: "ten", tuKhoa: ten, ungVien: kq.ungVien }, { headers: corsHeaders });
+      } catch (e) {
+        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
+      }
+    }
+
+    // [A92] GET /count -> tổng số bài trên server (chỉ ĐỌC, không ghi gì)
+    if (url.pathname === "/count" && request.method === "GET") {
+      try {
+        const a = await env.DB.prepare(`SELECT COUNT(*) as n FROM song_info`).first();
+        const b = await env.DB.prepare(`SELECT COUNT(DISTINCT song_id) as n FROM song_key_segments`).first();
+        const c = await env.DB.prepare(`SELECT COUNT(*) as n FROM song_info WHERE total_duration_sec > 0`).first();
+        return Response.json({
+          ok: true,
+          tongBai: (a && a.n) || 0,
+          baiCoKey: (b && b.n) || 0,
+          baiCoThoiLuong: (c && c.n) || 0
+        }, { headers: corsHeaders });
       } catch (e) {
         return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
       }
@@ -579,8 +678,56 @@ function laIdYouTube(id) {
   return /^[A-Za-z0-9_-]{11}$/.test(String(id || "")) && !/^app_/.test(String(id));
 }
 
+// [A92] Lấy thời lượng (giây) theo thứ tự: (1) YouTube Data API nếu có YOUTUBE_API_KEY, (2) đọc trang xem YouTube, (3) ytapi.dev dự phòng.
+// Giữ nguyên kiểu trả về { ok:true, giay } hoặc { ok:false, loi } nên các nơi gọi cũ không phải sửa logic.
+async function layThoiLuongYouTube(videoId, env) {
+  // 1) YouTube Data API (nếu có khóa)
+  if (env && env.YOUTUBE_API_KEY) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 6000);
+    try {
+      const res = await fetch(
+        "https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=" +
+        encodeURIComponent(videoId) + "&key=" + encodeURIComponent(env.YOUTUBE_API_KEY),
+        { signal: ctl.signal }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const it = data && data.items && data.items[0];
+        const iso = it && it.contentDetails && it.contentDetails.duration;
+        const giay = iso ? phanTichThoiGianISO8601(iso) : null;
+        if (giay && giay >= 1 && giay <= 86400) return { ok: true, giay };
+      }
+    } catch (_) {
+    } finally { clearTimeout(timer); }
+  }
+  // 2) Cách cũ: đọc trang YouTube
+  const kq = await layThoiLuongTrangYouTube(videoId);
+  if (kq.ok) return kq;
+  // 3) Dự phòng cuối: ytapi.dev (lỗi thì bỏ qua)
+  const ctl2 = new AbortController();
+  const timer2 = setTimeout(() => ctl2.abort(), 5000);
+  try {
+    const res = await fetch("https://ytapi.dev/v1/video/" + encodeURIComponent(videoId), { signal: ctl2.signal });
+    if (res.ok) {
+      const d = await res.json();
+      const g = parseInt(d && d.length_seconds, 10);
+      if (Number.isFinite(g) && g >= 1 && g <= 86400) return { ok: true, giay: g };
+    }
+  } catch (_) {
+  } finally { clearTimeout(timer2); }
+  return kq; // báo lỗi gốc
+}
+
+// Chuyển "PT1H2M3S" -> số giây
+function phanTichThoiGianISO8601(str) {
+  const m = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(String(str || ""));
+  if (!m) return null;
+  return parseInt(m[1] || 0, 10) * 3600 + parseInt(m[2] || 0, 10) * 60 + parseInt(m[3] || 0, 10);
+}
+
 // Lấy thời lượng (giây) từ trang xem YouTube ("lengthSeconds"). Không cần khoá API. Lỗi/chặn -> { ok:false, loi }.
-async function layThoiLuongYouTube(videoId) {
+async function layThoiLuongTrangYouTube(videoId) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 6000);
   try {
@@ -657,6 +804,156 @@ async function timYouTubeTheoTen(ten) {
   }
 }
 
+// ========== [A93] TỰ ĐIỀN THỜI LƯỢNG THEO TÊN BÀI (chạy nền) ==========
+// Menu lấy tên bài từ Windows = tên video YouTube đang mở, nên tìm đúng tên đó trên YouTube.
+// AN TOÀN: chỉ lưu khi tên video khớp ĐÚNG HOÀN TOÀN (sau chuẩn hoá) với tên bài; không khớp -> để trống (không đoán).
+// Chỉ điền chỗ trống: câu UPDATE có điều kiện "thời lượng đang trống" nên không bao giờ ghi đè giá trị đã có/đã sửa tay.
+const DA_THU_TIM = new Map(); // songId -> thời điểm thử gần nhất (bộ nhớ tạm của máy chủ, chống tìm lặp)
+const NGHI_TIM_MS = 6 * 60 * 60 * 1000;
+function daThuGanDay(songId) {
+  const t = DA_THU_TIM.get(songId);
+  return t !== undefined && (Date.now() - t) < NGHI_TIM_MS;
+}
+function ghiNhoDaThu(songId) {
+  if (DA_THU_TIM.size > 500) DA_THU_TIM.delete(DA_THU_TIM.keys().next().value);
+  DA_THU_TIM.set(songId, Date.now());
+}
+
+// Tìm bằng YouTube Data API (dự phòng khi đọc trang tìm kiếm bị chặn). Cần YOUTUBE_API_KEY. Trả { ok, ungVien:[{videoId,title,durationSec}] }.
+async function timYouTubeTheoTenAPI(ten, env) {
+  if (!env || !env.YOUTUBE_API_KEY) return { ok: false, loi: "khong_co_khoa_api" };
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 7000);
+  try {
+    const k = encodeURIComponent(env.YOUTUBE_API_KEY);
+    const r1 = await fetch("https://www.googleapis.com/youtube/v3/search?part=id&type=video&maxResults=5&q=" + encodeURIComponent(ten) + "&key=" + k, { signal: ctl.signal });
+    if (!r1.ok) return { ok: false, loi: "api_search_http_" + r1.status };
+    const d1 = await r1.json();
+    const ids = ((d1 && d1.items) || []).map((x) => x && x.id && x.id.videoId).filter(Boolean);
+    if (!ids.length) return { ok: false, loi: "api_khong_co_ket_qua" };
+    const r2 = await fetch("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=" + ids.join(",") + "&key=" + k, { signal: ctl.signal });
+    if (!r2.ok) return { ok: false, loi: "api_videos_http_" + r2.status };
+    const d2 = await r2.json();
+    const ds = [];
+    for (const it of ((d2 && d2.items) || [])) {
+      const giay = phanTichThoiGianISO8601(it && it.contentDetails && it.contentDetails.duration);
+      if (giay && giay >= 1 && giay <= 86400) ds.push({ videoId: it.id, title: (it.snippet && it.snippet.title) || null, durationSec: giay });
+    }
+    return ds.length ? { ok: true, ungVien: ds } : { ok: false, loi: "api_khong_co_thoi_luong" };
+  } catch (e) {
+    return { ok: false, loi: e && e.name === "AbortError" ? "het_gio" : String((e && e.message) || e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Tìm theo tên rồi điền thời lượng nếu có video khớp đúng tên. KHÔNG BAO GIỜ throw. Trả { ok, giay?, loi? }.
+async function tuDienThoiLuongTheoTen(env, songId, title) {
+  try {
+    const ten = String(title || "").trim();
+    const q = chuanHoaTen(ten);
+    if (q.length < 6) return { ok: false, loi: "ten_qua_ngan" };
+    if (daThuGanDay(songId)) return { ok: false, loi: "vua_thu" };
+    const row = await env.DB.prepare(`SELECT total_duration_sec as totalSec FROM song_info WHERE song_id = ?`).bind(songId).first();
+    if (!row) return { ok: false, loi: "khong_co_bai" };
+    if (Number(row.totalSec) > 0) return { ok: false, loi: "da_co_thoi_luong" };
+
+    // [A94] Có bài trùng tên đã có thời lượng -> dùng luôn (không cần hỏi YouTube).
+    const muon = await layThoiLuongTuBaiCungTen(env, songId, ten);
+    if (muon) {
+      await env.DB.prepare(`
+        UPDATE song_info SET total_duration_sec = ?
+        WHERE song_id = ? AND (total_duration_sec IS NULL OR total_duration_sec = 0)
+      `).bind(muon, songId).run();
+      return { ok: true, giay: muon, nguon: "bai_cung_ten" };
+    }
+    ghiNhoDaThu(songId);
+
+    let kq = await timYouTubeTheoTen(ten);
+    let khop = kq.ok ? kq.ungVien.filter((u) => u.title && chuanHoaTen(u.title) === q) : [];
+    if (!khop.length) {
+      const kq2 = await timYouTubeTheoTenAPI(ten, env);
+      if (kq2.ok) khop = kq2.ungVien.filter((u) => u.title && chuanHoaTen(u.title) === q);
+      if (!kq.ok && !kq2.ok) return { ok: false, loi: kq.loi || kq2.loi || "khong_tim_duoc" };
+    }
+    if (!khop.length) return { ok: false, loi: "khong_khop_ten" };
+
+    const giay = khop[0].durationSec;
+    if (!(giay >= 1 && giay <= 86400)) return { ok: false, loi: "thoi_luong_vo_ly" };
+    await env.DB.prepare(`
+      UPDATE song_info SET total_duration_sec = ?
+      WHERE song_id = ? AND (total_duration_sec IS NULL OR total_duration_sec = 0)
+    `).bind(giay, songId).run();
+    await chepThoiLuongChoBaiCungTen(env, songId); // [A94]
+    return { ok: true, giay };
+  } catch (e) {
+    return { ok: false, loi: String((e && e.message) || e) };
+  }
+}
+
+// Điền thời lượng cho 1 bài bất kỳ: ID YouTube -> tra theo ID; ID khác (app_xxxx) -> tìm theo tên. Không throw.
+async function tuDienThoiLuongBai(env, songId, title) {
+  try {
+    if (laIdYouTube(songId)) {
+      if (daThuGanDay(songId)) return { ok: false, loi: "vua_thu" };
+      ghiNhoDaThu(songId);
+      const kq = await layThoiLuongYouTube(songId, env);
+      let giay = kq.ok ? kq.giay : null;
+      if (!giay) giay = await layThoiLuongTuBaiCungTen(env, songId, title); // [A94] YouTube không trả được -> mượn từ bài trùng tên
+      if (!giay) return { ok: false, loi: kq.loi };
+      await env.DB.prepare(`
+        UPDATE song_info SET total_duration_sec = ?
+        WHERE song_id = ? AND (total_duration_sec IS NULL OR total_duration_sec = 0)
+      `).bind(giay, songId).run();
+      await chepThoiLuongChoBaiCungTen(env, songId); // [A94]
+      return { ok: true, giay };
+    }
+    return await tuDienThoiLuongTheoTen(env, songId, title);
+  } catch (e) {
+    return { ok: false, loi: String((e && e.message) || e) };
+  }
+}
+
+// ========== [A94] BÀI TRÙNG TÊN DÙNG CHUNG THỜI LƯỢNG ==========
+// Cùng 1 bài có thể có 2 dòng: bản Menu (ID app_xxxx) và bản Extension (ID YouTube). "Trùng" = tên chuẩn hoá giống HỆT nhau (>= 6 ký tự).
+// Không xoá, không gộp dòng nào; chỉ điền thời lượng vào dòng đang TRỐNG (câu UPDATE có điều kiện trống nên không ghi đè). Không bao giờ throw.
+async function layThoiLuongTuBaiCungTen(env, songId, title) {
+  try {
+    const q = chuanHoaTen(title);
+    if (q.length < 6) return null;
+    const { results } = await env.DB.prepare(`
+      SELECT song_id as songId, title, total_duration_sec as totalSec FROM song_info
+      WHERE total_duration_sec > 0 AND song_id != ? ORDER BY updated_at DESC LIMIT 1000
+    `).bind(songId).all();
+    for (const r of (results || [])) {
+      if (chuanHoaTen(r.title) === q) return Number(r.totalSec);
+    }
+    return null;
+  } catch (_) { return null; }
+}
+async function chepThoiLuongChoBaiCungTen(env, songId) {
+  try {
+    const me = await env.DB.prepare(`SELECT title, total_duration_sec as totalSec FROM song_info WHERE song_id = ?`).bind(songId).first();
+    if (!me || !(Number(me.totalSec) > 0)) return 0;
+    const q = chuanHoaTen(me.title);
+    if (q.length < 6) return 0;
+    const { results } = await env.DB.prepare(`
+      SELECT song_id as songId, title FROM song_info
+      WHERE (total_duration_sec IS NULL OR total_duration_sec = 0) AND song_id != ? ORDER BY updated_at DESC LIMIT 1000
+    `).bind(songId).all();
+    let n = 0;
+    for (const r of (results || [])) {
+      if (chuanHoaTen(r.title) !== q) continue;
+      await env.DB.prepare(`
+        UPDATE song_info SET total_duration_sec = ?
+        WHERE song_id = ? AND (total_duration_sec IS NULL OR total_duration_sec = 0)
+      `).bind(Number(me.totalSec), r.songId).run();
+      n++;
+    }
+    return n;
+  } catch (_) { return 0; }
+}
+
 // Ghi thời lượng cho 1 bài: bài đã có dòng thông tin -> chỉ đổi cột thời lượng (giữ tên/ghi chú); chưa có -> tạo dòng mới.
 async function luuThoiLuong(env, songId, giay, coDong) {
   if (coDong) {
@@ -668,6 +965,7 @@ async function luuThoiLuong(env, songId, giay, coDong) {
       INSERT INTO song_info (song_id, total_duration_sec, updated_at) VALUES (?, ?, strftime('%s','now') * 1000)
     `).bind(songId, giay).run();
   }
+  await chepThoiLuongChoBaiCungTen(env, songId); // [A94] chép sang bài trùng tên đang trống (lỗi thì bỏ qua)
 }
 
 // ========== [A83] BÀI MỚI / BÀI ĐÃ BIẾT ==========
@@ -738,7 +1036,7 @@ function chuanHoaTen(s) {
   return String(s || "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
@@ -825,6 +1123,10 @@ function taoTrangChu() {
     h3 { margin: 20px 0 10px 0; }
     .init-note { background: rgba(255,193,7,0.15); padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; color: #ffd700; font-size: 14px; }
     .init-note a { color: #fff; font-weight: bold; }
+      th.sx { cursor: pointer; user-select: none; }
+    th.sx:hover { background: rgba(255,215,0,0.35); }
+    tr.hang-bai { cursor: pointer; }
+    tr.hang-bai:hover { background: rgba(255,255,255,0.12); }
   </style>
 </head>
 <body>
@@ -909,8 +1211,16 @@ function taoTrangChu() {
     <div id="tab-list" class="hidden">
       <div class="card">
         <h3>Tat Ca Bai Da Luu</h3>
+        <div class="search-bar" style="margin-top:10px; flex-wrap:wrap;">
+          <input type="text" id="timTenBai" placeholder="Tim theo ten bai hat...">
+          <select id="locKey" style="padding:12px; border-radius:8px; border:none; font-size:15px;"><option value="">Moi Key</option></select>
+          <button class="btn-secondary" id="btnLamMoiDS">Tai lai</button>
+        </div>
+        <label style="display:flex; gap:6px; align-items:center; color:#ddd; font-size:14px; margin-bottom:6px;"><input type="checkbox" id="hienChuaTen" style="flex:none; width:auto;"> Hien ca bai "Chua dat ten"</label>
+        <p id="demBai" style="font-size:13px; color:#aaa; margin-bottom:6px;"></p>
         <div id="kqDS" style="margin:10px 0; padding:10px; border-radius:8px; display:none;"></div>
-        <div id="danhSachTatCa"></div>
+        <div id="bangBai" style="overflow-x:auto;"></div>
+        <div id="danhSachTatCa" class="hidden"></div>
       </div>
     </div>
   </div>
@@ -1109,8 +1419,138 @@ function taoTrangChu() {
     }
 
     var OPT_KEY = '<option>C</option><option>C#</option><option>D</option><option>D#</option><option>E</option><option>F</option><option>F#</option><option>G</option><option>G#</option><option>A</option><option>A#</option><option>B</option>';
-    // Danh sach tat ca bai
-    async function taiDanhSach() {
+    // [A95] Danh sach Key cho o chon trong bang "Tat Ca Bai": them lua chon trong (bai chua co Key thi chua chon san).
+    var OPT_KEY_HANG = '<option value="">Key</option>' + OPT_KEY;
+    // OLD-KEY-02: BANG BAI HAT kieu thu muc (Ten bai hat - Key - Thoi luong - Ngay them). Bam tieu de cot de sap xep; co o tim ten + loc Key.
+    var BANG = { rows: [], sapXep: 'ngay', giam: true };
+    var THU_TU_KEY = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    function boDau(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, ' ').trim(); }
+    function giaTriKey(r) { if (!r.key) return 999; var i = THU_TU_KEY.indexOf(r.key); return (i < 0 ? 998 : i) * 2 + (r.mode === 'minor' ? 1 : 0); }
+    function dinhDangNgay(ms) {
+      if (!(ms > 0)) return '--';
+      var d = new Date(ms), p = function(n) { return (n < 10 ? '0' : '') + n; };
+      return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+    function moBaiChiTiet(sid) {
+      document.getElementById('songIdInput').value = sid;
+      var allTabs = document.querySelectorAll('.tab');
+      allTabs[0].classList.add('active');
+      allTabs[1].classList.remove('active');
+      document.getElementById('tab-search').classList.remove('hidden');
+      document.getElementById('tab-list').classList.add('hidden');
+      timBai();
+    }
+    function veBang() {
+      var div = document.getElementById('bangBai');
+      var tk = boDau(document.getElementById('timTenBai').value);
+      var kf = document.getElementById('locKey').value;
+      var hienChua = document.getElementById('hienChuaTen').checked;
+      var ds = [], an = 0;
+      for (var i = 0; i < BANG.rows.length; i++) {
+        var r = BANG.rows[i];
+        if (r.chuaTen && !hienChua) { an++; continue; }
+        if (tk && boDau(r.title).indexOf(tk) < 0) continue;
+        if (kf === '__none') { if (r.keyText) continue; }
+        else if (kf && r.keyText !== kf) continue;
+        ds.push(r);
+      }
+      var f = BANG.sapXep, dir = BANG.giam ? -1 : 1;
+      ds.sort(function(a, b) {
+        var c = 0;
+        if (f === 'ten') { var x = boDau(a.title), y = boDau(b.title); c = x < y ? -1 : (x > y ? 1 : 0); }
+        else if (f === 'key') c = giaTriKey(a) - giaTriKey(b);
+        else if (f === 'tg') c = a.tongGiay - b.tongGiay;
+        else c = a.themNgay - b.themNgay;
+        return c * dir;
+      });
+      document.getElementById('demBai').innerText = 'Hien ' + ds.length + ' / ' + BANG.rows.length + ' bai' + (an ? ' (an ' + an + ' bai "Chua dat ten")' : '') + '. Bam tieu de cot de sap xep.';
+      var mui = function(k) { return BANG.sapXep === k ? (BANG.giam ? ' ▼' : ' ▲') : ''; };
+      var h = '<table><thead><tr>' +
+        '<th class="sx" data-s="ten">Ten bai hat' + mui('ten') + '</th>' +
+        '<th class="sx" data-s="key">Key' + mui('key') + '</th>' +
+        '<th class="sx" data-s="tg">Thoi luong' + mui('tg') + '</th>' +
+        '<th class="sx" data-s="ngay">Ngay them' + mui('ngay') + '</th>' +
+        '<th>Sua Key / Xoa</th></tr></thead><tbody>';
+      if (!ds.length) h += '<tr><td colspan="5" class="empty">' + (tk || kf ? 'Khong tim thay bai nao' : 'Chua co bai hat nao duoc luu') + '</td></tr>';
+      for (var j = 0; j < ds.length; j++) {
+        var b = ds[j];
+        h += '<tr class="hang-bai" data-songid="' + esc(b.songId) + '">' +
+          '<td>' + esc(b.title || 'Chua dat ten') + '</td>' +
+          '<td>' + (b.keyText ? '<span class="tag ' + (b.mode === 'minor' ? 'tag-minor' : 'tag-major') + '">' + esc(b.keyText) + '</span>' : '<span style="color:#888;">--</span>') + '</td>' +
+          '<td>' + esc(b.tongThoiLuong) + '</td>' +
+          '<td>' + esc(dinhDangNgay(b.themNgay)) + '</td>' +
+          '<td style="white-space:nowrap;"><div style="display:flex; gap:6px; align-items:center;">' +
+            '<select class="hg-key" data-val="' + esc(b.key || '') + '" style="padding:8px; border-radius:6px; border:none;">' + OPT_KEY_HANG + '</select>' +
+            '<select class="hg-mode" data-val="' + esc(b.mode === 'minor' ? 'minor' : 'major') + '" style="padding:8px; border-radius:6px; border:none;"><option value="major">Truong</option><option value="minor">Phu</option></select>' +
+            '<button class="btn-primary hang-luu" data-songid="' + esc(b.songId) + '" data-sodoan="' + esc(b.soDoan) + '" style="padding:8px 12px;">Sua Key</button>' +
+            '<button class="hang-xoa" data-songid="' + esc(b.songId) + '" data-title="' + esc(b.title || b.songId) + '" style="background:#c62828; color:#fff; padding:8px 12px;">Xoa</button>' +
+          '</div></td></tr>';
+      }
+      h += '</tbody></table>';
+      div.innerHTML = h;
+      var ths = div.querySelectorAll('th.sx');
+      for (var t = 0; t < ths.length; t++) {
+        ths[t].addEventListener('click', function() {
+          var k = this.getAttribute('data-s');
+          if (BANG.sapXep === k) BANG.giam = !BANG.giam; else { BANG.sapXep = k; BANG.giam = (k === 'ngay'); }
+          veBang();
+        });
+      }
+      var hs = div.querySelectorAll('tr.hang-bai');
+      for (var q = 0; q < hs.length; q++) {
+        hs[q].addEventListener('click', function(ev) {
+          if (ev.target && ev.target.closest && ev.target.closest('select, button')) return;
+          moBaiChiTiet(this.getAttribute('data-songid'));
+        });
+      }
+      // [A95] O chon Key/Che do + nut "Sua Key" + nut "Xoa" o cot cuoi moi bai
+      var hk = div.querySelectorAll('select.hg-key'), hm = div.querySelectorAll('select.hg-mode');
+      for (var u = 0; u < hk.length; u++) { hk[u].value = hk[u].getAttribute('data-val') || ''; }
+      for (var w = 0; w < hm.length; w++) { hm[w].value = hm[w].getAttribute('data-val') === 'minor' ? 'minor' : 'major'; }
+      var hl = div.querySelectorAll('button.hang-luu');
+      for (var n = 0; n < hl.length; n++) {
+        hl[n].addEventListener('click', function(ev) { ev.stopPropagation(); suaKeyHang(this); });
+      }
+      var hx = div.querySelectorAll('button.hang-xoa');
+      for (var y = 0; y < hx.length; y++) {
+        hx[y].addEventListener('click', function(ev) { ev.stopPropagation(); xoaBaiDS(this); });
+      }
+    }
+    async function taiDanhSach(imLang) {
+      var div = document.getElementById('bangBai');
+      if (!imLang) div.innerHTML = '<p class="empty">Dang tai...</p>';
+      try {
+        var res = await fetch(SERVER + '/list?all=1');
+        var data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || ('HTTP ' + res.status));
+        var ds = data.danhSach || [], rows = [], keyGt = {};
+        for (var i = 0; i < ds.length; i++) {
+          var b = ds[i], ten = String(b.title || ''), bd = boDau(ten);
+          var r = { songId: b.songId, title: ten, chuaTen: (bd === '' || bd === 'chua dat ten'), key: b.key || null, mode: b.mode || null, keyText: b.keyHienThi || '',
+                    soDoan: Number(b.soDoan) || 0,
+                    tongThoiLuong: b.tongThoiLuong || '--', tongGiay: Number(b.tongGiay) || 0, themNgay: Number(b.themNgay) || 0 };
+          rows.push(r);
+          if (r.keyText) keyGt[r.keyText] = giaTriKey(r);
+        }
+        BANG.rows = rows;
+        var sel = document.getElementById('locKey'), cu = sel.value;
+        var ks = Object.keys(keyGt).sort(function(a, b) { return keyGt[a] - keyGt[b]; });
+        var opts = '<option value="">Moi Key</option><option value="__none">Chua co Key</option>';
+        for (var k = 0; k < ks.length; k++) opts += '<option value="' + esc(ks[k]) + '">' + esc(ks[k]) + '</option>';
+        sel.innerHTML = opts;
+        sel.value = cu;
+        if (sel.value !== cu) sel.value = '';
+        veBang();
+      } catch (err) {
+        div.innerHTML = '<p class="empty">Loi tai danh sach: ' + esc(err.message) + '</p>';
+      }
+    }
+    document.getElementById('timTenBai').addEventListener('input', veBang);
+    document.getElementById('locKey').addEventListener('change', veBang);
+    document.getElementById('hienChuaTen').addEventListener('change', veBang);
+    document.getElementById('btnLamMoiDS').addEventListener('click', function() { taiDanhSach(); });
+    // Danh sach tat ca bai (kieu cu, khong con dung)
+    async function taiDanhSachCu() {
       var res = await fetch(SERVER + '/list');
       var data = await res.json();
       var div = document.getElementById('danhSachTatCa');
@@ -1173,6 +1613,8 @@ function taoTrangChu() {
       kq.style.display = 'block';
       kq.style.background = ok ? 'rgba(76,175,80,0.25)' : 'rgba(244,67,54,0.25)';
       kq.innerText = text;
+      // [A95] Bao loi thi cuon len de nhin thay (danh sach dai, nut bam o duoi)
+      if (!ok) { try { kq.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {} }
     }
     function layMatKhau() {
       var t = '';
@@ -1208,6 +1650,26 @@ function taoTrangChu() {
         else hienKqDS(false, data.message || data.error || 'Loi');
       } catch (err) { hienKqDS(false, 'Loi ket noi: ' + err.message); }
     }
+    // [A95] Nut "Sua Key" o cot cuoi bang "Tat Ca Bai": doi Key (+ Truong/Phu) cua bai ngay tai dong do.
+    async function suaKeyHang(btn) {
+      var tr = btn.closest('tr');
+      if (!tr) return;
+      var n = Number(btn.getAttribute('data-sodoan')) || 0;
+      var key = tr.querySelector('select.hg-key').value;
+      if (!key) { hienKqDS(false, 'Hay chon Key truoc khi bam "Sua Key".'); return; }
+      var body = { songId: btn.getAttribute('data-songid'), key: key, mode: tr.querySelector('select.hg-mode').value };
+      if (n > 1) {
+        if (!confirm('Bai nay co ' + n + ' doan. Dat Key nay cho TAT CA ' + n + ' doan? (Muon sua tung doan: bam vao ten bai, cot "Sua doan nay")')) return;
+        body.all = true;
+      }
+      var token = layMatKhau();
+      if (!token) { hienKqDS(false, 'Chua nhap mat khau quan tri.'); return; }
+      try {
+        var data = await goiAdmin('/set-key', body, token);
+        if (data.ok) { nhoMatKhau(token); hienKqDS(true, 'Da sua ' + data.daSua + ' doan -> ' + data.keyHienThi); taiDanhSach(true); }
+        else hienKqDS(false, data.message || data.error || 'Loi');
+      } catch (err) { hienKqDS(false, 'Loi ket noi: ' + err.message); }
+    }
     async function xoaBaiDS(btn) {
       var id = btn.getAttribute('data-songid'), ten = btn.getAttribute('data-title') || id;
       if (!confirm('XOA bai "' + ten + '" va tat ca Key cua bai khoi server? Khong hoan tac duoc.')) return;
@@ -1215,7 +1677,7 @@ function taoTrangChu() {
       if (!token) { hienKqDS(false, 'Chua nhap mat khau quan tri.'); return; }
       try {
         var data = await goiAdmin('/delete-song', { songId: id, xacNhan: true }, token);
-        if (data.ok) { nhoMatKhau(token); hienKqDS(true, 'Da xoa bai "' + ten + '" (' + data.daXoaDoan + ' doan Key).'); taiDanhSach(); }
+        if (data.ok) { nhoMatKhau(token); hienKqDS(true, 'Da xoa bai "' + ten + '" (' + data.daXoaDoan + ' doan Key).'); taiDanhSach(true); }
         else hienKqDS(false, data.message || data.error || 'Loi');
       } catch (err) { hienKqDS(false, 'Loi ket noi: ' + err.message); }
     }

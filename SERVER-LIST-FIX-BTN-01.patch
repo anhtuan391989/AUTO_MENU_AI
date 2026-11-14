@@ -1,0 +1,240 @@
+--- a/server/worker.js	2026-11-14 17:14:48.781447624 +0000
++++ b/server/worker.js	2026-11-14 17:14:48.783539008 +0000
+@@ -1,9 +1,10 @@
+ // ============================================================
+ //  AUTO_MENU_AI — Key Server (Cloudflare Worker + D1)
+-//  Phiên bản: 2.4 (hoàn chỉnh, 2 chiều, hỗ trợ MENU & Auto-Tune)
++//  Phiên bản: 2.5 (hoàn chỉnh, 2 chiều, hỗ trợ MENU & Auto-Tune)
+ //  [A92] Thêm: thời lượng YouTube qua Data API (YOUTUBE_API_KEY), tự điền thời lượng khi thiếu, /count
+ //  [A93] Thêm: tự điền thời lượng cho bài của Menu (ID app_xxxx) bằng cách tìm theo TÊN trên YouTube, chạy nền, chỉ lưu khi tên khớp đúng
+ //  [A94] Thêm: bài trùng tên (vd bản Menu app_xxxx + bản Extension ID YouTube) dùng chung thời lượng — chỉ điền chỗ trống, KHÔNG xoá/gộp dòng nào
++//  [A95] Sửa: /list không còn văng lỗi 1101 (HTML) — luôn trả JSON, có truy vấn dự phòng. Thêm: nút "Sua Key" + "Xoa" ngay cạnh "Ngay them" ở mỗi bài.
+ // ============================================================
+ 
+ export default {
+@@ -280,46 +281,68 @@
+ 
+     // ========== [7] DANH SÁCH TẤT CẢ BÀI ==========
+     // Thêm trường "key" (Key của đoạn đầu tiên, vd "D minor") để hiện cạnh tên bài. Các trường cũ giữ nguyên.
++    // [A95] Bọc try/catch: lỗi D1 không còn làm Worker văng (Error 1101 / trang HTML) mà trả JSON {error} để trang hiện đúng nguyên nhân.
++    //       Truy vấn chính có cột ngày thêm (MIN(s.created_at)); nếu lỗi thì thử lại truy vấn dự phòng KHÔNG có cột đó.
+     if (url.pathname === "/list") {
+-      // OLD-KEY-02: ?all=1 = xem TOAN BO bai (toi da 5000); ?q=ten = loc theo ten bai. Khong tham so = nhu cu (100 bai moi nhat).
+-      const xemHet = url.searchParams.get("all") === "1";
+-      const gioiHan = xemHet ? 5000 : 100;
+-      const tuKhoa = chuanHoaTen(url.searchParams.get("q") || "");
+-      let { results } = await env.DB.prepare(`
+-        SELECT i.song_id as songId, i.title, i.total_duration_sec as tongGiay,
+-               COUNT(s.id) as soDoan, i.updated_at, MIN(s.created_at) as ngayDoanDau,
+-               (SELECT s2.key FROM song_key_segments s2 WHERE s2.song_id = i.song_id ORDER BY s2.start_sec ASC LIMIT 1) as key1,
+-               (SELECT s3.mode FROM song_key_segments s3 WHERE s3.song_id = i.song_id ORDER BY s3.start_sec ASC LIMIT 1) as mode1
+-        FROM song_info i
+-        LEFT JOIN song_key_segments s ON i.song_id = s.song_id
+-        GROUP BY i.song_id ORDER BY i.updated_at DESC LIMIT ${gioiHan}
+-      `).all();
+-      if (tuKhoa) results = (results || []).filter(r => chuanHoaTen(r.title).includes(tuKhoa));
+-
+-      // [A93] Điền dần thời lượng cho bài cũ còn trống (tối đa 2 bài mỗi lần mở danh sách, chạy nền, không ghi đè bài đã có).
+-      if (ctx && ctx.waitUntil) {
+-        const trong = (xemHet || tuKhoa) ? [] : results.filter(r => !(Number(r.tongGiay) > 0) && !daThuGanDay(r.songId)).slice(0, 2);
+-        if (trong.length) {
+-          ctx.waitUntil((async () => {
+-            for (const r of trong) { await tuDienThoiLuongBai(env, r.songId, r.title); }
+-          })());
++      try {
++        // OLD-KEY-02: ?all=1 = xem TOAN BO bai (toi da 5000); ?q=ten = loc theo ten bai. Khong tham so = nhu cu (100 bai moi nhat).
++        const xemHet = url.searchParams.get("all") === "1";
++        const gioiHan = xemHet ? 5000 : 100;
++        const tuKhoa = chuanHoaTen(url.searchParams.get("q") || "");
++        let results;
++        try {
++          const r1 = await env.DB.prepare(`
++            SELECT i.song_id as songId, i.title, i.total_duration_sec as tongGiay,
++                   COUNT(s.id) as soDoan, i.updated_at, MIN(s.created_at) as ngayDoanDau,
++                   (SELECT s2.key FROM song_key_segments s2 WHERE s2.song_id = i.song_id ORDER BY s2.start_sec ASC LIMIT 1) as key1,
++                   (SELECT s3.mode FROM song_key_segments s3 WHERE s3.song_id = i.song_id ORDER BY s3.start_sec ASC LIMIT 1) as mode1
++            FROM song_info i
++            LEFT JOIN song_key_segments s ON i.song_id = s.song_id
++            GROUP BY i.song_id ORDER BY i.updated_at DESC LIMIT ${gioiHan}
++          `).all();
++          results = r1.results;
++        } catch (_) {
++          const r2 = await env.DB.prepare(`
++            SELECT i.song_id as songId, i.title, i.total_duration_sec as tongGiay,
++                   COUNT(s.id) as soDoan, i.updated_at, NULL as ngayDoanDau,
++                   (SELECT s2.key FROM song_key_segments s2 WHERE s2.song_id = i.song_id ORDER BY s2.start_sec ASC LIMIT 1) as key1,
++                   (SELECT s3.mode FROM song_key_segments s3 WHERE s3.song_id = i.song_id ORDER BY s3.start_sec ASC LIMIT 1) as mode1
++            FROM song_info i
++            LEFT JOIN song_key_segments s ON i.song_id = s.song_id
++            GROUP BY i.song_id ORDER BY i.updated_at DESC LIMIT ${gioiHan}
++          `).all();
++          results = r2.results;
++        }
++        results = results || [];
++        if (tuKhoa) results = results.filter(r => chuanHoaTen(r.title).includes(tuKhoa));
++
++        // [A93] Điền dần thời lượng cho bài cũ còn trống (tối đa 2 bài mỗi lần mở danh sách, chạy nền, không ghi đè bài đã có).
++        if (ctx && ctx.waitUntil) {
++          const trong = (xemHet || tuKhoa) ? [] : results.filter(r => !(Number(r.tongGiay) > 0) && !daThuGanDay(r.songId)).slice(0, 2);
++          if (trong.length) {
++            ctx.waitUntil((async () => {
++              for (const r of trong) { await tuDienThoiLuongBai(env, r.songId, r.title); }
++            })());
++          }
+         }
+-      }
+ 
+-      return Response.json({
+-        tongBai: results.length,
+-        danhSach: results.map(r => ({
+-          songId: r.songId,
+-          title: r.title || "Chua dat ten",
+-          tongThoiLuong: r.tongGiay ? giaySangPhutGiay(r.tongGiay) : "Chua cap nhat",
+-          tongGiay: Number(r.tongGiay) > 0 ? Number(r.tongGiay) : 0,
+-          themNgay: Number(r.ngayDoanDau) > 1e12 ? Number(r.ngayDoanDau) : (Number(r.updated_at) > 1e12 ? Number(r.updated_at) : 0),
+-          soDoan: r.soDoan,
+-          key: r.key1 || null,
+-          mode: r.mode1 || null,
+-          keyHienThi: r.key1 ? (r.key1 + " " + (r.mode1 === "minor" ? "Minor" : "Major")) : null
+-        }))
+-      }, { headers: corsHeaders });
++        return Response.json({
++          tongBai: results.length,
++          danhSach: results.map(r => ({
++            songId: r.songId,
++            title: r.title || "Chua dat ten",
++            tongThoiLuong: r.tongGiay ? giaySangPhutGiay(r.tongGiay) : "Chua cap nhat",
++            tongGiay: Number(r.tongGiay) > 0 ? Number(r.tongGiay) : 0,
++            themNgay: Number(r.ngayDoanDau) > 1e12 ? Number(r.ngayDoanDau) : (Number(r.updated_at) > 1e12 ? Number(r.updated_at) : 0),
++            soDoan: r.soDoan,
++            key: r.key1 || null,
++            mode: r.mode1 || null,
++            keyHienThi: r.key1 ? (r.key1 + " " + (r.mode1 === "minor" ? "Minor" : "Major")) : null
++          }))
++        }, { headers: corsHeaders });
++      } catch (e) {
++        return Response.json({ error: "loi_danh_sach: " + ((e && e.message) || e) }, { status: 500, headers: corsHeaders });
++      }
+     }
+ 
+     // ========== [9] SỬA KEY BÀI HÁT — CẦN MẬT KHẨU QUẢN TRỊ (ADMIN_TOKEN) ==========
+@@ -1396,6 +1419,8 @@
+     }
+ 
+     var OPT_KEY = '<option>C</option><option>C#</option><option>D</option><option>D#</option><option>E</option><option>F</option><option>F#</option><option>G</option><option>G#</option><option>A</option><option>A#</option><option>B</option>';
++    // [A95] Danh sach Key cho o chon trong bang "Tat Ca Bai": them lua chon trong (bai chua co Key thi chua chon san).
++    var OPT_KEY_HANG = '<option value="">Key</option>' + OPT_KEY;
+     // OLD-KEY-02: BANG BAI HAT kieu thu muc (Ten bai hat - Key - Thoi luong - Ngay them). Bam tieu de cot de sap xep; co o tim ten + loc Key.
+     var BANG = { rows: [], sapXep: 'ngay', giam: true };
+     var THU_TU_KEY = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+@@ -1444,15 +1469,22 @@
+         '<th class="sx" data-s="ten">Ten bai hat' + mui('ten') + '</th>' +
+         '<th class="sx" data-s="key">Key' + mui('key') + '</th>' +
+         '<th class="sx" data-s="tg">Thoi luong' + mui('tg') + '</th>' +
+-        '<th class="sx" data-s="ngay">Ngay them' + mui('ngay') + '</th></tr></thead><tbody>';
+-      if (!ds.length) h += '<tr><td colspan="4" class="empty">' + (tk || kf ? 'Khong tim thay bai nao' : 'Chua co bai hat nao duoc luu') + '</td></tr>';
++        '<th class="sx" data-s="ngay">Ngay them' + mui('ngay') + '</th>' +
++        '<th>Sua Key / Xoa</th></tr></thead><tbody>';
++      if (!ds.length) h += '<tr><td colspan="5" class="empty">' + (tk || kf ? 'Khong tim thay bai nao' : 'Chua co bai hat nao duoc luu') + '</td></tr>';
+       for (var j = 0; j < ds.length; j++) {
+         var b = ds[j];
+         h += '<tr class="hang-bai" data-songid="' + esc(b.songId) + '">' +
+           '<td>' + esc(b.title || 'Chua dat ten') + '</td>' +
+           '<td>' + (b.keyText ? '<span class="tag ' + (b.mode === 'minor' ? 'tag-minor' : 'tag-major') + '">' + esc(b.keyText) + '</span>' : '<span style="color:#888;">--</span>') + '</td>' +
+           '<td>' + esc(b.tongThoiLuong) + '</td>' +
+-          '<td>' + esc(dinhDangNgay(b.themNgay)) + '</td></tr>';
++          '<td>' + esc(dinhDangNgay(b.themNgay)) + '</td>' +
++          '<td style="white-space:nowrap;"><div style="display:flex; gap:6px; align-items:center;">' +
++            '<select class="hg-key" data-val="' + esc(b.key || '') + '" style="padding:8px; border-radius:6px; border:none;">' + OPT_KEY_HANG + '</select>' +
++            '<select class="hg-mode" data-val="' + esc(b.mode === 'minor' ? 'minor' : 'major') + '" style="padding:8px; border-radius:6px; border:none;"><option value="major">Truong</option><option value="minor">Phu</option></select>' +
++            '<button class="btn-primary hang-luu" data-songid="' + esc(b.songId) + '" data-sodoan="' + esc(b.soDoan) + '" style="padding:8px 12px;">Sua Key</button>' +
++            '<button class="hang-xoa" data-songid="' + esc(b.songId) + '" data-title="' + esc(b.title || b.songId) + '" style="background:#c62828; color:#fff; padding:8px 12px;">Xoa</button>' +
++          '</div></td></tr>';
+       }
+       h += '</tbody></table>';
+       div.innerHTML = h;
+@@ -1466,19 +1498,36 @@
+       }
+       var hs = div.querySelectorAll('tr.hang-bai');
+       for (var q = 0; q < hs.length; q++) {
+-        hs[q].addEventListener('click', function() { moBaiChiTiet(this.getAttribute('data-songid')); });
++        hs[q].addEventListener('click', function(ev) {
++          if (ev.target && ev.target.closest && ev.target.closest('select, button')) return;
++          moBaiChiTiet(this.getAttribute('data-songid'));
++        });
++      }
++      // [A95] O chon Key/Che do + nut "Sua Key" + nut "Xoa" o cot cuoi moi bai
++      var hk = div.querySelectorAll('select.hg-key'), hm = div.querySelectorAll('select.hg-mode');
++      for (var u = 0; u < hk.length; u++) { hk[u].value = hk[u].getAttribute('data-val') || ''; }
++      for (var w = 0; w < hm.length; w++) { hm[w].value = hm[w].getAttribute('data-val') === 'minor' ? 'minor' : 'major'; }
++      var hl = div.querySelectorAll('button.hang-luu');
++      for (var n = 0; n < hl.length; n++) {
++        hl[n].addEventListener('click', function(ev) { ev.stopPropagation(); suaKeyHang(this); });
++      }
++      var hx = div.querySelectorAll('button.hang-xoa');
++      for (var y = 0; y < hx.length; y++) {
++        hx[y].addEventListener('click', function(ev) { ev.stopPropagation(); xoaBaiDS(this); });
+       }
+     }
+-    async function taiDanhSach() {
++    async function taiDanhSach(imLang) {
+       var div = document.getElementById('bangBai');
+-      div.innerHTML = '<p class="empty">Dang tai...</p>';
++      if (!imLang) div.innerHTML = '<p class="empty">Dang tai...</p>';
+       try {
+         var res = await fetch(SERVER + '/list?all=1');
+         var data = await res.json();
++        if (!res.ok || data.error) throw new Error(data.error || ('HTTP ' + res.status));
+         var ds = data.danhSach || [], rows = [], keyGt = {};
+         for (var i = 0; i < ds.length; i++) {
+           var b = ds[i], ten = String(b.title || ''), bd = boDau(ten);
+           var r = { songId: b.songId, title: ten, chuaTen: (bd === '' || bd === 'chua dat ten'), key: b.key || null, mode: b.mode || null, keyText: b.keyHienThi || '',
++                    soDoan: Number(b.soDoan) || 0,
+                     tongThoiLuong: b.tongThoiLuong || '--', tongGiay: Number(b.tongGiay) || 0, themNgay: Number(b.themNgay) || 0 };
+           rows.push(r);
+           if (r.keyText) keyGt[r.keyText] = giaTriKey(r);
+@@ -1564,6 +1613,8 @@
+       kq.style.display = 'block';
+       kq.style.background = ok ? 'rgba(76,175,80,0.25)' : 'rgba(244,67,54,0.25)';
+       kq.innerText = text;
++      // [A95] Bao loi thi cuon len de nhin thay (danh sach dai, nut bam o duoi)
++      if (!ok) { try { kq.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {} }
+     }
+     function layMatKhau() {
+       var t = '';
+@@ -1599,6 +1650,26 @@
+         else hienKqDS(false, data.message || data.error || 'Loi');
+       } catch (err) { hienKqDS(false, 'Loi ket noi: ' + err.message); }
+     }
++    // [A95] Nut "Sua Key" o cot cuoi bang "Tat Ca Bai": doi Key (+ Truong/Phu) cua bai ngay tai dong do.
++    async function suaKeyHang(btn) {
++      var tr = btn.closest('tr');
++      if (!tr) return;
++      var n = Number(btn.getAttribute('data-sodoan')) || 0;
++      var key = tr.querySelector('select.hg-key').value;
++      if (!key) { hienKqDS(false, 'Hay chon Key truoc khi bam "Sua Key".'); return; }
++      var body = { songId: btn.getAttribute('data-songid'), key: key, mode: tr.querySelector('select.hg-mode').value };
++      if (n > 1) {
++        if (!confirm('Bai nay co ' + n + ' doan. Dat Key nay cho TAT CA ' + n + ' doan? (Muon sua tung doan: bam vao ten bai, cot "Sua doan nay")')) return;
++        body.all = true;
++      }
++      var token = layMatKhau();
++      if (!token) { hienKqDS(false, 'Chua nhap mat khau quan tri.'); return; }
++      try {
++        var data = await goiAdmin('/set-key', body, token);
++        if (data.ok) { nhoMatKhau(token); hienKqDS(true, 'Da sua ' + data.daSua + ' doan -> ' + data.keyHienThi); taiDanhSach(true); }
++        else hienKqDS(false, data.message || data.error || 'Loi');
++      } catch (err) { hienKqDS(false, 'Loi ket noi: ' + err.message); }
++    }
+     async function xoaBaiDS(btn) {
+       var id = btn.getAttribute('data-songid'), ten = btn.getAttribute('data-title') || id;
+       if (!confirm('XOA bai "' + ten + '" va tat ca Key cua bai khoi server? Khong hoan tac duoc.')) return;
+@@ -1606,7 +1677,7 @@
+       if (!token) { hienKqDS(false, 'Chua nhap mat khau quan tri.'); return; }
+       try {
+         var data = await goiAdmin('/delete-song', { songId: id, xacNhan: true }, token);
+-        if (data.ok) { nhoMatKhau(token); hienKqDS(true, 'Da xoa bai "' + ten + '" (' + data.daXoaDoan + ' doan Key).'); taiDanhSach(); }
++        if (data.ok) { nhoMatKhau(token); hienKqDS(true, 'Da xoa bai "' + ten + '" (' + data.daXoaDoan + ' doan Key).'); taiDanhSach(true); }
+         else hienKqDS(false, data.message || data.error || 'Loi');
+       } catch (err) { hienKqDS(false, 'Loi ket noi: ' + err.message); }
+     }
