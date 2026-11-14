@@ -1,10 +1,12 @@
 // ============================================================
 //  AUTO_MENU_AI — Key Server (Cloudflare Worker + D1)
-//  Phiên bản: 2.5 (hoàn chỉnh, 2 chiều, hỗ trợ MENU & Auto-Tune)
+//  Phiên bản: 2.6 (hoàn chỉnh, 2 chiều, hỗ trợ MENU & Auto-Tune)
 //  [A92] Thêm: thời lượng YouTube qua Data API (YOUTUBE_API_KEY), tự điền thời lượng khi thiếu, /count
 //  [A93] Thêm: tự điền thời lượng cho bài của Menu (ID app_xxxx) bằng cách tìm theo TÊN trên YouTube, chạy nền, chỉ lưu khi tên khớp đúng
 //  [A94] Thêm: bài trùng tên (vd bản Menu app_xxxx + bản Extension ID YouTube) dùng chung thời lượng — chỉ điền chỗ trống, KHÔNG xoá/gộp dòng nào
 //  [A95] Sửa: /list không còn văng lỗi 1101 (HTML) — luôn trả JSON, có truy vấn dự phòng. Thêm: nút "Sua Key" + "Xoa" ngay cạnh "Ngay them" ở mỗi bài.
+//  [A96] Giảm số dòng ĐỌC D1 (gói miễn phí chỉ 5 triệu dòng/ngày, hết là /list, /find... lỗi tới 7h sáng giờ VN): nhớ tạm kết quả /find, /list, /count
+//        trong bộ nhớ Worker vài chục giây; mọi thao tác ghi đều xoá cache. Trang dùng &fresh=1 sau khi sửa/xoá để thấy dữ liệu mới ngay.
 // ============================================================
 
 export default {
@@ -92,6 +94,7 @@ export default {
           (song_id, title, total_duration_sec, note, updated_at)
           VALUES (?, ?, ?, ?, strftime('%s','now') * 1000)
         `).bind(songId, title || null, giayLuu, note || null).run();
+        xoaCache(); // [A96]
 
         // [A93] Bài của Menu (ID app_xxxx) chưa có thời lượng -> chạy NỀN tìm theo tên trên YouTube (không làm chậm phản hồi cho Menu).
         if (!giayLuu && title && !laIdYouTube(String(songId)) && ctx && ctx.waitUntil) {
@@ -149,6 +152,7 @@ export default {
           (song_id, start_sec, end_sec, key, mode, weight, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `).bind(songId, startSec, endSec, kq.key, kq.mode, weight, trangThai.dauTien).run();
+        xoaCache(); // [A96]
         // created_at = thời điểm đoạn đầu tiên của bài (KHÔNG làm mới khi sửa) -> bài đã biết không bị "mở khoá" lại sau mỗi lần sửa.
 
         // [A83] Extension gửi kèm tên bài: nếu bài chưa có thông tin (người dùng chưa bấm "Lưu Thông Tin Bài") thì tạo luôn.
@@ -170,6 +174,7 @@ export default {
               VALUES (?, ?, ?, ?, strftime('%s','now') * 1000)
             `).bind(songId, tenBai, durGiay, "nguon: extension").run();
             taoThongTin = true;
+            xoaCache(); // [A96]
             // [A93] ID không phải YouTube mà vẫn thiếu thời lượng -> tìm nền theo tên.
             if (!durGiay && !laIdYouTube(songId) && ctx && ctx.waitUntil) {
               ctx.waitUntil(tuDienThoiLuongTheoTen(env, songId, tenBai));
@@ -289,6 +294,16 @@ export default {
         const xemHet = url.searchParams.get("all") === "1";
         const gioiHan = xemHet ? 5000 : 100;
         const tuKhoa = chuanHoaTen(url.searchParams.get("q") || "");
+
+        // [A96] Cache: cùng 1 danh sách được hỏi lại trong 60 giây thì trả luôn, không chạm D1.
+        //       fresh=1 (trang gửi sau khi sửa/xoá hoặc bấm "Tai lai") bỏ qua cache, nhưng chỉ khi cache đã cũ >= 3 giây (chống bấm liên tục).
+        const cKeyDs = "list|" + (xemHet ? "1" : "0") + "|" + tuKhoa;
+        const daNhoDs = cacheGet(cKeyDs);
+        const lamMoiDs = url.searchParams.get("fresh") === "1";
+        if (daNhoDs && !(lamMoiDs && (Date.now() - daNhoDs.t) >= CACHE_LAM_MOI_TOI_THIEU_MS)) {
+          return Response.json(daNhoDs.body, { headers: corsHeaders });
+        }
+
         let results;
         try {
           const r1 = await env.DB.prepare(`
@@ -326,7 +341,7 @@ export default {
           }
         }
 
-        return Response.json({
+        const bodyDs = {
           tongBai: results.length,
           danhSach: results.map(r => ({
             songId: r.songId,
@@ -339,7 +354,9 @@ export default {
             mode: r.mode1 || null,
             keyHienThi: r.key1 ? (r.key1 + " " + (r.mode1 === "minor" ? "Minor" : "Major")) : null
           }))
-        }, { headers: corsHeaders });
+        };
+        cacheSet(cKeyDs, bodyDs, CACHE_TTL_LIST_MS);
+        return Response.json(bodyDs, { headers: corsHeaders });
       } catch (e) {
         return Response.json({ error: "loi_danh_sach: " + ((e && e.message) || e) }, { status: 500, headers: corsHeaders });
       }
@@ -404,6 +421,7 @@ export default {
         }
 
         await env.DB.prepare(`UPDATE song_info SET updated_at = strftime('%s','now') * 1000 WHERE song_id = ?`).bind(songId).run();
+        xoaCache(); // [A96]
         return Response.json({ ok: true, songId, daSua, key, mode, keyHienThi: key + " " + (mode === "minor" ? "Minor" : "Major") }, { headers: corsHeaders });
       } catch (e) {
         return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
@@ -421,6 +439,12 @@ export default {
         return Response.json({ found: false, error: "thieu title" }, { status: 400, headers: corsHeaders });
       }
 
+      // [A96] Cache: Menu hỏi lại cùng 1 bài thì trả luôn, không quét lại tới 1000 bài trong D1.
+      //       Tìm thấy: nhớ 120 giây. Không thấy: chỉ nhớ 30 giây (để bài vừa thêm sớm được Menu thấy).
+      const cKeyFind = "find|" + q + "|" + chuanHoaTen(artist);
+      const daNhoFind = cacheGet(cKeyFind);
+      if (daNhoFind) return Response.json(daNhoFind.body, { headers: corsHeaders });
+
       try {
         const { results: songs } = await env.DB.prepare(`
           SELECT song_id as songId, title FROM song_info ORDER BY updated_at DESC LIMIT 1000
@@ -428,6 +452,7 @@ export default {
 
         const best = timBaiKhopNhat(songs || [], q, chuanHoaTen(artist));
         if (!best) {
+          cacheSet(cKeyFind, { found: false }, CACHE_TTL_FIND_KHONG_MS);
           return Response.json({ found: false }, { headers: corsHeaders });
         }
 
@@ -437,10 +462,11 @@ export default {
         `).bind(best.songId).all();
 
         if (!segs || segs.length === 0) {
+          cacheSet(cKeyFind, { found: false }, CACHE_TTL_FIND_KHONG_MS);
           return Response.json({ found: false }, { headers: corsHeaders });
         }
 
-        return Response.json({
+        const bodyFind = {
           found: true,
           songId: best.songId,
           title: best.title,
@@ -449,7 +475,9 @@ export default {
           startSec: segs[0].startSec,
           endSec: segs[0].endSec,
           tongDoan: segs.length
-        }, { headers: corsHeaders });
+        };
+        cacheSet(cKeyFind, bodyFind, CACHE_TTL_FIND_DUNG_MS);
+        return Response.json(bodyFind, { headers: corsHeaders });
       } catch (e) {
         return Response.json({ found: false, error: e.message }, { status: 500, headers: corsHeaders });
       }
@@ -485,6 +513,7 @@ export default {
           env.DB.prepare(`DELETE FROM song_key_segments WHERE song_id = ?`).bind(songId),
           env.DB.prepare(`DELETE FROM song_info WHERE song_id = ?`).bind(songId)
         ]);
+        xoaCache(); // [A96]
 
         return Response.json({
           ok: true,
@@ -627,15 +656,20 @@ export default {
     // [A92] GET /count -> tổng số bài trên server (chỉ ĐỌC, không ghi gì)
     if (url.pathname === "/count" && request.method === "GET") {
       try {
+        // [A96] Cache 60 giây (3 câu đếm này đọc toàn bộ bảng mỗi lần).
+        const daNhoCount = cacheGet("count");
+        if (daNhoCount) return Response.json(daNhoCount.body, { headers: corsHeaders });
         const a = await env.DB.prepare(`SELECT COUNT(*) as n FROM song_info`).first();
         const b = await env.DB.prepare(`SELECT COUNT(DISTINCT song_id) as n FROM song_key_segments`).first();
         const c = await env.DB.prepare(`SELECT COUNT(*) as n FROM song_info WHERE total_duration_sec > 0`).first();
-        return Response.json({
+        const bodyCount = {
           ok: true,
           tongBai: (a && a.n) || 0,
           baiCoKey: (b && b.n) || 0,
           baiCoThoiLuong: (c && c.n) || 0
-        }, { headers: corsHeaders });
+        };
+        cacheSet("count", bodyCount, CACHE_TTL_COUNT_MS);
+        return Response.json(bodyCount, { headers: corsHeaders });
       } catch (e) {
         return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
       }
@@ -644,6 +678,31 @@ export default {
     return Response.json({ error: "not_found" }, { status: 404, headers: corsHeaders });
   }
 };
+
+// ========== [A96] BỘ NHỚ TẠM (CACHE) GIẢM SỐ DÒNG ĐỌC D1 ==========
+// Gói miễn phí D1 chỉ cho 5 triệu dòng đọc/ngày. /find (quét tới 1000 bài), /list và /count đọc rất nhiều dòng mỗi lần gọi,
+// nên nhớ tạm kết quả vài chục giây trong bộ nhớ của Worker: cùng 1 câu hỏi lặp lại không chạm D1.
+// - Chỉ nhớ kết quả THÀNH CÔNG (lỗi không bao giờ được nhớ).
+// - Mọi thao tác GHI đi qua server này (/add-segment, /set-key, /delete-song, /set-song-info, thời lượng) gọi xoaCache() -> xoá sạch.
+// - Worker có thể chạy nhiều bản song song; bản khác có thể còn giữ dữ liệu cũ tối đa bằng thời hạn (TTL) dưới đây. D1 thật không bị đổi gì.
+const CACHE_TTL_LIST_MS = 60 * 1000;
+const CACHE_TTL_COUNT_MS = 60 * 1000;
+const CACHE_TTL_FIND_DUNG_MS = 120 * 1000;   // /find tìm thấy bài
+const CACHE_TTL_FIND_KHONG_MS = 30 * 1000;   // /find không thấy bài (ngắn để bài vừa thêm sớm được Menu thấy)
+const CACHE_LAM_MOI_TOI_THIEU_MS = 3 * 1000; // fresh=1 chỉ được nghe khi cache đã cũ >= 3 giây
+const CACHE_TOI_DA = 200;
+const CACHE = new Map(); // khoá -> { t: thời điểm lưu, ttl, body }
+function cacheGet(khoa) {
+  const e = CACHE.get(khoa);
+  if (!e) return null;
+  if (Date.now() - e.t >= e.ttl) { CACHE.delete(khoa); return null; }
+  return e;
+}
+function cacheSet(khoa, body, ttl) {
+  if (CACHE.size >= CACHE_TOI_DA) CACHE.delete(CACHE.keys().next().value);
+  CACHE.set(khoa, { t: Date.now(), ttl, body });
+}
+function xoaCache() { CACHE.clear(); }
 
 // ========== KIỂM TRA QUYỀN SỬA (mật khẩu quản trị) ==========
 // Trả null nếu hợp lệ; ngược lại trả sẵn Response lỗi.
@@ -966,6 +1025,7 @@ async function luuThoiLuong(env, songId, giay, coDong) {
     `).bind(songId, giay).run();
   }
   await chepThoiLuongChoBaiCungTen(env, songId); // [A94] chép sang bài trùng tên đang trống (lỗi thì bỏ qua)
+  xoaCache(); // [A96]
 }
 
 // ========== [A83] BÀI MỚI / BÀI ĐÃ BIẾT ==========
@@ -1516,11 +1576,12 @@ function taoTrangChu() {
         hx[y].addEventListener('click', function(ev) { ev.stopPropagation(); xoaBaiDS(this); });
       }
     }
-    async function taiDanhSach(imLang) {
+    // [A96] imLang = tai ngam (khong hien "Dang tai..."); lamMoi = bo qua cache server (dung sau khi sua/xoa va khi bam "Tai lai").
+    async function taiDanhSach(imLang, lamMoi) {
       var div = document.getElementById('bangBai');
       if (!imLang) div.innerHTML = '<p class="empty">Dang tai...</p>';
       try {
-        var res = await fetch(SERVER + '/list?all=1');
+        var res = await fetch(SERVER + '/list?all=1' + ((imLang || lamMoi) ? '&fresh=1' : ''));
         var data = await res.json();
         if (!res.ok || data.error) throw new Error(data.error || ('HTTP ' + res.status));
         var ds = data.danhSach || [], rows = [], keyGt = {};
@@ -1548,7 +1609,7 @@ function taoTrangChu() {
     document.getElementById('timTenBai').addEventListener('input', veBang);
     document.getElementById('locKey').addEventListener('change', veBang);
     document.getElementById('hienChuaTen').addEventListener('change', veBang);
-    document.getElementById('btnLamMoiDS').addEventListener('click', function() { taiDanhSach(); });
+    document.getElementById('btnLamMoiDS').addEventListener('click', function() { taiDanhSach(false, true); });
     // Danh sach tat ca bai (kieu cu, khong con dung)
     async function taiDanhSachCu() {
       var res = await fetch(SERVER + '/list');
