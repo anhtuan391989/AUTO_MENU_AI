@@ -63,31 +63,79 @@ function normalizeForMatch(value) {
 
 class SongMatcher {
 
+    // Chuẩn hoá để SO SÁNH TRÙNG (bỏ dấu, hạ chữ thường, gộp khoảng trắng) —
+    // KHÔNG bỏ cụm nhiễu như "(Karaoke)", để 2 bản ghi khác bản không bị coi là một.
+    fold(value) {
+
+        return stripDiacritics(value).toLowerCase().replace(/\s+/g, " ").trim();
+
+    }
+
     // Trả về Song Reference (object) nếu tìm thấy, ngược lại trả về null.
+    // Cùng tên nhưng khác ca sĩ mà không đủ căn cứ chọn bài nào -> null (KHÔNG đoán bừa:
+    // Key sai tệ hơn là để AI tự dò). Xem resolve() để biết lý do null.
     findReference(title, artist) {
 
-        if (!title || !String(title).trim()) return null;
+        return this.resolve(title, artist).song;
 
-        // Bước 1: thử so khớp chính xác trước (nhanh, đúng ngay nếu dữ liệu sạch).
-        const exact = SongDatabase.getSong(title, artist);
-        if (exact) return exact;
+    }
 
-        // Bước 2: so khớp mờ trên toàn bộ danh sách.
+    // Như findReference nhưng nói rõ lý do khi không có kết quả:
+    //   { song, ambiguous } — ambiguous=true nghĩa là CÓ nhiều bản ghi cùng tên, khác Key, không phân biệt được.
+    resolve(title, artist) {
+
+        if (!title || !String(title).trim()) return { song: null, ambiguous: false };
+
         const songs = SongDatabase.load();
         const normTitle = normalizeForMatch(title);
         const normArtist = artist ? normalizeForMatch(artist) : null;
 
-        if (!normTitle) return null;
+        // Khớp CHÍNH XÁC (chỉ hoa/thường + khoảng trắng, giống SongDatabase.getSong) — ưu tiên số 1.
+        const exactTitle = SongDatabase._normalize(title);
+        const exactArtist = artist !== undefined && artist !== null && artist !== "" ? SongDatabase._normalize(artist) : null;
+        const exact = songs.filter((s) => {
 
-        const found = songs.find((s) => {
+            if (SongDatabase._normalize(s.title) !== exactTitle) return false;
+            if (exactArtist !== null && SongDatabase._normalize(s.artist) !== exactArtist) return false;
+            return true;
+
+        });
+
+        // Khớp "mờ": bỏ dấu + bỏ cụm nhiễu.
+        const fuzzy = normTitle ? songs.filter((s) => {
 
             if (normalizeForMatch(s.title) !== normTitle) return false;
             if (normArtist && s.artist && normalizeForMatch(s.artist) !== normArtist) return false; // bản ghi kéo từ server chưa có ca sĩ (artist rỗng) vẫn khớp theo tên
             return true;
 
-        });
+        }) : [];
 
-        return found || null;
+        const pool = exact.length ? exact : fuzzy;
+
+        if (pool.length === 0) return { song: null, ambiguous: false };
+        if (pool.length === 1) return { song: pool[0], ambiguous: false };
+
+        // Nhiều bản ghi cùng tên. Biết ca sĩ -> ưu tiên bản ghi CÓ ca sĩ khớp (bản ghi artist rỗng yếu hơn).
+        let narrowed = pool;
+
+        if (normArtist) {
+
+            const withArtist = pool.filter((s) => s.artist && normalizeForMatch(s.artist) === normArtist);
+            if (withArtist.length) narrowed = withArtist;
+
+        }
+
+        if (narrowed.length === 1) return { song: narrowed[0], ambiguous: false };
+
+        // Vẫn còn nhiều bản ghi: nếu tất cả cùng Key thì chọn bản đầu cũng không sai Key.
+        const keyOf = (s) => String((s && s.key) || "").trim().toLowerCase();
+        const firstKey = keyOf(narrowed[0]);
+
+        if (narrowed.every((s) => keyOf(s) === firstKey)) return { song: narrowed[0], ambiguous: false };
+
+        console.log(`[SongMatcher] Bài trùng tên, khác Key, thiếu ca sĩ để phân biệt -> không chọn (title="${title}", ${narrowed.length} bản ghi)`);
+
+        return { song: null, ambiguous: true };
 
     }
 

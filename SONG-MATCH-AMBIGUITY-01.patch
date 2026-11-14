@@ -1,0 +1,253 @@
+From ebd409a213812e7d0ff1679f39aeff9ad10bae5f Mon Sep 17 00:00:00 2001
+From: Claude A <claude-a@local>
+Date: Sat, 14 Nov 2026 11:00:38 +0000
+Subject: [PATCH] A: SONG-MATCH-AMBIGUITY-01 - bai trung ten khong doan bua +
+ import khong trung khac dau
+
+---
+ core/reference/SongDbAdmin.js             |   8 +-
+ core/reference/SongMatcher.js             |  66 ++++++++++++--
+ tests/unit/SongMatchAmbiguity01.verify.js | 100 ++++++++++++++++++++++
+ 3 files changed, 163 insertions(+), 11 deletions(-)
+ create mode 100644 tests/unit/SongMatchAmbiguity01.verify.js
+
+diff --git a/core/reference/SongDbAdmin.js b/core/reference/SongDbAdmin.js
+index 7e4554e..9673a06 100644
+--- a/core/reference/SongDbAdmin.js
++++ b/core/reference/SongDbAdmin.js
+@@ -1,6 +1,7 @@
+ const fs = require("fs");
+ const SongDatabase = require("./SongDatabase");
+ const SongCollectorState = require("./SongCollectorState");
++const SongMatcher = require("./SongMatcher");
+ 
+ /**
+  * ==========================================================
+@@ -16,6 +17,9 @@ const SongCollectorState = require("./SongCollectorState");
+ 
+ const norm = (v) => String(v || "").trim().toLowerCase();
+ const keyOf = (s) => norm(s.title) + "|" + norm(s.artist);
++// Khoá chống trùng khi NHẬP: bỏ dấu nữa, để "Đêm Trắng" và "dem trang" (cùng ca sĩ) không thành 2 bản ghi.
++// Chỉ dùng cho importSongs (chỉ bỏ qua, không xoá gì); rebuild vẫn dùng keyOf cũ vì rebuild XOÁ bản ghi.
++const foldKeyOf = (s) => SongMatcher.fold(s.title) + "|" + SongMatcher.fold(s.artist);
+ 
+ // Chuẩn hoá 1 bản ghi đúng định dạng SongDatabase; null nếu không hợp lệ (thiếu title / không phải object).
+ function cleanEntry(s) {
+@@ -70,13 +74,13 @@ function importSongs(list, db = SongDatabase) {
+     if (!Array.isArray(list)) return { ok: false, error: "File phải chứa một mảng (danh sách) bài hát." };
+     let existing;
+     try { existing = db.load(); } catch (err) { return { ok: false, error: err.message }; }
+-    const seen = new Set(existing.map(keyOf));
++    const seen = new Set(existing.map(foldKeyOf));
+     const merged = existing.slice();
+     let added = 0, duplicates = 0, invalid = 0;
+     for (const raw of list) {
+         const e = cleanEntry(raw);
+         if (!e) { invalid++; continue; }
+-        const k = keyOf(e);
++        const k = foldKeyOf(e);
+         if (seen.has(k)) { duplicates++; continue; }
+         seen.add(k); merged.push(e); added++;
+     }
+diff --git a/core/reference/SongMatcher.js b/core/reference/SongMatcher.js
+index 1e1367c..fb1fb75 100644
+--- a/core/reference/SongMatcher.js
++++ b/core/reference/SongMatcher.js
+@@ -63,31 +63,79 @@ function normalizeForMatch(value) {
+ 
+ class SongMatcher {
+ 
++    // Chuẩn hoá để SO SÁNH TRÙNG (bỏ dấu, hạ chữ thường, gộp khoảng trắng) —
++    // KHÔNG bỏ cụm nhiễu như "(Karaoke)", để 2 bản ghi khác bản không bị coi là một.
++    fold(value) {
++
++        return stripDiacritics(value).toLowerCase().replace(/\s+/g, " ").trim();
++
++    }
++
+     // Trả về Song Reference (object) nếu tìm thấy, ngược lại trả về null.
++    // Cùng tên nhưng khác ca sĩ mà không đủ căn cứ chọn bài nào -> null (KHÔNG đoán bừa:
++    // Key sai tệ hơn là để AI tự dò). Xem resolve() để biết lý do null.
+     findReference(title, artist) {
+ 
+-        if (!title || !String(title).trim()) return null;
++        return this.resolve(title, artist).song;
++
++    }
+ 
+-        // Bước 1: thử so khớp chính xác trước (nhanh, đúng ngay nếu dữ liệu sạch).
+-        const exact = SongDatabase.getSong(title, artist);
+-        if (exact) return exact;
++    // Như findReference nhưng nói rõ lý do khi không có kết quả:
++    //   { song, ambiguous } — ambiguous=true nghĩa là CÓ nhiều bản ghi cùng tên, khác Key, không phân biệt được.
++    resolve(title, artist) {
++
++        if (!title || !String(title).trim()) return { song: null, ambiguous: false };
+ 
+-        // Bước 2: so khớp mờ trên toàn bộ danh sách.
+         const songs = SongDatabase.load();
+         const normTitle = normalizeForMatch(title);
+         const normArtist = artist ? normalizeForMatch(artist) : null;
+ 
+-        if (!normTitle) return null;
++        // Khớp CHÍNH XÁC (chỉ hoa/thường + khoảng trắng, giống SongDatabase.getSong) — ưu tiên số 1.
++        const exactTitle = SongDatabase._normalize(title);
++        const exactArtist = artist !== undefined && artist !== null && artist !== "" ? SongDatabase._normalize(artist) : null;
++        const exact = songs.filter((s) => {
++
++            if (SongDatabase._normalize(s.title) !== exactTitle) return false;
++            if (exactArtist !== null && SongDatabase._normalize(s.artist) !== exactArtist) return false;
++            return true;
++
++        });
+ 
+-        const found = songs.find((s) => {
++        // Khớp "mờ": bỏ dấu + bỏ cụm nhiễu.
++        const fuzzy = normTitle ? songs.filter((s) => {
+ 
+             if (normalizeForMatch(s.title) !== normTitle) return false;
+             if (normArtist && s.artist && normalizeForMatch(s.artist) !== normArtist) return false; // bản ghi kéo từ server chưa có ca sĩ (artist rỗng) vẫn khớp theo tên
+             return true;
+ 
+-        });
++        }) : [];
++
++        const pool = exact.length ? exact : fuzzy;
++
++        if (pool.length === 0) return { song: null, ambiguous: false };
++        if (pool.length === 1) return { song: pool[0], ambiguous: false };
++
++        // Nhiều bản ghi cùng tên. Biết ca sĩ -> ưu tiên bản ghi CÓ ca sĩ khớp (bản ghi artist rỗng yếu hơn).
++        let narrowed = pool;
++
++        if (normArtist) {
++
++            const withArtist = pool.filter((s) => s.artist && normalizeForMatch(s.artist) === normArtist);
++            if (withArtist.length) narrowed = withArtist;
++
++        }
++
++        if (narrowed.length === 1) return { song: narrowed[0], ambiguous: false };
++
++        // Vẫn còn nhiều bản ghi: nếu tất cả cùng Key thì chọn bản đầu cũng không sai Key.
++        const keyOf = (s) => String((s && s.key) || "").trim().toLowerCase();
++        const firstKey = keyOf(narrowed[0]);
++
++        if (narrowed.every((s) => keyOf(s) === firstKey)) return { song: narrowed[0], ambiguous: false };
++
++        console.log(`[SongMatcher] Bài trùng tên, khác Key, thiếu ca sĩ để phân biệt -> không chọn (title="${title}", ${narrowed.length} bản ghi)`);
+ 
+-        return found || null;
++        return { song: null, ambiguous: true };
+ 
+     }
+ 
+diff --git a/tests/unit/SongMatchAmbiguity01.verify.js b/tests/unit/SongMatchAmbiguity01.verify.js
+new file mode 100644
+index 0000000..25c8a4a
+--- /dev/null
++++ b/tests/unit/SongMatchAmbiguity01.verify.js
+@@ -0,0 +1,100 @@
++/**
++ * ==========================================================
++ * Auto Menu AI — SONG-MATCH-AMBIGUITY-01
++ * Kiểm chứng: tìm bài không dấu + xử lý bài trùng tên (SongMatcher) + nhập không trùng khác dấu (SongDbAdmin).
++ * Chạy: node tests/unit/SongMatchAmbiguity01.verify.js
++ * Dùng file data tạm trong thư mục temp của OS — KHÔNG đụng data/songs.json thật.
++ * ==========================================================
++ */
++
++const fs = require("fs");
++const os = require("os");
++const path = require("path");
++
++const ROOT = path.resolve(__dirname, "../..");
++let pass = 0, fail = 0;
++function ok(cond, msg) {
++    if (cond) { pass++; console.log("  ✅ " + msg); } else { fail++; console.log("  ❌ " + msg); }
++}
++
++const TMP = path.join(os.tmpdir(), `automenu_ambig_${Date.now()}.json`);
++const SongDatabase = require(path.join(ROOT, "core/reference/SongDatabase.js"));
++SongDatabase.filePath = TMP;
++const SongMatcher = require(path.join(ROOT, "core/reference/SongMatcher.js"));
++const SongDbAdmin = require(path.join(ROOT, "core/reference/SongDbAdmin.js"));
++
++const origLog = console.log;
++function quiet(fn) { console.log = () => {}; try { return fn(); } finally { console.log = origLog; } }
++function setDb(list) { fs.writeFileSync(TMP, JSON.stringify(list), "utf-8"); }
++
++try {
++
++    console.log("=== A. Tìm không dấu (đã có từ trước, khoá lại bằng test) ===");
++    setDb([{ title: "Đêm Trắng", artist: "Hà Anh Tuấn", key: "A Minor" }]);
++    ok((SongMatcher.findReference("dem trang") || {}).key === "A Minor", "'dem trang' tìm ra 'Đêm Trắng'");
++    ok((SongMatcher.findReference("ĐÊM TRẮNG (Karaoke)") || {}).key === "A Minor", "Tên có hậu tố '(Karaoke)' vẫn tìm ra");
++    ok((SongMatcher.findReference("Dem Trang", "ha anh tuan") || {}).key === "A Minor", "Ca sĩ không dấu 'ha anh tuan' vẫn khớp");
++    ok(SongMatcher.findReference("Bài Không Có") === null, "Bài không có -> null");
++    ok(SongMatcher.findReference("") === null && SongMatcher.findReference(null) === null, "Title rỗng/null -> null, không throw");
++
++    console.log("=== B. Bài trùng tên, khác ca sĩ ===");
++    setDb([
++        { title: "Em Ơi", artist: "Ca Sĩ A", key: "C Major" },
++        { title: "Em Ơi", artist: "Ca Sĩ B", key: "D Major" }
++    ]);
++    const amb = quiet(() => SongMatcher.resolve("em oi", ""));
++    ok(amb.song === null && amb.ambiguous === true, "Không biết ca sĩ + khác Key -> null và ambiguous=true (không đoán bừa)");
++    ok(quiet(() => SongMatcher.findReference("Em Ơi")) === null, "findReference trả null khi mơ hồ");
++    ok((SongMatcher.findReference("Em Ơi", "Ca Sĩ B") || {}).key === "D Major", "Có ca sĩ B -> chọn đúng Key D");
++    ok((SongMatcher.findReference("em oi", "ca si a") || {}).key === "C Major", "Ca sĩ viết không dấu/thường -> chọn đúng Key C");
++    ok(SongMatcher.resolve("Em Ơi", "Ca Sĩ C").song === null && SongMatcher.resolve("Em Ơi", "Ca Sĩ C").ambiguous === false, "Ca sĩ lạ (không có trong DB) -> null nhưng KHÔNG coi là mơ hồ");
++
++    console.log("=== C. Trùng tên nhưng cùng Key thì chọn được ===");
++    setDb([
++        { title: "Bài X", artist: "A", key: "G Major" },
++        { title: "Bài X", artist: "B", key: "g major" }
++    ]);
++    ok((SongMatcher.findReference("Bài X") || {}).key === "G Major", "Cùng Key (khác hoa/thường) -> chọn bản đầu, vẫn đúng Key");
++
++    console.log("=== D. Ưu tiên khớp chính xác; bản ghi artist rỗng yếu hơn ===");
++    setDb([
++        { title: "dem trang", artist: "", key: "C Major" },
++        { title: "Đêm Trắng", artist: "", key: "A Minor" }
++    ]);
++    ok((SongMatcher.findReference("Đêm Trắng") || {}).key === "A Minor", "Có bản khớp chính xác (đúng dấu) -> ưu tiên bản đó");
++    setDb([
++        { title: "Mưa Chiều", artist: "", key: "E Minor" },
++        { title: "Mưa Chiều", artist: "Ca Sĩ Z", key: "F Major" }
++    ]);
++    ok((SongMatcher.findReference("mua chieu", "Ca Sĩ Z") || {}).key === "F Major", "Biết ca sĩ -> ưu tiên bản có ca sĩ khớp hơn bản artist rỗng");
++
++    console.log("=== E. Hành vi cũ giữ nguyên ===");
++    setDb([{ title: "Chỉ Một Bài", artist: "", key: "B Major" }]);
++    ok((SongMatcher.findReference("Chỉ Một Bài", "ai đó") || {}).key === "B Major", "Bản ghi artist rỗng (kéo từ server) vẫn khớp theo tên");
++    ok(typeof SongMatcher.sameRecording === "function" && SongMatcher.sameRecording({ durationSec: 200 }, 200) === true, "sameRecording vẫn hoạt động");
++
++    console.log("=== F. Nhập (importSongs) không tạo bài trùng khác dấu ===");
++    const fakeDb = { filePath: TMP + ".x", data: [{ title: "Đêm Trắng", artist: "Hà Anh Tuấn", key: "A Minor" }], load() { return this.data; }, save(v) { this.data = v; } };
++    const r = SongDbAdmin.importSongs([
++        { title: "dem trang", artist: "ha anh tuan", key: "C Major" },
++        { title: "Đêm Trắng", artist: "Ca Sĩ Khác", key: "D Major" },
++        { title: "  ", artist: "x" }
++    ], fakeDb);
++    ok(r.ok && r.added === 1 && r.duplicates === 1 && r.invalid === 1, "Bản khác dấu bị bỏ qua (duplicates=1), bản khác ca sĩ được thêm (added=1), bản sai bị đếm invalid");
++    ok(fakeDb.data.length === 2 && fakeDb.data[0].key === "A Minor", "Bản ghi cũ không bị ghi đè");
++    const fakeDb2 = { filePath: TMP + ".y", data: [{ title: "Đêm Trắng", artist: "A", key: "C Major" }, { title: "dem trang", artist: "A", key: "D Major" }], load() { return this.data; }, save(v) { this.data = v; } };
++    const rb = SongDbAdmin.rebuild(fakeDb2, { size: 0, clear() {} });
++    ok(rb.ok && rb.after === 2 && rb.duplicates === 0, "rebuild KHÔNG đổi: không xoá bản khác dấu (tránh xoá nhầm dữ liệu)");
++
++    console.log("=== G. Phạm vi sửa ===");
++    const main = fs.readFileSync(path.join(ROOT, "app/main.js"), "utf-8");
++    ok(/SongMatcher\.findReference\(resolved\.title, resolved\.artist\)/.test(main), "app/main.js vẫn gọi findReference đúng như cũ (không sửa main.js)");
++    const matcherSrc = fs.readFileSync(path.join(ROOT, "core/reference/SongMatcher.js"), "utf-8");
++    ok(!/document\.|require\(["']electron["']\)|keyEngine|EventBus/.test(matcherSrc), "SongMatcher không chạm giao diện / Electron / Key Engine / EventBus");
++
++} finally {
++    for (const f of [TMP]) { try { fs.unlinkSync(f); } catch (e) { /* không có thì thôi */ } }
++}
++
++console.log(`\n== TỔNG KẾT: ${pass} PASS, ${fail} FAIL ==`);
++process.exit(fail ? 1 : 0);
+-- 
+2.43.0
+

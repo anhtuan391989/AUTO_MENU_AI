@@ -1,6 +1,7 @@
 const fs = require("fs");
 const SongDatabase = require("./SongDatabase");
 const SongCollectorState = require("./SongCollectorState");
+const SongMatcher = require("./SongMatcher");
 
 /**
  * ==========================================================
@@ -16,6 +17,9 @@ const SongCollectorState = require("./SongCollectorState");
 
 const norm = (v) => String(v || "").trim().toLowerCase();
 const keyOf = (s) => norm(s.title) + "|" + norm(s.artist);
+// Khoá chống trùng khi NHẬP: bỏ dấu nữa, để "Đêm Trắng" và "dem trang" (cùng ca sĩ) không thành 2 bản ghi.
+// Chỉ dùng cho importSongs (chỉ bỏ qua, không xoá gì); rebuild vẫn dùng keyOf cũ vì rebuild XOÁ bản ghi.
+const foldKeyOf = (s) => SongMatcher.fold(s.title) + "|" + SongMatcher.fold(s.artist);
 
 // Chuẩn hoá 1 bản ghi đúng định dạng SongDatabase; null nếu không hợp lệ (thiếu title / không phải object).
 function cleanEntry(s) {
@@ -70,13 +74,13 @@ function importSongs(list, db = SongDatabase) {
     if (!Array.isArray(list)) return { ok: false, error: "File phải chứa một mảng (danh sách) bài hát." };
     let existing;
     try { existing = db.load(); } catch (err) { return { ok: false, error: err.message }; }
-    const seen = new Set(existing.map(keyOf));
+    const seen = new Set(existing.map(foldKeyOf));
     const merged = existing.slice();
     let added = 0, duplicates = 0, invalid = 0;
     for (const raw of list) {
         const e = cleanEntry(raw);
         if (!e) { invalid++; continue; }
-        const k = keyOf(e);
+        const k = foldKeyOf(e);
         if (seen.has(k)) { duplicates++; continue; }
         seen.add(k); merged.push(e); added++;
     }
