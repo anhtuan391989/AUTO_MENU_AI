@@ -36,7 +36,7 @@ const parseMacro = (dir, name) => {
     const sent = [];
     const store = { selectedDAW: 'studio-one', dawMidiOutMappings: { 'studio-one': Object.fromEntries(TABLE.map(([a, cc]) => [a, { kind: 'cc', channel: 16, number: cc, value: 127, source: 'USER_DEFINED' }])) } };
     const sb = { console: { log() {}, error() {}, warn() {} }, setTimeout, clearTimeout, Date, Math, Promise, getSetting: (k, f) => (store[k] === undefined ? f : store[k]), setSetting: (k, v) => { store[k] = v; }, electronAPI: {},
-        sendMidiCC: async (n, v, ch) => { sent.push([0xb0 | ch, n, v]); return true; }, sendMidiNotePulse: async () => true };
+        sendMidiCC: async (n, v, ch) => { if (ch === 14 && n >= 40 && n <= 45) return true; /* FX-SENDS-01: CC Sends (kênh 15, CC 40..45) gửi kèm nút FX được kiểm RIÊNG ở FxSends01.verify.js; ở đây bỏ qua để test này vẫn đo đúng lệnh FX chính */ sent.push([0xb0 | ch, n, v]); return true; }, sendMidiNotePulse: async () => true };
     sb.window = sb; vm.createContext(sb); vm.runInContext(read('ui/js/actionRegistry.js'), sb);
     const AR = sb.window.ActionRegistry;
     for (const ctl of ['MUSIC', 'MIC1', 'MIC2', 'FX']) for (const on of [true, false]) {

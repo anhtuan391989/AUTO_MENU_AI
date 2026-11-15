@@ -34,7 +34,7 @@ function makeEnv({ mappings = {}, sendResult = true, withRendererSlice = false }
         console: { log() {}, error: console.error, warn() {} }, setTimeout, clearTimeout, Date, Math, Promise,
         getSetting: (k, f) => (store[k] === undefined ? f : store[k]),
         setSetting: (k, v) => { store[k] = v; },
-        sendMidiCC: async (n, v, ch) => { sends.push({ t: 'cc', n, v, ch }); return typeof sendResult === 'function' ? sendResult() : sendResult; },
+        sendMidiCC: async (n, v, ch) => { if (ch === 14 && n >= 40 && n <= 45) return true; /* FX-SENDS-01: CC Sends (kênh 15, CC 40..45) gửi kèm nút FX được kiểm RIÊNG ở FxSends01.verify.js; ở đây bỏ qua để test này vẫn đo đúng lệnh FX chính */ sends.push({ t: 'cc', n, v, ch }); return typeof sendResult === 'function' ? sendResult() : sendResult; },
         sendMidiNotePulse: async (n, v, ch) => { sends.push({ t: 'note', n, v, ch }); return typeof sendResult === 'function' ? sendResult() : sendResult; },
         saveData() {},
         electronAPI: {},

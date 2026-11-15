@@ -37,6 +37,7 @@ function build({ mappings = full(), sendMode = 'ok', saved = false } = {}) {
         getSetting: (k, f) => (store[k] === undefined || store[k] === '' ? f : store[k]), setSetting: (k, v) => { store[k] = v; }, saveData() {},
         console: { log() {}, warn() {}, error() {} }, setInterval: (fn) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,
         sendMidiCC: (n, v, ch) => {
+            if (ch === 14 && n >= 40 && n <= 45) return true; /* FX-SENDS-01: CC Sends (kênh 15, CC 40..45) gửi kèm nút FX được kiểm RIÊNG ở FxSends01.verify.js; ở đây bỏ qua để test này vẫn đo đúng lệnh FX chính */ 
             sent.push({ n, v, ch, t: clock.t, bytes: [0xb0 | (ch & 15), n & 127, v & 127] });
             if (mode === 'fail') return Promise.resolve(false);
             if (mode === 'hang') return new Promise(() => {});

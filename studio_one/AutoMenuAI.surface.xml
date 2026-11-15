@@ -2,7 +2,7 @@
 <!--
   AutoMenuAI - Studio One Control Surface (tao boi setup_all_midi.bat)
   Cong MIDI: AUTO MENU AI (loopMIDI). Bo CC dong bo voi Menu (Setup > MIDI > Studio One).
-  CH16 = status #BF (CC 102-117: LIVE ON/OFF, chon track, TUNE, Preset NORM/LOFI/RAP/REMIX). CH15 = status #BE (CC 20-31: Knob, Mic vol, Scale/Key, FX bus).
+  CH16 = status #BF (CC 102-117: LIVE ON/OFF, chon track, TUNE, Preset NORM/LOFI/RAP/REMIX). CH15 = status #BE (CC 20-31: Knob, Mic vol, Scale/Key, FX bus; CC 40-45: nut nguon 6 Send, di cung nut FX).
 -->
 <ControlSurface name="AutoMenuAI" manufacturer="AutoMenuAI" model="AutoMenuAI" protocol="MIDI" version="1.0">
   <Controls>
@@ -177,6 +177,30 @@
     <!-- CC 31 -->
     <Control name="fxComVerb" title="FX Bus Com Verb" type="knob" options="receive public">
       <MidiMessage status="#BE" address="31"/>
+    </Control>
+    <!-- CC 40 (FX-SENDS-01: nut nguon Sends #1; kenh 15) -->
+    <Control name="fxSends1" title="FX Sends 1 - Verb ngan (127=bat, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="40"/>
+    </Control>
+    <!-- CC 41 (FX-SENDS-01: nut nguon Sends #2; kenh 15) -->
+    <Control name="fxSends2" title="FX Sends 2 - Verb dai (127=bat, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="41"/>
+    </Control>
+    <!-- CC 42 (FX-SENDS-01: nut nguon Sends #3; kenh 15) -->
+    <Control name="fxSends3" title="FX Sends 3 - Main (127=bat, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="42"/>
+    </Control>
+    <!-- CC 43 (FX-SENDS-01: nut nguon Sends #4; kenh 15) -->
+    <Control name="fxSends4" title="FX Sends 4 - Delay (127=bat, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="43"/>
+    </Control>
+    <!-- CC 44 (FX-SENDS-01: nut nguon Sends #5; kenh 15) -->
+    <Control name="fxSends5" title="FX Sends 5 - Com Verb (127=bat, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="44"/>
+    </Control>
+    <!-- CC 45 (FX-SENDS-01: nut nguon Sends #6; kenh 15) -->
+    <Control name="fxSends6" title="FX Sends 6 - None (127=bat, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="45"/>
     </Control>
   </Controls>
 </ControlSurface>

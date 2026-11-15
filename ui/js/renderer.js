@@ -1155,12 +1155,14 @@ function createFxAutoWiring() {
         if (lr.reason === "TIMEOUT") return "lệnh FX ON/OFF KHÔNG phản hồi (hết thời gian) — DAW có thể chưa đồng bộ";
         return "gửi lệnh FX ON/OFF LỖI" + (lr.partial ? " một phần" : "") + " — DAW KHÔNG nhận lệnh";
     };
-    const syncText = (info) => {
+    const syncText = (info) => withSends(syncText0(info));
+    const syncText0 = (info) => {
         const st = sendText(info);
         if (info.manualOverride) return "FX THỦ CÔNG (Auto nhường quyền " + Math.round(AudioSource.FX_AUTO_DEFAULTS.manualHoldMs / 1000) + " s kể từ lần bấm) — " + (st || "chưa có kết quả gửi");
         if (info.musicState === "SOURCE_UNAVAILABLE") return "FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái" + (st ? " — " + st : " (trạng thái nút = mặc định lúc mở/yêu cầu; Send DAW CHƯA được xác nhận)");
         return "FX Auto: " + (st || "đang theo dõi nhạc nền");
     };
+    const withSends = (t) => (window.__fxSendsLast && window.__fxSendsLast.text ? t + " | " + window.__fxSendsLast.text : t); // FX-SENDS-01: thêm kết quả gửi 6 CC Sends vào tooltip nút FX
     const syncKey = (info) => info.pending ? "pending" : (info.lastResult ? (info.lastResult.ok ? "sent-unconfirmed" : (info.lastResult.reason === "NOT_CONFIGURED" ? "not-configured" : (info.lastResult.reason === "TIMEOUT" ? "timeout" : "failed"))) : "idle");
     let __lastFxLogKey = "";
     const ctl = AudioSource.createFxAutoController({
@@ -1199,6 +1201,8 @@ function createFxAutoWiring() {
                 return res;
             }
             window.__fxLastManualVia = "send";
+            // FX-SENDS-01 — đường FX CŨ (chưa lưu FX ON/OFF): vẫn gửi thêm 6 CC Sends theo trạng thái nút FX (lệnh FX cũ bên dưới giữ NGUYÊN, gửi bình thường).
+            try { await AR0()?.sendFxSendsLink?.(!!target, { reason: "menu-button" }); } catch (e) { console.warn("[FX-SENDS] lỗi gửi Sends:", e); }
             if (group.managed().some((n) => n !== "MONITOR_FX")) res = await group.apply(!!target, { force: true });
             else {
                 const AR = AR0();

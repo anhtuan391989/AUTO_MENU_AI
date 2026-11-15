@@ -122,6 +122,14 @@ const ACTIONS = Object.freeze({
     MIC2_OFF: "MIC2_OFF",
     FX_ON: "FX_ON",
     FX_OFF: "FX_OFF",
+    // FX-SENDS-01 — nút FX của Menu điều khiển THÊM 6 nút nguồn của hộp "Sends" trong Studio One (Verb ngắn, Verb dài, Main, Delay, Com Verb, None).
+    // Studio One không nối 1 CC vào nhiều Send => mỗi Send 1 CC RIÊNG (kênh 15, CC 40..45), gửi kèm FX_ON/FX_OFF (giống cách nút TUNE gửi thêm 3 bypass).
+    FX_SENDS_1: "FX_SENDS_1",
+    FX_SENDS_2: "FX_SENDS_2",
+    FX_SENDS_3: "FX_SENDS_3",
+    FX_SENDS_4: "FX_SENDS_4",
+    FX_SENDS_5: "FX_SENDS_5",
+    FX_SENDS_6: "FX_SENDS_6",
     // MENU-FIX-02 — lệnh CHỌN TRACK riêng (macro chỉ có "Find Track"), tuỳ chọn. Có mapping thì Menu gửi nó TRƯỚC, chờ track chuyển xong,
     // rồi mới gửi ON/OFF. Chưa lưu => hành vi cũ (một lệnh/cú bấm).
     MUSIC_SELECT: "MUSIC_SELECT",
@@ -280,6 +288,9 @@ function getMidiOutMapping(action) {
     }
     if (/^TUNE_BYPASS_[234]$/.test(String(action))) { // A94 — bypass riêng Auto-Tune 2/3/4: kênh 15, CC 89/90/91 (không trùng bộ KNOB 85-88)
         return { kind: "cc", channel: 15, number: 87 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
+    }
+    if (/^FX_SENDS_[1-6]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // FX-SENDS-01 — kênh 15, CC 40..45 (không trùng 20-37, 85-95, 102-104); mapping người dùng đã lưu vẫn thắng
+        return { kind: "cc", channel: 15, number: 39 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
     }
     if (/^REMIX_PLUGIN_[12]$/.test(String(action))) { // A95 — kênh 15, CC 92/93 (không trùng bộ KNOB 85-88, TUNE 89-91)
         return { kind: "cc", channel: 15, number: 91 + Number(String(action).slice(-1)), value: 0, source: "DEFAULT_PRESET" };
@@ -518,6 +529,34 @@ function runDawSequence(fn) {
     return p;
 }
 
+// FX-SENDS-01 — gửi 6 CC (kênh 15, CC 40..45) cho 6 nút nguồn Send: BẬT = 127, TẮT = 0 (đảo bằng setting fxSendsInvert = true; tắt hẳn bằng fxSendsLink = false).
+// Dùng cho MỌI đường của nút FX (FX ON/OFF "explicit" và đường FX cũ). Không bao giờ ném lỗi. Ghi kết quả vào window.__fxSendsLast (hiện trên tooltip nút FX).
+async function sendFxSendsLink(targetOn, opts = {}) {
+    if (!getFxSendsSetting("fxSendsLink", true)) { try { window.__fxSendsLast = { text: "Sends: TẮT (fxSendsLink=false)" }; } catch (_) {} return null; }
+    const reason = (opts && opts.reason) || "fx-sends";
+    const on = getFxSendsSetting("fxSendsInvert", false) ? 0 : 127;
+    const val = targetOn ? on : 127 - on;
+    const results = {};
+    for (const ex of [ACTIONS.FX_SENDS_1, ACTIONS.FX_SENDS_2, ACTIONS.FX_SENDS_3, ACTIONS.FX_SENDS_4, ACTIONS.FX_SENDS_5, ACTIONS.FX_SENDS_6]) {
+        try {
+            if (!isMidiMappingConfigured(ex)) { results[ex] = "NOT_CONFIGURED"; continue; }
+            const rx = await executeAction(ex, { reason, value: val });
+            results[ex] = rx && rx.ok ? "OK" : "FAIL";
+        } catch (e) { results[ex] = "FAIL"; }
+    }
+    const okN = Object.values(results).filter((x) => x === "OK").length;
+    const notCfg = Object.values(results).filter((x) => x === "NOT_CONFIGURED").length;
+    const text = okN === 6 ? "Sends: đã GỬI 6/6 CC (kênh 15, CC 40–45, " + val + (targetOn ? " = BẬT" : " = TẮT") + ") — Studio One chưa xác nhận"
+        : "Sends: chỉ gửi được " + okN + "/6" + (notCfg ? " (" + notCfg + " chưa cấu hình)" : " — có CC gửi LỖI (kiểm cổng MIDI)");
+    try { window.__fxSendsLast = { at: Date.now(), target: !!targetOn, ok: okN, total: 6, text, results }; } catch (_) {}
+    return { ok: okN === 6, okCount: okN, total: 6, value: val, text, results };
+}
+
+// FX-SENDS-01 — đọc cờ setting an toàn (thiếu getSetting => dùng mặc định).
+function getFxSendsSetting(key, def) {
+    try { const v = typeof getSetting === "function" ? getSetting(key) : undefined; return v === undefined || v === null ? def : !!v; } catch (_) { return def; }
+}
+
 async function setDawControlState(control, targetOn, context = {}) {
     const def = DAW_STATE_CONTROLS[control];
     if (!def) return { ok: false, reason: "UNKNOWN_CONTROL", control };
@@ -559,9 +598,17 @@ async function setDawControlState(control, targetOn, context = {}) {
             } catch (e) { tuneExtra[ex] = "FAIL"; }
         }
     }
+    // FX-SENDS-01 — nút FX: gửi thêm 6 CC cho 6 nút nguồn Sends (xem sendFxSendsLink). Đường FX ON/OFF "explicit" gọi ở đây (bấm tay + FX Auto);
+    // đường FX cũ (chưa lưu FX ON/OFF) do renderer.js gọi sendFxSendsLink ở __fxManualToggle. Lỗi ở các CC phụ KHÔNG làm hỏng kết quả của FX chính.
+    let sendsExtra = null;
+    if (control === "FX" && mode === "explicit" && res && res.ok) {
+        const sx = await sendFxSendsLink(!!targetOn, { reason });
+        if (sx) sendsExtra = sx.results;
+    }
     const out = {
         ...res,
         ...(tuneExtra ? { tuneExtra } : {}),
+        ...(sendsExtra ? { sendsExtra } : {}),
         control,
         target: targetOn ? "ON" : "OFF",
         mode,
@@ -659,7 +706,8 @@ async function applyPresetTransition(prev, next, ctx = {}) {
 }
 
 window.ActionRegistry = {
-    ACTIONS,    applyPresetTransition,
+    ACTIONS,
+    sendFxSendsLink, // FX-SENDS-01    applyPresetTransition,
 
     ACTION_STATUS,
     SUPPORTED_DAWS,

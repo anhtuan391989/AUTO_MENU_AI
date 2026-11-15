@@ -1,0 +1,339 @@
+diff --git a/studio_one/AutoMenuAI.surface.xml b/studio_one/AutoMenuAI.surface.xml
+index 7ae06e2..edec9ba 100644
+--- a/studio_one/AutoMenuAI.surface.xml
++++ b/studio_one/AutoMenuAI.surface.xml
+@@ -2,7 +2,7 @@
+ <!--
+   AutoMenuAI - Studio One Control Surface (tao boi setup_all_midi.bat)
+   Cong MIDI: AUTO MENU AI (loopMIDI). Bo CC dong bo voi Menu (Setup > MIDI > Studio One).
+-  CH16 = status #BF (CC 102-117: LIVE ON/OFF, chon track, TUNE, Preset NORM/LOFI/RAP/REMIX). CH15 = status #BE (CC 20-31: Knob, Mic vol, Scale/Key, FX bus).
++  CH16 = status #BF (CC 102-117: LIVE ON/OFF, chon track, TUNE, Preset NORM/LOFI/RAP/REMIX). CH15 = status #BE (CC 20-31: Knob, Mic vol, Scale/Key, FX bus; CC 40-45: nut nguon 6 Send, di cung nut FX).
+ -->
+ <ControlSurface name="AutoMenuAI" manufacturer="AutoMenuAI" model="AutoMenuAI" protocol="MIDI" version="1.0">
+   <Controls>
+@@ -178,5 +178,29 @@
+     <Control name="fxComVerb" title="FX Bus Com Verb" type="knob" options="receive public">
+       <MidiMessage status="#BE" address="31"/>
+     </Control>
++    <!-- CC 40 (FX-SENDS-01: nut nguon Sends #1; kenh 15) -->
++    <Control name="fxSends1" title="FX Sends 1 - Verb ngan (127=bat, 0=tat)" type="button" options="receive public">
++      <MidiMessage status="#BE" address="40"/>
++    </Control>
++    <!-- CC 41 (FX-SENDS-01: nut nguon Sends #2; kenh 15) -->
++    <Control name="fxSends2" title="FX Sends 2 - Verb dai (127=bat, 0=tat)" type="button" options="receive public">
++      <MidiMessage status="#BE" address="41"/>
++    </Control>
++    <!-- CC 42 (FX-SENDS-01: nut nguon Sends #3; kenh 15) -->
++    <Control name="fxSends3" title="FX Sends 3 - Main (127=bat, 0=tat)" type="button" options="receive public">
++      <MidiMessage status="#BE" address="42"/>
++    </Control>
++    <!-- CC 43 (FX-SENDS-01: nut nguon Sends #4; kenh 15) -->
++    <Control name="fxSends4" title="FX Sends 4 - Delay (127=bat, 0=tat)" type="button" options="receive public">
++      <MidiMessage status="#BE" address="43"/>
++    </Control>
++    <!-- CC 44 (FX-SENDS-01: nut nguon Sends #5; kenh 15) -->
++    <Control name="fxSends5" title="FX Sends 5 - Com Verb (127=bat, 0=tat)" type="button" options="receive public">
++      <MidiMessage status="#BE" address="44"/>
++    </Control>
++    <!-- CC 45 (FX-SENDS-01: nut nguon Sends #6; kenh 15) -->
++    <Control name="fxSends6" title="FX Sends 6 - None (127=bat, 0=tat)" type="button" options="receive public">
++      <MidiMessage status="#BE" address="45"/>
++    </Control>
+   </Controls>
+ </ControlSurface>
+diff --git a/tests/unit/DawQuickFillAll01.verify.js b/tests/unit/DawQuickFillAll01.verify.js
+index a14f1c9..5e03c92 100644
+--- a/tests/unit/DawQuickFillAll01.verify.js
++++ b/tests/unit/DawQuickFillAll01.verify.js
+@@ -24,7 +24,7 @@ console.log('== 1. Một lần bấm lưu đủ cả 9 bộ ==');
+   const e = env({ selectedDAW: 'Studio Pro 8' }); const r = e.click(); const m = e.st.dawMidiOutMappings['Studio Pro 8'] || {};
+   const base = e.api.resolveDawProfile('Studio Pro 8');
+   const expect = Object.values(base.bundles).reduce((n, b) => n + Object.keys(b.mappings).length, 0);
+-  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 4 + 1 + 1 + 2 + 6 + 4 + 12, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 4 TUNE + 1 LOFI + 1 BÈ + 2 MIC VOLUME + 6 PRESET + 4 FX BUS + 12 KEY/SCALE)', Object.keys(m).length);
++  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 4 + 1 + 1 + 2 + 6 + 4 + 6 + 12, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 4 TUNE + 1 LOFI + 1 BÈ + 2 MIC VOLUME + 6 PRESET + 4 FX BUS + 6 FX→SENDS (FX-SENDS-01) + 12 KEY/SCALE)', Object.keys(m).length);
+   ok(m.MUSIC_ON && m.BEAT_INPUT_VOLUME && m.MUSIC_SELECT && m.MIC1_VOLUME && m.KEY_SCALE_MINOR && m.KEY_ROOT && m.TUNE_BYPASS && m.LOFI_STATE && m.BE_STATE && m.PRESET_NORM && m.FX_BUS_DELAY_VOLUME && m.KEY_ROOT_AT4, 'có mặt đủ đại diện từng bộ');
+   ok(Object.values(m).every((x) => x.source === 'USER_DEFINED'), 'đều đánh dấu USER_DEFINED');
+   ok(base.quickFillLabel === 'Fender Studio Pro 8 MIDI', 'tên nút = "Fender Studio Pro 8 MIDI"');
+diff --git a/tests/unit/FxAutoBusFix01.verify.js b/tests/unit/FxAutoBusFix01.verify.js
+index 4287967..8dcfe53 100644
+--- a/tests/unit/FxAutoBusFix01.verify.js
++++ b/tests/unit/FxAutoBusFix01.verify.js
+@@ -37,6 +37,7 @@ function build({ mappings = full(), sendMode = 'ok', saved = false } = {}) {
+         getSetting: (k, f) => (store[k] === undefined || store[k] === '' ? f : store[k]), setSetting: (k, v) => { store[k] = v; }, saveData() {},
+         console: { log() {}, warn() {}, error() {} }, setInterval: (fn) => { intervals.push(fn); return intervals.length; }, AudioSource: win.AudioSource,
+         sendMidiCC: (n, v, ch) => {
++            if (ch === 14 && n >= 40 && n <= 45) return true; /* FX-SENDS-01: CC Sends (kênh 15, CC 40..45) gửi kèm nút FX được kiểm RIÊNG ở FxSends01.verify.js; ở đây bỏ qua để test này vẫn đo đúng lệnh FX chính */ 
+             sent.push({ n, v, ch, t: clock.t, bytes: [0xb0 | (ch & 15), n & 127, v & 127] });
+             if (mode === 'fail') return Promise.resolve(false);
+             if (mode === 'hang') return new Promise(() => {});
+diff --git a/tests/unit/FxSends01.verify.js b/tests/unit/FxSends01.verify.js
+new file mode 100644
+index 0000000..3d9422c
+--- /dev/null
++++ b/tests/unit/FxSends01.verify.js
+@@ -0,0 +1,73 @@
++/** FxSends01.verify.js — FX-SENDS-01: nút FX (bấm tay + FX Auto) gửi thêm 6 CC cho 6 nút nguồn của hộp Sends trong Studio One (kênh 15, CC 40..45).
++ *  MÔ PHỎNG (hàm gửi MIDI giả) — KHÔNG phải Studio One thật. Chạy: node tests/unit/FxSends01.verify.js */
++'use strict';
++const fs = require('fs'), path = require('path'), vm = require('vm');
++let pass = 0, fail = 0;
++const ok = (c, l) => { if (c) { pass++; console.log('  OK  ', l); } else { fail++; console.error('  FAIL ', l); } };
++const rd = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
++const FX_SAVED = { FX_ON: { kind: 'cc', channel: 16, number: 108, value: 127 }, FX_OFF: { kind: 'cc', channel: 16, number: 109, value: 127 } };
++function makeAR(daw, saved, settings, failCc) {
++    const sent = [];
++    const win = { appSettings: {}, getLastMidiSendResult: () => null };
++    const sb = { window: win, console: { log() {}, error() {}, warn() {} }, setTimeout, clearTimeout, Promise,
++        getSetting: (k) => (k === 'selectedDAW' ? daw : k === 'dawMidiOutMappings' ? (saved || {}) : (settings || {})[k]), saveSetting: () => {},
++        sendMidiCC: async (n, v, ch) => { if (failCc === n) return false; sent.push([n, v, ch]); return true; } };
++    vm.createContext(sb); vm.runInContext(rd('ui/js/actionRegistry.js'), sb, { filename: 'actionRegistry.js' });
++    return Object.assign({}, win.ActionRegistry, { __sent: sent, __win: win });
++}
++const SP = (v) => ({ 'Studio Pro 8': { ...FX_SAVED } });
++(async () => {
++    console.log('== 1. FX BẬT/TẮT gửi thêm 6 CC Sends (mặc định, không cần Setup) ==');
++    let AR = makeAR('Studio Pro 8', SP());
++    ok(['FX_SENDS_1', 'FX_SENDS_2', 'FX_SENDS_3', 'FX_SENDS_4', 'FX_SENDS_5', 'FX_SENDS_6'].every((a) => AR.ACTIONS[a] === a), '6 action FX_SENDS_1..6 tồn tại');
++    let r = await AR.setDawControlState('FX', true, {});
++    ok(r.ok && JSON.stringify(AR.__sent[0]) === JSON.stringify([108, 127, 15]), 'FX BẬT: lệnh chính FX_ON (CC108 kênh 16) vẫn gửi TRƯỚC, giữ nguyên');
++    ok(JSON.stringify(AR.__sent.slice(1)) === JSON.stringify([40, 41, 42, 43, 44, 45].map((n) => [n, 127, 14])), 'FX BẬT: sau đó 6 CC 40..45 = 127 kênh 15 (index 14)');
++    ok(r.sendsExtra && Object.values(r.sendsExtra).every((x) => x === 'OK') && Object.keys(r.sendsExtra).length === 6, 'kết quả báo sendsExtra 6/6 OK');
++    AR.__sent.length = 0; r = await AR.setDawControlState('FX', false, {});
++    ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([109, 127, 15]) && JSON.stringify(AR.__sent.slice(1)) === JSON.stringify([40, 41, 42, 43, 44, 45].map((n) => [n, 0, 14])), 'FX TẮT: FX_OFF (CC109) rồi 6 CC 40..45 = 0');
++
++    console.log('== 1b. Đường FX CŨ (chưa lưu FX ON/OFF): sendFxSendsLink gọi trực tiếp ==');
++    AR = makeAR('Studio Pro 8', {}); const wsb = AR.__win; r = await AR.sendFxSendsLink(true, { reason: 'menu-button' });
++    ok(r && r.ok && JSON.stringify(AR.__sent) === JSON.stringify([40, 41, 42, 43, 44, 45].map((n) => [n, 127, 14])), 'FX cũ BẬT: gửi đủ 6 CC 40..45 = 127 (không cần FX ON/OFF)');
++    ok(AR.__win.__fxSendsLast && /đã GỬI 6\/6/.test(AR.__win.__fxSendsLast.text), 'ghi window.__fxSendsLast.text để hiện trên tooltip nút FX');
++    AR.__sent.length = 0; await AR.sendFxSendsLink(false, {}); ok(AR.__sent.length === 6 && AR.__sent.every((m) => m[1] === 0), 'FX cũ TẮT: 6 CC = 0');
++    AR = makeAR('Studio Pro 8', {}, {}, 43); r = await AR.sendFxSendsLink(true, {}); ok(r && !r.ok && r.okCount === 5 && /5\/6/.test(AR.__win.__fxSendsLast.text), 'một CC lỗi: báo 5/6 trên tooltip, không ném lỗi');
++    AR = makeAR('Studio Pro 8', {}, { fxSendsLink: false }); r = await AR.sendFxSendsLink(true, {}); ok(r === null && AR.__sent.length === 0, 'fxSendsLink=false: không gửi');
++    const rend = rd('ui/js/renderer.js');
++    ok(/window\.__fxLastManualVia = "send";\s*\/\/ FX-SENDS-01[\s\S]{0,400}sendFxSendsLink\?\.\(!!target[\s\S]{0,300}group\.apply\(!!target, \{ force: true \}\)/.test(rend), 'renderer: đường FX cũ gọi sendFxSendsLink TRƯỚC lệnh FX cũ (lệnh cũ giữ nguyên)');
++    ok(/withSends\(syncText0\(info\)\)/.test(rend), 'renderer: tooltip nút FX có thêm dòng kết quả Sends');
++
++    console.log('== 2. Cờ tuỳ chọn ==');
++    AR = makeAR('Studio Pro 8', SP(), { fxSendsInvert: true }); await AR.setDawControlState('FX', true, {});
++    ok(AR.__sent.slice(1).every((m) => m[1] === 0) && AR.__sent.length === 7, 'fxSendsInvert=true: FX BẬT gửi 0 (đảo)');
++    AR = makeAR('Studio Pro 8', SP(), { fxSendsLink: false }); r = await AR.setDawControlState('FX', true, {});
++    ok(AR.__sent.length === 1 && !r.sendsExtra, 'fxSendsLink=false: chỉ còn lệnh FX chính, không gửi Sends');
++
++    console.log('== 3. An toàn: không làm hỏng FX chính / các nút khác ==');
++    AR = makeAR('Studio Pro 8', SP(), {}, 42); r = await AR.setDawControlState('FX', true, {});
++    ok(r.ok && r.sendsExtra.FX_SENDS_3 === 'FAIL' && r.sendsExtra.FX_SENDS_4 === 'OK' && AR.__sent.length === 6, 'một CC phụ lỗi (CC42): FX chính vẫn ok, các CC còn lại vẫn gửi');
++    AR = makeAR('Studio Pro 8', SP(), {}, 108); r = await AR.setDawControlState('FX', true, {});
++    ok(!r.ok && AR.__sent.length === 0 && !r.sendsExtra, 'lệnh FX chính lỗi => KHÔNG gửi Sends');
++    AR = makeAR('Studio Pro 8', {}); r = await AR.setDawControlState('FX', true, {});
++    ok(AR.__sent.every((m) => m[0] < 40 || m[0] > 45) && !r.sendsExtra, 'chưa cấu hình FX ON/OFF (chế độ cũ): KHÔNG gửi Sends, hành vi cũ giữ nguyên');
++    AR = makeAR('Studio Pro 8', SP()); await AR.setDawControlState('MIC1', true, {}); await AR.setDawControlState('LOFI', true, {}); await AR.setDawControlState('TUNE', true, {});
++    ok(AR.__sent.every((m) => m[0] < 40 || m[0] > 45), 'MIC1 / LOFI / TUNE không gửi CC 40..45');
++    AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { ...FX_SAVED, FX_SENDS_2: { kind: 'cc', channel: 15, number: 77, value: 127 } } }); await AR.setDawControlState('FX', true, {});
++    ok(AR.__sent.some((m) => m[0] === 77 && m[1] === 127) && !AR.__sent.some((m) => m[0] === 41), 'mapping người dùng đã lưu cho FX_SENDS_2 thắng mặc định (CC77 thay CC41)');
++    AR = makeAR('Cubase 14', { 'Cubase 14': { FX_ON: { kind: 'cc', channel: 1, number: 50, value: 127 } } }); r = await AR.setDawControlState('FX', true, {});
++    ok(AR.__sent.length === 1 && Object.values(r.sendsExtra || {}).every((x) => x === 'NOT_CONFIGURED'), 'Cubase: không có mặc định Sends (chưa kiểm chứng) => không gửi');
++
++    console.log('== 4. Surface Studio One + Setup khớp ==');
++    const xml = rd('studio_one/AutoMenuAI.surface.xml');
++    ok([1, 2, 3, 4, 5, 6].every((i) => new RegExp('name="fxSends' + i + '"[\\s\\S]{0,200}status="#BE" address="' + (39 + i) + '"').test(xml)), 'surface có 6 control fxSends1..6 = kênh 15 (#BE) CC 40..45');
++    const addrs = [...xml.matchAll(/status="(#B[EF])" address="(\d+)"/g)].map((m) => m[1] + m[2]);
++    ok(new Set(addrs).size === addrs.length, 'surface: không có 2 control trùng (kênh, CC)');
++    const setup = rd('ui/js/setup.js');
++    ok(/FX_SENDS_\[1-6\][\s\S]{0,300}number: 39 \+ Number/.test(setup), 'Setup: mặc định FX_SENDS khớp actionRegistry');
++    ok([1, 2, 3, 4, 5, 6].every((i) => setup.indexOf('{ action: "FX_SENDS_' + i + '"') > 0) && setup.indexOf('{ action: "FX_OFF"') < setup.indexOf('{ action: "FX_SENDS_1"') && /\{ action: "FX_ON"/.test(setup) && /\{ action: "FX_OFF"/.test(setup), 'Setup: 6 dòng FX_SENDS_1..6 ngay sau FX_OFF; dòng FX_ON / FX_OFF cũ vẫn còn');
++    ok(/fxsends: Object\.freeze\(\{ title: "FX → SENDS[^\n]*count: 6[^\n]*FX_SENDS_1: 40[^\n]*FX_SENDS_6: 45/.test(setup), 'Setup: bộ điền nhanh Fender Studio Pro 8 có bộ fxsends (6 mapping, kênh 15, CC 40..45)');
++    ok(/\.forEach\(\(a\) => MIDI_CONFLICT_GUARD_SET\.add\(a\)\)/.test(setup) && /FX_SENDS_6", "FX_SENDS_5|"FX_SENDS_1", "FX_SENDS_2"/.test(setup), 'Setup: 6 action FX_SENDS thuộc nhóm bảo vệ trùng CC');
++    ok(!/FX_SENDS/.test(rd('ui/index.html')) && !/FX_SENDS/.test(rd('ui/js/renderer.js')), 'KHÔNG đổi HTML / renderer (giao diện giữ nguyên)');
++    console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
++})();
+diff --git a/tests/unit/LiveMidiCompletion01.verify.js b/tests/unit/LiveMidiCompletion01.verify.js
+index ed14822..3c98fa1 100644
+--- a/tests/unit/LiveMidiCompletion01.verify.js
++++ b/tests/unit/LiveMidiCompletion01.verify.js
+@@ -36,7 +36,7 @@ const parseMacro = (dir, name) => {
+     const sent = [];
+     const store = { selectedDAW: 'studio-one', dawMidiOutMappings: { 'studio-one': Object.fromEntries(TABLE.map(([a, cc]) => [a, { kind: 'cc', channel: 16, number: cc, value: 127, source: 'USER_DEFINED' }])) } };
+     const sb = { console: { log() {}, error() {}, warn() {} }, setTimeout, clearTimeout, Date, Math, Promise, getSetting: (k, f) => (store[k] === undefined ? f : store[k]), setSetting: (k, v) => { store[k] = v; }, electronAPI: {},
+-        sendMidiCC: async (n, v, ch) => { sent.push([0xb0 | ch, n, v]); return true; }, sendMidiNotePulse: async () => true };
++        sendMidiCC: async (n, v, ch) => { if (ch === 14 && n >= 40 && n <= 45) return true; /* FX-SENDS-01: CC Sends (kênh 15, CC 40..45) gửi kèm nút FX được kiểm RIÊNG ở FxSends01.verify.js; ở đây bỏ qua để test này vẫn đo đúng lệnh FX chính */ sent.push([0xb0 | ch, n, v]); return true; }, sendMidiNotePulse: async () => true };
+     sb.window = sb; vm.createContext(sb); vm.runInContext(read('ui/js/actionRegistry.js'), sb);
+     const AR = sb.window.ActionRegistry;
+     for (const ctl of ['MUSIC', 'MIC1', 'MIC2', 'FX']) for (const on of [true, false]) {
+diff --git a/tests/unit/MidiDawControl01.verify.js b/tests/unit/MidiDawControl01.verify.js
+index b2c80f6..ecb64bd 100644
+--- a/tests/unit/MidiDawControl01.verify.js
++++ b/tests/unit/MidiDawControl01.verify.js
+@@ -34,7 +34,7 @@ function makeEnv({ mappings = {}, sendResult = true, withRendererSlice = false }
+         console: { log() {}, error: console.error, warn() {} }, setTimeout, clearTimeout, Date, Math, Promise,
+         getSetting: (k, f) => (store[k] === undefined ? f : store[k]),
+         setSetting: (k, v) => { store[k] = v; },
+-        sendMidiCC: async (n, v, ch) => { sends.push({ t: 'cc', n, v, ch }); return typeof sendResult === 'function' ? sendResult() : sendResult; },
++        sendMidiCC: async (n, v, ch) => { if (ch === 14 && n >= 40 && n <= 45) return true; /* FX-SENDS-01: CC Sends (kênh 15, CC 40..45) gửi kèm nút FX được kiểm RIÊNG ở FxSends01.verify.js; ở đây bỏ qua để test này vẫn đo đúng lệnh FX chính */ sends.push({ t: 'cc', n, v, ch }); return typeof sendResult === 'function' ? sendResult() : sendResult; },
+         sendMidiNotePulse: async (n, v, ch) => { sends.push({ t: 'note', n, v, ch }); return typeof sendResult === 'function' ? sendResult() : sendResult; },
+         saveData() {},
+         electronAPI: {},
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index 677fa53..55ead3e 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -122,6 +122,14 @@ const ACTIONS = Object.freeze({
+     MIC2_OFF: "MIC2_OFF",
+     FX_ON: "FX_ON",
+     FX_OFF: "FX_OFF",
++    // FX-SENDS-01 — nút FX của Menu điều khiển THÊM 6 nút nguồn của hộp "Sends" trong Studio One (Verb ngắn, Verb dài, Main, Delay, Com Verb, None).
++    // Studio One không nối 1 CC vào nhiều Send => mỗi Send 1 CC RIÊNG (kênh 15, CC 40..45), gửi kèm FX_ON/FX_OFF (giống cách nút TUNE gửi thêm 3 bypass).
++    FX_SENDS_1: "FX_SENDS_1",
++    FX_SENDS_2: "FX_SENDS_2",
++    FX_SENDS_3: "FX_SENDS_3",
++    FX_SENDS_4: "FX_SENDS_4",
++    FX_SENDS_5: "FX_SENDS_5",
++    FX_SENDS_6: "FX_SENDS_6",
+     // MENU-FIX-02 — lệnh CHỌN TRACK riêng (macro chỉ có "Find Track"), tuỳ chọn. Có mapping thì Menu gửi nó TRƯỚC, chờ track chuyển xong,
+     // rồi mới gửi ON/OFF. Chưa lưu => hành vi cũ (một lệnh/cú bấm).
+     MUSIC_SELECT: "MUSIC_SELECT",
+@@ -281,6 +289,9 @@ function getMidiOutMapping(action) {
+     if (/^TUNE_BYPASS_[234]$/.test(String(action))) { // A94 — bypass riêng Auto-Tune 2/3/4: kênh 15, CC 89/90/91 (không trùng bộ KNOB 85-88)
+         return { kind: "cc", channel: 15, number: 87 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
+     }
++    if (/^FX_SENDS_[1-6]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // FX-SENDS-01 — kênh 15, CC 40..45 (không trùng 20-37, 85-95, 102-104); mapping người dùng đã lưu vẫn thắng
++        return { kind: "cc", channel: 15, number: 39 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
++    }
+     if (/^REMIX_PLUGIN_[12]$/.test(String(action))) { // A95 — kênh 15, CC 92/93 (không trùng bộ KNOB 85-88, TUNE 89-91)
+         return { kind: "cc", channel: 15, number: 91 + Number(String(action).slice(-1)), value: 0, source: "DEFAULT_PRESET" };
+     }
+@@ -518,6 +529,34 @@ function runDawSequence(fn) {
+     return p;
+ }
+ 
++// FX-SENDS-01 — gửi 6 CC (kênh 15, CC 40..45) cho 6 nút nguồn Send: BẬT = 127, TẮT = 0 (đảo bằng setting fxSendsInvert = true; tắt hẳn bằng fxSendsLink = false).
++// Dùng cho MỌI đường của nút FX (FX ON/OFF "explicit" và đường FX cũ). Không bao giờ ném lỗi. Ghi kết quả vào window.__fxSendsLast (hiện trên tooltip nút FX).
++async function sendFxSendsLink(targetOn, opts = {}) {
++    if (!getFxSendsSetting("fxSendsLink", true)) { try { window.__fxSendsLast = { text: "Sends: TẮT (fxSendsLink=false)" }; } catch (_) {} return null; }
++    const reason = (opts && opts.reason) || "fx-sends";
++    const on = getFxSendsSetting("fxSendsInvert", false) ? 0 : 127;
++    const val = targetOn ? on : 127 - on;
++    const results = {};
++    for (const ex of [ACTIONS.FX_SENDS_1, ACTIONS.FX_SENDS_2, ACTIONS.FX_SENDS_3, ACTIONS.FX_SENDS_4, ACTIONS.FX_SENDS_5, ACTIONS.FX_SENDS_6]) {
++        try {
++            if (!isMidiMappingConfigured(ex)) { results[ex] = "NOT_CONFIGURED"; continue; }
++            const rx = await executeAction(ex, { reason, value: val });
++            results[ex] = rx && rx.ok ? "OK" : "FAIL";
++        } catch (e) { results[ex] = "FAIL"; }
++    }
++    const okN = Object.values(results).filter((x) => x === "OK").length;
++    const notCfg = Object.values(results).filter((x) => x === "NOT_CONFIGURED").length;
++    const text = okN === 6 ? "Sends: đã GỬI 6/6 CC (kênh 15, CC 40–45, " + val + (targetOn ? " = BẬT" : " = TẮT") + ") — Studio One chưa xác nhận"
++        : "Sends: chỉ gửi được " + okN + "/6" + (notCfg ? " (" + notCfg + " chưa cấu hình)" : " — có CC gửi LỖI (kiểm cổng MIDI)");
++    try { window.__fxSendsLast = { at: Date.now(), target: !!targetOn, ok: okN, total: 6, text, results }; } catch (_) {}
++    return { ok: okN === 6, okCount: okN, total: 6, value: val, text, results };
++}
++
++// FX-SENDS-01 — đọc cờ setting an toàn (thiếu getSetting => dùng mặc định).
++function getFxSendsSetting(key, def) {
++    try { const v = typeof getSetting === "function" ? getSetting(key) : undefined; return v === undefined || v === null ? def : !!v; } catch (_) { return def; }
++}
++
+ async function setDawControlState(control, targetOn, context = {}) {
+     const def = DAW_STATE_CONTROLS[control];
+     if (!def) return { ok: false, reason: "UNKNOWN_CONTROL", control };
+@@ -559,9 +598,17 @@ async function setDawControlState(control, targetOn, context = {}) {
+             } catch (e) { tuneExtra[ex] = "FAIL"; }
+         }
+     }
++    // FX-SENDS-01 — nút FX: gửi thêm 6 CC cho 6 nút nguồn Sends (xem sendFxSendsLink). Đường FX ON/OFF "explicit" gọi ở đây (bấm tay + FX Auto);
++    // đường FX cũ (chưa lưu FX ON/OFF) do renderer.js gọi sendFxSendsLink ở __fxManualToggle. Lỗi ở các CC phụ KHÔNG làm hỏng kết quả của FX chính.
++    let sendsExtra = null;
++    if (control === "FX" && mode === "explicit" && res && res.ok) {
++        const sx = await sendFxSendsLink(!!targetOn, { reason });
++        if (sx) sendsExtra = sx.results;
++    }
+     const out = {
+         ...res,
+         ...(tuneExtra ? { tuneExtra } : {}),
++        ...(sendsExtra ? { sendsExtra } : {}),
+         control,
+         target: targetOn ? "ON" : "OFF",
+         mode,
+@@ -659,7 +706,8 @@ async function applyPresetTransition(prev, next, ctx = {}) {
+ }
+ 
+ window.ActionRegistry = {
+-    ACTIONS,    applyPresetTransition,
++    ACTIONS,
++    sendFxSendsLink, // FX-SENDS-01    applyPresetTransition,
+ 
+     ACTION_STATUS,
+     SUPPORTED_DAWS,
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 3cb1084..181ab33 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -1155,12 +1155,14 @@ function createFxAutoWiring() {
+         if (lr.reason === "TIMEOUT") return "lệnh FX ON/OFF KHÔNG phản hồi (hết thời gian) — DAW có thể chưa đồng bộ";
+         return "gửi lệnh FX ON/OFF LỖI" + (lr.partial ? " một phần" : "") + " — DAW KHÔNG nhận lệnh";
+     };
+-    const syncText = (info) => {
++    const syncText = (info) => withSends(syncText0(info));
++    const syncText0 = (info) => {
+         const st = sendText(info);
+         if (info.manualOverride) return "FX THỦ CÔNG (Auto nhường quyền " + Math.round(AudioSource.FX_AUTO_DEFAULTS.manualHoldMs / 1000) + " s kể từ lần bấm) — " + (st || "chưa có kết quả gửi");
+         if (info.musicState === "SOURCE_UNAVAILABLE") return "FX Auto: nguồn nhạc (SYSTEM_AUDIO) không khả dụng — giữ nguyên trạng thái" + (st ? " — " + st : " (trạng thái nút = mặc định lúc mở/yêu cầu; Send DAW CHƯA được xác nhận)");
+         return "FX Auto: " + (st || "đang theo dõi nhạc nền");
+     };
++    const withSends = (t) => (window.__fxSendsLast && window.__fxSendsLast.text ? t + " | " + window.__fxSendsLast.text : t); // FX-SENDS-01: thêm kết quả gửi 6 CC Sends vào tooltip nút FX
+     const syncKey = (info) => info.pending ? "pending" : (info.lastResult ? (info.lastResult.ok ? "sent-unconfirmed" : (info.lastResult.reason === "NOT_CONFIGURED" ? "not-configured" : (info.lastResult.reason === "TIMEOUT" ? "timeout" : "failed"))) : "idle");
+     let __lastFxLogKey = "";
+     const ctl = AudioSource.createFxAutoController({
+@@ -1199,6 +1201,8 @@ function createFxAutoWiring() {
+                 return res;
+             }
+             window.__fxLastManualVia = "send";
++            // FX-SENDS-01 — đường FX CŨ (chưa lưu FX ON/OFF): vẫn gửi thêm 6 CC Sends theo trạng thái nút FX (lệnh FX cũ bên dưới giữ NGUYÊN, gửi bình thường).
++            try { await AR0()?.sendFxSendsLink?.(!!target, { reason: "menu-button" }); } catch (e) { console.warn("[FX-SENDS] lỗi gửi Sends:", e); }
+             if (group.managed().some((n) => n !== "MONITOR_FX")) res = await group.apply(!!target, { force: true });
+             else {
+                 const AR = AR0();
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index 95ebec9..4900a38 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -702,6 +702,13 @@ const DAW_MIDI_ACTIONS = [
+     { action: "MIC2_OFF", label: "MIC 2 OFF (Monitor Không Dây tắt)" },
+     { action: "FX_ON", label: "FX ON (bỏ Mute 4 bus)" },
+     { action: "FX_OFF", label: "FX OFF (Mute 4 bus)" },
++    // FX-SENDS-01 — nút FX gửi THÊM 6 CC (kênh 15, CC 40..45; 127 = bật, 0 = tắt) cho 6 nút nguồn của hộp Sends trong Studio One. Lệnh FX_ON/FX_OFF cũ ở trên giữ NGUYÊN.
++    { action: "FX_SENDS_1", label: "FX → SENDS 1 Verb ngắn (nút nguồn Send; gửi kèm FX ON/OFF)" },
++    { action: "FX_SENDS_2", label: "FX → SENDS 2 Verb dài (nút nguồn Send; gửi kèm FX ON/OFF)" },
++    { action: "FX_SENDS_3", label: "FX → SENDS 3 Main (nút nguồn Send; gửi kèm FX ON/OFF)" },
++    { action: "FX_SENDS_4", label: "FX → SENDS 4 Delay (nút nguồn Send; gửi kèm FX ON/OFF)" },
++    { action: "FX_SENDS_5", label: "FX → SENDS 5 Com Verb (nút nguồn Send; gửi kèm FX ON/OFF)" },
++    { action: "FX_SENDS_6", label: "FX → SENDS 6 None (nút nguồn Send; gửi kèm FX ON/OFF)" },
+     // TASK A79 — nút TUNE OFF: bypass Auto-Tune cả 2 mic (ON = bypass bật, OFF = bypass tắt). Trống mặc định, tự MIDI Learn.
+     // 1 CC DUY NHẤT cho nút TUNE ON/OFF: Menu tự gửi giá trị 127 (nút thành TUNE OFF = bypass BẬT) hoặc 0 (về TUNE ON = bypass TẮT).
+     { action: "TUNE_BYPASS", label: "TUNE ON/OFF — BYPASS Auto-Tune 1 (127 = bypass bật, 0 = tắt)" },
+@@ -750,6 +757,7 @@ const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME
+ const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
+ const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "TUNE_BYPASS_2", "TUNE_BYPASS_3", "TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2", "AUDIO_CHILL_STATE", "AUDIO_CHILL_KNOB"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
+ MIDI_CONFLICT_GUARD_SET.add("BE_STATE"); // BE-BTN-01: nút BÈ cũng thuộc nhóm bảo vệ trùng CC
++["FX_SENDS_1", "FX_SENDS_2", "FX_SENDS_3", "FX_SENDS_4", "FX_SENDS_5", "FX_SENDS_6"].forEach((a) => MIDI_CONFLICT_GUARD_SET.add(a)); // FX-SENDS-01: 6 CC Sends cũng thuộc nhóm bảo vệ trùng CC
+ function findMidiOutMappingConflict(action, mapping) {
+     for (const { action: other } of DAW_MIDI_ACTIONS) {
+         if (other === action) continue;
+@@ -796,6 +804,9 @@ function getDawMidiOutMapping(action) {
+         const base = /_AT3$/.test(action) ? 34 : 36;
+         return { kind: "cc", channel: 15, number: /^KEY_ROOT_/.test(action) ? base + 1 : base, value: /SCALE_MINOR/.test(action) ? 5 : 0, source: "DEFAULT_PRESET" };
+     }
++    if (/^FX_SENDS_[1-6]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // FX-SENDS-01 — khớp getMidiOutMapping() ở actionRegistry.js
++        return { kind: "cc", channel: 15, number: 39 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
++    }
+     if (action === "AUTOKEY_DETECT" || action === "AUTOKEY_SEND") { // AUTOKEY-MIDI-01 — khớp getMidiOutMapping() ở actionRegistry.js
+         return { kind: "cc", channel: 15, number: action === "AUTOKEY_DETECT" ? 102 : 103, value: 127, source: "DEFAULT_PRESET" };
+     }
+@@ -867,6 +878,8 @@ const DAW_MIDI_PROFILES = Object.freeze({
+             micvol: Object.freeze({ title: "MIC VOLUME", count: 2, mappings: dawQfMake(15, 127, { MIC1_VOLUME: 24, MIC2_VOLUME: 25 }) }),
+             // FX-BUS-KNOB-01 — 4 CC (kênh 15) cho fader 4 bus hiệu ứng, không trùng CC 20–27 (Knob/Mic/Scale/Root) và 102–113 (LIVE/CHỌN TRACK/TUNE).
+             fxbus: Object.freeze({ title: "FX BUS VOLUME", count: 4, mappings: dawQfMake(15, 127, { FX_BUS_DELAY_VOLUME: 28, FX_BUS_VERB_SHORT_VOLUME: 29, FX_BUS_VERB_LONG_VOLUME: 30, FX_BUS_COM_VERB_VOLUME: 31 }) }),
++            // FX-SENDS-01 — 6 CC (kênh 15, CC 40..45) cho 6 nút nguồn Send; nút FX gửi kèm FX ON/OFF (giá trị 127 = bật, 0 = tắt do Menu tự quyết). Không trùng 20–37, 85–95, 102–104.
++            fxsends: Object.freeze({ title: "FX → SENDS (6 nút nguồn)", count: 6, mappings: dawQfMake(15, 127, { FX_SENDS_1: 40, FX_SENDS_2: 41, FX_SENDS_3: 42, FX_SENDS_4: 43, FX_SENDS_5: 44, FX_SENDS_6: 45 }) }),
+             // KEY-SCALE-CC-02 — 1 CC (26, kênh 15) chọn Scale Auto-Tune theo GIÁ TRỊ: Major=0 (mục 1/29), Minor=5 (mục 2/29: 5/127×28≈1.1).
+             // KEY-ROOT-CC-01 — CC 27 (kênh 15) cho Key gốc: Menu tự tính giá trị theo nốt (C=0 … B=127); giá trị 0 ở bộ này chỉ là chỗ giữ.
+             // Danh sách Scale của Auto-Tune Pro: 29 mục, Major đầu, Minor thứ hai, Harmonic cuối (=127). Giá trị CHƯA kiểm chứng đủ trên máy thật.
