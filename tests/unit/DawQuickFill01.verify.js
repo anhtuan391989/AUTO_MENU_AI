@@ -173,7 +173,7 @@ const KNOB_S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_
 // 12 an toàn khởi động/đổi DAW + phạm vi sửa
 {
   const blk = setup.slice(setup.indexOf('const DAW_QF_S1_LIVE'), setup.indexOf('// S8 — 3 hàng PLAY/STOP/RECORD'));
-  ok(!/applyDawProfileFill\(/.test(setup.replace(/function applyDawProfileFill[\s\S]*?\n}\n/, '').replace(/applyDawProfileFill\(dawNow,[^\n]*\n/, '')), '[12] applyDawProfileFill chỉ được gọi từ handler nút (không tự áp dụng lúc mở/đổi DAW)');
+  ok(!/applyDawProfileFill\(/.test(setup.replace(/function applyDawProfileFill[\s\S]*?\n}\n/, '').replace(/applyDawProfileFill\(dawNow,[^\n]*\n/, '').replace(/applyDawProfileFill\(daw, \{ ok: true, writes \}[^\n]*\n/, '')), '[12] applyDawProfileFill chỉ được gọi từ handler nút + autoApplyDawMidi (C64: CHỈ khi bấm Lưu DAW; mở trang/đổi radio chưa lưu thì không tự áp)');
   ok(!/setSetting/.test(blk.replace(/function applyDawProfileFill[\s\S]*$/, '')), '[12] logic profile/plan không tự ghi setting');
 }
 // 13 (MENU-FIX-02) bộ CHỌN TRACK: chỉ Studio One, ghi đúng 3 action SELECT, không đụng bộ khác

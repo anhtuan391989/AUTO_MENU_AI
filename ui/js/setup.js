@@ -71,7 +71,8 @@ function setupRadioSetting({
     saveBtnId,
     radioName,
     storageKey,
-    displayId
+    displayId,
+    onSaved
 }) {
     initModal(openBtnId, modalId, closeBtnId);
     const saveBtn = document.getElementById(saveBtnId);
@@ -92,6 +93,11 @@ function setupRadioSetting({
             updateSetupStatus();
             updateSetupProgress();
             notifySetupChanged();
+
+            // C64 — callback tuỳ chọn SAU KHI đã lưu (chỉ DAW dùng): không làm hỏng việc lưu nếu callback lỗi.
+            if (typeof onSaved === "function") {
+                try { onSaved(selected.value); } catch (e) { console.warn("[setupRadioSetting] onSaved lỗi:", e); }
+            }
 
             if (display) {
                 display.textContent = selected.value;
@@ -117,7 +123,8 @@ function initSetupPage() {
         saveBtnId: "saveDawBtn",
         radioName: "daw",
         storageKey: "selectedDAW",
-        displayId: "currentDaw"
+        displayId: "currentDaw",
+        onSaved: (daw) => autoApplyDawMidi(daw)   // C64 — Lưu DAW => MIDI tự theo DAW
     });
 
     setupRadioSetting({
@@ -1004,6 +1011,60 @@ function applyDawProfileFill(dawLabel, plan, getAll, setAll) {
     all[dawLabel] = mine;
     setAll(all);
     return true;
+}
+
+// C64 — LƯU DAW => MIDI TỰ THEO DAW. Dùng đúng bộ "điền toàn bộ" (QUICKFILL-ALL-01) của DAW vừa lưu, không tạo CC mới.
+// Quy tắc an toàn: mapping do người dùng đã lưu (khác bộ chuẩn) KHÔNG bị ghi đè âm thầm — hỏi 1 lần; mapping mặc định (DEFAULT_PRESET) thì thay thẳng.
+// Action nào trùng CC với action ngoài bộ thì bỏ qua (không ghi nửa vời gây trùng). Hàm thuần, KHÔNG ghi, KHÔNG gửi MIDI.
+function planAutoDawMidi(profile, getMapping, allActions) {
+    const res = { ok: false, reason: "", errors: [], writes: [], overwrite: [], skippedConflicts: [] };
+    if (!profile || !profile.quickFillLabel) { res.reason = "NO_PROFILE"; return res; }
+    const plan = planDawProfileFill(dawProfileAllInOne(profile), DAW_QF_ALL, getMapping, allActions);
+    if (plan.errors.length) { res.reason = "INVALID"; res.errors = plan.errors; return res; }
+    const bad = new Set(plan.conflicts.map(([a]) => a));
+    res.skippedConflicts = [...bad];
+    res.writes = plan.writes.filter(([a]) => !bad.has(a));
+    res.overwrite = plan.overwrite.filter((a) => !bad.has(a) && !((getMapping(a) || {}).source === "DEFAULT_PRESET"));
+    res.ok = true;
+    return res;
+}
+// io (tuỳ chọn, để test): { getAll, setAll, getMapping, confirmFn, notify }
+function autoApplyDawMidi(dawLabel, io) {
+    io = io || {};
+    const daw = String(dawLabel || "").trim();
+    const out = { status: "SKIPPED", daw, written: 0, keptManual: 0, skippedConflicts: [], message: "" };
+    if (!daw) return out;
+    const profile = resolveDawProfile(daw);
+    const getMapping = io.getMapping || getDawMidiOutMapping;
+    const plan = planAutoDawMidi(profile, getMapping, DAW_MIDI_ACTIONS.map((x) => x.action));
+    if (!plan.ok) {
+        out.status = plan.reason;
+        out.message = plan.reason === "NO_PROFILE" ? `Chưa có bộ MIDI gợi ý cho ${daw} — hãy cấu hình MIDI thủ công.` : "Bộ MIDI của DAW này bị lỗi: " + plan.errors.join("; ");
+        return out;
+    }
+    let writes = plan.writes;
+    if (plan.overwrite.length) {
+        const ask = (io.confirmFn || ((m) => confirm(m)))(`Có ${plan.overwrite.length} mapping MIDI bạn đã chỉnh tay khác bộ chuẩn của ${daw}:\n${plan.overwrite.join(", ")}\n\nOK = ghi đè bằng bộ chuẩn.  Hủy = giữ nguyên mapping của bạn.`);
+        if (!ask) { writes = writes.filter(([a]) => !plan.overwrite.includes(a)); out.keptManual = plan.overwrite.length; }
+    }
+    const getAll = io.getAll || (() => getSetting("dawMidiOutMappings"));
+    const setAll = io.setAll || ((all) => setSetting("dawMidiOutMappings", all));
+    applyDawProfileFill(daw, { ok: true, writes }, getAll, setAll);
+    out.status = "APPLIED"; out.written = writes.length; out.skippedConflicts = plan.skippedConflicts;
+    out.message = `Đã tự áp bộ MIDI ${profile.name} cho ${daw}: ${writes.length} mapping` + (out.keptManual ? `, giữ ${out.keptManual} mapping bạn chỉnh tay` : "") + (out.skippedConflicts.length ? `, bỏ qua ${out.skippedConflicts.length} mapping bị trùng CC` : "") + ". Chưa gửi gì tới DAW.";
+    (io.notify || notifySetupChanged)();
+    try { (io.status || showAutoDawMidiNotice)(out); } catch (e) { /* thông báo không được làm hỏng việc lưu */ }
+    return out;
+}
+// Thông báo nhỏ dưới nút Lưu DAW — tạo bằng JS (không đổi HTML), tự mất sau vài giây.
+function showAutoDawMidiNotice(out) {
+    const btn = typeof document !== "undefined" && document.getElementById("saveDawBtn");
+    if (!btn) return;
+    let el = document.getElementById("autoDawMidiNotice");
+    if (!el) { el = document.createElement("div"); el.id = "autoDawMidiNotice"; el.className = "hint-text"; el.style.marginTop = "6px"; btn.insertAdjacentElement("afterend", el); }
+    el.textContent = "🎛 " + out.message;
+    clearTimeout(showAutoDawMidiNotice._t);
+    showAutoDawMidiNotice._t = setTimeout(() => { el.textContent = ""; }, 12000);
 }
 
 // S8 — 3 hàng PLAY/STOP/RECORD, mỗi hàng: Type (CC/Note) + Channel + Number + Value/Velocity + Lưu + Xoá.
