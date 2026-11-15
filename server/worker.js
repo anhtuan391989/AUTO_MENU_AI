@@ -295,7 +295,7 @@ export default {
         const gioiHan = xemHet ? 5000 : 100;
         const tuKhoa = chuanHoaTen(url.searchParams.get("q") || "");
 
-        // [A96] Cache: cùng 1 danh sách được hỏi lại trong 60 giây thì trả luôn, không chạm D1.
+        // [A96] Cache: cùng 1 danh sách được hỏi lại trong 5 phút thì trả luôn, không chạm D1.
         //       fresh=1 (trang gửi sau khi sửa/xoá hoặc bấm "Tai lai") bỏ qua cache, nhưng chỉ khi cache đã cũ >= 3 giây (chống bấm liên tục).
         const cKeyDs = "list|" + (xemHet ? "1" : "0") + "|" + tuKhoa;
         const daNhoDs = cacheGet(cKeyDs);
@@ -685,7 +685,7 @@ export default {
 // - Chỉ nhớ kết quả THÀNH CÔNG (lỗi không bao giờ được nhớ).
 // - Mọi thao tác GHI đi qua server này (/add-segment, /set-key, /delete-song, /set-song-info, thời lượng) gọi xoaCache() -> xoá sạch.
 // - Worker có thể chạy nhiều bản song song; bản khác có thể còn giữ dữ liệu cũ tối đa bằng thời hạn (TTL) dưới đây. D1 thật không bị đổi gì.
-const CACHE_TTL_LIST_MS = 60 * 1000;
+const CACHE_TTL_LIST_MS = 5 * 60 * 1000;
 const CACHE_TTL_COUNT_MS = 60 * 1000;
 const CACHE_TTL_FIND_DUNG_MS = 120 * 1000;   // /find tìm thấy bài
 const CACHE_TTL_FIND_KHONG_MS = 30 * 1000;   // /find không thấy bài (ngắn để bài vừa thêm sớm được Menu thấy)
