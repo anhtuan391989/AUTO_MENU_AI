@@ -1,0 +1,63 @@
+diff --git a/tests/unit/FxSends01.verify.js b/tests/unit/FxSends01.verify.js
+index 55938ca..df3204e 100644
+--- a/tests/unit/FxSends01.verify.js
++++ b/tests/unit/FxSends01.verify.js
+@@ -10,7 +10,7 @@ function makeAR(daw, saved, settings, failCc) {
+     const sent = [];
+     const win = { appSettings: {}, getLastMidiSendResult: () => null };
+     const sb = { window: win, console: { log() {}, error() {}, warn() {} }, setTimeout, clearTimeout, Promise,
+-        getSetting: (k) => (k === 'selectedDAW' ? daw : k === 'dawMidiOutMappings' ? (saved || {}) : (settings || {})[k]), saveSetting: () => {},
++        getSetting: (k, fb = '') => (k === 'selectedDAW' ? daw : k === 'dawMidiOutMappings' ? (saved || {}) : ((settings || {})[k] !== undefined ? (settings || {})[k] : fb)), /* giống getSetting thật: khoá chưa có => "" (đây từng là LỖI: "" bị coi là TẮT) */ saveSetting: () => {},
+         sendMidiCC: async (n, v, ch) => { if (failCc === n) return false; sent.push([n, v, ch]); return true; } };
+     vm.createContext(sb); vm.runInContext(rd('ui/js/actionRegistry.js'), sb, { filename: 'actionRegistry.js' });
+     return Object.assign({}, win.ActionRegistry, { __sent: sent, __win: win });
+@@ -38,10 +38,16 @@ const SP = (v) => ({ 'Studio Pro 8': { ...FX_SAVED } });
+     ok(/window\.__fxLastManualVia = "send";\s*\/\/ FX-SENDS-01[\s\S]{0,400}sendFxSendsLink\?\.\(!!target[\s\S]{0,300}group\.apply\(!!target, \{ force: true \}\)/.test(rend), 'renderer: đường FX cũ gọi sendFxSendsLink TRƯỚC lệnh FX cũ (lệnh cũ giữ nguyên)');
+     ok(/withSends\(syncText0\(info\)\)/.test(rend), 'renderer: tooltip nút FX có thêm dòng kết quả Sends');
+ 
+-    { const tele = []; const w2 = {}; const sb2 = { window: w2, console: { log() {}, error() {}, warn() {} }, setTimeout, clearTimeout, Promise, getSetting: (k) => (k === 'selectedDAW' ? 'Studio Pro 8' : k === 'dawMidiOutMappings' ? {} : undefined), saveSetting: () => {}, sendMidiCC: async () => true };
++    { const tele = []; const w2 = {}; const sb2 = { window: w2, console: { log() {}, error() {}, warn() {} }, setTimeout, clearTimeout, Promise, getSetting: (k, fb = '') => (k === 'selectedDAW' ? 'Studio Pro 8' : k === 'dawMidiOutMappings' ? {} : fb), saveSetting: () => {}, sendMidiCC: async () => true };
+       w2.appSettings = {}; w2.getLastMidiSendResult = () => null; w2.electronAPI = { sendTelemetry: (r) => tele.push(r) };
+       vm.createContext(sb2); vm.runInContext(rd('ui/js/actionRegistry.js'), sb2); await w2.ActionRegistry.sendFxSendsLink(true, { reason: 'menu-button' });
+       ok(tele.length === 1 && tele[0].event === 'FX_SENDS' && tele[0].ok === 6 && tele[0].target === true && tele[0].value === 127, 'ghi telemetry FX_SENDS (ok 6/6, target, value) để đọc từ logs/*.jsonl'); }
++    { // LỖI THẬT đã gặp: getSetting() trả "" cho khoá chưa có => trước đây fxSendsLink bị hiểu là TẮT => không gửi gì.
++      AR = makeAR('Studio Pro 8', SP()); const a1 = await AR.setDawControlState('FX', true, {});
++      ok(AR.__sent.length === 7 && a1.sendsExtra, 'getSetting trả "" (chưa đặt fxSendsLink) => vẫn MẶC ĐỊNH BẬT, gửi đủ 6 CC Sends');
++      AR = makeAR('Studio Pro 8', SP(), { fxSendsLink: 'false' }); await AR.setDawControlState('FX', true, {}); ok(AR.__sent.length === 1, 'fxSendsLink = chuỗi "false" => TẮT');
++      AR = makeAR('Studio Pro 8', SP(), { fxSendsLink: true, fxSendsInvert: '' }); await AR.setDawControlState('FX', true, {}); ok(AR.__sent.length === 7 && AR.__sent[1][1] === 127, 'fxSendsInvert chưa đặt ("") => không đảo');
++      AR = makeAR('Studio Pro 8', SP(), { fxSendsInvert: 'true' }); await AR.setDawControlState('FX', true, {}); ok(AR.__sent[1][1] === 0, 'fxSendsInvert = chuỗi "true" => đảo'); }
+     console.log('== 2. Cờ tuỳ chọn ==');
+     AR = makeAR('Studio Pro 8', SP(), { fxSendsInvert: true }); await AR.setDawControlState('FX', true, {});
+     ok(AR.__sent.slice(1).every((m) => m[1] === 0) && AR.__sent.length === 7, 'fxSendsInvert=true: FX BẬT gửi 0 (đảo)');
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index 7c8f16d..77cbd6e 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -532,7 +532,11 @@ function runDawSequence(fn) {
+ // FX-SENDS-01 — gửi 6 CC (kênh 15, CC 40..45) cho 6 nút nguồn Send: BẬT = 127, TẮT = 0 (đảo bằng setting fxSendsInvert = true; tắt hẳn bằng fxSendsLink = false).
+ // Dùng cho MỌI đường của nút FX (FX ON/OFF "explicit" và đường FX cũ). Không bao giờ ném lỗi. Ghi kết quả vào window.__fxSendsLast (hiện trên tooltip nút FX).
+ async function sendFxSendsLink(targetOn, opts = {}) {
+-    if (!getFxSendsSetting("fxSendsLink", true)) { try { window.__fxSendsLast = { text: "Sends: TẮT (fxSendsLink=false)" }; } catch (_) {} return null; }
++    if (!getFxSendsSetting("fxSendsLink", true)) {
++        try { window.__fxSendsLast = { text: "Sends: TẮT (fxSendsLink=false)" }; } catch (_) {}
++        try { window.electronAPI && typeof window.electronAPI.sendTelemetry === "function" && window.electronAPI.sendTelemetry({ event: "FX_SENDS", skipped: "fxSendsLink=false", target: !!targetOn, timestamp: Date.now() }); } catch (_) {}
++        return null;
++    }
+     const reason = (opts && opts.reason) || "fx-sends";
+     const on = getFxSendsSetting("fxSendsInvert", false) ? 0 : 127;
+     const val = targetOn ? on : 127 - on;
+@@ -556,7 +560,13 @@ async function sendFxSendsLink(targetOn, opts = {}) {
+ 
+ // FX-SENDS-01 — đọc cờ setting an toàn (thiếu getSetting => dùng mặc định).
+ function getFxSendsSetting(key, def) {
+-    try { const v = typeof getSetting === "function" ? getSetting(key) : undefined; return v === undefined || v === null ? def : !!v; } catch (_) { return def; }
++    // getSetting() của Menu trả "" (chuỗi rỗng) cho khoá CHƯA có => "" phải coi là CHƯA ĐẶT (dùng mặc định), nếu không "" -> false làm tính năng bị TẮT ngầm.
++    try {
++        const v = typeof getSetting === "function" ? getSetting(key) : undefined;
++        if (v === undefined || v === null || v === "") return def;
++        if (typeof v === "string") { const t = v.trim().toLowerCase(); if (t === "false" || t === "0" || t === "off" || t === "no") return false; if (t === "true" || t === "1" || t === "on" || t === "yes") return true; return def; }
++        return !!v;
++    } catch (_) { return def; }
+ }
+ 
+ async function setDawControlState(control, targetOn, context = {}) {

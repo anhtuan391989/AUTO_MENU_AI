@@ -529,12 +529,16 @@ function runDawSequence(fn) {
     return p;
 }
 
-// FX-SENDS-01 — gửi 6 CC (kênh 15, CC 40..45) cho 6 nút nguồn Send: BẬT = 127, TẮT = 0 (đảo bằng setting fxSendsInvert = true; tắt hẳn bằng fxSendsLink = false).
+// FX-SENDS-01 — gửi 6 CC (kênh 15, CC 40..45) cho 6 nút nguồn Send: BẬT = 127, TẮT = 0 (mặc định ĐẢO theo Studio One của Khói: FX BẬT gửi 0, FX TẮT gửi 127; đặt fxSendsInvert = false để về 127 = BẬT; tắt hẳn bằng fxSendsLink = false).
 // Dùng cho MỌI đường của nút FX (FX ON/OFF "explicit" và đường FX cũ). Không bao giờ ném lỗi. Ghi kết quả vào window.__fxSendsLast (hiện trên tooltip nút FX).
 async function sendFxSendsLink(targetOn, opts = {}) {
-    if (!getFxSendsSetting("fxSendsLink", true)) { try { window.__fxSendsLast = { text: "Sends: TẮT (fxSendsLink=false)" }; } catch (_) {} return null; }
+    if (!getFxSendsSetting("fxSendsLink", true)) {
+        try { window.__fxSendsLast = { text: "Sends: TẮT (fxSendsLink=false)" }; } catch (_) {}
+        try { window.electronAPI && typeof window.electronAPI.sendTelemetry === "function" && window.electronAPI.sendTelemetry({ event: "FX_SENDS", skipped: "fxSendsLink=false", target: !!targetOn, timestamp: Date.now() }); } catch (_) {}
+        return null;
+    }
     const reason = (opts && opts.reason) || "fx-sends";
-    const on = getFxSendsSetting("fxSendsInvert", false) ? 0 : 127;
+    const on = getFxSendsSetting("fxSendsInvert", true) ? 0 : 127;
     const val = targetOn ? on : 127 - on;
     const results = {};
     for (const ex of [ACTIONS.FX_SENDS_1, ACTIONS.FX_SENDS_2, ACTIONS.FX_SENDS_3, ACTIONS.FX_SENDS_4, ACTIONS.FX_SENDS_5, ACTIONS.FX_SENDS_6]) {
@@ -556,7 +560,13 @@ async function sendFxSendsLink(targetOn, opts = {}) {
 
 // FX-SENDS-01 — đọc cờ setting an toàn (thiếu getSetting => dùng mặc định).
 function getFxSendsSetting(key, def) {
-    try { const v = typeof getSetting === "function" ? getSetting(key) : undefined; return v === undefined || v === null ? def : !!v; } catch (_) { return def; }
+    // getSetting() của Menu trả "" (chuỗi rỗng) cho khoá CHƯA có => "" phải coi là CHƯA ĐẶT (dùng mặc định), nếu không "" -> false làm tính năng bị TẮT ngầm.
+    try {
+        const v = typeof getSetting === "function" ? getSetting(key) : undefined;
+        if (v === undefined || v === null || v === "") return def;
+        if (typeof v === "string") { const t = v.trim().toLowerCase(); if (t === "false" || t === "0" || t === "off" || t === "no") return false; if (t === "true" || t === "1" || t === "on" || t === "yes") return true; return def; }
+        return !!v;
+    } catch (_) { return def; }
 }
 
 async function setDawControlState(control, targetOn, context = {}) {
