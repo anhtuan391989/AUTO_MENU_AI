@@ -549,6 +549,8 @@ async function sendFxSendsLink(targetOn, opts = {}) {
     const text = okN === 6 ? "Sends: đã GỬI 6/6 CC (kênh 15, CC 40–45, " + val + (targetOn ? " = BẬT" : " = TẮT") + ") — Studio One chưa xác nhận"
         : "Sends: chỉ gửi được " + okN + "/6" + (notCfg ? " (" + notCfg + " chưa cấu hình)" : " — có CC gửi LỖI (kiểm cổng MIDI)");
     try { window.__fxSendsLast = { at: Date.now(), target: !!targetOn, ok: okN, total: 6, text, results }; } catch (_) {}
+    // Ghi vết vào logs/*.jsonl (event FX_SENDS) để biết CHẮC Menu đã gửi 6 CC hay chưa mà không cần xem tooltip.
+    try { window.electronAPI && typeof window.electronAPI.sendTelemetry === "function" && window.electronAPI.sendTelemetry({ event: "FX_SENDS", target: !!targetOn, value: val, ok: okN, total: 6, results, reason, daw: (typeof getSetting === "function" ? getSetting("selectedDAW") : null), timestamp: Date.now() }); } catch (_) {}
     return { ok: okN === 6, okCount: okN, total: 6, value: val, text, results };
 }
 

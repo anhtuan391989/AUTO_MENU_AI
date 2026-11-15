@@ -38,6 +38,10 @@ const SP = (v) => ({ 'Studio Pro 8': { ...FX_SAVED } });
     ok(/window\.__fxLastManualVia = "send";\s*\/\/ FX-SENDS-01[\s\S]{0,400}sendFxSendsLink\?\.\(!!target[\s\S]{0,300}group\.apply\(!!target, \{ force: true \}\)/.test(rend), 'renderer: đường FX cũ gọi sendFxSendsLink TRƯỚC lệnh FX cũ (lệnh cũ giữ nguyên)');
     ok(/withSends\(syncText0\(info\)\)/.test(rend), 'renderer: tooltip nút FX có thêm dòng kết quả Sends');
 
+    { const tele = []; const w2 = {}; const sb2 = { window: w2, console: { log() {}, error() {}, warn() {} }, setTimeout, clearTimeout, Promise, getSetting: (k) => (k === 'selectedDAW' ? 'Studio Pro 8' : k === 'dawMidiOutMappings' ? {} : undefined), saveSetting: () => {}, sendMidiCC: async () => true };
+      w2.appSettings = {}; w2.getLastMidiSendResult = () => null; w2.electronAPI = { sendTelemetry: (r) => tele.push(r) };
+      vm.createContext(sb2); vm.runInContext(rd('ui/js/actionRegistry.js'), sb2); await w2.ActionRegistry.sendFxSendsLink(true, { reason: 'menu-button' });
+      ok(tele.length === 1 && tele[0].event === 'FX_SENDS' && tele[0].ok === 6 && tele[0].target === true && tele[0].value === 127, 'ghi telemetry FX_SENDS (ok 6/6, target, value) để đọc từ logs/*.jsonl'); }
     console.log('== 2. Cờ tuỳ chọn ==');
     AR = makeAR('Studio Pro 8', SP(), { fxSendsInvert: true }); await AR.setDawControlState('FX', true, {});
     ok(AR.__sent.slice(1).every((m) => m[1] === 0) && AR.__sent.length === 7, 'fxSendsInvert=true: FX BẬT gửi 0 (đảo)');
