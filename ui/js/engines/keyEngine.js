@@ -170,7 +170,14 @@ const KeyEngine = (() => {
     // relative khi RELATIVE_GROUP_ENABLED, và confidence ≥ MIN_CONFIDENCE). Chỉ chạy khi lastLockedKey === null nên KHÔNG đụng bài đã chốt bình thường.
     // Đặt FALLBACK_LOCK_ENABLED = false để tắt.
     const FALLBACK_LOCK_ENABLED = true;
-    const FALLBACK_LOCK_LONG_S = 180; // theo yêu cầu người dùng ("hết bài 3 phút"). Muốn chốt sớm hơn: đổi số này (đề nghị của Claude B: 25).
+    // KEY-FALLBACK-LOCK-02 (15/11/2026) — HẠ từ 180 s xuống 30 s và dùng sàn tin cậy RIÊNG (FALLBACK_MIN_CONFIDENCE) cho đường dự phòng.
+    // Lý do (đo bằng mã engine THẬT chạy ngoại tuyến trên nhạc thật, xem tools/keybench/live_lock.js): bài nhập nhằng relative (cặp như B <-> G#m) có
+    // tin cậy dài hạn chỉ 0.33–0.47 < MIN_CONFIDENCE (0.55) nên KHÔNG BAO GIỜ khoá được => Menu treo "ĐANG NGHE"; chỉ hạ số giây (180 -> 25) KHÔNG đủ
+    // (đã thử, không đổi kết quả). Điều kiện còn lại giữ nguyên: lastLockedKey === null, có nhạc, Key dài hạn dẫn đầu ổn định >= LONG_LOCK_TICKS tick.
+    // Đánh đổi: bài nhập nhằng có thể khoá sang Key relative (cùng bộ nốt, vd B Major <-> G# Minor) — vẫn tốt hơn không có Key; đường khoá thường sửa được sau.
+    // Muốn về như cũ: FALLBACK_LOCK_LONG_S = 180 và FALLBACK_MIN_CONFIDENCE = MIN_CONFIDENCE (0.55).
+    const FALLBACK_LOCK_LONG_S = 30;
+    const FALLBACK_MIN_CONFIDENCE = 0.30;
     const LONG_FIRST_LOCK_S = 8;      // khoá LẦN ĐẦU: chờ ≥ 8 s nhạc, trừ khi tín hiệu "đứng yên" (1 hợp âm giữ lâu: ngắn ≈ dài)
     const LONG_STATIONARY_COS = 0.97; // cosine(ngắn, dài) ≥ 0.97 => không có gì để lấy trung bình, khoá sớm vẫn đúng
     // TASK AI-KEY-ENGINE-COMPLETE-01 — lối tắt "đứng yên" (1 hợp âm giữ lâu) CHỈ hợp lệ sau LONG_STATIONARY_MIN_S giây nhạc tích luỹ.
@@ -894,7 +901,7 @@ const KeyEngine = (() => {
             // KEY-FALLBACK-LOCK-01 — đường dự phòng (xem chú thích ở hằng FALLBACK_LOCK_ENABLED)
             const __fbStreak = RELATIVE_GROUP_ENABLED ? longState.groupStreak : longState.streak;
             if (FALLBACK_LOCK_ENABLED && lastLockedKey === null && hasMusicalContent && longState.key && longState.result
-                && longSeconds >= FALLBACK_LOCK_LONG_S && __fbStreak >= LONG_LOCK_TICKS && longState.result.confidence >= MIN_CONFIDENCE) {
+                && longSeconds >= FALLBACK_LOCK_LONG_S && __fbStreak >= LONG_LOCK_TICKS && longState.result.confidence >= FALLBACK_MIN_CONFIDENCE) {
                 const fr = longState.result;
                 longLockFiredKey = longState.key; fastPathLastFiredKey = longState.key; lastLockedKey = longState.key;
                 sendTelemetry({
