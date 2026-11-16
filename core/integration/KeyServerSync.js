@@ -41,6 +41,16 @@ const LOG_ONCE_WINDOW_MS = 60 * 1000; // cùng 1 lý do cho cùng 1 bài: chỉ 
 // Chỉ gửi Key lên server khi độ tin cậy từ KeyEngine (0..1) đạt ngưỡng này.
 // 0.55 = đúng KeyEngine.MIN_CONFIDENCE (ngưỡng bộ dò tự coi là "có Key") — không khắt khe hơn chính bộ dò.
 const MIN_SUBMIT_CONFIDENCE = 0.55;
+
+// LIVE-SUBMIT-GATE-01 (16/11/2026) — Key do AI NGHE TRỰC TIẾP (submit({ live:true })) chỉ được gửi khi đã "chín".
+// Lý do: Server là "người gửi trước thắng" (bài đã có trên Server thì mọi lần gửi sau đều bị chặn), mà AI hay chốt SAI ở vài giây đầu rồi
+// tự sửa vài chục giây sau (đo 29 bài: chốt trước 10 giây chỉ đúng 5/15). Trước đây Key chốt sớm bị gửi ngay và nằm lại Server mãi.
+// Điều kiện: (1) đã nghe >= LIVE_MIN_LISTEN_MS kể từ lần báo Key đầu tiên của bài; (2) Key không đổi >= LIVE_KEY_HOLD_MS.
+// Đường gửi khác (phân tích cả file, bản ghi âm, tay người dùng) KHÔNG bị ảnh hưởng. Muốn tắt: đặt liveMinListenMs = 0 và liveKeyHoldMs = 0.
+const LIVE_MIN_LISTEN_MS = 90 * 1000;
+const LIVE_KEY_HOLD_MS = 30 * 1000;
+const LIVE_GATE_IDLE_RESET_MS = 120 * 1000; // im quá lâu = lần phát khác của bài -> bắt đầu đếm lại (không thừa hưởng mốc cũ)
+const LIVE_GATE_MAX_ENTRIES = 200;
 // Menu (SMTC) không biết độ dài bài -> coi Key này áp dụng cho TOÀN BÀI.
 const WHOLE_SONG_END_SEC = 36000;
 
@@ -130,6 +140,9 @@ class KeyServerSync {
         // DB-MATCH-ID-02: (title, artist) => độ dài (giây) của bài ĐANG PHÁT nếu biết, ngược lại null. Có độ dài -> Server báo bài cùng tên mà
         // KHÁC độ dài (> 3 giây) thì coi là bản thu khác, không dùng Key đó. Không truyền = hành vi cũ.
         this.durationResolver = typeof opts.durationResolver === 'function' ? opts.durationResolver : null;
+        // LIVE-SUBMIT-GATE-01: ngưỡng cho Key nghe trực tiếp (xem ghi chú ở đầu file). Test có thể truyền số khác.
+        this.liveMinListenMs = Number.isFinite(opts.liveMinListenMs) ? opts.liveMinListenMs : LIVE_MIN_LISTEN_MS;
+        this.liveKeyHoldMs = Number.isFinite(opts.liveKeyHoldMs) ? opts.liveKeyHoldMs : LIVE_KEY_HOLD_MS;
 
         this._cache = new Map();           // cacheKey -> { at, ttl, value }
         this._lookupInflight = new Map();  // cacheKey -> Promise
@@ -139,6 +152,30 @@ class KeyServerSync {
         this._enabledAt = -Infinity;
         this._enabledValue = true;
         this._logAt = new Map();           // khóa log -> thời điểm ghi gần nhất (chống spam)
+        this._liveGate = new Map();        // subKey -> { firstAt, key, keySince, lastAt } (LIVE-SUBMIT-GATE-01)
+    }
+
+    // LIVE-SUBMIT-GATE-01: null = đủ "chín", được gửi; ngược lại { reason, text }. Mỗi lần gọi cập nhật mốc thời gian của bài.
+    _liveGateCheck(subKey, keyId) {
+        const t = this.now();
+        let g = this._liveGate.get(subKey);
+        if (g && t - g.lastAt > LIVE_GATE_IDLE_RESET_MS) g = null; // quá lâu không có báo cáo -> lần phát khác
+        if (!g) {
+            if (this._liveGate.size >= LIVE_GATE_MAX_ENTRIES) this._liveGate.delete(this._liveGate.keys().next().value);
+            g = { firstAt: t, key: keyId, keySince: t, lastAt: t };
+        } else if (g.key !== keyId) {
+            g.key = keyId; g.keySince = t; // Key đổi -> đếm lại thời gian giữ Key
+        }
+        g.lastAt = t;
+        this._liveGate.set(subKey, g);
+        const listened = t - g.firstAt, held = t - g.keySince;
+        if (listened < this.liveMinListenMs) {
+            return { reason: 'too-early', text: 'AI mới nghe ' + Math.round(listened / 1000) + ' giây, cần >= ' + Math.round(this.liveMinListenMs / 1000) + ' giây mới gửi (tránh lưu Key chốt sớm)' };
+        }
+        if (held < this.liveKeyHoldMs) {
+            return { reason: 'key-unstable', text: 'Key mới giữ ' + Math.round(held / 1000) + ' giây, cần >= ' + Math.round(this.liveKeyHoldMs / 1000) + ' giây' };
+        }
+        return null;
     }
 
     // Ghi log lý do (không bao giờ throw). Cùng 1 khóa chỉ ghi 1 lần / LOG_ONCE_WINDOW_MS,
@@ -428,10 +465,10 @@ class KeyServerSync {
     /**
      * Gửi Key vừa dò lên server (chỉ khi server chưa có bài). Luôn resolve:
      *   { ok:true,  reason:"submitted" | "server-already-has" | "already-submitted" }
-     *   { ok:false, reason:"disabled" | "no-title" | "low-confidence" | "bad-key" |
+     *   { ok:false, reason:"disabled" | "no-title" | "low-confidence" | "bad-key" | "too-early" | "key-unstable" |
      *                      "cooldown" | "lookup-failed" | "info-failed" | "segment-failed" }
      */
-    async submit({ title, artist, key, confidence, durationSec } = {}) {
+    async submit({ title, artist, key, confidence, durationSec, live } = {}) {
         const label = String(title || '');
         const reject = (reason, text) => { this._log('reject|' + reason + '|' + this._cacheKey(title, artist), 'Không gửi Key: ' + text); return { ok: false, reason }; };
 
@@ -449,6 +486,10 @@ class KeyServerSync {
         const subKey = songId + (dur ? '|d' + Math.round(dur) : ''); // DB-MATCH-ID-02: cùng tên khác độ dài = hai bản thu riêng, không chặn nhau
         if (this._submitted.has(subKey)) return { ok: true, reason: 'already-submitted' };
         if (this._submitInflight.has(subKey)) return this._submitInflight.get(subKey);
+        if (live === true) { // LIVE-SUBMIT-GATE-01: Key AI nghe trực tiếp phải "chín" mới được gửi
+            const gate = this._liveGateCheck(subKey, sk.key + '|' + sk.mode);
+            if (gate) return reject(gate.reason, gate.text + ' (bài "' + label + '")');
+        }
 
         const failedAt = this._submitFailedAt.get(subKey);
         if (failedAt !== undefined && this.now() - failedAt < SUBMIT_RETRY_COOLDOWN_MS) {
