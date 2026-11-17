@@ -1659,7 +1659,24 @@ const keySource = {
 // KHÔNG ghi gì lên Server (Key Server vẫn giữ nguyên Key cũ — xem điều kiện submitDetectedKey bên dưới).
 const __dbBypass = { pending: false, active: false };
 let __autoDetectInternal = false; // true khi CODE (không phải người dùng) gọi autoDetectBtn.click() lúc đổi bài
-function __dbBypassClear() { __dbBypass.pending = false; __dbBypass.active = false; }
+let __dbPendingTimer = null;
+const AUTO_DETECT_PENDING_TIMEOUT_MS = 30000; // TẠM THỜI (đề xuất) — chờ AI chốt tối đa 30s; chỉnh theo log thật
+function __dbPendingTimerStop() { if (__dbPendingTimer) { clearTimeout(__dbPendingTimer); __dbPendingTimer = null; } }
+function __dbBypassClear() { __dbPendingTimerStop(); __dbBypass.pending = false; __dbBypass.active = false; }
+// TASK AUTO-DETECT-COMPLETE-01 — Auto Detect trên bài Database mà AI KHÔNG chốt được (im lặng/mất tín hiệu): quá hạn thì thôi chờ,
+// trả ô Key về Key Database (Plugin vẫn luôn dùng Key Database trong lúc chờ nên không gửi lại gì).
+function __dbPendingTimerStart() {
+    __dbPendingTimerStop();
+    const gen = __aiCycleGen;
+    __dbPendingTimer = setTimeout(() => {
+        __dbPendingTimer = null;
+        if (!__dbBypass.pending || gen !== __aiCycleGen) return; // đã chốt / đã đổi bài -> không làm gì
+        __dbBypass.pending = false;
+        if (typeof aiDiag === "function") aiDiag("DB_BYPASS_TIMEOUT", { db: keySource.songDb.value, waitMs: AUTO_DETECT_PENDING_TIMEOUT_MS });
+        refreshKeySourceDisplay();
+        if (getActiveSourceName() === "songDb") applyActiveKeyToPlugin("Song Database");
+    }, AUTO_DETECT_PENDING_TIMEOUT_MS);
+}
 // TASK AUTO-DETECT-TRUST-01 — Auto Detect dò lại THẬT dù bài đang lấy Key từ Database; AI CHỈ chốt Key mới thay Database khi
 // đáng tin hơn Database: Key AI KHÁC Key Database, độ tin cậy >= ngưỡng dưới (cao hơn ngưỡng khoá thường 0.80), và không phải cặp
 // "láng giềng cách 5" (F <-> A#, dễ nhầm hợp âm át với nhà — cùng luật KEY-CORRECT-02). Không đạt -> giữ Key Database.
@@ -2386,7 +2403,7 @@ function startAiRealtimeLoop() {
         } catch (e) {}
         keySource.ai.value = result.key;
         if (__dbBypass.pending) { // TASK AUTO-RELISTEN-01 + AUTO-DETECT-TRUST-01: AI chỉ thay Database khi đáng tin hơn
-            __dbBypass.pending = false;
+            __dbBypass.pending = false; __dbPendingTimerStop();
             const __v = __aiBeatsDatabase(result.key, result.confidence, keySource.songDb.value);
             if (__v.ok) { __dbBypass.active = true; if (typeof aiDiag === "function") aiDiag("DB_BYPASS_ON", { db: keySource.songDb.value, ai: result.key, conf: result.confidence }); }
             else {
@@ -3160,7 +3177,7 @@ document.getElementById("autoDetectBtn")?.addEventListener("click", () => {
 
     // TASK AUTO-RELISTEN-01 — người dùng bấm AUTO DETECT khi bài đang dùng Key Database: đánh dấu "chờ AI chốt".
     // Trong lúc AI đang nghe lại, Auto-Tune vẫn dùng Key Database (không im/lệch); AI chốt xong mới thay.
-    if (!__autoDetectInternal) { __dbBypass.active = false; __dbBypass.pending = !!keySource.songDb.active; }
+    if (!__autoDetectInternal) { __dbBypass.active = false; __dbBypass.pending = !!keySource.songDb.active; if (__dbBypass.pending) __dbPendingTimerStart(); else __dbPendingTimerStop(); }
 
     // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — Auto Detect = reset THẬT về chế độ nghe
     // (LISTENING) cho cả Key/BPM/MOD, không giữ hiển thị giá trị cũ trong lúc chờ kết quả mới.
