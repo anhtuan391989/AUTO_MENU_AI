@@ -16,5 +16,5 @@ const S=require('../../app/silentClick');let p=0,f=0;const ok=(c,m)=>{c?p++:f++;
  const ahk=R('ahk/AHK.ahk'),mn=R('app/main.js');
  ok(/A_Args\[3\] = "screen"\)\s*\n\s*CoordMode\("Mouse", "Screen"\)/.test(ahk),'AHK.ahk: tham số "screen" -> CoordMode Mouse Screen');
  ok(!/^CoordMode/m.test(ahk),'AHK.ahk: không đổi cách cũ cho các toạ độ khác');
- ok(/runAhkCapture\(totalPoints, ahkExePath, name === "autokey1" \|\| name === "autokey2"\)/.test(mn)&&/concat\(screenMode \? \["screen"\] : \[\]\)/.test(mn),'main.js: chỉ Auto-Key 1/2 lấy toạ độ màn hình');
+ ok(/const isAk = name === "autokey1" \|\| name === "autokey2";[\s\S]*?runAhkCapture\(totalPoints, ahkExePath, isAk\)/.test(mn)&&/concat\(screenMode \? \["screen"\] : \[\]\)/.test(mn),'main.js: chỉ Auto-Key 1/2 lấy toạ độ màn hình');
  console.log(p+' PASS / '+f+' FAIL');process.exit(f?1:0)})();

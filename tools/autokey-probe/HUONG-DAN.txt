@@ -1,0 +1,9 @@
+AUTOKEY-PROBE-01 — kiểm tra Windows có "nhìn thấy" nút của Auto-Key không (chỉ đọc, không bấm gì)
+
+1. Mở Studio One, mở cửa sổ plugin Auto-Key (thấy rõ trên màn hình, đừng thu nhỏ).
+2. Bấm đúp AutoKeyProbe.bat. (Nếu kết quả báo không thấy Studio One dù đang mở: bấm CHUỘT PHẢI AutoKeyProbe.bat > Run as administrator.)
+3. Đợi tới khi hiện "Xong". Mở file AutoKeyProbe-KETQUA.txt (cùng thư mục) và gửi cho Claude A (kéo thả file vào chat).
+
+Cách đọc nhanh kết quả (phần TÓM TẮT cuối file):
+- Có dòng "N có tên, M bấm được (Invoke)" với M > 0 và thấy nút tên giống "Detect"/"Send"... -> làm được cách 2 (không cần toạ độ).
+- Chỉ thấy vài phần tử trống tên / 0 bấm được -> plugin tự vẽ giao diện, cách 2 không dùng được -> làm cách 1 (nhận diện hình ảnh).

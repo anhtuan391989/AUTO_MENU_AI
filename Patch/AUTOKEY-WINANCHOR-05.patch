@@ -1,0 +1,166 @@
+diff --git a/app/main.js b/app/main.js
+index 32c1996..b9a4f0c 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -1823,7 +1823,11 @@ ipcMain.handle("setup-capture", async (event, { name, points }) => {
+     }
+ 
+     // SILENT-CLICK-01: Auto-Key 1/2 lấy toạ độ TUYỆT ĐỐI trên màn hình (bấm ngầm cần toạ độ màn hình; cách cũ là toạ độ theo cửa sổ đang active nên bị lệch khi cửa sổ đổi chỗ).
+-    const captured = await runAhkCapture(totalPoints, ahkExePath, name === "autokey1" || name === "autokey2");
++    const isAk = name === "autokey1" || name === "autokey2";
++    let captured = await runAhkCapture(totalPoints, ahkExePath, isAk);
++    if (isAk) { // AUTOKEY-WINANCHOR-05: gắn thêm vị trí TƯƠNG ĐỐI trong cửa sổ plugin Auto-Key (kéo cửa sổ đi đâu cũng bấm đúng); không gắn được thì giữ toạ độ màn hình như cũ
++        try { const sc = require("./silentClick"); captured = await Promise.all(captured.map((q) => sc.anchorPoint(q))); } catch (e) { /* giữ nguyên toạ độ màn hình */ }
++    }
+     return totalPoints === 1 ? captured[0] : captured;
+ });
+ 
+@@ -1848,8 +1852,8 @@ function runAhkClick(x, y, ahkExePath) {
+ 
+ // SILENT-CLICK-01 — bấm ngầm (KHÔNG di chuyển con trỏ chuột) vào toạ độ đã lưu; dùng cho Auto-Key.
+ ipcMain.handle("click-at-point-silent", async (event, point) => {
+-    const r = await require("./silentClick").silentClick(point && point.x, point && point.y);
+-    try { openBundleLog("bấm ngầm (" + (point && point.x) + "," + (point && point.y) + "): " + JSON.stringify(r)); } catch (e) { /* log không bắt buộc */ }
++    const r = await require("./silentClick").silentClickPoint(point); // AUTOKEY-WINANCHOR-05: có anchor -> bấm theo vị trí cửa sổ hiện tại; không có -> toạ độ màn hình như cũ
++    try { openBundleLog("bấm ngầm (" + (point && point.x) + "," + (point && point.y) + (point && point.anchor ? ", neo=" + point.anchor + " rx=" + point.rx + " ry=" + point.ry : "") + "): " + JSON.stringify(r)); } catch (e) { /* log không bắt buộc */ }
+     return r;
+ });
+ 
+diff --git a/app/silentClick.js b/app/silentClick.js
+index a6babd8..9c2eaa4 100644
+--- a/app/silentClick.js
++++ b/app/silentClick.js
+@@ -7,6 +7,10 @@
+  * Con trỏ thật KHÔNG nhúc nhích, người dùng vẫn dùng chuột bình thường.
+  * Giới hạn: cửa sổ plugin phải hiện (không bị cửa sổ khác che đúng điểm đó) và plugin phải nhận được thông điệp chuột.
+  * Không dialog/IPC ở đây (việc của app/main.js) để test được bằng Node thuần.
++ *
++ * AUTOKEY-WINANCHOR-05 — toạ độ THEO CỬA SỔ PLUGIN: lúc "Lấy tọa độ" Auto-Key 1/2, nếu điểm nằm trong cửa sổ có tên kết thúc bằng "Auto-Key"
++ * (vd "Beat · Inserts · 5 - Auto-Key") thì lưu thêm { anchor:"Auto-Key", rx, ry } = vị trí TƯƠNG ĐỐI trong cửa sổ đó. Lúc bấm, tìm lại cửa sổ theo tên
++ * rồi tính toạ độ màn hình hiện tại => kéo cửa sổ plugin sang chỗ khác vẫn bấm đúng. Toạ độ cũ (không có anchor) chạy y như trước.
+  */
+ const { execFile } = require("child_process");
+ 
+@@ -80,4 +84,110 @@ async function silentClick(x, y, deps = {}) {
+     return { ok: true, detail: r.out };
+ }
+ 
+-module.exports = { silentClick, PS_SCRIPT, encode };
++// ===== AUTOKEY-WINANCHOR-05 =====
++const PS_TYPES = `
++$ErrorActionPreference = 'Stop'
++Add-Type -TypeDefinition @"
++using System;
++using System.Text;
++using System.Runtime.InteropServices;
++public static class WinAnchorW {
++    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
++    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
++    public delegate bool EnumProc(IntPtr h, IntPtr l);
++    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
++    [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
++    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint f);
++    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
++    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
++    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
++    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc p, IntPtr l);
++    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder sb, int max);
++    public static string TitleOf(IntPtr h) { StringBuilder sb = new StringBuilder(512); GetWindowText(h, sb, 512); return sb.ToString(); }
++    // Tìm cửa sổ ĐANG HIỆN (không thu nhỏ) có tên kết thúc bằng suffix. Trả "OK<TAB>tên<TAB>left<TAB>top" / "MINIMIZED" / "NOT_FOUND".
++    public static string FindByTitleSuffix(string suffix) {
++        string res = "NOT_FOUND";
++        EnumWindows(delegate(IntPtr h, IntPtr l) {
++            if (!IsWindowVisible(h)) return true;
++            string t = TitleOf(h);
++            if (t.Length == 0 || !t.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) return true;
++            if (IsIconic(h)) { res = "MINIMIZED"; return true; }
++            RECT r; if (!GetWindowRect(h, out r) || (r.Right - r.Left) < 50) return true;
++            res = "OK\\t" + t + "\\t" + r.Left + "\\t" + r.Top; return false;
++        }, IntPtr.Zero);
++        return res;
++    }
++}
++"@
++[void][WinAnchorW]::SetProcessDPIAware()
++`;
++const PS_DESCRIBE = (x, y) => PS_TYPES + `
++$sp = New-Object WinAnchorW+POINT
++$sp.X = ${Math.round(x)}
++$sp.Y = ${Math.round(y)}
++$h = [WinAnchorW]::WindowFromPoint($sp)
++if ($h -eq [IntPtr]::Zero) { Write-Output 'NO_WINDOW'; exit 0 }
++$root = [WinAnchorW]::GetAncestor($h, 2)
++if ($root -eq [IntPtr]::Zero) { $root = $h }
++$r = New-Object WinAnchorW+RECT
++[void][WinAnchorW]::GetWindowRect($root, [ref]$r)
++Write-Output ('OK' + [char]9 + [WinAnchorW]::TitleOf($root) + [char]9 + $r.Left + [char]9 + $r.Top)
++`;
++const PS_FIND = (suffix) => PS_TYPES + `
++Write-Output ([WinAnchorW]::FindByTitleSuffix('${suffix}'))
++`;
++const ANCHOR_RX = /^[A-Za-z0-9][A-Za-z0-9 \-]{0,38}$/; // chặn ký tự lạ trước khi nhúng vào script
++
++async function runPs(script, exec) {
++    return run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encode(script)], 15000, exec);
++}
++
++// Cửa sổ nằm dưới điểm (x,y) màn hình: { ok, title, left, top } — hoặc { ok:false, detail }
++async function describeWindowAt(x, y, deps = {}) {
++    const platform = deps.platform || process.platform, exec = deps.exec || execFile;
++    if (platform !== "win32") return { ok: false, detail: "Chỉ chạy trên Windows" };
++    if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false, detail: "Thiếu toạ độ" };
++    const r = await runPs(PS_DESCRIBE(x, y), exec);
++    if (r.err) return { ok: false, detail: (r.errText || r.err.message || "lỗi").slice(0, 200) };
++    const f = r.out.split("\t");
++    if (f[0] !== "OK") return { ok: false, detail: r.out || "không phản hồi" };
++    return { ok: true, title: f[1] || "", left: Number(f[2]), top: Number(f[3]) };
++}
++
++// Tìm cửa sổ theo đuôi tên (vd "Auto-Key"): { ok, title, left, top } — hoặc { ok:false, detail }
++async function findWindowBySuffix(suffix, deps = {}) {
++    const platform = deps.platform || process.platform, exec = deps.exec || execFile;
++    if (platform !== "win32") return { ok: false, detail: "Chỉ chạy trên Windows" };
++    if (typeof suffix !== "string" || !ANCHOR_RX.test(suffix)) return { ok: false, detail: "Tên cửa sổ neo không hợp lệ" };
++    const r = await runPs(PS_FIND(suffix), exec);
++    if (r.err) return { ok: false, detail: (r.errText || r.err.message || "lỗi").slice(0, 200) };
++    const f = r.out.split("\t");
++    if (f[0] === "OK") return { ok: true, title: f[1], left: Number(f[2]), top: Number(f[3]) };
++    if (f[0] === "MINIMIZED") return { ok: false, detail: "Cửa sổ '" + suffix + "' đang thu nhỏ — hãy mở plugin lên rồi thử lại" };
++    return { ok: false, detail: "Không thấy cửa sổ '" + suffix + "' đang mở — hãy mở plugin " + suffix + " lên rồi thử lại" };
++}
++
++// Gắn neo cửa sổ vào 1 điểm vừa lấy ở Setup. Chỉ gắn khi điểm nằm trong cửa sổ có tên KẾT THÚC bằng "Auto-Key"; ngược lại giữ nguyên điểm (toạ độ màn hình).
++async function anchorPoint(pt, deps = {}) {
++    try {
++        if (!pt || typeof pt.x !== "number" || typeof pt.y !== "number") return pt;
++        const d = await describeWindowAt(pt.x, pt.y, deps);
++        if (!d.ok) return pt;
++        const m = /auto-?key$/i.exec(d.title.trim());
++        if (!m) return pt;
++        return Object.assign({}, pt, { anchor: m[0], anchorTitle: d.title, rx: pt.x - d.left, ry: pt.y - d.top });
++    } catch (e) { return pt; }
++}
++
++// Bấm ngầm 1 điểm đã lưu: có anchor -> tính lại toạ độ màn hình theo vị trí cửa sổ hiện tại; không có -> toạ độ tuyệt đối như cũ.
++async function silentClickPoint(pt, deps = {}) {
++    if (pt && typeof pt.anchor === "string" && Number.isFinite(pt.rx) && Number.isFinite(pt.ry)) {
++        const w = await findWindowBySuffix(pt.anchor, deps);
++        if (!w.ok) return { ok: false, detail: w.detail };
++        const r = await silentClick(w.left + pt.rx, w.top + pt.ry, deps);
++        return r.ok ? { ok: true, detail: "theo cửa sổ '" + w.title + "' (" + w.left + "," + w.top + ") — " + r.detail } : r;
++    }
++    return silentClick(pt && pt.x, pt && pt.y, deps);
++}
++
++module.exports = { silentClick, PS_SCRIPT, encode, describeWindowAt, findWindowBySuffix, anchorPoint, silentClickPoint, PS_DESCRIBE, PS_FIND };
+diff --git a/tests/unit/SilentClick01.verify.js b/tests/unit/SilentClick01.verify.js
+index 3d631a1..5a4849b 100644
+--- a/tests/unit/SilentClick01.verify.js
++++ b/tests/unit/SilentClick01.verify.js
+@@ -16,5 +16,5 @@ const S=require('../../app/silentClick');let p=0,f=0;const ok=(c,m)=>{c?p++:f++;
+  const ahk=R('ahk/AHK.ahk'),mn=R('app/main.js');
+  ok(/A_Args\[3\] = "screen"\)\s*\n\s*CoordMode\("Mouse", "Screen"\)/.test(ahk),'AHK.ahk: tham số "screen" -> CoordMode Mouse Screen');
+  ok(!/^CoordMode/m.test(ahk),'AHK.ahk: không đổi cách cũ cho các toạ độ khác');
+- ok(/runAhkCapture\(totalPoints, ahkExePath, name === "autokey1" \|\| name === "autokey2"\)/.test(mn)&&/concat\(screenMode \? \["screen"\] : \[\]\)/.test(mn),'main.js: chỉ Auto-Key 1/2 lấy toạ độ màn hình');
++ ok(/const isAk = name === "autokey1" \|\| name === "autokey2";[\s\S]*?runAhkCapture\(totalPoints, ahkExePath, isAk\)/.test(mn)&&/concat\(screenMode \? \["screen"\] : \[\]\)/.test(mn),'main.js: chỉ Auto-Key 1/2 lấy toạ độ màn hình');
+  console.log(p+' PASS / '+f+' FAIL');process.exit(f?1:0)})();

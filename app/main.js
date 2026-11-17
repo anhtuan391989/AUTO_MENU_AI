@@ -1823,7 +1823,11 @@ ipcMain.handle("setup-capture", async (event, { name, points }) => {
     }
 
     // SILENT-CLICK-01: Auto-Key 1/2 lấy toạ độ TUYỆT ĐỐI trên màn hình (bấm ngầm cần toạ độ màn hình; cách cũ là toạ độ theo cửa sổ đang active nên bị lệch khi cửa sổ đổi chỗ).
-    const captured = await runAhkCapture(totalPoints, ahkExePath, name === "autokey1" || name === "autokey2");
+    const isAk = name === "autokey1" || name === "autokey2";
+    let captured = await runAhkCapture(totalPoints, ahkExePath, isAk);
+    if (isAk) { // AUTOKEY-WINANCHOR-05: gắn thêm vị trí TƯƠNG ĐỐI trong cửa sổ plugin Auto-Key (kéo cửa sổ đi đâu cũng bấm đúng); không gắn được thì giữ toạ độ màn hình như cũ
+        try { const sc = require("./silentClick"); captured = await Promise.all(captured.map((q) => sc.anchorPoint(q))); } catch (e) { /* giữ nguyên toạ độ màn hình */ }
+    }
     return totalPoints === 1 ? captured[0] : captured;
 });
 
@@ -1848,8 +1852,8 @@ function runAhkClick(x, y, ahkExePath) {
 
 // SILENT-CLICK-01 — bấm ngầm (KHÔNG di chuyển con trỏ chuột) vào toạ độ đã lưu; dùng cho Auto-Key.
 ipcMain.handle("click-at-point-silent", async (event, point) => {
-    const r = await require("./silentClick").silentClick(point && point.x, point && point.y);
-    try { openBundleLog("bấm ngầm (" + (point && point.x) + "," + (point && point.y) + "): " + JSON.stringify(r)); } catch (e) { /* log không bắt buộc */ }
+    const r = await require("./silentClick").silentClickPoint(point); // AUTOKEY-WINANCHOR-05: có anchor -> bấm theo vị trí cửa sổ hiện tại; không có -> toạ độ màn hình như cũ
+    try { openBundleLog("bấm ngầm (" + (point && point.x) + "," + (point && point.y) + (point && point.anchor ? ", neo=" + point.anchor + " rx=" + point.rx + " ry=" + point.ry : "") + "): " + JSON.stringify(r)); } catch (e) { /* log không bắt buộc */ }
     return r;
 });
 
