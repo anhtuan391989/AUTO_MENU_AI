@@ -1891,7 +1891,7 @@ function __aiCoreCfg() {
         const ak = st && typeof st === "object" ? st.autoKeyMode : null;
         if (ak && typeof ak === "object" && ak.enabled === true) {
             const w = typeof ak.waitSec === "number" && isFinite(ak.waitSec) ? Math.min(60, Math.max(1, Math.round(ak.waitSec))) : 8;
-            v = Object.assign({}, v, { autoKeyMode: true, autoKeyWait: w });
+            v = Object.assign({}, v, { autoKeyMode: true, autoKeyWait: w, autoKeyVia: ak.via === "click" ? "click" : "midi" }); // AUTO-KEY-MIDI-02: Dò tay = MIDI điều khiển plugin Auto-Key (mặc định). "click" (bấm ngầm toạ độ) chỉ còn là đường dự phòng cũ, không có ô chọn trên giao diện
         }
     } catch (e) {}
     __aiCoreCache = { t: now, v };
@@ -2280,22 +2280,30 @@ async function runAutoKeyDetect(reason) {
         if (srcNow === "songDb") return { ran: false, why: "song-db" };
         if (__autoKeyRun.busy) return { ran: false, why: "busy" };
         if (Date.now() - __autoKeyRun.last < 8000) return { ran: false, why: "cooldown" };
+        const via = cfg.autoKeyVia === "click" ? "click" : "midi"; // AUTO-KEY-MIDI-02: mặc định MIDI = gửi AUTOKEY_DETECT/AUTOKEY_SEND (kênh 15 CC 102/103, đã nối sẵn) qua ActionRegistry; "click" = đường cũ bấm ngầm toạ độ (chỉ khi autoKeyMode.via="click")
         const click = window.electronAPI?.clickAtPointSilent;
         const p1 = __autoKeyPoints("autokey1"), p2 = __autoKeyPoints("autokey2");
-        if (!p1.length || !p2.length || !click) { __autoKeyRun.status = "Chưa lấy đủ toạ độ Auto-Key 1 (điểm dò Key) / 2 (Send Auto-Tune)"; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "no-coords" }; }
+        const midiExec = window.ActionRegistry?.executeAction;
+        if (via === "midi" && typeof midiExec !== "function") { __autoKeyRun.status = "Chưa sẵn sàng gửi MIDI (ActionRegistry chưa nạp)"; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "no-midi" }; }
+        if (via === "click" && (!p1.length || !p2.length || !click)) { __autoKeyRun.status = "Chưa lấy đủ toạ độ Auto-Key 1 (điểm dò Key) / 2 (Send Auto-Tune)"; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "no-coords" }; }
         __autoKeyRun.busy = true; __autoKeyRun.last = Date.now();
-        console.log("[Auto-Key] Chạy (" + (reason || "?") + "): bấm ngầm điểm dò Key -> chờ " + cfg.autoKeyWait + "s -> bấm ngầm Send Auto-Tune");
-        const press = async (pts) => { for (const q of pts) { const r = await click(q); if (!r || !r.ok) return r || { ok: false, detail: "không phản hồi" }; await __autoKeySleep(300); } return { ok: true }; };
+        console.log("[Auto-Key] Chạy (" + (reason || "?") + ", " + via + "): điểm dò Key -> chờ " + cfg.autoKeyWait + "s -> Send Auto-Tune");
+        const pressClick = async (pts) => { for (const q of pts) { const r = await click(q); if (!r || !r.ok) return r || { ok: false, detail: "không phản hồi" }; await __autoKeySleep(300); } return { ok: true }; };
+        const pressMidi = async (action) => { // MIDI: mặc định CC đã nối sẵn (ActionRegistry.getMidiOutMapping) — không cần cấu hình tay; cổng MIDI out lấy từ Setup như mọi lệnh MIDI khác
+            try { const r = await midiExec(action, { reason: "auto-key" }); return r && r.ok ? { ok: true } : { ok: false, detail: (r && (r.status || r.reason)) || "không phản hồi" }; }
+            catch (e) { return { ok: false, detail: (e && e.message) || "lỗi MIDI" }; }
+        };
+        const press = (which) => via === "midi" ? pressMidi(which === 1 ? "AUTOKEY_DETECT" : "AUTOKEY_SEND") : pressClick(which === 1 ? p1 : p2);
         try {
             await __autoKeySleep(1500); // để bài/âm thanh vào ổn định rồi mới bắt đầu dò
-            const r1 = await press(p1);
-            if (!r1.ok) { __autoKeyRun.status = "Bấm điểm dò Key không được: " + r1.detail; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "click-fail" }; }
+            const r1 = await press(1);
+            if (!r1.ok) { __autoKeyRun.status = (via === "midi" ? "Gửi MIDI điểm dò Key không được: " : "Bấm điểm dò Key không được: ") + r1.detail; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "click-fail" }; }
             await __autoKeySleep(cfg.autoKeyWait * 1000);
             const c2 = __aiCoreCfg();
             if (!c2.autoKeyMode || (typeof getActiveSourceName === "function" && getActiveSourceName() === "manual")) { __autoKeyRun.status = "Dừng trước bước Send (đã tắt chế độ hoặc chuyển sang Dò tay)"; return { ran: true, sent: false, why: "aborted" }; }
-            const r2 = await press(p2);
-            if (!r2.ok) { __autoKeyRun.status = "Bấm Send không được: " + r2.detail; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: true, sent: false, why: "click-fail" }; }
-            __autoKeyRun.status = "Đã dò + Send (bấm ngầm) lúc " + new Date().toLocaleTimeString();
+            const r2 = await press(2);
+            if (!r2.ok) { __autoKeyRun.status = (via === "midi" ? "Gửi MIDI Send không được: " : "Bấm Send không được: ") + r2.detail; console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: true, sent: false, why: "click-fail" }; }
+            __autoKeyRun.status = "Đã dò + Send (" + (via === "midi" ? "MIDI" : "bấm ngầm") + ") lúc " + new Date().toLocaleTimeString();
             return { ran: true, sent: true };
         } finally { __autoKeyRun.busy = false; }
     } catch (e) { __autoKeyRun.busy = false; __autoKeyRun.status = "Lỗi: " + (e && e.message); return { ran: false, why: "error" }; }
