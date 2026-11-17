@@ -1,0 +1,103 @@
+diff --git a/tests/unit/AutoKeyDetail03.verify.js b/tests/unit/AutoKeyDetail03.verify.js
+index f8c7367..91c9907 100644
+--- a/tests/unit/AutoKeyDetail03.verify.js
++++ b/tests/unit/AutoKeyDetail03.verify.js
+@@ -5,17 +5,17 @@ let pass = 0, fail = 0; const ok = (c, m, x) => { if (c) { pass++; console.log("
+ const dm = /const __AI_CORE_DEFAULT[\s\S]*?try \{ setInterval/.exec(src), am = /const __autoKeyRun[\s\S]*?\nfunction restartAiForNewSong/.exec(src);
+ ok(!!dm && !!am, "tìm thấy khối Auto-Key");
+ function make(o) {
+-  const midi = [], sleeps = [], ivs = []; const info = { textContent: "" };
++  const midi = [], clicks = [], sleeps = [], ivs = []; const info = { textContent: "" };
+   const ctx = { t: 100000, console: { log() {} }, keyInfoEl: info, Date: (function () { const F = function () { return new Date(); }; F.now = () => ctx.t; return F; })(),
+-    window: { electronAPI: { loadSettingsSync: () => ({ autoKeyMode: { enabled: true, waitSec: 10 } }) }, ActionRegistry: { executeAction: async (a) => { midi.push(a); return { ok: true }; } } },
+-    getSetting: () => null, getCoordinate: () => "", getActiveSourceName: () => o.src || "ai", KeyEngine: { setTuning() { return {}; } },
++    window: { electronAPI: { clickAtPointSilent: async (q) => { clicks.push(q); return { ok: true }; }, loadSettingsSync: () => ({ autoKeyMode: { enabled: true, waitSec: 10, via: o.via || "midi" } }) }, ActionRegistry: { executeAction: async (a) => { midi.push(a); return { ok: true }; } } },
++    getSetting: () => null, getCoordinate: (k) => (o.via === "click" ? ({ autokey1: [{ x: 10, y: 20 }], autokey2: [{ x: 30, y: 40 }] })[k] || "" : ""), getActiveSourceName: () => o.src || "ai", KeyEngine: { setTuning() { return {}; } },
+     setTimeout: (fn, ms) => { sleeps.push({ fn, ms }); }, setInterval: (fn) => { ivs.push(fn); return ivs.length; }, clearInterval: () => {} };
+   vm.createContext(ctx);
+   vm.runInContext(dm[0].replace(/try \{ setInterval$/, "") + "\n" + am[0].replace(/\nfunction restartAiForNewSong$/, "") + ";this.run=runAutoKeyDetect;this.st=__autoKeyRun;", ctx);
+   const st = ctx.st;
+   const settle = () => new Promise((r) => setImmediate(r));
+   const release = async () => { await settle(); while (sleeps.length) { const s = sleeps.shift(); s.fn(); await settle(); } };
+-  return { ctx, st: ctx.st, midi, info, sleeps, ivs, release, settle };
++  return { ctx, st: ctx.st, clicks, midi, info, sleeps, ivs, release, settle };
+ }
+ (async () => {
+   // 1) Luồng chuẩn
+@@ -50,6 +50,14 @@ function make(o) {
+   m = make({ src: "songDb" }); q = m.ctx.run("t", { force: true, user: true }); await m.release(); r2 = await q; ok(r2.sent === true && m.midi.length === 2, "NGƯỜI DÙNG bấm Tự dò trên bài có Database -> vẫn chạy Auto-Key");
+   m = make({ src: "manual" }); r2 = await m.ctx.run("t", { force: true, user: true }); ok(r2.why === "manual" && m.midi.length === 0, "đang Key tay -> không chạy, kể cả người dùng bấm");
+ 
++  // 4b) Mặc định bấm ngầm (Auto-Key 1/2 không có MIDI Learn): luồng dò -> nghe -> Send giống hệt, nhưng bằng toạ độ
++  m = make({ via: "click" }); p = m.ctx.run("t", { force: true, user: true }); await m.settle(); m.sleeps.shift().fn(); await m.settle();
++  m.sleeps.shift().fn(); await m.settle(); // nghỉ 300ms sau cú bấm ngầm
++  ok(m.clicks.length === 1 && m.midi.length === 0, "bấm ngầm: dò Key = bấm toạ độ Auto-Key 1, không gửi MIDI", [m.clicks, m.midi]);
++  ok(/đang nghe\.\.\. còn 10 giây/.test(m.info.textContent), "bấm ngầm: vẫn hiện đang nghe + đếm ngược");
++  await m.release(); r2 = await p;
++  ok(r2.sent && m.clicks.length === 2 && m.midi.length === 0 && /bấm ngầm/.test(m.info.textContent), "bấm ngầm: hết giờ tự bấm Send (Auto-Key 2) rồi báo 'đã gửi sang Auto-Tune (bấm ngầm)'", [m.clicks, m.info.textContent]);
++
+   // 5) Nối dây
+   ok(/runAutoKeyDetect\("AUTO DETECT", \{ force: true, user: !__autoDetectInternal \}\)/.test(src), "nút Tự dò: người dùng bấm = user:true; đổi bài (internal) = user:false");
+   ok(/keyInfoEl && !__autoKeyRun\.busy\) keyInfoEl\.textContent = `Auto Detect/.test(src), "kết quả AI không đè dòng trạng thái khi Auto-Key đang chạy");
+diff --git a/tests/unit/AutoKeyMidi02.verify.js b/tests/unit/AutoKeyMidi02.verify.js
+index ce1915d..0db885f 100644
+--- a/tests/unit/AutoKeyMidi02.verify.js
++++ b/tests/unit/AutoKeyMidi02.verify.js
+@@ -19,9 +19,9 @@ const P = { autokey1: [{ x: 1, y: 2 }], autokey2: [{ x: 3, y: 4 }] };
+ const on = (via) => ({ autoKeyMode: { enabled: true, waitSec: 1, via } });
+ (async () => {
+   let m = make({ st: on("midi"), coords: P }); ok(m.ctx.cfg().autoKeyVia === "midi", "cfg đọc via=midi");
+-  m = make({ st: on(undefined), coords: P }); ok(m.ctx.cfg().autoKeyVia === "midi", "không đặt via -> mặc định MIDI (Dò tay = MIDI)");
+-  m = make({ st: on("rác"), coords: P }); ok(m.ctx.cfg().autoKeyVia === "midi", "via lạ -> MIDI");
+-  m = make({ st: on("click"), coords: P }); ok(m.ctx.cfg().autoKeyVia === "click", "via=click vẫn đọc được (đường cũ)");
++  m = make({ st: on(undefined), coords: P }); ok(m.ctx.cfg().autoKeyVia === "click", "không đặt via -> mặc định bấm ngầm (Auto-Key không có MIDI Learn)");
++  m = make({ st: on("rác"), coords: P }); ok(m.ctx.cfg().autoKeyVia === "click", "via lạ -> bấm ngầm");
++  m = make({ st: on("click"), coords: P }); ok(m.ctx.cfg().autoKeyVia === "click", "via=click đọc được");
+   m = make({ st: on("midi"), coords: {} }); let r = await m.ctx.run("t");
+   ok(r.ran && r.sent && JSON.stringify(m.midi) === '["AUTOKEY_DETECT","AUTOKEY_SEND"]' && m.clicks.length === 0, "MIDI: gửi AUTOKEY_DETECT rồi AUTOKEY_SEND, không cần toạ độ, không bấm chuột", [r, m.midi]);
+   ok(/MIDI/.test(m.ctx.st.status), "trạng thái ghi rõ MIDI", m.ctx.st.status);
+diff --git a/tests/unit/AutoKeyModeA119.verify.js b/tests/unit/AutoKeyModeA119.verify.js
+index 9848e30..2273458 100644
+--- a/tests/unit/AutoKeyModeA119.verify.js
++++ b/tests/unit/AutoKeyModeA119.verify.js
+@@ -42,7 +42,8 @@ const P1={x:10,y:20},P2={x:30,y:40};
+  console.log('== gate gửi Key AI ==');
+  const blk=src.slice(gi-120,gi+330);ok(/source === "ai"/.test(blk)&&/return;/.test(blk),'chỉ chặn nguồn AI (Dò tay/Song DB vẫn gửi bình thường)');
+  const ap=src.slice(src.indexOf('function applyActiveKeyToPlugin'));const send=ap.indexOf('sendKeyToAutotune(sendValue)');ok(ap.indexOf('autoKeyMode')<send&&ap.indexOf('autoKeyMode')>0,'cổng nằm trước lệnh gửi Plugin');
+- const hook=src.indexOf('runAutoKeyDetect("AUTO DETECT")');ok(hook>0&&/autoDetectBtn/.test(src.slice(hook-250,hook)),'nút AUTO DETECT (kể cả bấm tự động khi đổi bài) kích hoạt Auto-Key');
++ const hook=src.indexOf('runAutoKeyDetect("AUTO DETECT"'); // AUTO-KEY-DETAIL-03: lệnh gọi nay truyền thêm { force, user }
++ok(hook>0&&/autoDetectBtn/.test(src.slice(hook-450,hook)),'nút AUTO DETECT (kể cả bấm tự động khi đổi bài) kích hoạt Auto-Key');
+  ok(/__dbBypass/.test(src)&&/AUTO-RELISTEN-01/.test(src),'giữ nguyên phần AUTO-RELISTEN-01 của task khác');
+  console.log('== Setup ==');
+  const {chromium}=require('playwright');const b=await chromium.launch();const pg=await b.newPage();const errs=[];pg.on('pageerror',e=>errs.push(e.message));
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 7fba087..793f72a 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -1891,7 +1891,7 @@ function __aiCoreCfg() {
+         const ak = st && typeof st === "object" ? st.autoKeyMode : null;
+         if (ak && typeof ak === "object" && ak.enabled === true) {
+             const w = typeof ak.waitSec === "number" && isFinite(ak.waitSec) ? Math.min(60, Math.max(1, Math.round(ak.waitSec))) : 8;
+-            v = Object.assign({}, v, { autoKeyMode: true, autoKeyWait: w, autoKeyVia: ak.via === "click" ? "click" : "midi" }); // AUTO-KEY-MIDI-02: Dò tay = MIDI điều khiển plugin Auto-Key (mặc định). "click" (bấm ngầm toạ độ) chỉ còn là đường dự phòng cũ, không có ô chọn trên giao diện
++            v = Object.assign({}, v, { autoKeyMode: true, autoKeyWait: w, autoKeyVia: ak.via === "midi" ? "midi" : "click" }); // AUTO-KEY-CLICK-04: Auto-Key 1 (dò) và 2 (Send) KHÔNG gán MIDI được trong DAW -> mặc định BẤM NGẦM toạ độ. "midi" chỉ còn là đường dự phòng (autoKeyMode.via="midi"), không có ô chọn trên giao diện
+         }
+     } catch (e) {}
+     __aiCoreCache = { t: now, v };
+@@ -2288,7 +2288,7 @@ async function runAutoKeyDetect(reason, opts) {
+         if (srcNow === "songDb" && !byUser) return { ran: false, why: "song-db" };
+         if (__autoKeyRun.busy && !force) return { ran: false, why: "busy" };
+         if (!force && Date.now() - __autoKeyRun.last < 8000) return { ran: false, why: "cooldown" };
+-        const via = cfg.autoKeyVia === "click" ? "click" : "midi"; // AUTO-KEY-MIDI-02: mặc định MIDI = gửi AUTOKEY_DETECT/AUTOKEY_SEND (kênh 15 CC 102/103, đã nối sẵn) qua ActionRegistry; "click" = đường cũ bấm ngầm toạ độ (chỉ khi autoKeyMode.via="click")
++        const via = cfg.autoKeyVia === "midi" ? "midi" : "click"; // AUTO-KEY-CLICK-04: mặc định "click" = bấm ngầm 2 toạ độ Auto-Key 1/2 đã lưu ở Setup; "midi" (AUTOKEY_DETECT/SEND, kênh 15 CC 102/103) chỉ khi autoKeyMode.via="midi"
+         const click = window.electronAPI?.clickAtPointSilent;
+         const p1 = __autoKeyPoints("autokey1"), p2 = __autoKeyPoints("autokey2");
+         const midiExec = window.ActionRegistry?.executeAction;
+@@ -2307,7 +2307,7 @@ async function runAutoKeyDetect(reason, opts) {
+             __autoKeySetStatus("chuẩn bị dò...");
+             await __autoKeySleep(1500); // để bài/âm thanh vào ổn định rồi mới bắt đầu dò
+             if (stale()) return { ran: true, sent: false, why: "superseded" };
+-            const r1 = await press(1); // MIDI: điều khiển phần chọn Key của plugin Auto-Key -> plugin bắt đầu nghe (LISTENING)
++            const r1 = await press(1); // bấm điểm dò Key của plugin Auto-Key (bấm ngầm toạ độ; hoặc MIDI nếu via=midi) -> plugin bắt đầu nghe (LISTENING)
+             if (!r1.ok) { __autoKeySetStatus((via === "midi" ? "Gửi MIDI điểm dò Key không được: " : "Bấm điểm dò Key không được: ") + r1.detail); console.log("[Auto-Key] " + __autoKeyRun.status); return { ran: false, why: "click-fail" }; }
+             const waitMs = cfg.autoKeyWait * 1000, t0 = Date.now();
+             const showLeft = () => __autoKeySetStatus("đang nghe... còn " + Math.max(0, Math.ceil((waitMs - (Date.now() - t0)) / 1000)) + " giây");

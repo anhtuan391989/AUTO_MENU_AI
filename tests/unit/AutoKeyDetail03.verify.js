@@ -5,17 +5,17 @@ let pass = 0, fail = 0; const ok = (c, m, x) => { if (c) { pass++; console.log("
 const dm = /const __AI_CORE_DEFAULT[\s\S]*?try \{ setInterval/.exec(src), am = /const __autoKeyRun[\s\S]*?\nfunction restartAiForNewSong/.exec(src);
 ok(!!dm && !!am, "tìm thấy khối Auto-Key");
 function make(o) {
-  const midi = [], sleeps = [], ivs = []; const info = { textContent: "" };
+  const midi = [], clicks = [], sleeps = [], ivs = []; const info = { textContent: "" };
   const ctx = { t: 100000, console: { log() {} }, keyInfoEl: info, Date: (function () { const F = function () { return new Date(); }; F.now = () => ctx.t; return F; })(),
-    window: { electronAPI: { loadSettingsSync: () => ({ autoKeyMode: { enabled: true, waitSec: 10 } }) }, ActionRegistry: { executeAction: async (a) => { midi.push(a); return { ok: true }; } } },
-    getSetting: () => null, getCoordinate: () => "", getActiveSourceName: () => o.src || "ai", KeyEngine: { setTuning() { return {}; } },
+    window: { electronAPI: { clickAtPointSilent: async (q) => { clicks.push(q); return { ok: true }; }, loadSettingsSync: () => ({ autoKeyMode: { enabled: true, waitSec: 10, via: o.via || "midi" } }) }, ActionRegistry: { executeAction: async (a) => { midi.push(a); return { ok: true }; } } },
+    getSetting: () => null, getCoordinate: (k) => (o.via === "click" ? ({ autokey1: [{ x: 10, y: 20 }], autokey2: [{ x: 30, y: 40 }] })[k] || "" : ""), getActiveSourceName: () => o.src || "ai", KeyEngine: { setTuning() { return {}; } },
     setTimeout: (fn, ms) => { sleeps.push({ fn, ms }); }, setInterval: (fn) => { ivs.push(fn); return ivs.length; }, clearInterval: () => {} };
   vm.createContext(ctx);
   vm.runInContext(dm[0].replace(/try \{ setInterval$/, "") + "\n" + am[0].replace(/\nfunction restartAiForNewSong$/, "") + ";this.run=runAutoKeyDetect;this.st=__autoKeyRun;", ctx);
   const st = ctx.st;
   const settle = () => new Promise((r) => setImmediate(r));
   const release = async () => { await settle(); while (sleeps.length) { const s = sleeps.shift(); s.fn(); await settle(); } };
-  return { ctx, st: ctx.st, midi, info, sleeps, ivs, release, settle };
+  return { ctx, st: ctx.st, clicks, midi, info, sleeps, ivs, release, settle };
 }
 (async () => {
   // 1) Luồng chuẩn
@@ -49,6 +49,14 @@ function make(o) {
   m = make({ src: "songDb" }); r2 = await m.ctx.run("t", { force: true, user: false }); ok(r2.why === "song-db" && m.midi.length === 0, "đổi bài tự động + bài có Database -> KHÔNG chạy Auto-Key");
   m = make({ src: "songDb" }); q = m.ctx.run("t", { force: true, user: true }); await m.release(); r2 = await q; ok(r2.sent === true && m.midi.length === 2, "NGƯỜI DÙNG bấm Tự dò trên bài có Database -> vẫn chạy Auto-Key");
   m = make({ src: "manual" }); r2 = await m.ctx.run("t", { force: true, user: true }); ok(r2.why === "manual" && m.midi.length === 0, "đang Key tay -> không chạy, kể cả người dùng bấm");
+
+  // 4b) Mặc định bấm ngầm (Auto-Key 1/2 không có MIDI Learn): luồng dò -> nghe -> Send giống hệt, nhưng bằng toạ độ
+  m = make({ via: "click" }); p = m.ctx.run("t", { force: true, user: true }); await m.settle(); m.sleeps.shift().fn(); await m.settle();
+  m.sleeps.shift().fn(); await m.settle(); // nghỉ 300ms sau cú bấm ngầm
+  ok(m.clicks.length === 1 && m.midi.length === 0, "bấm ngầm: dò Key = bấm toạ độ Auto-Key 1, không gửi MIDI", [m.clicks, m.midi]);
+  ok(/đang nghe\.\.\. còn 10 giây/.test(m.info.textContent), "bấm ngầm: vẫn hiện đang nghe + đếm ngược");
+  await m.release(); r2 = await p;
+  ok(r2.sent && m.clicks.length === 2 && m.midi.length === 0 && /bấm ngầm/.test(m.info.textContent), "bấm ngầm: hết giờ tự bấm Send (Auto-Key 2) rồi báo 'đã gửi sang Auto-Tune (bấm ngầm)'", [m.clicks, m.info.textContent]);
 
   // 5) Nối dây
   ok(/runAutoKeyDetect\("AUTO DETECT", \{ force: true, user: !__autoDetectInternal \}\)/.test(src), "nút Tự dò: người dùng bấm = user:true; đổi bài (internal) = user:false");

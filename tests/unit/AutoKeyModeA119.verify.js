@@ -42,7 +42,8 @@ const P1={x:10,y:20},P2={x:30,y:40};
  console.log('== gate gửi Key AI ==');
  const blk=src.slice(gi-120,gi+330);ok(/source === "ai"/.test(blk)&&/return;/.test(blk),'chỉ chặn nguồn AI (Dò tay/Song DB vẫn gửi bình thường)');
  const ap=src.slice(src.indexOf('function applyActiveKeyToPlugin'));const send=ap.indexOf('sendKeyToAutotune(sendValue)');ok(ap.indexOf('autoKeyMode')<send&&ap.indexOf('autoKeyMode')>0,'cổng nằm trước lệnh gửi Plugin');
- const hook=src.indexOf('runAutoKeyDetect("AUTO DETECT")');ok(hook>0&&/autoDetectBtn/.test(src.slice(hook-250,hook)),'nút AUTO DETECT (kể cả bấm tự động khi đổi bài) kích hoạt Auto-Key');
+ const hook=src.indexOf('runAutoKeyDetect("AUTO DETECT"'); // AUTO-KEY-DETAIL-03: lệnh gọi nay truyền thêm { force, user }
+ok(hook>0&&/autoDetectBtn/.test(src.slice(hook-450,hook)),'nút AUTO DETECT (kể cả bấm tự động khi đổi bài) kích hoạt Auto-Key');
  ok(/__dbBypass/.test(src)&&/AUTO-RELISTEN-01/.test(src),'giữ nguyên phần AUTO-RELISTEN-01 của task khác');
  console.log('== Setup ==');
  const {chromium}=require('playwright');const b=await chromium.launch();const pg=await b.newPage();const errs=[];pg.on('pageerror',e=>errs.push(e.message));

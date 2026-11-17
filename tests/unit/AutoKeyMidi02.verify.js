@@ -19,9 +19,9 @@ const P = { autokey1: [{ x: 1, y: 2 }], autokey2: [{ x: 3, y: 4 }] };
 const on = (via) => ({ autoKeyMode: { enabled: true, waitSec: 1, via } });
 (async () => {
   let m = make({ st: on("midi"), coords: P }); ok(m.ctx.cfg().autoKeyVia === "midi", "cfg đọc via=midi");
-  m = make({ st: on(undefined), coords: P }); ok(m.ctx.cfg().autoKeyVia === "midi", "không đặt via -> mặc định MIDI (Dò tay = MIDI)");
-  m = make({ st: on("rác"), coords: P }); ok(m.ctx.cfg().autoKeyVia === "midi", "via lạ -> MIDI");
-  m = make({ st: on("click"), coords: P }); ok(m.ctx.cfg().autoKeyVia === "click", "via=click vẫn đọc được (đường cũ)");
+  m = make({ st: on(undefined), coords: P }); ok(m.ctx.cfg().autoKeyVia === "click", "không đặt via -> mặc định bấm ngầm (Auto-Key không có MIDI Learn)");
+  m = make({ st: on("rác"), coords: P }); ok(m.ctx.cfg().autoKeyVia === "click", "via lạ -> bấm ngầm");
+  m = make({ st: on("click"), coords: P }); ok(m.ctx.cfg().autoKeyVia === "click", "via=click đọc được");
   m = make({ st: on("midi"), coords: {} }); let r = await m.ctx.run("t");
   ok(r.ran && r.sent && JSON.stringify(m.midi) === '["AUTOKEY_DETECT","AUTOKEY_SEND"]' && m.clicks.length === 0, "MIDI: gửi AUTOKEY_DETECT rồi AUTOKEY_SEND, không cần toạ độ, không bấm chuột", [r, m.midi]);
   ok(/MIDI/.test(m.ctx.st.status), "trạng thái ghi rõ MIDI", m.ctx.st.status);
