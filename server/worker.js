@@ -5,6 +5,7 @@
 //  [A93] Thêm: tự điền thời lượng cho bài của Menu (ID app_xxxx) bằng cách tìm theo TÊN trên YouTube, chạy nền, chỉ lưu khi tên khớp đúng
 //  [A94] Thêm: bài trùng tên (vd bản Menu app_xxxx + bản Extension ID YouTube) dùng chung thời lượng — chỉ điền chỗ trống, KHÔNG xoá/gộp dòng nào
 //  [A95] Sửa: /list không còn văng lỗi 1101 (HTML) — luôn trả JSON, có truy vấn dự phòng. Thêm: nút "Sua Key" + "Xoa" ngay cạnh "Ngay them" ở mỗi bài.
+//  [A97] Thêm: nút "Xoa bai Chua dat ten" (xoá hàng loạt) ở tab Tat Ca Bai Da Luu.
 //  [A96] Giảm số dòng ĐỌC D1 (gói miễn phí chỉ 5 triệu dòng/ngày, hết là /list, /find... lỗi tới 7h sáng giờ VN): nhớ tạm kết quả /find, /list, /count
 //        trong bộ nhớ Worker vài chục giây; mọi thao tác ghi đều xoá cache. Trang dùng &fresh=1 sau khi sửa/xoá để thấy dữ liệu mới ngay.
 // ============================================================
@@ -1275,6 +1276,7 @@ function taoTrangChu() {
           <input type="text" id="timTenBai" placeholder="Tim theo ten bai hat...">
           <select id="locKey" style="padding:12px; border-radius:8px; border:none; font-size:15px;"><option value="">Moi Key</option></select>
           <button class="btn-secondary" id="btnLamMoiDS">Tai lai</button>
+          <button id="btnXoaChuaTen" style="background:#c62828; color:#fff; padding:12px 14px; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">Xoa bai Chua dat ten</button>
         </div>
         <label style="display:flex; gap:6px; align-items:center; color:#ddd; font-size:14px; margin-bottom:6px;"><input type="checkbox" id="hienChuaTen" style="flex:none; width:auto;"> Hien ca bai "Chua dat ten"</label>
         <p id="demBai" style="font-size:13px; color:#aaa; margin-bottom:6px;"></p>
@@ -1610,6 +1612,24 @@ function taoTrangChu() {
     document.getElementById('locKey').addEventListener('change', veBang);
     document.getElementById('hienChuaTen').addEventListener('change', veBang);
     document.getElementById('btnLamMoiDS').addEventListener('click', function() { taiDanhSach(false, true); });
+    // [A97] Xoa hang loat cac bai "Chua dat ten" (khong co ten hop le). Moi bai goi /delete-song nhu nut Xoa le.
+    document.getElementById('btnXoaChuaTen').addEventListener('click', async function() {
+      var ds = [];
+      for (var i = 0; i < BANG.rows.length; i++) if (BANG.rows[i].chuaTen) ds.push(BANG.rows[i]);
+      if (!ds.length) { hienKqDS(true, 'Khong co bai nao Chua dat ten.'); return; }
+      if (!confirm('XOA ' + ds.length + ' bai "Chua dat ten" khoi server? Khong hoan tac duoc.')) return;
+      var token = layMatKhau();
+      if (!token) { hienKqDS(false, 'Chua nhap mat khau quan tri.'); return; }
+      var ok = 0, loi = 0;
+      for (var j = 0; j < ds.length; j++) {
+        try {
+          var data = await goiAdmin('/delete-song', { songId: ds[j].songId, xacNhan: true }, token);
+          if (data.ok) { ok++; nhoMatKhau(token); } else loi++;
+        } catch (err) { loi++; }
+      }
+      hienKqDS(loi === 0, 'Da xoa ' + ok + ' bai Chua dat ten' + (loi ? ', loi ' + loi + ' bai.' : '.'));
+      taiDanhSach(true);
+    });
     // Danh sach tat ca bai (kieu cu, khong con dung)
     async function taiDanhSachCu() {
       var res = await fetch(SERVER + '/list');

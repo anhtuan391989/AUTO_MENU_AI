@@ -34,8 +34,10 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
     let running = false;
     let last = null; // { at, ok, pulled, filled, pushed, pending, error }
 
-    async function fetchList() {
-        const r = await keyServerSync._request('/list', { method: 'GET' }, LIST_TIMEOUT_MS);
+    // DB-SYNC-03: lượt ĐẦY ĐỦ (10 phút/lần) kéo TOÀN BỘ danh sách Server (/list?all=1, tối đa 5000 bài); lượt nhanh (20 giây) vẫn /list (100 bài mới nhất).
+    // Trước đây mọi lượt chỉ lấy 100 bài mới nhất nên bài cũ trên Server không bao giờ về máy. Server có cache 5 phút nên /list?all=1 không tốn D1.
+    async function fetchList(all) {
+        const r = await keyServerSync._request(all ? '/list?all=1' : '/list', { method: 'GET' }, LIST_TIMEOUT_MS);
         if (!r.ok || !r.json || !Array.isArray(r.json.danhSach)) return { ok: false, error: r.error || ('http-' + r.status) };
         return { ok: true, list: r.json.danhSach };
     }
@@ -82,7 +84,7 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
         if (running) return { ok: false, error: 'Đang đồng bộ, vui lòng chờ.' };
         running = true;
         try {
-            const got = await fetchList();
+            const got = await fetchList(!light);
             if (!got.ok) return (last = { at: now(), ok: false, error: 'Không kết nối được server (' + got.error + ').' });
 
             // ---- KÉO ----
