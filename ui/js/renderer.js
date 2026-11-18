@@ -1689,6 +1689,19 @@ function __aiBeatsDatabase(aiKey, aiConf, dbKey) {
     return { ok: true, why: "ai-more-trusted" };
 }
 
+// TASK AI-CONSISTENT-01 — Key Database/Server có thể SAI (Server "người gửi trước thắng"). Luật 0.85 + "cách quãng 5" làm AI không bao giờ sửa được
+// (vd Database D Major sai, AI chốt A Major 2 lần liên tiếp 0.61 -> 0.79 vẫn bị giữ D). Thêm đường thứ 2: AI chốt CÙNG 1 Key khác Database
+// >= 2 lần liên tiếp (mỗi lần tin cậy >= 0.60) và lần cuối >= 0.75 thì AI thay Database cho bài này (kể cả cặp cách quãng 5). Không ghi lên Server.
+const AI_CONSISTENT_MIN_CONF = 0.60, AI_CONSISTENT_LAST_CONF = 0.75, AI_CONSISTENT_MIN_LOCKS = 2;
+const __aiConsistent = { gen: null, key: null, n: 0 };
+function __aiConsistentUpdate(aiKey, aiConf, dbKey, gen) {
+    const st = __aiConsistent;
+    if (st.gen !== gen) { st.gen = gen; st.key = null; st.n = 0; } // bài/chu trình mới -> đếm lại
+    if (typeof aiKey !== "string" || typeof dbKey !== "string" || !dbKey || aiKey === dbKey || !Number.isFinite(aiConf) || aiConf < AI_CONSISTENT_MIN_CONF) { st.key = null; st.n = 0; return false; }
+    if (st.key === aiKey) st.n++; else { st.key = aiKey; st.n = 1; }
+    return st.n >= AI_CONSISTENT_MIN_LOCKS && aiConf >= AI_CONSISTENT_LAST_CONF;
+}
+
 let lastPluginKey = appState.originalKey; // giá trị THẬT đã gửi xuống Plugin lần gần nhất (chống gửi trùng)
 // TASK AI-KEY-FAST-08 — chống gửi lại + log lặp khi Mouse Control TẮT (status "MOUSE_DISABLED"). KHÔNG có vòng retry nền: chỉ quyết định
 // tại thời điểm applyActiveKeyToPlugin() được gọi. Phát hiện "bật lại" bằng cách ĐỌC LẠI đúng 2 setting mà sendKeyToAutotune() đọc
@@ -2427,9 +2440,11 @@ function startAiRealtimeLoop() {
                 bassAgreement: result.bassAgreement ?? null, lockMs: (__aiDiagState && __aiDiagState.t0 != null) ? Math.round(performance.now() - __aiDiagState.t0) : null });
         } catch (e) {}
         keySource.ai.value = result.key;
+        const __aiConsistentWins = (typeof __aiConsistentUpdate === "function" && keySource.songDb && keySource.songDb.active) ? __aiConsistentUpdate(result.key, result.confidence, keySource.songDb.value, cycleGen) : false; // AI-CONSISTENT-01 (đếm 1 lần/kết quả)
         if (__dbBypass.pending) { // TASK AUTO-RELISTEN-01 + AUTO-DETECT-TRUST-01: AI chỉ thay Database khi đáng tin hơn
             __dbBypass.pending = false; __dbPendingTimerStop();
             const __v = __aiBeatsDatabase(result.key, result.confidence, keySource.songDb.value);
+            if (!__v.ok && typeof __aiConsistentWins !== "undefined" && __aiConsistentWins) { __v.ok = true; __v.why = "ai-consistent"; }
             if (__v.ok) { __dbBypass.active = true; if (typeof aiDiag === "function") aiDiag("DB_BYPASS_ON", { db: keySource.songDb.value, ai: result.key, conf: result.confidence }); }
             else {
                 if (typeof aiDiag === "function") aiDiag("DB_BYPASS_REJECTED", { db: keySource.songDb.value, ai: result.key, conf: result.confidence, why: __v.why });
@@ -2441,9 +2456,10 @@ function startAiRealtimeLoop() {
         // tin cậy >= 0.85, không phải cặp láng giềng cách 5). Đạt -> AI thay Database cho bài này; không đạt -> giữ Database.
         // Manual vẫn cao nhất (không bị đụng). Không ghi gì lên Server.
         if (keySource.songDb.active && !__dbBypass.active && !(keySource.manual && (keySource.manual.active || keySource.manual.sending))
-            && __aiBeatsDatabase(result.key, result.confidence, keySource.songDb.value).ok) {
+            && (__aiBeatsDatabase(result.key, result.confidence, keySource.songDb.value).ok || (typeof __aiConsistentWins !== "undefined" && __aiConsistentWins))) {
             __dbBypass.active = true;
             if (typeof aiDiag === "function") aiDiag("DB_BYPASS_AUTO_ON", { db: keySource.songDb.value, ai: result.key, conf: result.confidence });
+            try { if (typeof __aiConsistentWins !== "undefined" && __aiConsistentWins) __keyDiagLog("DB_BYPASS", { db: keySource.songDb.value, ai: result.key, conf: result.confidence, consistent: true }); } catch (e) {}
         }
         if (typeof __aiMemoryRemember === "function") __aiMemoryRemember(typeof lastNowPlayingKey !== "undefined" ? lastNowPlayingKey : null, result.key); // A117: Học BẬT -> nhớ Key theo bài
         keyEverDetected = true; // TASK (Khói xác nhận cho phép sửa, 25/08/2026) — có kết quả THẬT từ audio

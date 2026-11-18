@@ -26,7 +26,7 @@ ok(src_() === "songDb" && key_() === "C Major", "đổi bài (xoá cờ) -> Data
 // --- phần 2: kiểm tra các điểm nối trong code (không chạy được cả renderer ngoài trình duyệt) ---
 ok(/if \(!__autoDetectInternal\) \{ __dbBypass\.active = false; __dbBypass\.pending = !!keySource\.songDb\.active;[^}]*\}/.test(src), "nút Auto Detect: người dùng bấm -> đánh dấu chờ AI chốt");
 ok(/__autoDetectInternal = true;[\s\S]{0,200}autoDetectBtn"\)\?\.click\(\)[\s\S]{0,60}__autoDetectInternal = false/.test(src), "đổi bài tự gọi nút Auto Detect -> KHÔNG bỏ qua Database");
-ok(/keySource\.ai\.value = result\.key;\s*\n\s*if \(__dbBypass\.pending\)/.test(src), "AI chốt Key -> bật thay Database");
+ok(/keySource\.ai\.value = result\.key;\s*\n(?:\s*const __aiConsistentWins[^\n]*\n)?\s*if \(__dbBypass\.pending\)/.test(src), "AI chốt Key -> bật thay Database");
 ok((src.match(/__dbBypassClear\(\)/g) || []).length >= 4, "xoá cờ khi đổi bài / Database miss / khởi động lại AI");
 ok(/if \(keySource\.songDb && !keySource\.songDb\.active\) \{\s*\n\s*window\.electronAPI\?\.submitDetectedKey/.test(src), "không gửi Key AI lên Server khi Database đang có bài (Server không bị ghi đè)");
 console.log(`\n${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
