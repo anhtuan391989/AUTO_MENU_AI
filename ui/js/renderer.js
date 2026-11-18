@@ -916,6 +916,10 @@ function initFxAutoMenu() {
 //   [x] Dò bằng AI      = AI của Menu dò Key rồi gửi xuống Auto-Tune (mặc định, như cũ)       -> appSettings.autoKeyMode.enabled = false
 // Dùng đúng khoá autoKeyMode của Setup > Calibration (cùng 1 nguồn dữ liệu, giữ nguyên waitSec). Tự ẩn sau 5 giây (A97). KHÔNG sửa HTML.
 function initAutoDetectModePopup() {
+    if (typeof __AUTOKEY_MODE_REMOVED !== "undefined" && __AUTOKEY_MODE_REMOVED) { // AUTOKEY-REMOVE-01: bỏ thẻ chọn chế độ; xoá cờ Auto-Key đã lưu để file cài đặt cũng về "Dò bằng AI"
+        try { const cur = getSetting("autoKeyMode", null); if (cur && typeof cur === "object" && cur.enabled === true) setSetting("autoKeyMode", { ...cur, enabled: false }); } catch (e) { /* bỏ qua */ }
+        return;
+    }
     const btn = document.getElementById("autoDetectBtn");
     if (!btn || document.getElementById("autoDetectModeCard")) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
     const card = document.createElement("div");
@@ -1872,6 +1876,9 @@ function refreshKeySourceDisplay() {
 // A113/A114 — "Lõi AI" (Setup): 12 núm nối thật — aiCore.autoApply (mặc định BẬT = hành vi cũ), aiCore.debug, aiCore.threshold + aiCore.confidence (0..100, 50 = mặc định = KHÔNG đổi KeyEngine) + realtime/instant/speed (A116; mặc định BẬT/BẬT/medium = như cũ)
 // (mặc định TẮT: chỉ tắt 3 dòng console debug tạm; aiDiag/file log KHÔNG đổi). Menu không tự đồng bộ appSettings
 // với Setup, nên đọc lại file dùng chung (loadSettingsSync, chỉ đọc) tối đa 2 giây/lần. Lỗi => dùng mặc định.
+// AUTOKEY-REMOVE-01 — Khói yêu cầu LOẠI BỎ chế độ "Tự dò bằng tay" (Auto-Key chiếm chuột, plugin phải hiện trên màn hình, không có MIDI Learn).
+// Công tắc cứng: true = Auto-Key LUÔN TẮT (bỏ qua cấu hình autoKeyMode đã lưu), thẻ chuột phải nút TỰ DÒ không còn. Menu chỉ dùng AI dò Key (như "Dò bằng AI").
+const __AUTOKEY_MODE_REMOVED = true;
 const __AI_CORE_DEFAULT = { autoApply: true, debug: false, threshold: 50, confidence: 50, realtime: true, instant: true, speed: "medium", lockHold: true, predict: true, learn: false, memory: "default", autoKeyMode: false, autoKeyWait: 8 };
 let __aiCoreCache = { t: 0, v: __AI_CORE_DEFAULT };
 let __aiCoreTuned = null; // chữ ký tuning đã áp xuống KeyEngine lần cuối (null = chưa chỉnh gì)
@@ -1903,7 +1910,7 @@ function __aiCoreCfg() {
         }
         // A119: Chế độ Auto-Key (khoá riêng `autoKeyMode` = {enabled, waitSec}, không nằm trong aiCore)
         const ak = st && typeof st === "object" ? st.autoKeyMode : null;
-        if (ak && typeof ak === "object" && ak.enabled === true) {
+        if (!(typeof __AUTOKEY_MODE_REMOVED !== "undefined" && __AUTOKEY_MODE_REMOVED) && ak && typeof ak === "object" && ak.enabled === true) {
             const w = typeof ak.waitSec === "number" && isFinite(ak.waitSec) ? Math.min(60, Math.max(1, Math.round(ak.waitSec))) : 8;
             v = Object.assign({}, v, { autoKeyMode: true, autoKeyWait: w, autoKeyVia: ak.via === "midi" ? "midi" : "click" }); // AUTO-KEY-CLICK-04: Auto-Key 1 (dò) và 2 (Send) KHÔNG gán MIDI được trong DAW -> mặc định BẤM NGẦM toạ độ. "midi" chỉ còn là đường dự phòng (autoKeyMode.via="midi"), không có ô chọn trên giao diện
         }

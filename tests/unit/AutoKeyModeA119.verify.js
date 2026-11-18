@@ -52,8 +52,8 @@ ok(hook>0&&/autoDetectBtn/.test(src.slice(hook-450,hook)),'nút AUTO DETECT (k�
  const res2=await pg.evaluate(()=>{const store={autoKeyMode:{enabled:true,waitSec:12}},saved=[];window.getSetting=(k,d)=>k in store?store[k]:d;window.setSetting=(k,v)=>{store[k]=v;saved.push(JSON.parse(JSON.stringify(v)))};window.setupAutoKey.init();
   const en=document.getElementById('autoKeyModeEnable'),wt=document.getElementById('autoKeyWaitSec');const init=[en.checked,wt.value];
   en.checked=false;en.dispatchEvent(new Event('change'));wt.value='99';wt.dispatchEvent(new Event('change'));return{init,saved:saved[saved.length-1],wt:wt.value,hint:document.getElementById('autoKeyModeHint').textContent.length>50,inCalib:!!document.getElementById('autoKeyModeBlock').closest('#panel-calibration')}});
- ok(JSON.stringify(res2.init)==='[true,"12"]','Setup hiện đúng giá trị đã lưu',res2.init);
- ok(res2.saved&&res2.saved.enabled===false&&res2.saved.waitSec===60&&res2.wt==='60','đổi => lưu đúng; chờ 99 bị kẹp 60',res2);
+ ok(res2.init[0]===false,'AUTOKEY-REMOVE-01: Setup — ô Bật luôn tắt (chế độ đã bị loại bỏ)',res2.init);
+ ok(res2.saved&&res2.saved.enabled===false,'AUTOKEY-REMOVE-01: cờ đã lưu bị ép về tắt',res2);
  ok(res2.hint&&res2.inCalib,'có dòng giải thích và nằm trong tab Calibration (cạnh toạ độ Auto-Key)');
  ok(errs.length===0,'không lỗi JS',errs);await b.close();
  const i18n=rd('ui/js/i18n.js');ok(/\["Chế độ Auto-Key \(Plugin tự dò\)", "Auto-Key mode/.test(i18n)&&/\["Chờ dò xong \(giây\)"/.test(i18n)&&/Khi BẬT: Menu không gửi Key AI xuống Auto-Tune/.test(i18n),'i18n có cặp dịch EN');

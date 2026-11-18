@@ -17,6 +17,14 @@
     function init() {
         var en = document.getElementById("autoKeyModeEnable"), wt = document.getElementById("autoKeyWaitSec"), st = document.getElementById("autoKeyModeStatus");
         if (!en || !wt) return;
+        // AUTOKEY-REMOVE-01: chế độ Auto-Key (Plugin tự dò) đã bị loại bỏ -> ẩn khối cài đặt này (không sửa HTML) và đảm bảo cờ lưu = tắt.
+        try {
+            ["autoKeyModeBlock", "autoKeyModeHint", "autoKeyModeStatus"].forEach(function (id) { var el = document.getElementById(id); if (el && el.style) el.style.display = "none"; });
+            var cur = typeof getSetting === "function" ? getSetting("autoKeyMode", null) : null;
+            if (cur && typeof cur === "object" && cur.enabled === true && typeof setSetting === "function") setSetting("autoKeyMode", Object.assign({}, cur, { enabled: false }));
+            en.checked = false;
+        } catch (e) { /* bỏ qua */ }
+        return;
         var c = cfg(); en.checked = c.enabled; wt.value = c.waitSec;
         function show() { if (st) st.textContent = en.checked ? "Auto-Key: ĐANG BẬT — chờ " + clampWait(wt.value) + " giây giữa bước dò và Send." : ""; }
         // AUTOKEY-SYNC-01: giữ các trường khác (via...) khi lưu, để Setup không xoá chọn lựa đã lưu.
