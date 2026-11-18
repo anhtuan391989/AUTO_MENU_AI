@@ -930,11 +930,12 @@ function initAutoDetectModePopup() {
     const aiChk = card.querySelector("#autoDetectAiChk");
     const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
     const hide = () => { card.style.display = "none"; auto.disarm(); };
-    const readManual = () => { const c = getSetting("autoKeyMode", null); return !!(c && typeof c === "object" && c.enabled === true); };
+    // AUTOKEY-SYNC-01: đọc cấu hình MỚI NHẤT từ file dùng chung (Setup là cửa sổ khác, có thể đã đổi) — lỗi/không có thì dùng bản trong bộ nhớ.
+    const freshCfg = () => { let c = null; try { const st = window.electronAPI?.loadSettingsSync?.(); if (st && typeof st === "object") c = st.autoKeyMode; } catch (e) { /* dùng bản bộ nhớ */ } if (!(c && typeof c === "object")) c = getSetting("autoKeyMode", null); return c && typeof c === "object" ? c : {}; };
+    const readManual = () => freshCfg().enabled === true;
     const show = (manual) => { manualChk.checked = manual; aiChk.checked = !manual; };
     const choose = (manual) => {
-        const c = getSetting("autoKeyMode", null);
-        const prev = c && typeof c === "object" ? c : {};
+        const prev = freshCfg(); // giữ nguyên waitSec / via (MIDI) mà Setup đã lưu
         setSetting("autoKeyMode", { ...prev, enabled: manual, waitSec: prev.waitSec === undefined ? 8 : prev.waitSec });
         try { if (typeof __aiCoreCache !== "undefined") __aiCoreCache.t = 0; } catch (e) { /* bỏ qua */ } // hiệu lực ngay, không chờ cache 2 s
         show(manual);

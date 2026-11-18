@@ -24,7 +24,7 @@ console.log('== 1. Một lần bấm lưu đủ cả 9 bộ ==');
   const e = env({ selectedDAW: 'Studio Pro 8' }); const r = e.click(); const m = e.st.dawMidiOutMappings['Studio Pro 8'] || {};
   const base = e.api.resolveDawProfile('Studio Pro 8');
   const expect = Object.values(base.bundles).reduce((n, b) => n + Object.keys(b.mappings).length, 0);
-  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 4 + 1 + 1 + 2 + 6 + 4 + 6 + 12, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 4 TUNE + 1 LOFI + 1 BÈ + 2 MIC VOLUME + 6 PRESET + 4 FX BUS + 6 FX→SENDS (FX-SENDS-01) + 12 KEY/SCALE)', Object.keys(m).length);
+  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 4 + 1 + 1 + 2 + 6 + 4 + 6 + 2 + 12, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 4 TUNE + 1 LOFI + 1 BÈ + 2 MIC VOLUME + 6 PRESET + 4 FX BUS + 6 FX→SENDS (FX-SENDS-01) + 2 AUTO-KEY (AUTOKEY-MIDI-02) + 12 KEY/SCALE)', Object.keys(m).length);
   ok(m.MUSIC_ON && m.BEAT_INPUT_VOLUME && m.MUSIC_SELECT && m.MIC1_VOLUME && m.KEY_SCALE_MINOR && m.KEY_ROOT && m.TUNE_BYPASS && m.LOFI_STATE && m.BE_STATE && m.PRESET_NORM && m.FX_BUS_DELAY_VOLUME && m.KEY_ROOT_AT4, 'có mặt đủ đại diện từng bộ');
   ok(Object.values(m).every((x) => x.source === 'USER_DEFINED'), 'đều đánh dấu USER_DEFINED');
   ok(base.quickFillLabel === 'Fender Studio Pro 8 MIDI', 'tên nút = "Fender Studio Pro 8 MIDI"');

@@ -887,6 +887,8 @@ const DAW_MIDI_PROFILES = Object.freeze({
             fxbus: Object.freeze({ title: "FX BUS VOLUME", count: 4, mappings: dawQfMake(15, 127, { FX_BUS_DELAY_VOLUME: 28, FX_BUS_VERB_SHORT_VOLUME: 29, FX_BUS_VERB_LONG_VOLUME: 30, FX_BUS_COM_VERB_VOLUME: 31 }) }),
             // FX-SENDS-01 — 6 CC (kênh 15, CC 40..45) cho 6 nút nguồn Send; nút FX gửi kèm FX ON/OFF (giá trị 127 = bật, 0 = tắt do Menu tự quyết). Không trùng 20–37, 85–95, 102–104.
             fxsends: Object.freeze({ title: "FX → SENDS (6 nút nguồn)", count: 6, mappings: dawQfMake(15, 127, { FX_SENDS_1: 40, FX_SENDS_2: 41, FX_SENDS_3: 42, FX_SENDS_4: 43, FX_SENDS_5: 44, FX_SENDS_6: 45 }) }),
+            // AUTOKEY-MIDI-02 — 2 CC (kênh 15, CC 102 dò Key / 103 Send Auto-Tune) để chế độ Auto-Key chạy bằng MIDI, KHÔNG chiếm chuột; gán 2 nút của plugin Auto-Key trong Control Link.
+            autokey: Object.freeze({ title: "AUTO-KEY (dò Key + Send)", count: 2, mappings: dawQfMake(15, 127, { AUTOKEY_DETECT: 102, AUTOKEY_SEND: 103 }) }),
             // KEY-SCALE-CC-02 — 1 CC (26, kênh 15) chọn Scale Auto-Tune theo GIÁ TRỊ: Major=0 (mục 1/29), Minor=5 (mục 2/29: 5/127×28≈1.1).
             // KEY-ROOT-CC-01 — CC 27 (kênh 15) cho Key gốc: Menu tự tính giá trị theo nốt (C=0 … B=127); giá trị 0 ở bộ này chỉ là chỗ giữ.
             // Danh sách Scale của Auto-Tune Pro: 29 mục, Major đầu, Minor thứ hai, Harmonic cuối (=127). Giá trị CHƯA kiểm chứng đủ trên máy thật.

@@ -202,5 +202,13 @@
     <Control name="fxSends6" title="FX Sends 6 - None (127=bat, 0=tat)" type="button" options="receive public">
       <MidiMessage status="#BE" address="45"/>
     </Control>
+    <!-- CC 102 (AUTOKEY-MIDI-02: nut DO Key cua plugin Auto-Key; kenh 15) -->
+    <Control name="autoKeyDetect" title="Auto-Key - Do Key (127)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="102"/>
+    </Control>
+    <!-- CC 103 (AUTOKEY-MIDI-02: nut Send Auto-Tune cua plugin Auto-Key; kenh 15) -->
+    <Control name="autoKeySend" title="Auto-Key - Send Auto-Tune (127)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="103"/>
+    </Control>
   </Controls>
 </ControlSurface>
