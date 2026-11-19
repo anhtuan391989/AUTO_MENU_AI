@@ -711,6 +711,9 @@ const DAW_MIDI_ACTIONS = [
     { action: "FX_ON", label: "FX ON (bỏ Mute 4 bus)" },
     { action: "FX_OFF", label: "FX OFF (Mute 4 bus)" },
     // FX-SENDS-01 — nút FX gửi THÊM 6 CC (kênh 15, CC 40..45; 127 = bật, 0 = tắt) cho 6 nút nguồn của hộp Sends trong Studio One. Lệnh FX_ON/FX_OFF cũ ở trên giữ NGUYÊN.
+    { action: "INSERTS_MIC1", label: "INSERTS Mic 1 — nút Activate All của cụm Inserts Mic 1 (127 = bật, 0 = tắt)" },
+    { action: "INSERTS_MIC2", label: "INSERTS Mic 2 — nút Activate All của cụm Inserts Mic 2 (127 = bật, 0 = tắt)" },
+    { action: "INSERTS_ALL", label: "INSERTS (ô tích ở thẻ FX) — Activate All (127 = bật, 0 = tắt)" },
     { action: "FX_SENDS_1", label: "FX → SENDS 1 Verb ngắn (nút nguồn Send; gửi kèm FX ON/OFF)" },
     { action: "FX_SENDS_2", label: "FX → SENDS 2 Verb dài (nút nguồn Send; gửi kèm FX ON/OFF)" },
     { action: "FX_SENDS_3", label: "FX → SENDS 3 Main (nút nguồn Send; gửi kèm FX ON/OFF)" },
@@ -765,6 +768,7 @@ const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME
 const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
 const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "TUNE_BYPASS_2", "TUNE_BYPASS_3", "TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2", "AUDIO_CHILL_STATE", "AUDIO_CHILL_KNOB"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
 MIDI_CONFLICT_GUARD_SET.add("BE_STATE"); // BE-BTN-01: nút BÈ cũng thuộc nhóm bảo vệ trùng CC
+["INSERTS_MIC1", "INSERTS_MIC2", "INSERTS_ALL"].forEach((a) => MIDI_CONFLICT_GUARD_SET.add(a)); // INSERTS-01
 ["FX_SENDS_1", "FX_SENDS_2", "FX_SENDS_3", "FX_SENDS_4", "FX_SENDS_5", "FX_SENDS_6"].forEach((a) => MIDI_CONFLICT_GUARD_SET.add(a)); // FX-SENDS-01: 6 CC Sends cũng thuộc nhóm bảo vệ trùng CC
 function findMidiOutMappingConflict(action, mapping) {
     for (const { action: other } of DAW_MIDI_ACTIONS) {
@@ -811,6 +815,9 @@ function getDawMidiOutMapping(action) {
     if (/^KEY_(SCALE_MAJOR|SCALE_MINOR|ROOT)_AT[34]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
         const base = /_AT3$/.test(action) ? 34 : 36;
         return { kind: "cc", channel: 15, number: /^KEY_ROOT_/.test(action) ? base + 1 : base, value: /SCALE_MINOR/.test(action) ? 5 : 0, source: "DEFAULT_PRESET" };
+    }
+    if (action === "INSERTS_MIC1" || action === "INSERTS_MIC2" || action === "INSERTS_ALL") { // INSERTS-01 — khớp getMidiOutMapping() ở actionRegistry.js
+        return { kind: "cc", channel: 15, number: action === "INSERTS_MIC1" ? 46 : action === "INSERTS_MIC2" ? 47 : 48, value: 127, source: "DEFAULT_PRESET" };
     }
     if (/^FX_SENDS_[1-6]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // FX-SENDS-01 — khớp getMidiOutMapping() ở actionRegistry.js
         return { kind: "cc", channel: 15, number: 39 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
@@ -888,6 +895,8 @@ const DAW_MIDI_PROFILES = Object.freeze({
             fxbus: Object.freeze({ title: "FX BUS VOLUME", count: 4, mappings: dawQfMake(15, 127, { FX_BUS_DELAY_VOLUME: 28, FX_BUS_VERB_SHORT_VOLUME: 29, FX_BUS_VERB_LONG_VOLUME: 30, FX_BUS_COM_VERB_VOLUME: 31 }) }),
             // FX-SENDS-01 — 6 CC (kênh 15, CC 40..45) cho 6 nút nguồn Send; nút FX gửi kèm FX ON/OFF (giá trị 127 = bật, 0 = tắt do Menu tự quyết). Không trùng 20–37, 85–95, 102–104.
             fxsends: Object.freeze({ title: "FX → SENDS (6 nút nguồn)", count: 6, mappings: dawQfMake(15, 127, { FX_SENDS_1: 40, FX_SENDS_2: 41, FX_SENDS_3: 42, FX_SENDS_4: 43, FX_SENDS_5: 44, FX_SENDS_6: 45 }) }),
+            // INSERTS-01 — 3 CC (kênh 15, CC 46 Mic 1 / 47 Mic 2 / 48 ô Inserts chung) gán vào nút "Activate All" của cụm Inserts trong Control Link.
+            inserts: Object.freeze({ title: "INSERTS (Mic 1, Mic 2, chung)", count: 3, mappings: dawQfMake(15, 127, { INSERTS_MIC1: 46, INSERTS_MIC2: 47, INSERTS_ALL: 48 }) }),
             // AUTOKEY-MIDI-02 — 2 CC (kênh 15, CC 102 dò Key / 103 Send Auto-Tune) để chế độ Auto-Key chạy bằng MIDI, KHÔNG chiếm chuột; gán 2 nút của plugin Auto-Key trong Control Link.
             autokey: Object.freeze({ title: "AUTO-KEY (dò Key + Send)", count: 2, mappings: dawQfMake(15, 127, { AUTOKEY_DETECT: 102, AUTOKEY_SEND: 103 }) }),
             // KEY-SCALE-CC-02 — 1 CC (26, kênh 15) chọn Scale Auto-Tune theo GIÁ TRỊ: Major=0 (mục 1/29), Minor=5 (mục 2/29: 5/127×28≈1.1).

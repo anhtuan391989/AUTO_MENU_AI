@@ -62,7 +62,7 @@ function build({ mapping = true, saved } = {}) {
       ok(card1 && card1.style.display === 'none' && card2.style.display === 'none', 'ban đầu cả 2 thẻ ẩn');
       let prevented = false; e.els.mic1Btn.fire('contextmenu', { preventDefault() { prevented = true; } });
       ok(prevented && card1.style.display === 'flex' && card2.style.display === 'none', 'chuột phải MIC 1 -> chỉ hiện núm MIC 1');
-      ok(card1.style.top === '298px' && card1.style.left === '255px', 'thẻ hiện phía trên nút, căn giữa (top/left = ' + card1.style.top + '/' + card1.style.left + ')');
+      ok(card1.style.top === '252px' && card1.style.left === '255px', 'thẻ hiện phía trên nút, căn giữa (top/left = ' + card1.style.top + '/' + card1.style.left + ')');
       e.els.mic2Btn.fire('contextmenu', { preventDefault() {} });
       ok(card1.style.display === 'none' && card2.style.display === 'flex', 'chuột phải MIC 2 -> đóng MIC 1, hiện MIC 2');
       e.els.mic2Btn.fire('contextmenu', { preventDefault() {} }); ok(card2.style.display === 'none', 'chuột phải lần nữa -> đóng');

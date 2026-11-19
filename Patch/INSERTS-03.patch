@@ -1,0 +1,285 @@
+diff --git a/studio_one/AutoMenuAI.surface.xml b/studio_one/AutoMenuAI.surface.xml
+index 9e3e956..9403e5f 100644
+--- a/studio_one/AutoMenuAI.surface.xml
++++ b/studio_one/AutoMenuAI.surface.xml
+@@ -210,5 +210,15 @@
+     <Control name="autoKeySend" title="Auto-Key - Send Auto-Tune (127)" type="button" options="receive public">
+       <MidiMessage status="#BE" address="103"/>
+     </Control>
++    <!-- CC 46/47/48 (INSERTS-01: Activate All cua cum Inserts; kenh 15; 127 = bat, 0 = tat) -->
++    <Control name="insertsMic1" title="Inserts Mic 1 - Activate All (127=bat, 0=tat)" type="button" options="receive public">
++      <MidiMessage status="#BE" address="46"/>
++    </Control>
++    <Control name="insertsMic2" title="Inserts Mic 2 - Activate All (127=bat, 0=tat)" type="button" options="receive public">
++      <MidiMessage status="#BE" address="47"/>
++    </Control>
++    <Control name="insertsAll" title="Inserts chung (the FX) - Activate All (127=bat, 0=tat)" type="button" options="receive public">
++      <MidiMessage status="#BE" address="48"/>
++    </Control>
+   </Controls>
+ </ControlSurface>
+diff --git a/tests/unit/DawQuickFillAll01.verify.js b/tests/unit/DawQuickFillAll01.verify.js
+index 81ec597..b22ec0d 100644
+--- a/tests/unit/DawQuickFillAll01.verify.js
++++ b/tests/unit/DawQuickFillAll01.verify.js
+@@ -24,7 +24,7 @@ console.log('== 1. Một lần bấm lưu đủ cả 9 bộ ==');
+   const e = env({ selectedDAW: 'Studio Pro 8' }); const r = e.click(); const m = e.st.dawMidiOutMappings['Studio Pro 8'] || {};
+   const base = e.api.resolveDawProfile('Studio Pro 8');
+   const expect = Object.values(base.bundles).reduce((n, b) => n + Object.keys(b.mappings).length, 0);
+-  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 4 + 1 + 1 + 2 + 6 + 4 + 6 + 2 + 12, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 4 TUNE + 1 LOFI + 1 BÈ + 2 MIC VOLUME + 6 PRESET + 4 FX BUS + 6 FX→SENDS (FX-SENDS-01) + 2 AUTO-KEY (AUTOKEY-MIDI-02) + 12 KEY/SCALE)', Object.keys(m).length);
++  ok(r.done && Object.keys(m).length === expect && expect === 8 + 4 + 3 + 4 + 1 + 1 + 2 + 6 + 4 + 6 + 2 + 3 + 12, 'lưu đủ ' + expect + ' mapping (8 LIVE + 4 KNOB + 3 CHỌN TRACK + 4 TUNE + 1 LOFI + 1 BÈ + 2 MIC VOLUME + 6 PRESET + 4 FX BUS + 6 FX→SENDS (FX-SENDS-01) + 2 AUTO-KEY (AUTOKEY-MIDI-02) + 3 INSERTS (INSERTS-01) + 12 KEY/SCALE)', Object.keys(m).length);
+   ok(m.MUSIC_ON && m.BEAT_INPUT_VOLUME && m.MUSIC_SELECT && m.MIC1_VOLUME && m.KEY_SCALE_MINOR && m.KEY_ROOT && m.TUNE_BYPASS && m.LOFI_STATE && m.BE_STATE && m.PRESET_NORM && m.FX_BUS_DELAY_VOLUME && m.KEY_ROOT_AT4, 'có mặt đủ đại diện từng bộ');
+   ok(Object.values(m).every((x) => x.source === 'USER_DEFINED'), 'đều đánh dấu USER_DEFINED');
+   ok(base.quickFillLabel === 'Fender Studio Pro 8 MIDI', 'tên nút = "Fender Studio Pro 8 MIDI"');
+diff --git a/tests/unit/Inserts01.verify.js b/tests/unit/Inserts01.verify.js
+new file mode 100644
+index 0000000..d43b28d
+--- /dev/null
++++ b/tests/unit/Inserts01.verify.js
+@@ -0,0 +1,47 @@
++/** Inserts01.verify.js — INSERTS-01: nút INSERTS trong thẻ chuột phải MIC 1/MIC 2 + ô tích Inserts (thẻ FX) + 3 CC MIDI (kênh 15, CC 46/47/48).
++ *  MÔ PHỎNG (hàm gửi MIDI giả) — KHÔNG phải Studio One thật. Chạy: node tests/unit/Inserts01.verify.js */
++'use strict';
++const fs = require('fs'), path = require('path'), vm = require('vm');
++let pass = 0, fail = 0;
++const ok = (c, l) => { if (c) { pass++; console.log('  OK  ', l); } else { fail++; console.error('  FAIL ', l); } };
++const rd = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8').replace(/\r\n/g, '\n');
++function makeAR(daw, settings, failCc) {
++    const sent = [], tele = [];
++    const win = { appSettings: {}, getLastMidiSendResult: () => null, electronAPI: { sendTelemetry: (r) => tele.push(r) } };
++    const sb = { window: win, console: { log() {}, error() {}, warn() {} }, setTimeout, clearTimeout, Promise,
++        getSetting: (k, fb = '') => (k === 'selectedDAW' ? daw : k === 'dawMidiOutMappings' ? {} : ((settings || {})[k] !== undefined ? (settings || {})[k] : fb)),
++        sendMidiCC: async (n, v, ch) => { if (failCc === n) return false; sent.push([n, v, ch]); return true; } };
++    vm.createContext(sb); vm.runInContext(rd('ui/js/actionRegistry.js'), sb, { filename: 'actionRegistry.js' });
++    return Object.assign({}, win.ActionRegistry, { __sent: sent, __tele: tele });
++}
++(async () => {
++    console.log('== ActionRegistry: 3 CC mặc định (kênh 15 = index 14) ==');
++    let AR = makeAR('Studio Pro 8');
++    ok(['INSERTS_MIC1', 'INSERTS_MIC2', 'INSERTS_ALL'].every((a) => AR.ACTIONS[a] === a), '3 action tồn tại');
++    let r = await AR.sendInsertsState('MIC1', true, { reason: 't' });
++    ok(r.ok && JSON.stringify(AR.__sent) === JSON.stringify([[46, 127, 14]]), 'Mic 1 BẬT: CC46 = 127 kênh 15');
++    AR.__sent.length = 0; await AR.sendInsertsState('MIC1', false); ok(JSON.stringify(AR.__sent) === JSON.stringify([[46, 0, 14]]), 'Mic 1 TẮT: CC46 = 0');
++    AR.__sent.length = 0; await AR.sendInsertsState('MIC2', true); await AR.sendInsertsState('MIC2', false);
++    ok(JSON.stringify(AR.__sent) === JSON.stringify([[47, 127, 14], [47, 0, 14]]), 'Mic 2: CC47 = 127 rồi 0');
++    AR.__sent.length = 0; await AR.sendInsertsState('ALL', true); await AR.sendInsertsState('ALL', false);
++    ok(JSON.stringify(AR.__sent) === JSON.stringify([[48, 127, 14], [48, 0, 14]]), 'Inserts chung: CC48 = 127 rồi 0');
++    ok(AR.__tele.length === 6 && AR.__tele[0].event === 'INSERTS' && AR.__tele[0].which === 'MIC1' && AR.__tele[0].result === 'OK', 'ghi telemetry INSERTS (để đọc log)');
++    r = await AR.sendInsertsState('XYZ', true); ok(!r.ok, 'tên lạ: không ném lỗi, không gửi');
++    AR = makeAR('Studio Pro 8', { insertsInvert: true }); await AR.sendInsertsState('ALL', true); ok(AR.__sent[0][1] === 0, 'insertsInvert=true: BẬT gửi 0 (đảo)');
++    AR = makeAR('Studio Pro 8', {}, 46); r = await AR.sendInsertsState('MIC1', true); ok(!r.ok && r.result === 'FAIL', 'CC lỗi: báo FAIL, không ném lỗi');
++    AR = makeAR('Cubase 13'); AR.__sent.length = 0; await AR.sendInsertsState('MIC1', true); ok(AR.__sent.length === 1, 'DAW khác (Cubase) cũng có mặc định');
++    console.log('== Setup / surface / điền nhanh ==');
++    const su = rd('ui/js/setup.js'), xml = rd('studio_one/AutoMenuAI.surface.xml');
++    ok(['INSERTS_MIC1', 'INSERTS_MIC2', 'INSERTS_ALL'].every((a) => new RegExp('action: "' + a + '"').test(su)), 'Setup có 3 dòng INSERTS');
++    ok(/inserts: Object\.freeze\(\{[^\n]*INSERTS_MIC1: 46, INSERTS_MIC2: 47, INSERTS_ALL: 48/.test(su), 'bộ điền nhanh Studio One có INSERTS 46/47/48');
++    ok(/name="insertsMic1"[\s\S]*?address="46"/.test(xml) && /name="insertsMic2"[\s\S]*?address="47"/.test(xml) && /name="insertsAll"[\s\S]*?address="48"/.test(xml), 'surface.xml có 3 điều khiển (kênh 15)');
++    console.log('== Giao diện (renderer.js) ==');
++    const rend = rd('ui/js/renderer.js');
++    ok(/id="\$\{cfg\.insertsBtnId\}" class="preset-btn active"/.test(rend) && /insertsWhich: "MIC1"/.test(rend) && /insertsWhich: "MIC2"/.test(rend), 'thẻ MIC 1/MIC 2: nút INSERTS luôn mở app ở trạng thái SÁNG');
++    ok(/id="fxAutoEnabledBtn" class="preset-btn active"[^\n]*>AUTO MUSIC ON</.test(rend), 'thẻ FX: ô tích cũ -> nút AUTO MUSIC ON');
++    ok(/id="insertsAllBtn" class="preset-btn active"/.test(rend) && /sendInsertsState\?\.\("ALL"/.test(rend), 'thẻ FX: nút INSERTS luôn SÁNG khi mở app, gửi MIDI');
++    ok(rend.indexOf('id="fxAutoEnabledBtn"') > 0 && rend.indexOf('id="fxAutoEnabledBtn"') < rend.indexOf('id="insertsAllBtn"'), 'thẻ FX: INSERTS nằm DƯỚI AUTO MUSIC ON');
++    ok(/window\.__insertsAllSet\?\.\(!!target, "fx-auto-music"\)/.test(rend) && !/if \(target\) \{ try \{ window\.__insertsAllSet/.test(rend), 'Auto FX: có nhạc => Inserts tự BẬT, không nhạc => tự TẮT (INSERTS-03)');
++    ok(rend.indexOf('id="${cfg.insertsBtnId}"') > 0 && rend.indexOf('id="${cfg.insertsBtnId}"') < rend.indexOf('id="${cfg.knobId}"'), 'thẻ MIC: nút INSERTS nằm TRÊN núm');
++    console.log('KẾT QUẢ: ' + pass + ' PASS / ' + fail + ' FAIL'); process.exit(fail ? 1 : 0);
++})();
+diff --git a/tests/unit/MicVolumeKnob01.verify.js b/tests/unit/MicVolumeKnob01.verify.js
+index a5fbe83..10f03b9 100644
+--- a/tests/unit/MicVolumeKnob01.verify.js
++++ b/tests/unit/MicVolumeKnob01.verify.js
+@@ -62,7 +62,7 @@ function build({ mapping = true, saved } = {}) {
+       ok(card1 && card1.style.display === 'none' && card2.style.display === 'none', 'ban đầu cả 2 thẻ ẩn');
+       let prevented = false; e.els.mic1Btn.fire('contextmenu', { preventDefault() { prevented = true; } });
+       ok(prevented && card1.style.display === 'flex' && card2.style.display === 'none', 'chuột phải MIC 1 -> chỉ hiện núm MIC 1');
+-      ok(card1.style.top === '298px' && card1.style.left === '255px', 'thẻ hiện phía trên nút, căn giữa (top/left = ' + card1.style.top + '/' + card1.style.left + ')');
++      ok(card1.style.top === '252px' && card1.style.left === '255px', 'thẻ hiện phía trên nút, căn giữa (top/left = ' + card1.style.top + '/' + card1.style.left + ')');
+       e.els.mic2Btn.fire('contextmenu', { preventDefault() {} });
+       ok(card1.style.display === 'none' && card2.style.display === 'flex', 'chuột phải MIC 2 -> đóng MIC 1, hiện MIC 2');
+       e.els.mic2Btn.fire('contextmenu', { preventDefault() {} }); ok(card2.style.display === 'none', 'chuột phải lần nữa -> đóng');
+diff --git a/ui/js/actionRegistry.js b/ui/js/actionRegistry.js
+index a5663b1..f7d03ba 100644
+--- a/ui/js/actionRegistry.js
++++ b/ui/js/actionRegistry.js
+@@ -124,6 +124,10 @@ const ACTIONS = Object.freeze({
+     FX_OFF: "FX_OFF",
+     // FX-SENDS-01 — nút FX của Menu điều khiển THÊM 6 nút nguồn của hộp "Sends" trong Studio One (Verb ngắn, Verb dài, Main, Delay, Com Verb, None).
+     // Studio One không nối 1 CC vào nhiều Send => mỗi Send 1 CC RIÊNG (kênh 15, CC 40..45), gửi kèm FX_ON/FX_OFF (giống cách nút TUNE gửi thêm 3 bypass).
++    // INSERTS-01 — nút "Activate All" của cụm Inserts (Control Link): mỗi Mic 1 nút + 1 ô chung. 127 = BẬT (kích hoạt tất cả), 0 = TẮT.
++    INSERTS_MIC1: "INSERTS_MIC1",
++    INSERTS_MIC2: "INSERTS_MIC2",
++    INSERTS_ALL: "INSERTS_ALL",
+     FX_SENDS_1: "FX_SENDS_1",
+     FX_SENDS_2: "FX_SENDS_2",
+     FX_SENDS_3: "FX_SENDS_3",
+@@ -289,6 +293,9 @@ function getMidiOutMapping(action) {
+     if (/^TUNE_BYPASS_[234]$/.test(String(action))) { // A94 — bypass riêng Auto-Tune 2/3/4: kênh 15, CC 89/90/91 (không trùng bộ KNOB 85-88)
+         return { kind: "cc", channel: 15, number: 87 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
+     }
++    if (action === "INSERTS_MIC1" || action === "INSERTS_MIC2" || action === "INSERTS_ALL") { // INSERTS-01 — mặc định mọi DAW: kênh 15, CC 46/47/48 (không trùng 20-37, 40-45, 85-95, 102-104)
++        return { kind: "cc", channel: 15, number: action === "INSERTS_MIC1" ? 46 : action === "INSERTS_MIC2" ? 47 : 48, value: 127, source: "DEFAULT_PRESET" };
++    }
+     if (/^FX_SENDS_[1-6]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // FX-SENDS-01 — kênh 15, CC 40..45 (không trùng 20-37, 85-95, 102-104); mapping người dùng đã lưu vẫn thắng
+         return { kind: "cc", channel: 15, number: 39 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
+     }
+@@ -558,6 +565,22 @@ async function sendFxSendsLink(targetOn, opts = {}) {
+     return { ok: okN === 6, okCount: okN, total: 6, value: val, text, results };
+ }
+ 
++// INSERTS-01 — gửi BẬT/TẮT nút Inserts ("Activate All") của Mic 1 / Mic 2 / ô chung. which: "MIC1" | "MIC2" | "ALL". 127 = BẬT, 0 = TẮT (setting insertsInvert=true để đảo).
++async function sendInsertsState(which, targetOn, opts = {}) {
++    const ex = which === "MIC1" ? ACTIONS.INSERTS_MIC1 : which === "MIC2" ? ACTIONS.INSERTS_MIC2 : which === "ALL" ? ACTIONS.INSERTS_ALL : null;
++    if (!ex) return { ok: false, reason: "UNKNOWN_INSERTS", which };
++    const reason = (opts && opts.reason) || "inserts";
++    const inv = getFxSendsSetting("insertsInvert", false);
++    const val = (!!targetOn !== !!inv) ? 127 : 0;
++    let res = "OK";
++    try {
++        if (!isMidiMappingConfigured(ex)) res = "NOT_CONFIGURED";
++        else { const rx = await executeAction(ex, { reason, value: val }); res = rx && rx.ok ? "OK" : "FAIL"; }
++    } catch (e) { res = "FAIL"; }
++    try { window.electronAPI && typeof window.electronAPI.sendTelemetry === "function" && window.electronAPI.sendTelemetry({ event: "INSERTS", which, target: !!targetOn, value: val, result: res, reason, timestamp: Date.now() }); } catch (_) {}
++    return { ok: res === "OK", result: res, value: val, which };
++}
++
+ // FX-SENDS-01 — đọc cờ setting an toàn (thiếu getSetting => dùng mặc định).
+ function getFxSendsSetting(key, def) {
+     // getSetting() của Menu trả "" (chuỗi rỗng) cho khoá CHƯA có => "" phải coi là CHƯA ĐẶT (dùng mặc định), nếu không "" -> false làm tính năng bị TẮT ngầm.
+@@ -719,6 +742,7 @@ async function applyPresetTransition(prev, next, ctx = {}) {
+ 
+ window.ActionRegistry = {
+     ACTIONS,
++    sendInsertsState, // INSERTS-01
+     sendFxSendsLink, // FX-SENDS-01    applyPresetTransition,
+ 
+     ACTION_STATUS,
+diff --git a/ui/js/renderer.js b/ui/js/renderer.js
+index 0b67d38..3897ea1 100644
+--- a/ui/js/renderer.js
++++ b/ui/js/renderer.js
+@@ -768,9 +768,10 @@ function createPopupAutoHide(card, hide) {
+     document.addEventListener("mouseup", () => { if (pressed) { pressed = false; if (card.style.display !== "none") arm(); } });
+     return { arm, disarm };
+ }
++const MIC_POPUP_H = 142; // INSERTS-01: nút INSERTS ở TRÊN + núm âm lượng bên dưới (cùng cỡ thẻ AUDIO CHILL)
+ const MIC_VOLUME_POPUPS = [
+-    { btnId: "mic1Btn", knobId: "mic1VolKnob", valueId: "mic1VolValue", label: "MIC 1 VOLUME" },
+-    { btnId: "mic2Btn", knobId: "mic2VolKnob", valueId: "mic2VolValue", label: "MIC 2 VOLUME" },
++    { btnId: "mic1Btn", knobId: "mic1VolKnob", valueId: "mic1VolValue", label: "MIC 1 VOLUME", insertsBtnId: "mic1InsertsBtn", insertsWhich: "MIC1" },
++    { btnId: "mic2Btn", knobId: "mic2VolKnob", valueId: "mic2VolValue", label: "MIC 2 VOLUME", insertsBtnId: "mic2InsertsBtn", insertsWhich: "MIC2" },
+ ];
+ function initMicVolumePopups() {
+     const cards = [];
+@@ -781,9 +782,21 @@ function initMicVolumePopups() {
+         if (!btn || document.getElementById(cfg.knobId)) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
+         const card = document.createElement("div");
+         card.className = "knob-card mic-volume-popup";
+-        card.style.cssText = "position:fixed;display:none;width:190px;height:96px;z-index:3000;background:#081523;"; // nền đặc (CSS .knob-card dùng nền mờ)
+-        card.innerHTML = `<div class="knob-label">${cfg.label}</div><div id="${cfg.valueId}" class="knob-number">90</div>`
+-            + `<div class="knob" id="${cfg.knobId}"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>`;
++        card.style.cssText = "position:fixed;display:none;width:190px;height:" + MIC_POPUP_H + "px;z-index:3000;background:#081523;"; // nền đặc (CSS .knob-card dùng nền mờ)
++        // INSERTS-01: nút INSERTS (sáng = BẬT, luôn BẬT khi mở app) nằm TRÊN núm âm lượng; gửi qua MIDI (ActionRegistry.sendInsertsState).
++        // Bố cục (giống thẻ AUDIO CHILL): HÀNG TRÊN = nút INSERTS; HÀNG DƯỚI = chữ + số bên trái, núm bên phải (dời xuống bằng style riêng, không sửa CSS).
++        card.innerHTML = `<button id="${cfg.insertsBtnId}" class="preset-btn active" style="position:absolute;left:12px;top:8px;width:166px;height:30px;cursor:pointer;">INSERTS</button>`
++            + `<div class="knob-label" style="top:46px;">${cfg.label}</div><div id="${cfg.valueId}" class="knob-number" style="top:70px;">90</div>`
++            + `<div class="knob" id="${cfg.knobId}" style="top:54px;"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>`;
++        const insBtn = typeof card.querySelector === "function" ? card.querySelector("#" + cfg.insertsBtnId) : null;
++        if (insBtn) insBtn.dataset.noPreset = "1"; // không thuộc nhóm preset NORM/RAP/REMIX
++        if (insBtn) insBtn.addEventListener("click", (e) => {
++            e.stopPropagation();
++            const onNow = !insBtn.classList.contains("active"); // trạng thái ĐÍCH sau cú bấm
++            insBtn.classList.toggle("active", onNow);
++            Promise.resolve(window.ActionRegistry?.sendInsertsState?.(cfg.insertsWhich, onNow, { reason: "menu-button" }))
++                .catch((err) => console.error("[MenuControl] INSERTS " + cfg.insertsWhich + " lỗi:", err));
++        });
+         document.body.appendChild(card);
+         const k = knobData.find((x) => x.id === cfg.knobId);
+         if (k) updateKnob(k); // vẽ giá trị đã khôi phục từ lần dùng trước (loadData chạy trước hàm này)
+@@ -796,7 +809,7 @@ function initMicVolumePopups() {
+             if (wasOpen) return;
+             const r = btn.getBoundingClientRect();
+             const left = Math.max(4, Math.min(window.innerWidth - 194, r.left + r.width / 2 - 95));
+-            let top = r.top - 96 - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
++            let top = r.top - MIC_POPUP_H - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
+             if (top < 4) top = r.bottom + 6;
+             card.style.left = left + "px";
+             card.style.top = top + "px";
+@@ -878,10 +891,25 @@ function initFxAutoMenu() {
+     const card = document.createElement("div");
+     card.id = "fxAutoMenuCard";
+     card.style.cssText = "position:fixed;display:none;z-index:3000;background:#081523;border:1px solid #1f3a57;border-radius:8px;padding:8px 12px;color:#cfe3f7;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.5);";
+-    card.innerHTML = '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;">'
+-        + '<input type="checkbox" id="fxAutoEnabledChk" style="cursor:pointer;"><span>Auto bật FX khi có nhạc</span></label>';
++    // INSERTS-01: ô tích cũ "Auto bật FX khi có nhạc" -> NÚT bật/tắt "AUTO MUSIC ON" (cùng cờ fxAutoEnabled); thêm ô tích "Inserts" (luôn BẬT khi mở app, gửi qua MIDI).
++    card.innerHTML = '<button id="fxAutoEnabledBtn" class="preset-btn active" style="display:block;width:170px;height:28px;cursor:pointer;">AUTO MUSIC ON</button>'
++        + '<button id="insertsAllBtn" class="preset-btn active" style="display:block;width:170px;height:28px;cursor:pointer;margin-top:8px;">INSERTS</button>';
+     document.body.appendChild(card);
+-    const chk = card.querySelector("#fxAutoEnabledChk");
++    const chk = card.querySelector("#fxAutoEnabledBtn");
++    chk.dataset.noPreset = "1"; // không thuộc nhóm preset NORM/RAP/REMIX
++    // Giữ giao diện "checkbox" cho phần mã bên dưới: chk.checked <-> class active.
++    Object.defineProperty(chk, "checked", { get() { return chk.classList.contains("active"); }, set(v) { chk.classList.toggle("active", !!v); } });
++    chk.addEventListener("click", (e) => { e.stopPropagation(); chk.checked = !chk.checked; chk.dispatchEvent(new Event("change")); });
++    const insBtn = card.querySelector("#insertsAllBtn");
++    insBtn.dataset.noPreset = "1";
++    // setInserts(on, reason): sáng/tắt nút + gửi MIDI (CC 48). Luôn BẬT khi mở app; Auto FX: có nhạc => tự BẬT, không nhạc => tự TẮT (window.__insertsAllSet).
++    const setInserts = (on, reason) => {
++        insBtn.classList.toggle("active", !!on);
++        return Promise.resolve(window.ActionRegistry?.sendInsertsState?.("ALL", !!on, { reason }))
++            .catch((err) => console.error("[MenuControl] INSERTS chung lỗi:", err));
++    };
++    window.__insertsAllSet = setInserts;
++    insBtn.addEventListener("click", (e) => { e.stopPropagation(); setInserts(!insBtn.classList.contains("active"), "menu-button"); });
+     const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
+     const hide = () => { card.style.display = "none"; auto.disarm(); };
+     chk.addEventListener("change", () => {
+@@ -1173,7 +1201,7 @@ function createFxAutoWiring() {
+     const ctl = AudioSource.createFxAutoController({
+         getFxState: () => busGroup.aggregate(),
+         isEnabled: () => getSetting("fxAutoEnabled", true) !== false, // FX-AUTO-TOGGLE-02: ô tích chuột phải FX
+-        onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); } }, // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX
++        onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); try { window.__insertsAllSet?.(!!target, "fx-auto-music"); } catch (e) { /* bỏ qua */ } } }, // INSERTS-03: INSERTS (thẻ FX) theo nhạc: có nhạc => tự BẬT, không có nhạc => tự TẮT // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX
+         applyFx: async (target) => {
+             if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
+             const res = await busGroup.apply(target);
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index 54a0645..0db2124 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -711,6 +711,9 @@ const DAW_MIDI_ACTIONS = [
+     { action: "FX_ON", label: "FX ON (bỏ Mute 4 bus)" },
+     { action: "FX_OFF", label: "FX OFF (Mute 4 bus)" },
+     // FX-SENDS-01 — nút FX gửi THÊM 6 CC (kênh 15, CC 40..45; 127 = bật, 0 = tắt) cho 6 nút nguồn của hộp Sends trong Studio One. Lệnh FX_ON/FX_OFF cũ ở trên giữ NGUYÊN.
++    { action: "INSERTS_MIC1", label: "INSERTS Mic 1 — nút Activate All của cụm Inserts Mic 1 (127 = bật, 0 = tắt)" },
++    { action: "INSERTS_MIC2", label: "INSERTS Mic 2 — nút Activate All của cụm Inserts Mic 2 (127 = bật, 0 = tắt)" },
++    { action: "INSERTS_ALL", label: "INSERTS (ô tích ở thẻ FX) — Activate All (127 = bật, 0 = tắt)" },
+     { action: "FX_SENDS_1", label: "FX → SENDS 1 Verb ngắn (nút nguồn Send; gửi kèm FX ON/OFF)" },
+     { action: "FX_SENDS_2", label: "FX → SENDS 2 Verb dài (nút nguồn Send; gửi kèm FX ON/OFF)" },
+     { action: "FX_SENDS_3", label: "FX → SENDS 3 Main (nút nguồn Send; gửi kèm FX ON/OFF)" },
+@@ -765,6 +768,7 @@ const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME
+ const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
+ const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "TUNE_BYPASS_2", "TUNE_BYPASS_3", "TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2", "AUDIO_CHILL_STATE", "AUDIO_CHILL_KNOB"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
+ MIDI_CONFLICT_GUARD_SET.add("BE_STATE"); // BE-BTN-01: nút BÈ cũng thuộc nhóm bảo vệ trùng CC
++["INSERTS_MIC1", "INSERTS_MIC2", "INSERTS_ALL"].forEach((a) => MIDI_CONFLICT_GUARD_SET.add(a)); // INSERTS-01
+ ["FX_SENDS_1", "FX_SENDS_2", "FX_SENDS_3", "FX_SENDS_4", "FX_SENDS_5", "FX_SENDS_6"].forEach((a) => MIDI_CONFLICT_GUARD_SET.add(a)); // FX-SENDS-01: 6 CC Sends cũng thuộc nhóm bảo vệ trùng CC
+ function findMidiOutMappingConflict(action, mapping) {
+     for (const { action: other } of DAW_MIDI_ACTIONS) {
+@@ -812,6 +816,9 @@ function getDawMidiOutMapping(action) {
+         const base = /_AT3$/.test(action) ? 34 : 36;
+         return { kind: "cc", channel: 15, number: /^KEY_ROOT_/.test(action) ? base + 1 : base, value: /SCALE_MINOR/.test(action) ? 5 : 0, source: "DEFAULT_PRESET" };
+     }
++    if (action === "INSERTS_MIC1" || action === "INSERTS_MIC2" || action === "INSERTS_ALL") { // INSERTS-01 — khớp getMidiOutMapping() ở actionRegistry.js
++        return { kind: "cc", channel: 15, number: action === "INSERTS_MIC1" ? 46 : action === "INSERTS_MIC2" ? 47 : 48, value: 127, source: "DEFAULT_PRESET" };
++    }
+     if (/^FX_SENDS_[1-6]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // FX-SENDS-01 — khớp getMidiOutMapping() ở actionRegistry.js
+         return { kind: "cc", channel: 15, number: 39 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
+     }
+@@ -888,6 +895,8 @@ const DAW_MIDI_PROFILES = Object.freeze({
+             fxbus: Object.freeze({ title: "FX BUS VOLUME", count: 4, mappings: dawQfMake(15, 127, { FX_BUS_DELAY_VOLUME: 28, FX_BUS_VERB_SHORT_VOLUME: 29, FX_BUS_VERB_LONG_VOLUME: 30, FX_BUS_COM_VERB_VOLUME: 31 }) }),
+             // FX-SENDS-01 — 6 CC (kênh 15, CC 40..45) cho 6 nút nguồn Send; nút FX gửi kèm FX ON/OFF (giá trị 127 = bật, 0 = tắt do Menu tự quyết). Không trùng 20–37, 85–95, 102–104.
+             fxsends: Object.freeze({ title: "FX → SENDS (6 nút nguồn)", count: 6, mappings: dawQfMake(15, 127, { FX_SENDS_1: 40, FX_SENDS_2: 41, FX_SENDS_3: 42, FX_SENDS_4: 43, FX_SENDS_5: 44, FX_SENDS_6: 45 }) }),
++            // INSERTS-01 — 3 CC (kênh 15, CC 46 Mic 1 / 47 Mic 2 / 48 ô Inserts chung) gán vào nút "Activate All" của cụm Inserts trong Control Link.
++            inserts: Object.freeze({ title: "INSERTS (Mic 1, Mic 2, chung)", count: 3, mappings: dawQfMake(15, 127, { INSERTS_MIC1: 46, INSERTS_MIC2: 47, INSERTS_ALL: 48 }) }),
+             // AUTOKEY-MIDI-02 — 2 CC (kênh 15, CC 102 dò Key / 103 Send Auto-Tune) để chế độ Auto-Key chạy bằng MIDI, KHÔNG chiếm chuột; gán 2 nút của plugin Auto-Key trong Control Link.
+             autokey: Object.freeze({ title: "AUTO-KEY (dò Key + Send)", count: 2, mappings: dawQfMake(15, 127, { AUTOKEY_DETECT: 102, AUTOKEY_SEND: 103 }) }),
+             // KEY-SCALE-CC-02 — 1 CC (26, kênh 15) chọn Scale Auto-Tune theo GIÁ TRỊ: Major=0 (mục 1/29), Minor=5 (mục 2/29: 5/127×28≈1.1).

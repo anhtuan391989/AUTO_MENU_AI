@@ -210,5 +210,15 @@
     <Control name="autoKeySend" title="Auto-Key - Send Auto-Tune (127)" type="button" options="receive public">
       <MidiMessage status="#BE" address="103"/>
     </Control>
+    <!-- CC 46/47/48 (INSERTS-01: Activate All cua cum Inserts; kenh 15; 127 = bat, 0 = tat) -->
+    <Control name="insertsMic1" title="Inserts Mic 1 - Activate All (127=bat, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="46"/>
+    </Control>
+    <Control name="insertsMic2" title="Inserts Mic 2 - Activate All (127=bat, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="47"/>
+    </Control>
+    <Control name="insertsAll" title="Inserts chung (the FX) - Activate All (127=bat, 0=tat)" type="button" options="receive public">
+      <MidiMessage status="#BE" address="48"/>
+    </Control>
   </Controls>
 </ControlSurface>

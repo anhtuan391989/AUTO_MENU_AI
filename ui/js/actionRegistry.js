@@ -124,6 +124,10 @@ const ACTIONS = Object.freeze({
     FX_OFF: "FX_OFF",
     // FX-SENDS-01 — nút FX của Menu điều khiển THÊM 6 nút nguồn của hộp "Sends" trong Studio One (Verb ngắn, Verb dài, Main, Delay, Com Verb, None).
     // Studio One không nối 1 CC vào nhiều Send => mỗi Send 1 CC RIÊNG (kênh 15, CC 40..45), gửi kèm FX_ON/FX_OFF (giống cách nút TUNE gửi thêm 3 bypass).
+    // INSERTS-01 — nút "Activate All" của cụm Inserts (Control Link): mỗi Mic 1 nút + 1 ô chung. 127 = BẬT (kích hoạt tất cả), 0 = TẮT.
+    INSERTS_MIC1: "INSERTS_MIC1",
+    INSERTS_MIC2: "INSERTS_MIC2",
+    INSERTS_ALL: "INSERTS_ALL",
     FX_SENDS_1: "FX_SENDS_1",
     FX_SENDS_2: "FX_SENDS_2",
     FX_SENDS_3: "FX_SENDS_3",
@@ -288,6 +292,9 @@ function getMidiOutMapping(action) {
     }
     if (/^TUNE_BYPASS_[234]$/.test(String(action))) { // A94 — bypass riêng Auto-Tune 2/3/4: kênh 15, CC 89/90/91 (không trùng bộ KNOB 85-88)
         return { kind: "cc", channel: 15, number: 87 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
+    }
+    if (action === "INSERTS_MIC1" || action === "INSERTS_MIC2" || action === "INSERTS_ALL") { // INSERTS-01 — mặc định mọi DAW: kênh 15, CC 46/47/48 (không trùng 20-37, 40-45, 85-95, 102-104)
+        return { kind: "cc", channel: 15, number: action === "INSERTS_MIC1" ? 46 : action === "INSERTS_MIC2" ? 47 : 48, value: 127, source: "DEFAULT_PRESET" };
     }
     if (/^FX_SENDS_[1-6]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // FX-SENDS-01 — kênh 15, CC 40..45 (không trùng 20-37, 85-95, 102-104); mapping người dùng đã lưu vẫn thắng
         return { kind: "cc", channel: 15, number: 39 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
@@ -558,6 +565,22 @@ async function sendFxSendsLink(targetOn, opts = {}) {
     return { ok: okN === 6, okCount: okN, total: 6, value: val, text, results };
 }
 
+// INSERTS-01 — gửi BẬT/TẮT nút Inserts ("Activate All") của Mic 1 / Mic 2 / ô chung. which: "MIC1" | "MIC2" | "ALL". 127 = BẬT, 0 = TẮT (setting insertsInvert=true để đảo).
+async function sendInsertsState(which, targetOn, opts = {}) {
+    const ex = which === "MIC1" ? ACTIONS.INSERTS_MIC1 : which === "MIC2" ? ACTIONS.INSERTS_MIC2 : which === "ALL" ? ACTIONS.INSERTS_ALL : null;
+    if (!ex) return { ok: false, reason: "UNKNOWN_INSERTS", which };
+    const reason = (opts && opts.reason) || "inserts";
+    const inv = getFxSendsSetting("insertsInvert", false);
+    const val = (!!targetOn !== !!inv) ? 127 : 0;
+    let res = "OK";
+    try {
+        if (!isMidiMappingConfigured(ex)) res = "NOT_CONFIGURED";
+        else { const rx = await executeAction(ex, { reason, value: val }); res = rx && rx.ok ? "OK" : "FAIL"; }
+    } catch (e) { res = "FAIL"; }
+    try { window.electronAPI && typeof window.electronAPI.sendTelemetry === "function" && window.electronAPI.sendTelemetry({ event: "INSERTS", which, target: !!targetOn, value: val, result: res, reason, timestamp: Date.now() }); } catch (_) {}
+    return { ok: res === "OK", result: res, value: val, which };
+}
+
 // FX-SENDS-01 — đọc cờ setting an toàn (thiếu getSetting => dùng mặc định).
 function getFxSendsSetting(key, def) {
     // getSetting() của Menu trả "" (chuỗi rỗng) cho khoá CHƯA có => "" phải coi là CHƯA ĐẶT (dùng mặc định), nếu không "" -> false làm tính năng bị TẮT ngầm.
@@ -719,6 +742,7 @@ async function applyPresetTransition(prev, next, ctx = {}) {
 
 window.ActionRegistry = {
     ACTIONS,
+    sendInsertsState, // INSERTS-01
     sendFxSendsLink, // FX-SENDS-01    applyPresetTransition,
 
     ACTION_STATUS,

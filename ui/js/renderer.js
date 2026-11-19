@@ -768,9 +768,10 @@ function createPopupAutoHide(card, hide) {
     document.addEventListener("mouseup", () => { if (pressed) { pressed = false; if (card.style.display !== "none") arm(); } });
     return { arm, disarm };
 }
+const MIC_POPUP_H = 142; // INSERTS-01: nút INSERTS ở TRÊN + núm âm lượng bên dưới (cùng cỡ thẻ AUDIO CHILL)
 const MIC_VOLUME_POPUPS = [
-    { btnId: "mic1Btn", knobId: "mic1VolKnob", valueId: "mic1VolValue", label: "MIC 1 VOLUME" },
-    { btnId: "mic2Btn", knobId: "mic2VolKnob", valueId: "mic2VolValue", label: "MIC 2 VOLUME" },
+    { btnId: "mic1Btn", knobId: "mic1VolKnob", valueId: "mic1VolValue", label: "MIC 1 VOLUME", insertsBtnId: "mic1InsertsBtn", insertsWhich: "MIC1" },
+    { btnId: "mic2Btn", knobId: "mic2VolKnob", valueId: "mic2VolValue", label: "MIC 2 VOLUME", insertsBtnId: "mic2InsertsBtn", insertsWhich: "MIC2" },
 ];
 function initMicVolumePopups() {
     const cards = [];
@@ -781,9 +782,21 @@ function initMicVolumePopups() {
         if (!btn || document.getElementById(cfg.knobId)) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
         const card = document.createElement("div");
         card.className = "knob-card mic-volume-popup";
-        card.style.cssText = "position:fixed;display:none;width:190px;height:96px;z-index:3000;background:#081523;"; // nền đặc (CSS .knob-card dùng nền mờ)
-        card.innerHTML = `<div class="knob-label">${cfg.label}</div><div id="${cfg.valueId}" class="knob-number">90</div>`
-            + `<div class="knob" id="${cfg.knobId}"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>`;
+        card.style.cssText = "position:fixed;display:none;width:190px;height:" + MIC_POPUP_H + "px;z-index:3000;background:#081523;"; // nền đặc (CSS .knob-card dùng nền mờ)
+        // INSERTS-01: nút INSERTS (sáng = BẬT, luôn BẬT khi mở app) nằm TRÊN núm âm lượng; gửi qua MIDI (ActionRegistry.sendInsertsState).
+        // Bố cục (giống thẻ AUDIO CHILL): HÀNG TRÊN = nút INSERTS; HÀNG DƯỚI = chữ + số bên trái, núm bên phải (dời xuống bằng style riêng, không sửa CSS).
+        card.innerHTML = `<button id="${cfg.insertsBtnId}" class="preset-btn active" style="position:absolute;left:12px;top:8px;width:166px;height:30px;cursor:pointer;">INSERTS</button>`
+            + `<div class="knob-label" style="top:46px;">${cfg.label}</div><div id="${cfg.valueId}" class="knob-number" style="top:70px;">90</div>`
+            + `<div class="knob" id="${cfg.knobId}" style="top:54px;"><div class="led-ring"></div><div class="led-active"></div><div class="cap"></div><div class="pointer"></div></div>`;
+        const insBtn = typeof card.querySelector === "function" ? card.querySelector("#" + cfg.insertsBtnId) : null;
+        if (insBtn) insBtn.dataset.noPreset = "1"; // không thuộc nhóm preset NORM/RAP/REMIX
+        if (insBtn) insBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const onNow = !insBtn.classList.contains("active"); // trạng thái ĐÍCH sau cú bấm
+            insBtn.classList.toggle("active", onNow);
+            Promise.resolve(window.ActionRegistry?.sendInsertsState?.(cfg.insertsWhich, onNow, { reason: "menu-button" }))
+                .catch((err) => console.error("[MenuControl] INSERTS " + cfg.insertsWhich + " lỗi:", err));
+        });
         document.body.appendChild(card);
         const k = knobData.find((x) => x.id === cfg.knobId);
         if (k) updateKnob(k); // vẽ giá trị đã khôi phục từ lần dùng trước (loadData chạy trước hàm này)
@@ -796,7 +809,7 @@ function initMicVolumePopups() {
             if (wasOpen) return;
             const r = btn.getBoundingClientRect();
             const left = Math.max(4, Math.min(window.innerWidth - 194, r.left + r.width / 2 - 95));
-            let top = r.top - 96 - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
+            let top = r.top - MIC_POPUP_H - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
             if (top < 4) top = r.bottom + 6;
             card.style.left = left + "px";
             card.style.top = top + "px";
@@ -878,10 +891,25 @@ function initFxAutoMenu() {
     const card = document.createElement("div");
     card.id = "fxAutoMenuCard";
     card.style.cssText = "position:fixed;display:none;z-index:3000;background:#081523;border:1px solid #1f3a57;border-radius:8px;padding:8px 12px;color:#cfe3f7;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.5);";
-    card.innerHTML = '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;">'
-        + '<input type="checkbox" id="fxAutoEnabledChk" style="cursor:pointer;"><span>Auto bật FX khi có nhạc</span></label>';
+    // INSERTS-01: ô tích cũ "Auto bật FX khi có nhạc" -> NÚT bật/tắt "AUTO MUSIC ON" (cùng cờ fxAutoEnabled); thêm ô tích "Inserts" (luôn BẬT khi mở app, gửi qua MIDI).
+    card.innerHTML = '<button id="fxAutoEnabledBtn" class="preset-btn active" style="display:block;width:170px;height:28px;cursor:pointer;">AUTO MUSIC ON</button>'
+        + '<button id="insertsAllBtn" class="preset-btn active" style="display:block;width:170px;height:28px;cursor:pointer;margin-top:8px;">INSERTS</button>';
     document.body.appendChild(card);
-    const chk = card.querySelector("#fxAutoEnabledChk");
+    const chk = card.querySelector("#fxAutoEnabledBtn");
+    chk.dataset.noPreset = "1"; // không thuộc nhóm preset NORM/RAP/REMIX
+    // Giữ giao diện "checkbox" cho phần mã bên dưới: chk.checked <-> class active.
+    Object.defineProperty(chk, "checked", { get() { return chk.classList.contains("active"); }, set(v) { chk.classList.toggle("active", !!v); } });
+    chk.addEventListener("click", (e) => { e.stopPropagation(); chk.checked = !chk.checked; chk.dispatchEvent(new Event("change")); });
+    const insBtn = card.querySelector("#insertsAllBtn");
+    insBtn.dataset.noPreset = "1";
+    // setInserts(on, reason): sáng/tắt nút + gửi MIDI (CC 48). Luôn BẬT khi mở app; Auto FX: có nhạc => tự BẬT, không nhạc => tự TẮT (window.__insertsAllSet).
+    const setInserts = (on, reason) => {
+        insBtn.classList.toggle("active", !!on);
+        return Promise.resolve(window.ActionRegistry?.sendInsertsState?.("ALL", !!on, { reason }))
+            .catch((err) => console.error("[MenuControl] INSERTS chung lỗi:", err));
+    };
+    window.__insertsAllSet = setInserts;
+    insBtn.addEventListener("click", (e) => { e.stopPropagation(); setInserts(!insBtn.classList.contains("active"), "menu-button"); });
     const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
     const hide = () => { card.style.display = "none"; auto.disarm(); };
     chk.addEventListener("change", () => {
@@ -1173,7 +1201,7 @@ function createFxAutoWiring() {
     const ctl = AudioSource.createFxAutoController({
         getFxState: () => busGroup.aggregate(),
         isEnabled: () => getSetting("fxAutoEnabled", true) !== false, // FX-AUTO-TOGGLE-02: ô tích chuột phải FX
-        onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); } }, // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX
+        onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); try { window.__insertsAllSet?.(!!target, "fx-auto-music"); } catch (e) { /* bỏ qua */ } } }, // INSERTS-03: INSERTS (thẻ FX) theo nhạc: có nhạc => tự BẬT, không có nhạc => tự TẮT // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX
         applyFx: async (target) => {
             if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
             const res = await busGroup.apply(target);
