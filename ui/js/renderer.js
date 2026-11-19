@@ -891,25 +891,47 @@ function initFxAutoMenu() {
     const card = document.createElement("div");
     card.id = "fxAutoMenuCard";
     card.style.cssText = "position:fixed;display:none;z-index:3000;background:#081523;border:1px solid #1f3a57;border-radius:8px;padding:8px 12px;color:#cfe3f7;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.5);";
-    // INSERTS-01: ô tích cũ "Auto bật FX khi có nhạc" -> NÚT bật/tắt "AUTO MUSIC ON" (cùng cờ fxAutoEnabled); thêm ô tích "Inserts" (luôn BẬT khi mở app, gửi qua MIDI).
-    card.innerHTML = '<button id="fxAutoEnabledBtn" class="preset-btn active" style="display:block;width:170px;height:28px;cursor:pointer;">AUTO MUSIC ON</button>'
-        + '<button id="insertsAllBtn" class="preset-btn active" style="display:block;width:170px;height:28px;cursor:pointer;margin-top:8px;">INSERTS</button>';
+    // INSERTS-AUTO-01: thẻ FX dùng lại Ô TÍCH (như trước khi đổi thành nút), 3 ô độc lập:
+    //   [x] Auto bật FX khi có nhạc        = cờ fxAutoEnabled (chỉ điều khiển FX/bus, như cũ)
+    //   [x] Auto Inserts theo nhạc          = cờ insertsAutoEnabled: TÍCH = có nhạc BẬT / không nhạc TẮT (tự động); BỎ TÍCH = chế độ NGƯỜI DÙNG (chỉ bạn bật/tắt Inserts)
+    //   [x] Inserts                         = trạng thái bật/tắt thật (gửi MIDI CC 48). Luôn BẬT khi mở app; bấm tay lúc nào cũng được.
+    const rowCss = "display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;";
+    card.innerHTML = '<label style="' + rowCss + '"><input type="checkbox" id="fxAutoEnabledBtn" style="cursor:pointer;"><span>Auto bật FX khi có nhạc</span></label>'
+        + '<label style="' + rowCss + 'margin-top:6px;"><input type="checkbox" id="insertsAutoChk" style="cursor:pointer;"><span>Auto Inserts theo nhạc</span></label>'
+        + '<label style="' + rowCss + 'margin-top:6px;"><input type="checkbox" id="insertsAllBtn" checked style="cursor:pointer;"><span>Inserts</span></label>';
     document.body.appendChild(card);
     const chk = card.querySelector("#fxAutoEnabledBtn");
-    chk.dataset.noPreset = "1"; // không thuộc nhóm preset NORM/RAP/REMIX
-    // Giữ giao diện "checkbox" cho phần mã bên dưới: chk.checked <-> class active.
-    Object.defineProperty(chk, "checked", { get() { return chk.classList.contains("active"); }, set(v) { chk.classList.toggle("active", !!v); } });
-    chk.addEventListener("click", (e) => { e.stopPropagation(); chk.checked = !chk.checked; chk.dispatchEvent(new Event("change")); });
+    const insAutoChk = card.querySelector("#insertsAutoChk");
     const insBtn = card.querySelector("#insertsAllBtn");
-    insBtn.dataset.noPreset = "1";
-    // setInserts(on, reason): sáng/tắt nút + gửi MIDI (CC 48). Luôn BẬT khi mở app; Auto FX: có nhạc => tự BẬT, không nhạc => tự TẮT (window.__insertsAllSet).
+    chk.checked = getSetting("fxAutoEnabled", true) !== false;
+    insAutoChk.checked = getSetting("insertsAutoEnabled", true) !== false;
+    // setInserts(on, reason): đặt ô tích + gửi MIDI (CC 48). Luôn BẬT khi mở app; Auto Inserts: có nhạc => BẬT, không nhạc => TẮT (window.__insertsAllSet).
     const setInserts = (on, reason) => {
-        insBtn.classList.toggle("active", !!on);
+        insBtn.checked = !!on;
         return Promise.resolve(window.ActionRegistry?.sendInsertsState?.("ALL", !!on, { reason }))
             .catch((err) => console.error("[MenuControl] INSERTS chung lỗi:", err));
     };
     window.__insertsAllSet = setInserts;
-    insBtn.addEventListener("click", (e) => { e.stopPropagation(); setInserts(!insBtn.classList.contains("active"), "menu-button"); });
+    insBtn.addEventListener("change", () => { setInserts(insBtn.checked, "menu-button"); }); // bấm tay: có hiệu lực ngay; Auto Inserts (nếu tích) tiếp tục theo nhạc ở lần đổi nhạc kế tiếp
+    // INSERTS-AUTO-01: theo dõi nhạc ĐỘC LẬP với Auto FX (không bị "nhường quyền 60 s" khi bấm tay nút FX, không phụ thuộc ô Auto FX).
+    // Chỉ hành động khi trạng thái nhạc ĐỔI (MUSIC_PRESENT/MUSIC_SILENT) hoặc khi vừa tích lại ô Auto Inserts.
+    let lastInsMusic = null;
+    const insTargetOf = (m) => (m === "MUSIC_PRESENT" ? true : (m === "MUSIC_SILENT" ? false : null));
+    window.__insertsAutoOnMusic = (musicState) => {
+        const target = insTargetOf(musicState);
+        if (target === null || musicState === lastInsMusic) return; // chưa rõ / không đổi => không làm gì
+        lastInsMusic = musicState;
+        if (getSetting("insertsAutoEnabled", true) === false) return; // chế độ NGƯỜI DÙNG: không tự đổi
+        setInserts(target, "inserts-auto-music"); // luôn gửi khi nhạc đổi (CC tuyệt đối 127/0, gửi lại vô hại) => DAW không lệch nếu lần gửi trước lỗi
+    };
+    insAutoChk.addEventListener("change", () => {
+        setSetting("insertsAutoEnabled", !!insAutoChk.checked);
+        if (insAutoChk.checked) { // tích lại => theo nhạc hiện tại NGAY (có nhạc bật / không nhạc tắt)
+            const target = insTargetOf(window.__fxAutoInfo && window.__fxAutoInfo.musicState);
+            if (target !== null) setInserts(target, "inserts-auto-music");
+        }
+    });
+    if (window.__fxAutoInfo) window.__insertsAutoOnMusic(window.__fxAutoInfo.musicState); // nhạc đã có trạng thái trước khi thẻ được tạo
     const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
     const hide = () => { card.style.display = "none"; auto.disarm(); };
     chk.addEventListener("change", () => {
@@ -1201,7 +1223,7 @@ function createFxAutoWiring() {
     const ctl = AudioSource.createFxAutoController({
         getFxState: () => busGroup.aggregate(),
         isEnabled: () => getSetting("fxAutoEnabled", true) !== false, // FX-AUTO-TOGGLE-02: ô tích chuột phải FX
-        onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); try { window.__insertsAllSet?.(!!target, "fx-auto-music"); } catch (e) { /* bỏ qua */ } } }, // INSERTS-03: INSERTS (thẻ FX) theo nhạc: có nhạc => tự BẬT, không có nhạc => tự TẮT // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX
+        onRequest: (target) => { if (getSetting("fxAutoEnabled", true) !== false) { fxBtn?.classList.toggle("active", !!target); } }, // BUTTON-RESET: Auto FX KHÔNG lưu trạng thái nút FX. INSERTS-AUTO-01: Inserts đã TÁCH khỏi đường này (xem __insertsAutoOnMusic trong onState)
         applyFx: async (target) => {
             if (getSetting("fxAutoEnabled", true) === false) return { ok: false, reason: "DISABLED" };
             const res = await busGroup.apply(target);
@@ -1212,6 +1234,7 @@ function createFxAutoWiring() {
         onDiag: (info) => { window.electronAPI?.sendTelemetry?.({ event: "FX_AUTO_DIAG", musicState: info.musicState, levelStats: info.levelStats, msSinceFrame: info.msSinceFrame, visibility: (typeof document !== "undefined" ? document.visibilityState : null), framesSeen: info.framesSeen, fxOn: !!fxBtn?.classList.contains("active"), timestamp: Date.now() }); },
         onState: (info) => {
             window.__fxAutoInfo = info;
+            try { window.__insertsAutoOnMusic?.(info.musicState); } catch (e) { /* UI không được làm hỏng bộ điều khiển */ } // INSERTS-AUTO-01: Inserts theo nhạc, độc lập Auto FX
             if (fxBtn) { fxBtn.title = syncText(info); fxBtn.dataset.fxSync = syncKey(info); fxBtn.dataset.fxControl = info.manualOverride ? "manual" : "auto"; }
             const k = `${info.musicState}|${info.actionState}|${info.fxTarget}|${info.pending ? "pending" : ""}|${info.lastResult ? info.lastResult.ok + ":" + info.lastResult.reason : ""}`;
             if (k !== __lastFxLogKey) { __lastFxLogKey = k; window.electronAPI?.sendTelemetry?.({ event: "FX_AUTO", musicState: info.musicState, actionState: info.actionState, target: info.fxTarget, lastResult: info.lastResult, lastDbfs: info.lastDbfs, levelStats: info.levelStats, msSinceFrame: info.msSinceFrame, framesSeen: info.framesSeen, timestamp: Date.now() }); }

@@ -38,10 +38,10 @@ function makeAR(daw, settings, failCc) {
     console.log('== Giao diện (renderer.js) ==');
     const rend = rd('ui/js/renderer.js');
     ok(/id="\$\{cfg\.insertsBtnId\}" class="preset-btn active"/.test(rend) && /insertsWhich: "MIC1"/.test(rend) && /insertsWhich: "MIC2"/.test(rend), 'thẻ MIC 1/MIC 2: nút INSERTS luôn mở app ở trạng thái SÁNG');
-    ok(/id="fxAutoEnabledBtn" class="preset-btn active"[^\n]*>AUTO MUSIC ON</.test(rend), 'thẻ FX: ô tích cũ -> nút AUTO MUSIC ON');
-    ok(/id="insertsAllBtn" class="preset-btn active"/.test(rend) && /sendInsertsState\?\.\("ALL"/.test(rend), 'thẻ FX: nút INSERTS luôn SÁNG khi mở app, gửi MIDI');
-    ok(rend.indexOf('id="fxAutoEnabledBtn"') > 0 && rend.indexOf('id="fxAutoEnabledBtn"') < rend.indexOf('id="insertsAllBtn"'), 'thẻ FX: INSERTS nằm DƯỚI AUTO MUSIC ON');
-    ok(/window\.__insertsAllSet\?\.\(!!target, "fx-auto-music"\)/.test(rend) && !/if \(target\) \{ try \{ window\.__insertsAllSet/.test(rend), 'Auto FX: có nhạc => Inserts tự BẬT, không nhạc => tự TẮT (INSERTS-03)');
+    ok(/id="fxAutoEnabledBtn"[^\n]*Auto bật FX khi có nhạc/.test(rend), 'thẻ FX: ô tích Auto bật FX khi có nhạc (INSERTS-AUTO-01: trở lại ô tích)');
+    ok(/id="insertsAllBtn" checked/.test(rend) && /sendInsertsState\?\.\("ALL"/.test(rend), 'thẻ FX: ô tích Inserts luôn TÍCH khi mở app, gửi MIDI');
+    ok(rend.indexOf('id="fxAutoEnabledBtn"') > 0 && rend.indexOf('id="fxAutoEnabledBtn"') < rend.indexOf('id="insertsAllBtn"'), 'thẻ FX: Inserts nằm DƯỚI Auto bật FX');
+    ok(/window\.__insertsAutoOnMusic\?\.\(info\.musicState\)/.test(rend) && /"inserts-auto-music"/.test(rend), 'Auto Inserts: có nhạc => tự BẬT, không nhạc => tự TẮT (INSERTS-AUTO-01, độc lập Auto FX)');
     ok(rend.indexOf('id="${cfg.insertsBtnId}"') > 0 && rend.indexOf('id="${cfg.insertsBtnId}"') < rend.indexOf('id="${cfg.knobId}"'), 'thẻ MIC: nút INSERTS nằm TRÊN núm');
     console.log('KẾT QUẢ: ' + pass + ' PASS / ' + fail + ' FAIL'); process.exit(fail ? 1 : 0);
 })();
