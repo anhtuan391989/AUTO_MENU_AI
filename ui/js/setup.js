@@ -279,6 +279,7 @@ function initSetupPage() {
     initShortcutsSection();
     initModal("openProjectModal", "projectModal", "btnClosePj");
     initProjectSection();
+    initProjectLockSection(); // PROJECT-LOCK-01
     initModal("openSoundcardModal", "soundcardModal", "closeSoundcardBtn");
     initSoundcardSection();
     initSystemAudioSection(); // TASK A71
@@ -1409,6 +1410,7 @@ function initProjectSection() {
             if (path) {
                 saveSetting("projectPath", path);
                 if (pjPathDisplay) pjPathDisplay.value = path;
+                window.__projectLockSync?.(); // PROJECT-LOCK-01: đang khóa Pj cũ -> chuyển khóa sang Pj mới
             }
         } catch (err) {
             console.error("Chọn project lỗi:", err);
@@ -1428,6 +1430,7 @@ function initProjectSection() {
 
         saveSetting("projectPath", current);
         alert("Đã lưu project hiện tại");
+        window.__projectLockSync?.(); // PROJECT-LOCK-01
     });
 
     document.getElementById("btnOpenProjectBundle")?.addEventListener("click", async () => {
@@ -1452,6 +1455,125 @@ function initProjectSection() {
             alert("Đã mở kèm Project/Youtube" + (result?.youtube?.via ? "\n(Youtube mở bằng: " + result.youtube.via + " — chi tiết: " + result.youtube.log + ")" : ""));  // A108
         }
     });
+}
+
+/* ================= PROJECT LOCK — PROJECT-LOCK-01 =================
+   Công tắc "Khóa Project (Pj)" ở Setup > DAW (ngay dưới thẻ "DAW đang dùng"). Khóa/mở khóa THẬT do main process làm
+   (electronAPI.projectLockSet -> core/integration/ProjectLock.js). Thứ tự an toàn: khóa/mở khóa file THÀNH CÔNG rồi mới lưu cờ
+   projectLockEnabled, để cờ luôn khớp trạng thái thật trên ổ đĩa. Mọi chữ hiển thị là chuỗi tĩnh (để i18n dịch được). */
+function initProjectLockSection() {
+    const cb = document.getElementById("projectLockEnable");
+    const badge = document.getElementById("projectLockBadge");
+    const statusEl = document.getElementById("projectLockStatus");
+    if (!cb) return;
+
+    const MSG = {
+        noProject: 'Chưa chọn Project. Hãy chọn ở mục AI → "Mở kèm Project / Youtube" rồi bật lại.',
+        noApi: "Chức năng khóa Project chưa khả dụng (chạy ngoài Menu).",
+        missing: "File Project không còn tồn tại nên không khóa được.",
+        notFile: "Đường dẫn Project không phải là file (có thể là thư mục) nên không khóa được.",
+        stillWritable: "Không khóa được file (vẫn ghi được). Hãy chạy Menu bằng quyền Administrator hoặc kiểm tra quyền thư mục/ổ đĩa.",
+        stillLocked: "Chưa mở khóa được file. Hãy chạy Menu bằng quyền Administrator rồi thử lại.",
+        internal: "Không thực hiện được khóa/mở khóa Project (lỗi nội bộ).",
+        saveFail: "Đã khóa/mở khóa file nhưng không lưu được cài đặt. Hãy bật/tắt lại công tắc.",
+        readonlyOnly: "Chỉ khóa được mức Chỉ đọc (ổ không phải NTFS hoặc thiếu quyền) — kém chắc hơn khóa cứng."
+    };
+    const STATE = {
+        off: "Trạng thái file: chưa khóa (ai cũng sửa được)",
+        hard: "Trạng thái file: ĐÃ KHÓA CỨNG (Chỉ đọc + cấm ghi NTFS)",
+        readonly: "Trạng thái file: ĐÃ KHÓA mức Chỉ đọc (chưa đặt được quyền NTFS)",
+        missing: "Trạng thái file: không tìm thấy file Project",
+        unknown: "Trạng thái file: không đọc được"
+    };
+    const BADGE = { off: "Đang tắt", hard: "Đã khóa cứng", readonly: "Khóa Chỉ đọc", warn: "Cần kiểm tra" };
+
+    const api = window.electronAPI;
+    const currentPj = () => {
+        const v = String(getSetting("projectPath", "") || "").trim();
+        return v === "Chưa chọn project" ? "" : v;
+    };
+    const isOn = () => getSetting("projectLockEnabled") === true || getSetting("projectLockEnabled") === "true";
+    const reasonMsg = (r) => {
+        switch (r && r.reason) {
+            case "no_project": return MSG.noProject;
+            case "missing": return MSG.missing;
+            case "not_a_file": return MSG.notFile;
+            case "still_writable": return MSG.stillWritable;
+            case "unlock_failed": case "still_locked": return MSG.stillLocked;
+            default: return MSG.internal;
+        }
+    };
+
+    function setBadge(text, cls) {
+        if (!badge) return;
+        badge.textContent = text;
+        badge.className = "badge " + cls;
+    }
+    function render(stateText, pj) {
+        if (!statusEl) return;
+        statusEl.textContent = "";
+        const l1 = document.createElement("div");
+        l1.textContent = stateText;
+        const l2 = document.createElement("div");
+        const lab = document.createElement("span");
+        lab.textContent = "Project:";
+        const val = document.createElement("span");
+        val.textContent = " " + (pj || "—");
+        l2.appendChild(lab);
+        l2.appendChild(val);
+        statusEl.appendChild(l1);
+        statusEl.appendChild(l2);
+    }
+
+    // Đọc trạng thái THẬT của file trên ổ đĩa rồi vẽ lại badge + dòng trạng thái.
+    async function refresh() {
+        const pj = currentPj();
+        if (!api?.projectLockStatus) { setBadge(BADGE.warn, "badge-soon"); render(STATE.unknown, pj); return; }
+        let st = null;
+        try { st = await api.projectLockStatus(pj); } catch (e) { st = null; }
+        if (!st) { setBadge(BADGE.warn, "badge-soon"); render(STATE.unknown, pj); return; }
+        if (pj && st.exists === false) { setBadge(BADGE.warn, "badge-soon"); render(STATE.missing, pj); return; }
+        if (st.locked && st.level === "hard") { setBadge(BADGE.hard, "badge-live"); render(STATE.hard, pj); return; }
+        if (st.locked) { setBadge(BADGE.readonly, "badge-live"); render(STATE.readonly, pj); return; }
+        // Chưa khóa: nếu công tắc đang BẬT mà file chưa khóa -> báo "Cần kiểm tra" (vd file bị gỡ khóa từ bên ngoài).
+        setBadge(isOn() ? BADGE.warn : BADGE.off, "badge-soon");
+        render(STATE.off, pj);
+    }
+
+    cb.checked = isOn();
+    refresh();
+    window.addEventListener("focus", refresh);
+
+    cb.addEventListener("change", async () => {
+        const want = cb.checked;
+        const pj = currentPj();
+        if (want && !pj) { cb.checked = false; alert(MSG.noProject); return; }
+        if (!api?.projectLockSet) { cb.checked = !want; alert(MSG.noApi); return; }
+        cb.disabled = true;
+        try {
+            let r = null;
+            try { r = await api.projectLockSet({ enabled: want, projectPath: pj }); } catch (e) { r = null; }
+            if (!r || r.ok !== true) {
+                cb.checked = !want; // việc khóa/mở khóa THẤT BẠI -> công tắc quay về đúng trạng thái thật
+                alert(reasonMsg(r));
+                return;
+            }
+            if (!saveSetting("projectLockEnabled", want)) { alert(MSG.saveFail); return; }
+            if (want && r.level === "readonly") alert(MSG.readonlyOnly);
+        } finally {
+            cb.disabled = false;
+            refresh();
+        }
+    });
+
+    // Gọi khi người dùng đổi Pj (Chọn PJ / Lưu PJ): nếu đang bật khóa -> mở khóa Pj cũ, khóa Pj mới.
+    window.__projectLockSync = async function () {
+        if (!isOn() || !api?.projectLockSet) { refresh(); return; }
+        let r = null;
+        try { r = await api.projectLockSet({ enabled: true, projectPath: currentPj() }); } catch (e) { r = null; }
+        if (!r || r.ok !== true) alert(reasonMsg(r));
+        refresh();
+    };
 }
 
 /* ================= SOUNDCARD (AUDIO INTERFACE) ================= */

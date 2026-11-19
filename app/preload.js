@@ -50,6 +50,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ---- Mở DAW / project / youtube cùng lúc ----
     openProjectBundle: (options) => ipcRenderer.invoke("open-project-bundle", options),
 
+    // ---- PROJECT-LOCK-01: khóa cứng file Project (chỉ cửa sổ Setup được main chấp nhận) ----
+    // projectLockSet({ enabled, projectPath }) -> { ok, level:'hard'|'readonly'|'none', reason?, warnings[] } ; projectLockStatus(path) -> { locked, level, ... }
+    projectLockSet: (req) => ipcRenderer.invoke("project-lock-set", req),
+    projectLockStatus: (projectPath) => ipcRenderer.invoke("project-lock-status", projectPath),
+
     // ---- Tính năng AI (mới thêm) ----
     // Lưu ý: main.js hiện CHƯA có ipcMain.handle("ai-command", ...).
     // Cần nối phần AI layer + Command Engine vào main.js thì hàm này mới chạy được.

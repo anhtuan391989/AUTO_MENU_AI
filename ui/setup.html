@@ -632,6 +632,14 @@
                     <button id="closeDawBtn" style="display:none;"></button>
                 </div>
 
+                <!-- PROJECT-LOCK-01: công tắc KHÓA CỨNG file Project (Pj). Logic ở setup.js (initProjectLockSection) + core/integration/ProjectLock.js -->
+                <div class="panel-card" id="projectLockCard">
+                    <div class="panel-card-title">🔒 Khóa Project (Pj) <span class="badge badge-soon" id="projectLockBadge">Đang tắt</span></div>
+                    <label class="setup-checkbox"><input type="checkbox" id="projectLockEnable"> Bật = KHÓA CỨNG file Project (không ai sửa/lưu đè được) · Tắt = cho phép sửa</label>
+                    <div class="status-text" id="projectLockStatus" style="margin-top:8px;">Project: chưa chọn</div>
+                    <p class="hint-text">Khóa nằm ngay trên file Project ở ổ đĩa nên vẫn giữ khi Menu/DAW tắt. Muốn sửa Project: tắt công tắc này, sửa xong bật lại. Project được chọn ở mục <b>AI</b> → "Mở kèm Project / Youtube".</p>
+                </div>
+
                 <!-- TASK C60: "📁 Đường dẫn & khởi động" (currentDawPath / browseDawBtn / launchDawOnStartup)
                      đã CHUYỂN sang panel-ai (AI > DAW Path/Startup Management) — cùng id, cùng handler
                      (trong initSetupPage() của setup.js), chỉ đổi vị trí DOM. Không còn bản duplicate ở đây. -->

@@ -1,0 +1,781 @@
+diff --git a/app/main.js b/app/main.js
+index b9a4f0c..5aeb6d9 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -2378,7 +2378,8 @@ ipcMain.handle("open-project-bundle", async (event, options = {}) => {
+     // 1+2) Mở DAW + Project (COMPANION-02: DAW chưa chạy -> mở DAW KÈM project làm đối số; DAW đã chạy -> giao project cho DAW đó)
+     const result = await Companion.openDawAndProject({ launchDAW, dawPath, projectPath, openProject, makeCopy }, {
+         exists: (p) => fs.existsSync(p),
+-        copyFile: (a, b) => fs.copyFileSync(a, b),
++        // PROJECT-LOCK-01: bản COPY là bản để người dùng sửa -> luôn cho ghi được (nếu Pj gốc đang khóa Chỉ đọc, copyFile sẽ chép luôn cờ Chỉ đọc sang bản copy).
++        copyFile: (a, b) => { fs.copyFileSync(a, b); try { fs.chmodSync(b, 0o666); } catch (e) { /* best-effort */ } },
+         buildCopyPath,
+         shellOpen: (p) => shell.openPath(p),
+         spawnOpen: (cmd, args) => spawnOpen(cmd, args, {}),
+@@ -2403,6 +2404,50 @@ ipcMain.handle("open-project-bundle", async (event, options = {}) => {
+     return result;
+ });
+ 
++// PROJECT-LOCK-01 — KHÓA CỨNG file Project (Pj): không ai sửa/lưu đè được, DÙ Menu/DAW bật hay tắt (khóa nằm trên file ở ổ đĩa).
++// Logic thật ở core/integration/ProjectLock.js (Chỉ đọc + quyền NTFS DENY). Công tắc nằm ở Setup > DAW; chỉ cửa sổ Setup được gọi.
++// Cờ bật/tắt = app-settings.json > projectLockEnabled (do Setup lưu). Khi tắt Menu KHÔNG mở khóa (khóa là để bảo vệ lúc Menu tắt);
++// chỉ công tắc trong Setup mới mở khóa. Mỗi lần Menu khởi động, nếu cờ đang BẬT thì khóa lại cho chắc.
++const ProjectLock = require("../core/integration/ProjectLock");
++let __projectLock = null;
++function getProjectLock() {
++    if (!__projectLock) __projectLock = ProjectLock.createProjectLock({ recordFile: path.join(app.getPath("userData"), "project-lock.json"), log: (m) => console.log("[ProjectLock] " + m) });
++    return __projectLock;
++}
++function isFromSetupWindow(event) { return !!(setupWin && !setupWin.isDestroyed() && event && event.sender === setupWin.webContents); }
++ipcMain.handle("project-lock-set", async (event, req) => {
++    try {
++        if (!isFromSetupWindow(event)) return { ok: false, reason: "denied" };
++        const r = req && typeof req === "object" ? req : {};
++        return await getProjectLock().apply({ enabled: r.enabled === true, projectPath: typeof r.projectPath === "string" ? r.projectPath : "" });
++    } catch (err) {
++        console.error("project-lock-set lỗi:", err && err.message);
++        return { ok: false, reason: "error" };
++    }
++});
++ipcMain.handle("project-lock-status", async (event, projectPath) => {
++    try {
++        if (!isFromSetupWindow(event)) return { locked: false, level: "none", reason: "denied" };
++        return await getProjectLock().status(typeof projectPath === "string" ? projectPath : "");
++    } catch (err) {
++        console.error("project-lock-status lỗi:", err && err.message);
++        return { locked: false, level: "none", reason: "error" };
++    }
++});
++app.whenReady().then(() => licenseReady).then(() => {
++    if (!licenseManager.isLicensed()) return;
++    try {
++        const s = readSettingsFile() || {};
++        const pj = typeof s.projectPath === "string" ? s.projectPath.trim() : "";
++        // Chỉ KHÓA lúc khởi động (không bao giờ mở khóa ở đây) — nếu cài đặt thiếu/hỏng thì file vẫn giữ nguyên trạng thái đang khóa.
++        if ((s.projectLockEnabled === true || s.projectLockEnabled === "true") && pj) {
++            getProjectLock().apply({ enabled: true, projectPath: pj })
++                .then((r) => console.log("[ProjectLock] khởi động: " + JSON.stringify({ ok: r.ok, level: r.level, reason: r.reason || null })))
++                .catch((e) => console.error("ProjectLock khởi động lỗi:", e && e.message));
++        }
++    } catch (err) { console.error("ProjectLock khởi động lỗi (bỏ qua):", err && err.message); }
++});
++
+ // COMPANION-01 — "Đóng DAW và Youtube cùng Menu": chặn thoát 1 lần, đóng DAW (hộp thoại lưu project -> chọn No) + tab YouTube, rồi thoát thật.
+ let __companionClosing = false, __companionDone = false;
+ app.on("before-quit", (event) => {
+diff --git a/app/preload.js b/app/preload.js
+index 7a58db4..1dca7c5 100644
+--- a/app/preload.js
++++ b/app/preload.js
+@@ -50,6 +50,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
+     // ---- Mở DAW / project / youtube cùng lúc ----
+     openProjectBundle: (options) => ipcRenderer.invoke("open-project-bundle", options),
+ 
++    // ---- PROJECT-LOCK-01: khóa cứng file Project (chỉ cửa sổ Setup được main chấp nhận) ----
++    // projectLockSet({ enabled, projectPath }) -> { ok, level:'hard'|'readonly'|'none', reason?, warnings[] } ; projectLockStatus(path) -> { locked, level, ... }
++    projectLockSet: (req) => ipcRenderer.invoke("project-lock-set", req),
++    projectLockStatus: (projectPath) => ipcRenderer.invoke("project-lock-status", projectPath),
++
+     // ---- Tính năng AI (mới thêm) ----
+     // Lưu ý: main.js hiện CHƯA có ipcMain.handle("ai-command", ...).
+     // Cần nối phần AI layer + Command Engine vào main.js thì hàm này mới chạy được.
+diff --git a/core/integration/ProjectLock.js b/core/integration/ProjectLock.js
+new file mode 100644
+index 0000000..b26625b
+--- /dev/null
++++ b/core/integration/ProjectLock.js
+@@ -0,0 +1,219 @@
++/**
++ * ProjectLock.js — PROJECT-LOCK-01
++ * ---------------------------------------------------------------------------
++ * KHÓA CỨNG file Project (Pj) của DAW (Studio One .song / Cubase .cpr ...) để không ai sửa/lưu đè
++ * được — dù Menu hay DAW đang bật hay tắt. Khóa nằm TRÊN FILE ở ổ đĩa (không phụ thuộc Menu chạy).
++ *
++ * 2 lớp (Windows):
++ *   1) Thuộc tính Chỉ đọc (Read-only).
++ *   2) Quyền NTFS "DENY" cho mọi người (Everyone, SID *S-1-1-0): cấm ghi dữ liệu / nối thêm / ghi thuộc
++ *      tính / xóa. Cấm cả "ghi thuộc tính" nên không thể chỉ bỏ tick Read-only trong Properties.
++ *      Muốn mở khóa phải gỡ quyền (icacls) — người dùng thường không làm được.
++ * Mở khóa = gỡ DENY rồi bỏ Chỉ đọc (chỉ bỏ nếu file KHÔNG phải vốn đã Chỉ đọc trước khi khóa).
++ *
++ * GIỚI HẠN THẬT (không nói quá):
++ *   - Người có quyền Administrator vẫn gỡ được khóa thủ công.
++ *   - Ai có toàn quyền trên THƯ MỤC chứa file vẫn có thể xóa/đổi tên file (đặc thù NTFS: quyền
++ *     "delete-child" của thư mục độc lập với DENY của file).
++ *   - Ổ không phải NTFS (FAT32/exFAT) chỉ khóa được mức Chỉ đọc.
++ *   - Không chặn người ta VẶN thông số trong DAW đang mở — chỉ chặn LƯU vào file.
++ *
++ * Module thuần Node (không phụ thuộc Electron), có DI (fs / execFile / platform) để test.
++ * Ghi nhớ "file nào đã bị MENU khóa" trong 1 file JSON riêng (recordFile) để biết mở khóa đúng file
++ * khi người dùng đổi Pj hoặc tắt công tắc — KHÔNG đụng app-settings.json.
++ */
++'use strict';
++
++const nodeFs = require('fs');
++const nodePath = require('path');
++const childProcess = require('child_process');
++
++const EVERYONE_SID = '*S-1-1-0';
++const DENY_RIGHTS = '(WD,AD,WEA,WA,D)'; // ghi dữ liệu, nối thêm, ghi thuộc tính mở rộng, ghi thuộc tính, xóa
++const ICACLS_TIMEOUT_MS = 15000;
++
++function runExecFile(execFile, cmd, args) {
++    return new Promise((resolve) => {
++        try {
++            execFile(cmd, args, { windowsHide: true, timeout: ICACLS_TIMEOUT_MS }, (err, stdout, stderr) => {
++                resolve({ ok: !err, err: err ? String(err.message || err) : null, stdout: String(stdout || ''), stderr: String(stderr || '') });
++            });
++        } catch (e) {
++            resolve({ ok: false, err: String(e && e.message || e), stdout: '', stderr: '' });
++        }
++    });
++}
++
++function createProjectLock(opts) {
++    const o = opts || {};
++    const fs = o.fs || nodeFs;
++    const platform = o.platform || process.platform;
++    const execFile = o.execFile || childProcess.execFile;
++    const recordFile = o.recordFile || null;
++    const log = typeof o.log === 'function' ? o.log : () => {};
++    const isWin = platform === 'win32';
++
++    const norm = (p) => {
++        const r = nodePath.resolve(String(p || ''));
++        return isWin ? r.toLowerCase() : r;
++    };
++
++    // ---------- ghi nhớ file đã khóa ----------
++    function readRecord() {
++        if (!recordFile) return null;
++        try {
++            const j = JSON.parse(fs.readFileSync(recordFile, 'utf-8'));
++            if (j && typeof j.lockedPath === 'string' && j.lockedPath) return { lockedPath: j.lockedPath, wasReadOnly: j.wasReadOnly === true };
++        } catch (e) { /* chưa có / hỏng => coi như chưa khóa file nào */ }
++        return null;
++    }
++    function writeRecord(rec) {
++        if (!recordFile) return true;
++        try { fs.writeFileSync(recordFile, JSON.stringify(rec), 'utf-8'); return true; }
++        catch (e) { log('ghi record khóa Pj lỗi: ' + e.message); return false; }
++    }
++    function clearRecord() {
++        if (!recordFile) return;
++        try { if (fs.existsSync(recordFile)) fs.unlinkSync(recordFile); } catch (e) { /* best-effort */ }
++    }
++
++    // ---------- kiểm tra thật ----------
++    function fileState(p) {
++        let st;
++        try { st = fs.statSync(p); } catch (e) { return { exists: false }; }
++        if (!st.isFile()) return { exists: true, isFile: false };
++        return { exists: true, isFile: true, readOnlyAttr: (st.mode & 0o200) === 0 };
++    }
++    // Bằng chứng thật: thử mở file để GHI. Mở được = chưa khóa.
++    function canWrite(p) {
++        let fd = null;
++        try { fd = fs.openSync(p, 'r+'); return true; }
++        catch (e) { return false; }
++        finally { if (fd !== null) { try { fs.closeSync(fd); } catch (e2) { /* bỏ qua */ } } }
++    }
++    async function hasDenyAcl(p) {
++        if (!isWin) return false;
++        const r = await runExecFile(execFile, 'icacls', [p]);
++        return r.ok && /\(DENY\)/i.test(r.stdout);
++    }
++
++    // ---------- khóa / mở khóa 1 file ----------
++    async function lockFile(p, wasReadOnly) {
++        const warnings = [];
++        try { fs.chmodSync(p, 0o444); } // 1) Chỉ đọc TRƯỚC (vì sau khi DENY "ghi thuộc tính" thì không chmod được nữa)
++        catch (e) { warnings.push('Không đặt được Chỉ đọc: ' + e.message); }
++
++        let denyOk = false;
++        if (isWin) {
++            const r = await runExecFile(execFile, 'icacls', [p, '/deny', EVERYONE_SID + ':' + DENY_RIGHTS]);
++            denyOk = r.ok;
++            if (!r.ok) warnings.push('Không đặt được quyền DENY (NTFS): ' + (r.err || r.stderr));
++        } else {
++            warnings.push('Không phải Windows: chỉ khóa mức Chỉ đọc.');
++        }
++
++        // Kết luận bằng BẰNG CHỨNG: thử ghi lại file.
++        const writable = canWrite(p);
++        if (writable) {
++            return { ok: false, level: 'none', reason: 'still_writable', warnings };
++        }
++        return { ok: true, level: denyOk ? 'hard' : 'readonly', warnings, wasReadOnly: !!wasReadOnly };
++    }
++
++    async function unlockFile(p, wasReadOnly) {
++        const st = fileState(p);
++        if (!st.exists) return { ok: true, level: 'none', note: 'file_missing' }; // file đã mất/đổi tên: không còn gì để mở
++        const warnings = [];
++        if (isWin) {
++            const r = await runExecFile(execFile, 'icacls', [p, '/remove:d', EVERYONE_SID]);
++            if (!r.ok) warnings.push('Gỡ quyền DENY lỗi: ' + (r.err || r.stderr));
++        }
++        if (!wasReadOnly) {
++            try { fs.chmodSync(p, 0o666); } catch (e) { warnings.push('Bỏ Chỉ đọc lỗi: ' + e.message); }
++        }
++        const writable = wasReadOnly ? true : canWrite(p); // vốn Chỉ đọc từ trước thì không đòi ghi được
++        if (!writable) return { ok: false, level: 'locked', reason: 'still_locked', warnings };
++        return { ok: true, level: 'none', warnings };
++    }
++
++    // ---------- hàng đợi: không chạy 2 lệnh khóa/mở chồng nhau ----------
++    let chain = Promise.resolve();
++    function enqueue(fn) {
++        const run = chain.then(fn, fn);
++        chain = run.then(() => {}, () => {});
++        return run;
++    }
++
++    /**
++     * apply({ enabled, projectPath }) — đưa trạng thái file thật về đúng mong muốn.
++     * Trả { ok, enabled, level, path, reason?, warnings[], unlockedOld? }. Không bao giờ throw.
++     */
++    function apply(req) {
++        return enqueue(async () => {
++            const enabled = !!(req && req.enabled);
++            const projectPath = req && typeof req.projectPath === 'string' ? req.projectPath.trim() : '';
++            const out = { ok: true, enabled, level: 'none', path: projectPath || null, warnings: [] };
++            try {
++                // 1) Mở khóa file cũ nếu: tắt công tắc, hoặc đã đổi sang Pj khác.
++                const rec = readRecord();
++                let keep = rec;
++                if (rec && (!enabled || !projectPath || norm(rec.lockedPath) !== norm(projectPath))) {
++                    const u = await unlockFile(rec.lockedPath, rec.wasReadOnly);
++                    if (u.ok) { clearRecord(); keep = null; out.unlockedOld = rec.lockedPath; }
++                    else {
++                        out.warnings.push('Chưa mở khóa được file cũ: ' + rec.lockedPath);
++                        if (!enabled) { out.ok = false; out.reason = 'unlock_failed'; out.level = 'locked'; return out; }
++                    }
++                }
++                if (!enabled) { out.level = 'none'; return out; }
++
++                // 2) Khóa file hiện tại.
++                if (!projectPath) { out.ok = false; out.reason = 'no_project'; return out; }
++                const st = fileState(projectPath);
++                if (!st.exists) { out.ok = false; out.reason = 'missing'; return out; }
++                if (!st.isFile) { out.ok = false; out.reason = 'not_a_file'; return out; }
++
++                // Đã khóa sẵn (cùng file, còn khóa thật) -> không làm lại.
++                if (keep && norm(keep.lockedPath) === norm(projectPath) && !canWrite(projectPath)) {
++                    out.level = (await hasDenyAcl(projectPath)) ? 'hard' : 'readonly';
++                    return out;
++                }
++
++                const wasReadOnly = keep && norm(keep.lockedPath) === norm(projectPath) ? keep.wasReadOnly : st.readOnlyAttr;
++                writeRecord({ lockedPath: projectPath, wasReadOnly: !!wasReadOnly }); // ghi TRƯỚC khi khóa: lỡ tắt đột ngột vẫn biết file nào
++                const l = await lockFile(projectPath, wasReadOnly);
++                out.warnings.push(...l.warnings);
++                out.level = l.level;
++                if (!l.ok) { out.ok = false; out.reason = l.reason; }
++                return out;
++            } catch (e) {
++                log('ProjectLock.apply lỗi: ' + e.message);
++                return { ok: false, enabled, level: 'none', path: projectPath || null, reason: 'exception', warnings: [String(e && e.message || e)] };
++            }
++        });
++    }
++
++    /** status(projectPath) — trạng thái THẬT của file (thử ghi + đọc quyền). Không đổi gì. */
++    function status(projectPath) {
++        return enqueue(async () => {
++            const p = typeof projectPath === 'string' ? projectPath.trim() : '';
++            const rec = readRecord();
++            if (!p) return { exists: false, locked: false, level: 'none', path: null, lockedByMenu: !!rec };
++            const st = fileState(p);
++            if (!st.exists) return { exists: false, locked: false, level: 'none', path: p, lockedByMenu: !!rec };
++            if (!st.isFile) return { exists: true, isFile: false, locked: false, level: 'none', path: p, lockedByMenu: !!rec };
++            const writable = canWrite(p);
++            const deny = writable ? false : await hasDenyAcl(p);
++            return {
++                exists: true, isFile: true, path: p,
++                locked: !writable,
++                level: writable ? 'none' : (deny ? 'hard' : 'readonly'),
++                lockedByMenu: !!(rec && norm(rec.lockedPath) === norm(p))
++            };
++        });
++    }
++
++    return { apply, status, _readRecord: readRecord };
++}
++
++module.exports = { createProjectLock, EVERYONE_SID, DENY_RIGHTS };
+diff --git a/tests/unit/ProjectLock01.verify.js b/tests/unit/ProjectLock01.verify.js
+new file mode 100644
+index 0000000..e8dea35
+--- /dev/null
++++ b/tests/unit/ProjectLock01.verify.js
+@@ -0,0 +1,261 @@
++/**
++ * ProjectLock01.verify.js — PROJECT-LOCK-01 (khóa cứng file Project Pj)
++ * ---------------------------------------------------------------------------
++ * Test module THẬT core/integration/ProjectLock.js bằng fs + icacls GIẢ LẬP (DI) để kiểm đúng THỨ TỰ và LOGIC:
++ *   - khóa: Chỉ đọc TRƯỚC, rồi icacls /deny Everyone; kết luận bằng "thử ghi" chứ không tin lệnh trả về
++ *   - mở khóa: gỡ DENY TRƯỚC rồi mới bỏ Chỉ đọc (vì DENY "ghi thuộc tính" chặn luôn chmod)
++ *   - đổi Pj: mở Pj cũ, khóa Pj mới; tắt: mở + xóa ghi nhớ; file vốn Chỉ đọc từ trước không bị đổi thành ghi được
++ *   - lỗi: không có Pj / file mất / là thư mục / icacls lỗi (rơi về Chỉ đọc) / vẫn ghi được / mở khóa lỗi (giữ ghi nhớ)
++ *   - cấu trúc nối dây: main.js (chỉ Setup được gọi, khởi động chỉ KHÓA không bao giờ mở), preload, setup.html (đúng 1 công tắc,
++ *     nằm giữa thẻ "DAW đang dùng" và thẻ Auto-Key), setup.js, bản dịch Việt/Anh.
++ * KHÔNG test được (cần Windows + NTFS thật): quyền DENY thật của icacls, DAW thật bấm Save khi file bị khóa.
++ * Chạy: node tests/unit/ProjectLock01.verify.js
++ */
++'use strict';
++
++const fs = require('fs');
++const os = require('os');
++const path = require('path');
++const root = path.join(__dirname, '..', '..');
++const { createProjectLock, EVERYONE_SID, DENY_RIGHTS } = require(path.join(root, 'core/integration/ProjectLock'));
++
++let pass = 0, fail = 0;
++function ok(cond, label, extra) {
++    if (cond) { pass++; console.log('  OK  ', label); }
++    else { fail++; console.error('  FAIL', label, extra === undefined ? '' : extra); }
++}
++const rd = (p) => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r/g, '');
++
++// ---------------- fs + icacls giả lập ----------------
++function makeEnv(opts) {
++    const o = opts || {};
++    const files = {};      // path -> { readOnly, deny, dir }
++    const store = {};      // record file (nội dung chuỗi)
++    const events = [];
++    const REC = '/userdata/project-lock.json';
++    const err = (code) => { const e = new Error(code); e.code = code; return e; };
++    const fakeFs = {
++        statSync(p) {
++            const f = files[p];
++            if (!f) throw err('ENOENT');
++            return { isFile: () => !f.dir, mode: f.readOnly ? 0o100444 : 0o100666 };
++        },
++        chmodSync(p, mode) {
++            const f = files[p];
++            if (!f) throw err('ENOENT');
++            if (f.deny) throw err('EPERM'); // DENY "ghi thuộc tính" => không chmod được
++            f.readOnly = (mode & 0o200) === 0;
++            events.push('chmod:' + p + ':' + mode.toString(8));
++        },
++        openSync(p, flags) {
++            const f = files[p];
++            if (!f) throw err('ENOENT');
++            if (o.alwaysWritable) return 1; // giả lập "khóa không có tác dụng"
++            if (f.readOnly || f.deny) throw err('EPERM');
++            return 1;
++        },
++        closeSync() { },
++        existsSync(p) { return p === REC ? REC in store : !!files[p]; },
++        readFileSync(p) { if (!(p in store)) throw err('ENOENT'); return store[p]; },
++        writeFileSync(p, d) { store[p] = String(d); },
++        unlinkSync(p) { delete store[p]; }
++    };
++    const fakeExec = (cmd, args, _o, cb) => {
++        events.push('exec:' + cmd + ' ' + args.slice(1).join(' '));
++        const p = args[0], f = files[p];
++        if (o.failIcacls) { cb(new Error('icacls fail'), '', 'denied'); return; }
++        if (!f) { cb(new Error('not found'), '', ''); return; }
++        if (args[1] === '/deny') { f.deny = true; cb(null, 'Successfully processed 1 files', ''); return; }
++        if (args[1] === '/remove:d') {
++            if (o.removeDenyFails) { cb(new Error('remove fail'), '', ''); return; }
++            f.deny = false; cb(null, 'Successfully processed 1 files', ''); return;
++        }
++        cb(null, p + ' Everyone:' + (f.deny ? '(DENY)(W,D)' : '(F)'), '');
++    };
++    const lock = createProjectLock({ fs: fakeFs, execFile: fakeExec, platform: o.platform || 'win32', recordFile: REC });
++    return { files, store, events, REC, lock };
++}
++const A = '/proj/A.song', B = '/proj/B.cpr';
++const record = (env) => { try { return JSON.parse(env.store[env.REC]); } catch (e) { return null; } };
++
++(async function main() {
++    // ---------- 1) khóa cứng ----------
++    console.log('--- khóa cứng (Windows) ---');
++    {
++        const env = makeEnv(); env.files[A] = { readOnly: false, deny: false };
++        const r = await env.lock.apply({ enabled: true, projectPath: A });
++        ok(r.ok === true && r.level === 'hard', 'bật -> ok, mức "hard"', JSON.stringify(r));
++        const iChmod = env.events.indexOf('chmod:' + A + ':444');
++        const iDeny = env.events.findIndex((e) => e.startsWith('exec:icacls /deny'));
++        ok(iChmod >= 0 && iDeny > iChmod, 'thứ tự: Chỉ đọc (chmod 444) TRƯỚC, rồi mới icacls /deny', env.events.join(' | '));
++        ok(env.events.some((e) => e === 'exec:icacls /deny ' + EVERYONE_SID + ':' + DENY_RIGHTS), 'icacls /deny đúng SID Everyone + đúng quyền', env.events.join(' | '));
++        ok(DENY_RIGHTS.includes('WA') && DENY_RIGHTS.includes('WD') && DENY_RIGHTS.includes('D'), 'quyền bị cấm gồm ghi dữ liệu (WD), ghi thuộc tính (WA), xóa (D)');
++        ok(record(env) && record(env).lockedPath === A && record(env).wasReadOnly === false, 'ghi nhớ file đã khóa + trạng thái Chỉ đọc ban đầu');
++        const st = await env.lock.status(A);
++        ok(st.locked === true && st.level === 'hard' && st.lockedByMenu === true, 'status: locked / hard / do Menu khóa', JSON.stringify(st));
++        // bật lại lần nữa (khởi động Menu) -> không làm lại
++        const before = env.events.length;
++        const r2 = await env.lock.apply({ enabled: true, projectPath: A });
++        ok(r2.ok && r2.level === 'hard' && !env.events.slice(before).some((e) => e.includes('/deny')), 'bật lần 2 cùng Pj: giữ nguyên, KHÔNG chạy lại icacls /deny', env.events.slice(before).join(' | '));
++    }
++
++    // ---------- 2) mở khóa ----------
++    console.log('--- mở khóa ---');
++    {
++        const env = makeEnv(); env.files[A] = { readOnly: false, deny: false };
++        await env.lock.apply({ enabled: true, projectPath: A });
++        env.events.length = 0;
++        const r = await env.lock.apply({ enabled: false, projectPath: A });
++        ok(r.ok && r.level === 'none' && r.unlockedOld === A, 'tắt -> ok, đã mở file cũ', JSON.stringify(r));
++        const iRem = env.events.findIndex((e) => e.startsWith('exec:icacls /remove:d'));
++        const iCh = env.events.indexOf('chmod:' + A + ':666');
++        ok(iRem >= 0 && iCh > iRem, 'thứ tự: gỡ DENY TRƯỚC, rồi mới bỏ Chỉ đọc (chmod 666)', env.events.join(' | '));
++        ok(!env.files[A].deny && !env.files[A].readOnly, 'file ghi được lại');
++        ok(record(env) === null, 'đã xóa ghi nhớ');
++        const st = await env.lock.status(A);
++        ok(st.locked === false && st.level === 'none', 'status: chưa khóa', JSON.stringify(st));
++    }
++    {   // file vốn Chỉ đọc từ trước: mở khóa KHÔNG được biến nó thành ghi được
++        const env = makeEnv(); env.files[A] = { readOnly: true, deny: false };
++        await env.lock.apply({ enabled: true, projectPath: A });
++        ok(record(env).wasReadOnly === true, 'nhớ file vốn đã Chỉ đọc');
++        env.events.length = 0;
++        const r = await env.lock.apply({ enabled: false, projectPath: A });
++        ok(r.ok && env.files[A].readOnly === true && !env.events.some((e) => e.includes(':666')), 'mở khóa: gỡ DENY nhưng GIỮ Chỉ đọc cũ (không chmod 666)', env.events.join(' | '));
++    }
++
++    // ---------- 3) đổi Pj ----------
++    console.log('--- đổi Pj ---');
++    {
++        const env = makeEnv(); env.files[A] = { readOnly: false, deny: false }; env.files[B] = { readOnly: false, deny: false };
++        await env.lock.apply({ enabled: true, projectPath: A });
++        const r = await env.lock.apply({ enabled: true, projectPath: B });
++        ok(r.ok && r.level === 'hard' && r.unlockedOld === A, 'đổi sang Pj mới: ok, mở Pj cũ', JSON.stringify(r));
++        ok(!env.files[A].deny && !env.files[A].readOnly, 'Pj cũ được mở khóa');
++        ok(env.files[B].deny && env.files[B].readOnly, 'Pj mới được khóa cứng');
++        ok(record(env).lockedPath === B, 'ghi nhớ chuyển sang Pj mới');
++    }
++
++    // ---------- 4) lỗi đầu vào ----------
++    console.log('--- lỗi đầu vào (không gọi icacls, không throw) ---');
++    {
++        const env = makeEnv();
++        let r = await env.lock.apply({ enabled: true, projectPath: '' });
++        ok(r.ok === false && r.reason === 'no_project', 'chưa chọn Pj -> no_project', JSON.stringify(r));
++        r = await env.lock.apply({ enabled: true, projectPath: '/nope.song' });
++        ok(r.ok === false && r.reason === 'missing', 'file không tồn tại -> missing', JSON.stringify(r));
++        env.files['/dir'] = { dir: true };
++        r = await env.lock.apply({ enabled: true, projectPath: '/dir' });
++        ok(r.ok === false && r.reason === 'not_a_file', 'là thư mục -> not_a_file', JSON.stringify(r));
++        ok(!env.events.some((e) => e.startsWith('exec:')), 'cả 3 trường hợp: không chạy icacls');
++        r = await env.lock.apply(undefined);
++        ok(r.ok === true && r.level === 'none', 'apply(undefined) = tắt, không throw', JSON.stringify(r));
++        const st = await env.lock.status('');
++        ok(st.locked === false && st.path === null, 'status(rỗng) không throw');
++    }
++
++    // ---------- 5) lỗi hệ thống ----------
++    console.log('--- lỗi hệ thống ---');
++    {
++        const env = makeEnv({ failIcacls: true }); env.files[A] = { readOnly: false, deny: false };
++        const r = await env.lock.apply({ enabled: true, projectPath: A });
++        ok(r.ok === true && r.level === 'readonly' && r.warnings.some((w) => /DENY/.test(w)), 'icacls lỗi -> vẫn khóa mức Chỉ đọc + cảnh báo (không báo "hard" giả)', JSON.stringify(r));
++    }
++    {
++        const env = makeEnv({ alwaysWritable: true }); env.files[A] = { readOnly: false, deny: false };
++        const r = await env.lock.apply({ enabled: true, projectPath: A });
++        ok(r.ok === false && r.reason === 'still_writable' && r.level === 'none', 'khóa nhưng vẫn ghi được -> THẤT BẠI (still_writable), không báo thành công giả', JSON.stringify(r));
++    }
++    {
++        const env = makeEnv({ platform: 'linux' }); env.files[A] = { readOnly: false, deny: false };
++        const r = await env.lock.apply({ enabled: true, projectPath: A });
++        ok(r.ok && r.level === 'readonly' && !env.events.some((e) => e.startsWith('exec:')), 'không phải Windows: chỉ Chỉ đọc, không gọi icacls', JSON.stringify(r));
++    }
++    {
++        const env = makeEnv(); env.files[A] = { readOnly: false, deny: false };
++        await env.lock.apply({ enabled: true, projectPath: A });
++        const rm = makeEnv({ removeDenyFails: true });
++        rm.files[A] = { readOnly: true, deny: true }; rm.store[rm.REC] = JSON.stringify({ lockedPath: A, wasReadOnly: false });
++        const r = await rm.lock.apply({ enabled: false, projectPath: A });
++        ok(r.ok === false && r.reason === 'unlock_failed', 'mở khóa thất bại -> unlock_failed (không báo thành công giả)', JSON.stringify(r));
++        ok(record(rm) && record(rm).lockedPath === A, 'mở khóa thất bại -> GIỮ ghi nhớ để lần sau thử lại');
++    }
++    {   // file đã bị xóa/đổi tên ngoài Menu: tắt công tắc vẫn dọn được ghi nhớ
++        const env = makeEnv(); env.store[env.REC] = JSON.stringify({ lockedPath: '/gone.song', wasReadOnly: false });
++        const r = await env.lock.apply({ enabled: false, projectPath: '/gone.song' });
++        ok(r.ok && record(env) === null, 'file đã mất: tắt công tắc vẫn dọn ghi nhớ, không kẹt');
++    }
++
++    // ---------- 6) hàng đợi ----------
++    console.log('--- hàng đợi (bấm nhanh) ---');
++    {
++        const env = makeEnv(); env.files[A] = { readOnly: false, deny: false };
++        const ps = [env.lock.apply({ enabled: true, projectPath: A }), env.lock.apply({ enabled: false, projectPath: A }), env.lock.apply({ enabled: true, projectPath: A })];
++        const rs = await Promise.all(ps);
++        ok(rs.every((x) => x.ok), 'bật-tắt-bật liên tiếp: cả 3 lệnh ok', JSON.stringify(rs.map((x) => x.ok)));
++        ok(env.files[A].deny && env.files[A].readOnly && record(env).lockedPath === A, 'kết quả cuối = đang khóa (đúng lệnh cuối cùng)');
++    }
++
++    // ---------- 7) fs thật (chỉ khi không phải root) ----------
++    console.log('--- fs thật ---');
++    if (typeof process.getuid === 'function' && process.getuid() === 0) {
++        console.log('  SKIP  đang chạy bằng root: root vẫn ghi được file 0444 nên không kiểm được trên Linux — cần chạy ở Windows thật');
++    } else {
++        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plock-'));
++        try {
++            const f = path.join(dir, 'x.song'); fs.writeFileSync(f, 'a');
++            const lk = createProjectLock({ platform: 'linux', recordFile: path.join(dir, 'rec.json') });
++            const r = await lk.apply({ enabled: true, projectPath: f });
++            let blocked = false; try { fs.writeFileSync(f, 'b'); } catch (e) { blocked = true; }
++            ok(r.ok && blocked, 'fs thật: sau khi khóa, ghi file bị chặn');
++            await lk.apply({ enabled: false, projectPath: f });
++            let writable = true; try { fs.writeFileSync(f, 'c'); } catch (e) { writable = false; }
++            ok(writable, 'fs thật: sau khi mở khóa, ghi lại được');
++        } finally { try { fs.chmodSync(path.join(dir, 'x.song'), 0o666); } catch (e) { } fs.rmSync(dir, { recursive: true, force: true }); }
++    }
++
++    // ---------- 8) nối dây (cấu trúc) ----------
++    console.log('--- nối dây ---');
++    const main = rd('app/main.js'), pre = rd('app/preload.js'), html = rd('ui/setup.html'), js = rd('ui/js/setup.js');
++    ok(/ipcMain\.handle\("project-lock-set"/.test(main) && /ipcMain\.handle\("project-lock-status"/.test(main), 'main.js: có 2 handler project-lock-set / project-lock-status');
++    const setBlock = main.slice(main.indexOf('ipcMain.handle("project-lock-set"'), main.indexOf('ipcMain.handle("project-lock-status"'));
++    ok(/isFromSetupWindow\(event\)/.test(setBlock) && /reason: "denied"/.test(setBlock), 'project-lock-set: chỉ cửa sổ Setup được gọi (cửa sổ khác bị từ chối)');
++    ok(/enabled: r\.enabled === true/.test(setBlock), 'project-lock-set: chỉ coi enabled === true là bật (giá trị lạ = tắt)');
++    const startBlock = main.slice(main.indexOf('app.whenReady().then(() => licenseReady).then(() => {\n    if (!licenseManager.isLicensed()) return;\n    try {\n        const s = readSettingsFile()'));
++    ok(/apply\(\{ enabled: true, projectPath: pj \}\)/.test(startBlock) && !/apply\(\{ enabled: false/.test(startBlock.slice(0, 900)), 'khởi động: chỉ gọi apply enabled:true (không bao giờ mở khóa lúc khởi động)');
++    ok(/&& pj\)/.test(startBlock), 'khởi động: chỉ khóa khi có đường dẫn Pj (cài đặt thiếu/hỏng thì giữ nguyên trạng thái)');
++    ok(!/before-quit[\s\S]{0,200}ProjectLock/.test(main), 'thoát Menu: KHÔNG mở khóa (khóa phải giữ khi Menu tắt)');
++    ok(/fs\.chmodSync\(b, 0o666\)/.test(main), 'bản COPY Pj luôn ghi được (không thừa kế cờ Chỉ đọc)');
++    ok(/projectLockSet: \(req\) => ipcRenderer\.invoke\("project-lock-set", req\)/.test(pre) && /projectLockStatus: \(projectPath\) => ipcRenderer\.invoke\("project-lock-status", projectPath\)/.test(pre), 'preload.js: bridge projectLockSet/projectLockStatus');
++
++    ok((html.match(/id="projectLockEnable"/g) || []).length === 1, 'setup.html: đúng 1 công tắc projectLockEnable');
++    const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
++    ok(new Set(ids).size === ids.length, 'setup.html: không có id trùng', ids.filter((x, i) => ids.indexOf(x) !== i).join(','));
++    const iDaw = html.indexOf('🎛 DAW đang dùng'), iLock = html.indexOf('id="projectLockCard"'), iAuto = html.indexOf('⌨ Auto-Key');
++    ok(iDaw > 0 && iLock > iDaw && iLock < iAuto, 'setup.html: thẻ Khóa Project nằm NGAY DƯỚI thẻ "DAW đang dùng", trước thẻ Auto-Key');
++    const panelDaw = html.slice(html.indexOf('id="panel-daw"'), html.indexOf('id="panel-daw"') + 200000);
++    ok(panelDaw.indexOf('projectLockCard') < panelDaw.indexOf('</section>'), 'công tắc nằm trong tab DAW');
++    ok(/initProjectLockSection\(\); \/\/ PROJECT-LOCK-01/.test(js) && /function initProjectLockSection\(\)/.test(js), 'setup.js: có và có gọi initProjectLockSection()');
++    ok((js.match(/window\.__projectLockSync\?\.\(\)/g) || []).length === 2, 'setup.js: đổi Pj (Chọn PJ + Lưu PJ) đều gọi đồng bộ khóa');
++    const lockFn = js.slice(js.indexOf('function initProjectLockSection()'), js.indexOf('/* ================= SOUNDCARD'));
++    const iApi = lockFn.indexOf('api.projectLockSet({ enabled: want'), iSave = lockFn.indexOf('saveSetting("projectLockEnabled", want)');
++    ok(iApi > 0 && iSave > iApi, 'setup.js: khóa/mở khóa file THÀNH CÔNG rồi mới lưu cờ (cờ luôn khớp ổ đĩa)');
++    ok(/if \(want && !pj\) \{ cb\.checked = false;/.test(lockFn), 'setup.js: chưa chọn Pj thì không cho bật');
++    ok(/cb\.checked = !want; \/\/ việc khóa\/mở khóa THẤT BẠI/.test(lockFn), 'setup.js: thất bại -> công tắc quay về trạng thái thật');
++
++    // ---------- 9) bản dịch ----------
++    console.log('--- bản dịch Việt/Anh ---');
++    const I = require(path.join(root, 'ui/js/i18n.js'));
++    I.setLang('en');
++    const vi = [...lockFn.matchAll(/(?:^|[\s,{])(?:[a-zA-Z]+): ("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')/gm)].map((m) => eval(m[1])).filter((s) => /[À-ỹ]/.test(s));
++    ok(vi.length >= 15, 'tìm thấy các chuỗi tĩnh trong initProjectLockSection', vi.length);
++    const missing = vi.filter((s) => { const t = I.translate(s); return t === null || t === s; });
++    ok(missing.length === 0, 'MỌI chuỗi hiển thị trong initProjectLockSection đều có bản dịch tiếng Anh', JSON.stringify(missing));
++    const staticHtml = ['🔒 Khóa Project (Pj)', 'Đang tắt', 'Bật = KHÓA CỨNG file Project (không ai sửa/lưu đè được) · Tắt = cho phép sửa', '→ "Mở kèm Project / Youtube".'];
++    const missingHtml = staticHtml.filter((s) => { const t = I.translate(s); return t === null || t === s; });
++    ok(missingHtml.length === 0, 'chuỗi tĩnh trong setup.html có bản dịch', JSON.stringify(missingHtml));
++    I.setLang('vi');
++
++    console.log('\n' + pass + ' pass, ' + fail + ' fail');
++    process.exit(fail ? 1 : 0);
++})();
+diff --git a/ui/js/i18n.js b/ui/js/i18n.js
+index 339b594..652479b 100644
+--- a/ui/js/i18n.js
++++ b/ui/js/i18n.js
+@@ -984,6 +984,30 @@
+     ["Xoá toàn bộ preset {0}", "Delete the whole {0} preset"],
+     ["Chưa có mapping nào của preset này để xoá.", "No mapping from this preset to delete."],
+     ["Xoá {0} mapping của preset {1}? Mapping khác (PLAY/STOP/RECORD...) không bị đụng.", "Delete {0} mappings of the {1} preset? Other mappings (PLAY/STOP/RECORD...) are not touched."],
++    // PROJECT-LOCK-01 — công tắc "Khóa Project (Pj)" ở Setup > DAW
++    ["🔒 Khóa Project (Pj)", "🔒 Lock Project (Pj)"],
++    ["Đang tắt", "Off"],
++    ["Đã khóa cứng", "Hard-locked"],
++    ["Khóa Chỉ đọc", "Read-only lock"],
++    ["Cần kiểm tra", "Needs checking"],
++    ["Bật = KHÓA CỨNG file Project (không ai sửa/lưu đè được) · Tắt = cho phép sửa", "On = HARD-LOCK the Project file (nobody can edit/overwrite it) · Off = editing allowed"],
++    ["Project: chưa chọn", "Project: not selected"],
++    ["Khóa nằm ngay trên file Project ở ổ đĩa nên vẫn giữ khi Menu/DAW tắt. Muốn sửa Project: tắt công tắc này, sửa xong bật lại. Project được chọn ở mục", "The lock is applied directly to the Project file on disk, so it stays even when the Menu/DAW is off. To edit the Project: turn this switch off, edit, then turn it back on. The Project is chosen in the"],
++    ["→ \"Mở kèm Project / Youtube\".", "→ \"Open with Project / Youtube\"."],
++    ["Trạng thái file: chưa khóa (ai cũng sửa được)", "File status: not locked (anyone can edit)"],
++    ["Trạng thái file: ĐÃ KHÓA CỨNG (Chỉ đọc + cấm ghi NTFS)", "File status: HARD-LOCKED (Read-only + NTFS write deny)"],
++    ["Trạng thái file: ĐÃ KHÓA mức Chỉ đọc (chưa đặt được quyền NTFS)", "File status: LOCKED at Read-only level (NTFS permission could not be set)"],
++    ["Trạng thái file: không tìm thấy file Project", "File status: Project file not found"],
++    ["Trạng thái file: không đọc được", "File status: cannot be read"],
++    ["Chưa chọn Project. Hãy chọn ở mục AI → \"Mở kèm Project / Youtube\" rồi bật lại.", "No Project selected. Choose one in AI → \"Open with Project / Youtube\", then turn this on again."],
++    ["Chức năng khóa Project chưa khả dụng (chạy ngoài Menu).", "Project lock is not available (running outside the Menu)."],
++    ["File Project không còn tồn tại nên không khóa được.", "The Project file no longer exists, so it cannot be locked."],
++    ["Đường dẫn Project không phải là file (có thể là thư mục) nên không khóa được.", "The Project path is not a file (it may be a folder), so it cannot be locked."],
++    ["Không khóa được file (vẫn ghi được). Hãy chạy Menu bằng quyền Administrator hoặc kiểm tra quyền thư mục/ổ đĩa.", "Could not lock the file (it is still writable). Run the Menu as Administrator or check the folder/drive permissions."],
++    ["Chưa mở khóa được file. Hãy chạy Menu bằng quyền Administrator rồi thử lại.", "Could not unlock the file. Run the Menu as Administrator and try again."],
++    ["Không thực hiện được khóa/mở khóa Project (lỗi nội bộ).", "Could not lock/unlock the Project (internal error)."],
++    ["Đã khóa/mở khóa file nhưng không lưu được cài đặt. Hãy bật/tắt lại công tắc.", "The file was locked/unlocked but the setting could not be saved. Please toggle the switch again."],
++    ["Chỉ khóa được mức Chỉ đọc (ổ không phải NTFS hoặc thiếu quyền) — kém chắc hơn khóa cứng.", "Only the Read-only level could be applied (non-NTFS drive or missing permission) — weaker than a hard lock."],
+     ["Đóng DAW và Youtube cùng Menu (DAW hỏi lưu project → tự chọn No, không lưu)", "Close the DAW and YouTube together with the Menu (if the DAW asks to save the project → automatically choose No, do not save)"]
+     ];
+ 
+diff --git a/ui/js/setup.js b/ui/js/setup.js
+index 5196065..54a0645 100644
+--- a/ui/js/setup.js
++++ b/ui/js/setup.js
+@@ -279,6 +279,7 @@ function initSetupPage() {
+     initShortcutsSection();
+     initModal("openProjectModal", "projectModal", "btnClosePj");
+     initProjectSection();
++    initProjectLockSection(); // PROJECT-LOCK-01
+     initModal("openSoundcardModal", "soundcardModal", "closeSoundcardBtn");
+     initSoundcardSection();
+     initSystemAudioSection(); // TASK A71
+@@ -1409,6 +1410,7 @@ function initProjectSection() {
+             if (path) {
+                 saveSetting("projectPath", path);
+                 if (pjPathDisplay) pjPathDisplay.value = path;
++                window.__projectLockSync?.(); // PROJECT-LOCK-01: đang khóa Pj cũ -> chuyển khóa sang Pj mới
+             }
+         } catch (err) {
+             console.error("Chọn project lỗi:", err);
+@@ -1428,6 +1430,7 @@ function initProjectSection() {
+ 
+         saveSetting("projectPath", current);
+         alert("Đã lưu project hiện tại");
++        window.__projectLockSync?.(); // PROJECT-LOCK-01
+     });
+ 
+     document.getElementById("btnOpenProjectBundle")?.addEventListener("click", async () => {
+@@ -1454,6 +1457,125 @@ function initProjectSection() {
+     });
+ }
+ 
++/* ================= PROJECT LOCK — PROJECT-LOCK-01 =================
++   Công tắc "Khóa Project (Pj)" ở Setup > DAW (ngay dưới thẻ "DAW đang dùng"). Khóa/mở khóa THẬT do main process làm
++   (electronAPI.projectLockSet -> core/integration/ProjectLock.js). Thứ tự an toàn: khóa/mở khóa file THÀNH CÔNG rồi mới lưu cờ
++   projectLockEnabled, để cờ luôn khớp trạng thái thật trên ổ đĩa. Mọi chữ hiển thị là chuỗi tĩnh (để i18n dịch được). */
++function initProjectLockSection() {
++    const cb = document.getElementById("projectLockEnable");
++    const badge = document.getElementById("projectLockBadge");
++    const statusEl = document.getElementById("projectLockStatus");
++    if (!cb) return;
++
++    const MSG = {
++        noProject: 'Chưa chọn Project. Hãy chọn ở mục AI → "Mở kèm Project / Youtube" rồi bật lại.',
++        noApi: "Chức năng khóa Project chưa khả dụng (chạy ngoài Menu).",
++        missing: "File Project không còn tồn tại nên không khóa được.",
++        notFile: "Đường dẫn Project không phải là file (có thể là thư mục) nên không khóa được.",
++        stillWritable: "Không khóa được file (vẫn ghi được). Hãy chạy Menu bằng quyền Administrator hoặc kiểm tra quyền thư mục/ổ đĩa.",
++        stillLocked: "Chưa mở khóa được file. Hãy chạy Menu bằng quyền Administrator rồi thử lại.",
++        internal: "Không thực hiện được khóa/mở khóa Project (lỗi nội bộ).",
++        saveFail: "Đã khóa/mở khóa file nhưng không lưu được cài đặt. Hãy bật/tắt lại công tắc.",
++        readonlyOnly: "Chỉ khóa được mức Chỉ đọc (ổ không phải NTFS hoặc thiếu quyền) — kém chắc hơn khóa cứng."
++    };
++    const STATE = {
++        off: "Trạng thái file: chưa khóa (ai cũng sửa được)",
++        hard: "Trạng thái file: ĐÃ KHÓA CỨNG (Chỉ đọc + cấm ghi NTFS)",
++        readonly: "Trạng thái file: ĐÃ KHÓA mức Chỉ đọc (chưa đặt được quyền NTFS)",
++        missing: "Trạng thái file: không tìm thấy file Project",
++        unknown: "Trạng thái file: không đọc được"
++    };
++    const BADGE = { off: "Đang tắt", hard: "Đã khóa cứng", readonly: "Khóa Chỉ đọc", warn: "Cần kiểm tra" };
++
++    const api = window.electronAPI;
++    const currentPj = () => {
++        const v = String(getSetting("projectPath", "") || "").trim();
++        return v === "Chưa chọn project" ? "" : v;
++    };
++    const isOn = () => getSetting("projectLockEnabled") === true || getSetting("projectLockEnabled") === "true";
++    const reasonMsg = (r) => {
++        switch (r && r.reason) {
++            case "no_project": return MSG.noProject;
++            case "missing": return MSG.missing;
++            case "not_a_file": return MSG.notFile;
++            case "still_writable": return MSG.stillWritable;
++            case "unlock_failed": case "still_locked": return MSG.stillLocked;
++            default: return MSG.internal;
++        }
++    };
++
++    function setBadge(text, cls) {
++        if (!badge) return;
++        badge.textContent = text;
++        badge.className = "badge " + cls;
++    }
++    function render(stateText, pj) {
++        if (!statusEl) return;
++        statusEl.textContent = "";
++        const l1 = document.createElement("div");
++        l1.textContent = stateText;
++        const l2 = document.createElement("div");
++        const lab = document.createElement("span");
++        lab.textContent = "Project:";
++        const val = document.createElement("span");
++        val.textContent = " " + (pj || "—");
++        l2.appendChild(lab);
++        l2.appendChild(val);
++        statusEl.appendChild(l1);
++        statusEl.appendChild(l2);
++    }
++
++    // Đọc trạng thái THẬT của file trên ổ đĩa rồi vẽ lại badge + dòng trạng thái.
++    async function refresh() {
++        const pj = currentPj();
++        if (!api?.projectLockStatus) { setBadge(BADGE.warn, "badge-soon"); render(STATE.unknown, pj); return; }
++        let st = null;
++        try { st = await api.projectLockStatus(pj); } catch (e) { st = null; }
++        if (!st) { setBadge(BADGE.warn, "badge-soon"); render(STATE.unknown, pj); return; }
++        if (pj && st.exists === false) { setBadge(BADGE.warn, "badge-soon"); render(STATE.missing, pj); return; }
++        if (st.locked && st.level === "hard") { setBadge(BADGE.hard, "badge-live"); render(STATE.hard, pj); return; }
++        if (st.locked) { setBadge(BADGE.readonly, "badge-live"); render(STATE.readonly, pj); return; }
++        // Chưa khóa: nếu công tắc đang BẬT mà file chưa khóa -> báo "Cần kiểm tra" (vd file bị gỡ khóa từ bên ngoài).
++        setBadge(isOn() ? BADGE.warn : BADGE.off, "badge-soon");
++        render(STATE.off, pj);
++    }
++
++    cb.checked = isOn();
++    refresh();
++    window.addEventListener("focus", refresh);
++
++    cb.addEventListener("change", async () => {
++        const want = cb.checked;
++        const pj = currentPj();
++        if (want && !pj) { cb.checked = false; alert(MSG.noProject); return; }
++        if (!api?.projectLockSet) { cb.checked = !want; alert(MSG.noApi); return; }
++        cb.disabled = true;
++        try {
++            let r = null;
++            try { r = await api.projectLockSet({ enabled: want, projectPath: pj }); } catch (e) { r = null; }
++            if (!r || r.ok !== true) {
++                cb.checked = !want; // việc khóa/mở khóa THẤT BẠI -> công tắc quay về đúng trạng thái thật
++                alert(reasonMsg(r));
++                return;
++            }
++            if (!saveSetting("projectLockEnabled", want)) { alert(MSG.saveFail); return; }
++            if (want && r.level === "readonly") alert(MSG.readonlyOnly);
++        } finally {
++            cb.disabled = false;
++            refresh();
++        }
++    });
++
++    // Gọi khi người dùng đổi Pj (Chọn PJ / Lưu PJ): nếu đang bật khóa -> mở khóa Pj cũ, khóa Pj mới.
++    window.__projectLockSync = async function () {
++        if (!isOn() || !api?.projectLockSet) { refresh(); return; }
++        let r = null;
++        try { r = await api.projectLockSet({ enabled: true, projectPath: currentPj() }); } catch (e) { r = null; }
++        if (!r || r.ok !== true) alert(reasonMsg(r));
++        refresh();
++    };
++}
++
+ /* ================= SOUNDCARD (AUDIO INTERFACE) ================= */
+ // TASK A71 — tham số thứ 3 `placeholderText` (tuỳ chọn, mặc định "Chọn Soundcard..." như cũ) để
+ // hàm này dùng lại được cho SYSTEM_AUDIO select (mục 4 bên dưới) mà không đổi hành vi/lời gọi cũ.
+diff --git a/ui/setup.html b/ui/setup.html
+index 7bb6fdd..d983ecf 100644
+--- a/ui/setup.html
++++ b/ui/setup.html
+@@ -632,6 +632,14 @@
+                     <button id="closeDawBtn" style="display:none;"></button>
+                 </div>
+ 
++                <!-- PROJECT-LOCK-01: công tắc KHÓA CỨNG file Project (Pj). Logic ở setup.js (initProjectLockSection) + core/integration/ProjectLock.js -->
++                <div class="panel-card" id="projectLockCard">
++                    <div class="panel-card-title">🔒 Khóa Project (Pj) <span class="badge badge-soon" id="projectLockBadge">Đang tắt</span></div>
++                    <label class="setup-checkbox"><input type="checkbox" id="projectLockEnable"> Bật = KHÓA CỨNG file Project (không ai sửa/lưu đè được) · Tắt = cho phép sửa</label>
++                    <div class="status-text" id="projectLockStatus" style="margin-top:8px;">Project: chưa chọn</div>
++                    <p class="hint-text">Khóa nằm ngay trên file Project ở ổ đĩa nên vẫn giữ khi Menu/DAW tắt. Muốn sửa Project: tắt công tắc này, sửa xong bật lại. Project được chọn ở mục <b>AI</b> → "Mở kèm Project / Youtube".</p>
++                </div>
++
+                 <!-- TASK C60: "📁 Đường dẫn & khởi động" (currentDawPath / browseDawBtn / launchDawOnStartup)
+                      đã CHUYỂN sang panel-ai (AI > DAW Path/Startup Management) — cùng id, cùng handler
+                      (trong initSetupPage() của setup.js), chỉ đổi vị trí DOM. Không còn bản duplicate ở đây. -->

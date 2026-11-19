@@ -2378,7 +2378,8 @@ ipcMain.handle("open-project-bundle", async (event, options = {}) => {
     // 1+2) Mở DAW + Project (COMPANION-02: DAW chưa chạy -> mở DAW KÈM project làm đối số; DAW đã chạy -> giao project cho DAW đó)
     const result = await Companion.openDawAndProject({ launchDAW, dawPath, projectPath, openProject, makeCopy }, {
         exists: (p) => fs.existsSync(p),
-        copyFile: (a, b) => fs.copyFileSync(a, b),
+        // PROJECT-LOCK-01: bản COPY là bản để người dùng sửa -> luôn cho ghi được (nếu Pj gốc đang khóa Chỉ đọc, copyFile sẽ chép luôn cờ Chỉ đọc sang bản copy).
+        copyFile: (a, b) => { fs.copyFileSync(a, b); try { fs.chmodSync(b, 0o666); } catch (e) { /* best-effort */ } },
         buildCopyPath,
         shellOpen: (p) => shell.openPath(p),
         spawnOpen: (cmd, args) => spawnOpen(cmd, args, {}),
@@ -2401,6 +2402,50 @@ ipcMain.handle("open-project-bundle", async (event, options = {}) => {
     }
 
     return result;
+});
+
+// PROJECT-LOCK-01 — KHÓA CỨNG file Project (Pj): không ai sửa/lưu đè được, DÙ Menu/DAW bật hay tắt (khóa nằm trên file ở ổ đĩa).
+// Logic thật ở core/integration/ProjectLock.js (Chỉ đọc + quyền NTFS DENY). Công tắc nằm ở Setup > DAW; chỉ cửa sổ Setup được gọi.
+// Cờ bật/tắt = app-settings.json > projectLockEnabled (do Setup lưu). Khi tắt Menu KHÔNG mở khóa (khóa là để bảo vệ lúc Menu tắt);
+// chỉ công tắc trong Setup mới mở khóa. Mỗi lần Menu khởi động, nếu cờ đang BẬT thì khóa lại cho chắc.
+const ProjectLock = require("../core/integration/ProjectLock");
+let __projectLock = null;
+function getProjectLock() {
+    if (!__projectLock) __projectLock = ProjectLock.createProjectLock({ recordFile: path.join(app.getPath("userData"), "project-lock.json"), log: (m) => console.log("[ProjectLock] " + m) });
+    return __projectLock;
+}
+function isFromSetupWindow(event) { return !!(setupWin && !setupWin.isDestroyed() && event && event.sender === setupWin.webContents); }
+ipcMain.handle("project-lock-set", async (event, req) => {
+    try {
+        if (!isFromSetupWindow(event)) return { ok: false, reason: "denied" };
+        const r = req && typeof req === "object" ? req : {};
+        return await getProjectLock().apply({ enabled: r.enabled === true, projectPath: typeof r.projectPath === "string" ? r.projectPath : "" });
+    } catch (err) {
+        console.error("project-lock-set lỗi:", err && err.message);
+        return { ok: false, reason: "error" };
+    }
+});
+ipcMain.handle("project-lock-status", async (event, projectPath) => {
+    try {
+        if (!isFromSetupWindow(event)) return { locked: false, level: "none", reason: "denied" };
+        return await getProjectLock().status(typeof projectPath === "string" ? projectPath : "");
+    } catch (err) {
+        console.error("project-lock-status lỗi:", err && err.message);
+        return { locked: false, level: "none", reason: "error" };
+    }
+});
+app.whenReady().then(() => licenseReady).then(() => {
+    if (!licenseManager.isLicensed()) return;
+    try {
+        const s = readSettingsFile() || {};
+        const pj = typeof s.projectPath === "string" ? s.projectPath.trim() : "";
+        // Chỉ KHÓA lúc khởi động (không bao giờ mở khóa ở đây) — nếu cài đặt thiếu/hỏng thì file vẫn giữ nguyên trạng thái đang khóa.
+        if ((s.projectLockEnabled === true || s.projectLockEnabled === "true") && pj) {
+            getProjectLock().apply({ enabled: true, projectPath: pj })
+                .then((r) => console.log("[ProjectLock] khởi động: " + JSON.stringify({ ok: r.ok, level: r.level, reason: r.reason || null })))
+                .catch((e) => console.error("ProjectLock khởi động lỗi:", e && e.message));
+        }
+    } catch (err) { console.error("ProjectLock khởi động lỗi (bỏ qua):", err && err.message); }
 });
 
 // COMPANION-01 — "Đóng DAW và Youtube cùng Menu": chặn thoát 1 lần, đóng DAW (hộp thoại lưu project -> chọn No) + tab YouTube, rồi thoát thật.
