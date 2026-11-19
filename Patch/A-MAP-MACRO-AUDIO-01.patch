@@ -1,0 +1,933 @@
+diff --git a/core/command-engine-js/capabilityRegistry.js b/core/command-engine-js/capabilityRegistry.js
+index 857ed88..0ce061a 100644
+--- a/core/command-engine-js/capabilityRegistry.js
++++ b/core/command-engine-js/capabilityRegistry.js
+@@ -54,6 +54,11 @@ const registry = {
+         mcu: { note: 0x5f },
+         hotkey: { keys: '*' }, // kiểm tra lại đúng Key Command bạn đã gán cho Record
+       },
++      // TASK A-MAP-01 — phím tắt mặc định của Studio One (CHƯA kiểm chứng trên máy thật; đổi nếu Key Command của bạn khác).
++      undo: { hotkey: { keys: '^z' } },
++      redo: { hotkey: { keys: '^y' } },
++      loopToggle: { hotkey: { keys: '/' } },
++      metronomeToggle: { hotkey: { keys: 'c' } },
+       saveSong: {
+         hotkey: { keys: '^s' }, // Ctrl+S
+       },
+diff --git a/core/command-engine-js/d1Loader.js b/core/command-engine-js/d1Loader.js
+index 9e0e797..a92ec4c 100644
+--- a/core/command-engine-js/d1Loader.js
++++ b/core/command-engine-js/d1Loader.js
+@@ -64,6 +64,11 @@ const CAPABILITY_BACKEND_TARGET = {
+     'daw:play': { targetId: 'studio_one', action: 'transportPlay' },
+     'daw:stop': { targetId: 'studio_one', action: 'transportStop' },
+     'daw:record': { targetId: 'studio_one', action: 'transportRecord' },
++    // TASK A-MAP-01 — 4 lệnh mở rộng (hotkey-only, xem capabilityRegistry.js studio_one.actions)
++    'daw:undo': { targetId: 'studio_one', action: 'undo' },
++    'daw:redo': { targetId: 'studio_one', action: 'redo' },
++    'daw:loop': { targetId: 'studio_one', action: 'loopToggle' },
++    'daw:metronome': { targetId: 'studio_one', action: 'metronomeToggle' },
+ };
+ 
+ /**
+@@ -168,8 +173,50 @@ function buildD1GatedMapping(legacyMidiMappings, d1Capabilities) {
+     return { mapping, rejected };
+ }
+ 
++/**
++ * TASK A-MACRO-01 — buildD1GatedMacros(macros, d1Capabilities, singleMapping)
++ * 1 MIDI trigger -> chuỗi 1..MACRO_MAX_STEPS capability chạy nối tiếp. Dùng ĐÚNG cổng D1 như buildD1GatedMapping:
++ * mỗi bước phải là capability có trong D1, midi-allowed=true VÀ có CAPABILITY_BACKEND_TARGET. Macro KHÔNG được chứa macro
++ * (bước chỉ là capability id) nên không thể lặp vô hạn. Trigger trùng key với mapping đơn -> loại (không để 2 thứ cùng nghe 1 nút).
++ * @returns {{ macros: Map<string,{id:string,steps:Array,delayMs:number}>, rejected: Array }}
++ */
++const MACRO_MAX_STEPS = 5;
++const MACRO_DEFAULT_DELAY_MS = 150;
++const MACRO_MAX_DELAY_MS = 2000;
++function buildD1GatedMacros(macros, d1Capabilities, singleMapping) {
++    const capById = new Map((d1Capabilities || []).map((c) => [c.id, c]));
++    const out = new Map();
++    const rejected = [];
++    for (const m of Array.isArray(macros) ? macros : []) {
++        if (!m || !m.type || m.channel == null || m.number == null || !Array.isArray(m.steps)) continue;
++        const key = `${m.type}:${m.channel}:${m.number}`;
++        const id = m.id || key;
++        if (m.steps.length < 1) { rejected.push({ key, id, reason: 'EMPTY_MACRO' }); continue; }
++        if (m.steps.length > MACRO_MAX_STEPS) { rejected.push({ key, id, reason: 'TOO_MANY_STEPS', max: MACRO_MAX_STEPS }); continue; }
++        let bad = null;
++        const steps = [];
++        for (const capId of m.steps) {
++            const cap = capById.get(capId);
++            const target = CAPABILITY_BACKEND_TARGET[capId];
++            if (!cap) { bad = { step: capId, reason: 'UNKNOWN_CAPABILITY_IN_D1' }; break; }
++            if (cap.midiAllowed !== true) { bad = { step: capId, reason: 'D1_MIDI_NOT_ALLOWED' }; break; }
++            if (!target) { bad = { step: capId, reason: 'NO_BACKEND_TARGET' }; break; }
++            steps.push({ capabilityId: capId, targetId: target.targetId, action: target.action });
++        }
++        if (bad) { rejected.push({ key, id, ...bad }); continue; }
++        if (singleMapping && singleMapping.has(key)) { rejected.push({ key, id, reason: 'CONFLICTS_WITH_SINGLE_MAPPING' }); continue; }
++        if (out.has(key)) { rejected.push({ key, id, reason: 'DUPLICATE_RUNTIME_KEY' }); continue; }
++        const d = Number(m.delayMs);
++        const delayMs = Number.isFinite(d) && d >= 0 ? Math.min(d, MACRO_MAX_DELAY_MS) : MACRO_DEFAULT_DELAY_MS;
++        out.set(key, { id, steps, delayMs });
++    }
++    return { macros: out, rejected };
++}
++
+ module.exports = {
+     loadAndValidateD1,
++    buildD1GatedMacros,
++    MACRO_MAX_STEPS,
+     loadD1FromDisk,
+     buildD1GatedMapping,
+     CAPABILITY_BACKEND_TARGET,
+diff --git a/core/command-engine-js/runtime.js b/core/command-engine-js/runtime.js
+index d99f0bd..3143c1f 100644
+--- a/core/command-engine-js/runtime.js
++++ b/core/command-engine-js/runtime.js
+@@ -46,6 +46,10 @@ let lastDispatchAt = new Map(); // key -> timestamp, chống double-fire khi con
+ // xem loadD1AndRebuild() bên dưới; trong lúc chưa nạp xong hoặc nạp lỗi, dispatchFromMidi()
+ // tự động không làm gì (an toàn, không crash, không dispatch nhầm).
+ let d1GatedMappingIndex = new Map();
++// TASK A-MACRO-01 — macro index (key -> {id, steps, delayMs}), xây cùng lúc với d1GatedMappingIndex; rỗng khi D1 fail (fail-closed).
++let d1GatedMacroIndex = new Map();
++let macroRunning = new Set(); // key đang chạy — bấm lại khi chưa xong thì bỏ qua (không xếp chồng/lặp)
++let lastMacroResult = null;
+ let d1State = { ok: false, stage: "not-loaded", errors: [], lastLoadedAt: null };
+ 
+ // ---------------------------------------------------------------------------
+@@ -276,11 +280,15 @@ async function loadD1AndRebuild(settings) {
+         log(`[D1] Validate THẤT BẠI (stage=${result.stage}) — mapping D1-gated bị RỖNG (fail-closed, không dispatch qua MIDI cho tới khi D1 hợp lệ trở lại).`, result.errors);
+         d1State = { ok: false, stage: result.stage, errors: result.errors, lastLoadedAt: Date.now() };
+         d1GatedMappingIndex = new Map(); // fail-closed — KHÔNG giữ mapping cũ nếu lần load lại này fail
++        d1GatedMacroIndex = new Map();
+         return;
+     }
+     const { mapping, rejected } = d1Loader.buildD1GatedMapping(settings?.midiMappingsV1, result.capabilities);
+     d1GatedMappingIndex = mapping;
+-    d1State = { ok: true, stage: "ok", errors: [], lastLoadedAt: Date.now(), capabilityCount: result.capabilities.length, mappingCount: mapping.size, rejectedCount: rejected.length };
++    const macroBuilt = d1Loader.buildD1GatedMacros(settings?.midiMacrosV1, result.capabilities, mapping);
++    d1GatedMacroIndex = macroBuilt.macros;
++    if (macroBuilt.rejected.length) log(`[D1] ${macroBuilt.rejected.length} macro bị loại:`, macroBuilt.rejected);
++    d1State = { ok: true, stage: "ok", errors: [], lastLoadedAt: Date.now(), capabilityCount: result.capabilities.length, mappingCount: mapping.size, rejectedCount: rejected.length, macroCount: macroBuilt.macros.size, macroRejectedCount: macroBuilt.rejected.length };
+     log(`[D1] Validate PASS — ${result.capabilities.length} capability, ${mapping.size} binding được cài vào mapping thật, ${rejected.length} binding bị loại (xem lý do trong rejected).`, rejected);
+ }
+ 
+@@ -290,7 +298,8 @@ async function dispatchFromMidi(msg) {
+     // TASK B38 — nguồn dispatch thật DUY NHẤT: d1GatedMappingIndex (xây từ D1 XML đã qua
+     // XSD+Semantic). Không có bảng hard-code nào chạy song song nữa (đã xoá ở B38-FIX).
+     const target = d1GatedMappingIndex.get(key);
+-    if (!target || !engine) return;
++    const macro = target ? null : d1GatedMacroIndex.get(key); // macro và mapping đơn không bao giờ trùng key (buildD1GatedMacros loại)
++    if ((!target && !macro) || !engine) return;
+ 
+     // Chống 1 event bắn nhiều lệnh nếu listener bị gắn trùng (Mục 12 — connect() x3).
+     const now = Date.now();
+@@ -298,10 +307,38 @@ async function dispatchFromMidi(msg) {
+     if (now - lastAt < 60) return; // debounce 60ms, không phải business logic — chỉ chống double-listener
+     lastDispatchAt.set(key, now);
+ 
++    if (macro) { await runMacro(key, macro); return; }
+     const result = await engine.dispatch({ targetId: target.targetId, action: target.action });
+     log("dispatch", key, "->", target.capabilityId, "(" + target.action + ")", result);
+ }
+ 
++/**
++ * TASK A-MACRO-01 — chạy chuỗi bước của 1 macro tuần tự. Bước lỗi -> DỪNG chuỗi (không chạy tiếp lệnh sau trên trạng thái không rõ).
++ * Đang chạy thì bấm lại bị bỏ qua. Kết quả lưu ở lastMacroResult (getHealth().macro).
++ */
++async function runMacro(key, macro) {
++    if (macroRunning.has(key)) { log("macro", key, "đang chạy — bỏ qua lần bấm lại."); return { ok: false, skipped: "BUSY" }; }
++    macroRunning.add(key);
++    const results = [];
++    let ok = true;
++    try {
++        for (let i = 0; i < macro.steps.length; i++) {
++            const st = macro.steps[i];
++            let r;
++            try { r = await engine.dispatch({ targetId: st.targetId, action: st.action }); }
++            catch (err) { r = { ok: false, detail: String(err && err.message || err) }; }
++            results.push({ step: i + 1, capabilityId: st.capabilityId, ok: !!(r && r.ok), driverUsed: r && r.driverUsed || null });
++            if (!r || !r.ok) { ok = false; break; }
++            if (i < macro.steps.length - 1 && macro.delayMs > 0) await new Promise((res) => setTimeout(res, macro.delayMs));
++        }
++    } finally {
++        macroRunning.delete(key);
++    }
++    lastMacroResult = { key, id: macro.id, ok, ran: results.length, total: macro.steps.length, results, at: Date.now() };
++    log("macro", key, "->", ok ? "OK" : "DỪNG (bước lỗi)", results);
++    return lastMacroResult;
++}
++
+ function makeErrorDetail(stage, message, portName, available) {
+     return { stage, message, portName: portName || null, available: Array.isArray(available) ? available.slice() : null, at: Date.now(), attempt: connectAttemptSeq };
+ }
+@@ -773,6 +810,10 @@ module.exports = {
+     // d1GatedMappingIndex/d1State mà không cần đợi timer đoán mò. KHÔNG export dispatchFromMidi()
+     // (vẫn giữ nguyên lý do cũ — side-effect trên state module-private).
+     loadD1AndRebuild,
++    getD1GatedMacros: () => d1GatedMacroIndex,
++    _getEngineForTest: () => engine,
++    getLastMacroResult: () => lastMacroResult,
++    runMacroForTest: runMacro,
+     getD1GatedMapping: () => d1GatedMappingIndex,
+     getD1State: () => d1State,
+ };
+diff --git a/docs/d1/capability-backend-matrix.md b/docs/d1/capability-backend-matrix.md
+index c8e5e97..07bfc53 100644
+--- a/docs/d1/capability-backend-matrix.md
++++ b/docs/d1/capability-backend-matrix.md
+@@ -17,6 +17,10 @@ chủ quan.
+ | `daw:play` | Transport Play | Studio One, driver `mcu` (note `0x5e`) → fallback `hotkey` (`Space`) | **implemented** | **true** | `core/command-engine-js/runtime.js:33` (`ACTION_TO_CAPABILITY["daw:play"] = {targetId:"studio_one", action:"transportPlay"}`) + `core/command-engine-js/capabilityRegistry.js:34-38` (`registry.studio_one.actions.transportPlay`) + test thật `tests/unit/MidiLearnDispatch.verify.js` SECTION 5/7 (Task B20, PASS) | Chỉ CODE VERIFIED — chưa có bằng chứng Studio One thật nhận đúng note (HARDWARE GAP, đã ghi nhận từ B18/B20, không đổi ở B23) |
+ | `daw:stop` | Transport Stop | Studio One, `mcu` (note `0x5d`) → `hotkey` (`Space`) | **implemented** | **true** | `runtime.js:34` + `capabilityRegistry.js:39-42` + `MidiLearnDispatch.verify.js` SECTION 5b/7 | Cùng HARDWARE GAP như `daw:play` |
+ | `daw:record` | Transport Record | Studio One, `mcu` (note `0x5f`) → `hotkey` (`*`) | **implemented** | **true** | `runtime.js:35` + `capabilityRegistry.js:43-46` + `MidiLearnDispatch.verify.js` SECTION 5b/7 | Cùng HARDWARE GAP |
++| `daw:undo` | Undo | Studio One, `hotkey` (`Ctrl+Z`) — KHÔNG có `mcu` | **implemented** | **true** | TASK A-MAP-01: `capabilityRegistry.js` studio_one.actions.undo + `d1Loader.js` CAPABILITY_BACKEND_TARGET | Chỉ CODE VERIFIED — phím mặc định chưa kiểm chứng trên Studio One thật (cần AHK service + Studio One foreground) |
++| `daw:redo` | Redo | Studio One, `hotkey` (`Ctrl+Y`) — KHÔNG có `mcu` | **implemented** | **true** | TASK A-MAP-01: `capabilityRegistry.js` studio_one.actions.redo + `d1Loader.js` CAPABILITY_BACKEND_TARGET | Chỉ CODE VERIFIED — phím mặc định chưa kiểm chứng trên Studio One thật (cần AHK service + Studio One foreground) |
++| `daw:loop` | Loop toggle | Studio One, `hotkey` (`/`) — KHÔNG có `mcu` | **implemented** | **true** | TASK A-MAP-01: `capabilityRegistry.js` studio_one.actions.loopToggle + `d1Loader.js` CAPABILITY_BACKEND_TARGET | Chỉ CODE VERIFIED — phím mặc định chưa kiểm chứng trên Studio One thật (cần AHK service + Studio One foreground) |
++| `daw:metronome` | Metronome toggle | Studio One, `hotkey` (`C`) — KHÔNG có `mcu` | **implemented** | **true** | TASK A-MAP-01: `capabilityRegistry.js` studio_one.actions.metronomeToggle + `d1Loader.js` CAPABILITY_BACKEND_TARGET | Chỉ CODE VERIFIED — phím mặc định chưa kiểm chứng trên Studio One thật (cần AHK service + Studio One foreground) |
+ | `daw:save` | Save Song | Studio One, `hotkey` (`Ctrl+S`) — **DUY NHẤT driver, không có `mcu`** | **pending-backend** | **false** | `capabilityRegistry.js:57-59` (`registry.studio_one.actions.saveSong`) — driver CÓ tồn tại. NHƯNG `runtime.js` grep `ACTION_TO_CAPABILITY` → **0 kết quả** cho `"daw:save"` hay bất kỳ entry nào trỏ tới `saveSong` | Đúng cảnh báo mục 11 (đề bài B23): capabilityRegistry có, ACTION_TO_CAPABILITY chưa wire — KHÔNG được tự nâng lên implemented. Chưa có action ID nào trong dropdown Setup thật cho save. |
+ | `menu:buttonA` | Menu Button A | — (không có) | **not-supported** | **false** | `ui/setup.html` dòng có `<option value="menu:buttonA">` — action ID CÓ trong UI. Grep `capabilityRegistry.js` cho target `"menu"` → 0 kết quả. Grep `runtime.js:ACTION_TO_CAPABILITY` cho `"menu:buttonA"` → 0 kết quả | Capability tồn tại trong UI ≠ backend đã implemented (đúng Principle 2/mục 3 đề bài) |
+ | `menu:buttonB` | Menu Button B | — (không có) | **not-supported** | **false** | Cùng cách xác nhận như `menu:buttonA` — 0 kết quả cả 2 nơi | — |
+diff --git a/docs/d1/midi-mapping.xml b/docs/d1/midi-mapping.xml
+index 4fd6ac7..1a92b98 100644
+--- a/docs/d1/midi-mapping.xml
++++ b/docs/d1/midi-mapping.xml
+@@ -44,6 +44,24 @@
+       <description>Gửi lệnh Record cho DAW đang chọn (transport control).</description>
+     </capability>
+ 
++    <!-- TASK A-MAP-01 — 4 capability transport mở rộng, backend = hotkey Studio One (capabilityRegistry.js).
++         Chỉ CODE VERIFIED (chưa có bằng chứng Studio One thật nhận phím — cần AHK service chạy + cửa sổ Studio One ở foreground). -->
++    <capability id="daw:undo" backend-status="implemented" midi-allowed="true">
++      <description>Gửi lệnh Undo (Hoàn tác) cho DAW đang chọn qua hotkey.</description>
++    </capability>
++
++    <capability id="daw:redo" backend-status="implemented" midi-allowed="true">
++      <description>Gửi lệnh Redo (Làm lại) cho DAW đang chọn qua hotkey.</description>
++    </capability>
++
++    <capability id="daw:loop" backend-status="implemented" midi-allowed="true">
++      <description>Bật/tắt Loop của DAW đang chọn qua hotkey.</description>
++    </capability>
++
++    <capability id="daw:metronome" backend-status="implemented" midi-allowed="true">
++      <description>Bật/tắt Metronome (Click) của DAW đang chọn qua hotkey.</description>
++    </capability>
++
+     <!-- daw:save — mục 11 đề bài B23: capabilityRegistry.js CÓ định nghĩa
+          driver (registry.studio_one.actions.saveSong, hotkey Ctrl+S) nhưng
+          runtime.js:ACTION_TO_CAPABILITY KHÔNG có entry nào trỏ tới đây —
+diff --git a/tests/unit/AudioCalibrationA01.verify.js b/tests/unit/AudioCalibrationA01.verify.js
+new file mode 100644
+index 0000000..87b8af1
+--- /dev/null
++++ b/tests/unit/AudioCalibrationA01.verify.js
+@@ -0,0 +1,70 @@
++/* TASK A-AUDIO-01 — kiểm tra thuật toán đo độ trễ vòng (hàm thuần) + nối giao diện Setup. Chạy: node tests/unit/AudioCalibrationA01.verify.js
++   LƯU Ý: chỉ kiểm chứng THUẬT TOÁN bằng tín hiệu tổng hợp. KHÔNG chứng minh đo đúng trên card âm thanh/loa/mic thật (cần máy thật). */
++const path = require('path'), fs = require('fs');
++const root = path.join(__dirname, '..', '..');
++const AC = require(path.join(root, 'ui/js/audioCalibration.js'));
++let pass = 0, fail = 0;
++function check(l, c, d) { if (c) { pass++; console.log('  OK   ' + l); } else { fail++; console.log('  FAIL ' + l + (d !== undefined ? ' (thực tế: ' + JSON.stringify(d) + ')' : '')); } }
++let seed = 12345; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296) * 2 - 1;
++
++function synth(sr, delayMs, noiseAmp, atten, times) {
++    const burst = AC.makeChirp(sr, 40, 1000, 8000);
++    const rec = new Float32Array(Math.round(sr * 3));
++    for (let i = 0; i < rec.length; i++) rec[i] = noiseAmp * rnd();
++    for (const t of times) { const p = Math.round((t + delayMs / 1000) * sr); for (let i = 0; i < burst.length && p + i < rec.length; i++) rec[p + i] += atten * burst[i]; }
++    return { rec, burst };
++}
++
++console.log('== makeChirp ==');
++const ch = AC.makeChirp(48000, 40);
++check('chirp 40 ms @48k = 1920 mẫu', ch.length === 1920, ch.length);
++check('chirp biên độ ≤ 1 và bắt đầu/kết thúc ≈ 0 (cửa sổ Hann)', Math.max(...ch.map(Math.abs)) <= 1 && Math.abs(ch[0]) < 1e-3 && Math.abs(ch[ch.length - 1]) < 1e-3);
++
++console.log('\n== measureRoundTrip trên tín hiệu tổng hợp ==');
++for (const sr of [44100, 48000]) {
++    for (const d of [3, 12.5, 47, 120]) {
++        const times = [0.3, 1.1, 1.9];
++        const { rec, burst } = synth(sr, d, 0.02, 0.4, times);
++        const r = AC.measureRoundTrip(rec, sr, burst, times, 0.6);
++        check(`sr=${sr} trễ thật ${d} ms -> đo ${r.latencyMs && r.latencyMs.toFixed(2)} ms (sai số ≤ 0.1 ms)`, r.ok && Math.abs(r.latencyMs - d) <= 0.1, r);
++    }
++}
++{
++    const times = [0.3, 1.1, 1.9];
++    const { rec, burst } = synth(48000, 20, 0.15, 0.2, times); // nhiễu to, tín hiệu nhỏ (SNR thấp)
++    const r = AC.measureRoundTrip(rec, 48000, burst, times, 0.6);
++    check('SNR thấp (nhiễu 0.15, chirp 0.2) vẫn đo đúng ±0.1 ms', r.ok && Math.abs(r.latencyMs - 20) <= 0.1, r);
++}
++{
++    const times = [0.3, 1.1, 1.9];
++    const { rec, burst } = synth(48000, 20, 0.05, 0, times); // KHÔNG có chirp nào (mic không nghe loa)
++    const r = AC.measureRoundTrip(rec, 48000, burst, times, 0.6);
++    check('chỉ có nhiễu -> ok=false, KHÔNG bịa ra độ trễ', r.ok === false && r.found <= 1, r);
++}
++{
++    const times = [0.3, 1.1, 1.9];
++    const { rec, burst } = synth(48000, 20, 0.02, 0.4, times);
++    for (let i = Math.round(1.1 * 48000); i < Math.round(1.6 * 48000); i++) rec[i] = 0; // mất 1 burst
++    const r = AC.measureRoundTrip(rec, 48000, burst, times, 0.6);
++    check('mất 1/3 burst vẫn ok (median của 2 lần còn lại), found=2', r.ok && r.found === 2 && Math.abs(r.latencyMs - 20) <= 0.1, r);
++}
++{
++    const r = AC.measureRoundTrip(new Float32Array(100), 48000, AC.makeChirp(48000, 40), [0.3], 0.6);
++    check('rec quá ngắn/im lặng -> ok=false, không throw', r.ok === false);
++}
++console.log('\n== reportedLatencyMs ==');
++check('baseLatency 0.01 + outputLatency 0.02 = 30 ms', Math.abs(AC.reportedLatencyMs({ baseLatency: 0.01, outputLatency: 0.02 }) - 30) < 1e-9);
++check('không có thông tin -> null', AC.reportedLatencyMs({}) === null && AC.reportedLatencyMs(null) === null);
++
++console.log('\n== Nối giao diện (tĩnh) ==');
++const html = fs.readFileSync(path.join(root, 'ui/setup.html'), 'utf8');
++const card = html.slice(html.indexOf('id="audioEngineCard"'), html.indexOf('</section>', html.indexOf('id="audioEngineCard"')));
++check('khu Audio không còn thuộc tính disabled', !/disabled/.test(card));
++check('không còn badge "Chưa có Engine" ở khu Audio', !card.includes('Chưa có Engine'));
++check('có đủ 5 điều khiển có id', ['audioSampleRateSelect', 'audioBufferSelect', 'audioLatencyText', 'btnAudioTest', 'btnAudioCalibrate'].every((i) => card.includes('id="' + i + '"')));
++check('setup.html nạp audioCalibration.js TRƯỚC setupAudioTest.js', html.indexOf('js/audioCalibration.js') > 0 && html.indexOf('js/audioCalibration.js') < html.indexOf('js/setupAudioTest.js'));
++const ui = fs.readFileSync(path.join(root, 'ui/js/setupAudioTest.js'), 'utf8');
++check('đọc đúng key output/mic đã có trong appSettings', ui.includes('selectedAudioOutputDeviceId') && ui.includes('selectedMicDeviceId'));
++check('không đụng audioSource/renderer (không tham chiếu)', !/audioSource|renderer\.js/.test(ui.replace(/\/\*[\s\S]*?\*\//, '')));
++console.log('\n' + pass + ' PASS, ' + fail + ' FAIL');
++process.exit(fail ? 1 : 0);
+diff --git a/tests/unit/D1SpecValidation.verify.js b/tests/unit/D1SpecValidation.verify.js
+index 2bb29ea..af8bb5d 100644
+--- a/tests/unit/D1SpecValidation.verify.js
++++ b/tests/unit/D1SpecValidation.verify.js
+@@ -82,7 +82,7 @@ async function main() {
+         check('midi-mapping.xml well-formed + validate PASS qua XSD (xmllint-wasm)', await xsdOk(xmlText));
+         const result = validateSemantics(xmlText);
+         check('midi-mapping.xml PASS luôn Semantic Validator (schemaVersion hỗ trợ, midi-allowed khớp backend-status, 0 binding nên Rule M4/M6 không có gì để vi phạm)', result.ok, result.errors);
+-        check('8 capability đúng như capability-backend-matrix.md (3 implemented, 1 pending-backend, 4 not-supported)', result.doc.capabilities.length === 8, result.doc.capabilities.length);
++        check('12 capability đúng như capability-backend-matrix.md (7 implemented, 1 pending-backend, 4 not-supported) — A-MAP-01 thêm 4 hotkey transport', result.doc.capabilities.length === 12, result.doc.capabilities.length);
+         check('0 binding trong bản production (đúng Rule M3 — không tự bịa MIDI mapping)', result.doc.bindings.length === 0, result.doc.bindings.length);
+     }
+ 
+diff --git a/tests/unit/MidiD1RuntimeB61.verify.js b/tests/unit/MidiD1RuntimeB61.verify.js
+index e745ac4..4f4c0bb 100644
+--- a/tests/unit/MidiD1RuntimeB61.verify.js
++++ b/tests/unit/MidiD1RuntimeB61.verify.js
+@@ -154,7 +154,7 @@ function startFakeAhk(port) {
+     {
+         d1 = await d1Loader.loadD1FromDisk();
+         check('loadD1FromDisk(): XML well-formed + XSD (xmllint-wasm) + Semantic đều PASS trên docs/d1/midi-mapping.xml thật', d1.ok === true && d1.stage === 'ok', d1);
+-        check('D1 production có đúng 8 capability', d1.ok && d1.capabilities.length === 8, d1.capabilities && d1.capabilities.length);
++        check('D1 production có đúng 12 capability (A-MAP-01 +4)', d1.ok && d1.capabilities.length === 12, d1.capabilities && d1.capabilities.length);
+ 
+         // ACTION_TO_CAPABILITY: không còn tồn tại trong CODE (chỉ còn trong comment/tài liệu)
+         const codeFiles = ['core/command-engine-js/runtime.js', 'core/command-engine-js/d1Loader.js', 'core/command-engine-js/commandEngine.js', 'core/command-engine-js/capabilityRegistry.js', 'app/main.js', 'app/preload.js', 'ui/js/vocalCommandRouter.js', 'ui/js/appSettings.js', 'ui/js/actionRegistry.js', 'ui/js/setupMidiInput.js'];
+@@ -181,7 +181,7 @@ function startFakeAhk(port) {
+             }
+         }
+         consistent = problems.length === 0;
+-        check('D1 <-> CAPABILITY_BACKEND_TARGET <-> capabilityRegistry nhất quán cho cả 8 capability (implemented có đủ driver; còn lại không có target)', consistent, problems);
++        check('D1 <-> CAPABILITY_BACKEND_TARGET <-> capabilityRegistry nhất quán cho cả 12 capability (implemented có đủ driver; còn lại không có target)', consistent, problems);
+         const extraTargets = Object.keys(d1Loader.CAPABILITY_BACKEND_TARGET).filter((id) => !d1.capabilities.some((c) => c.id === id));
+         check('CAPABILITY_BACKEND_TARGET không chứa capability nào ngoài D1', extraTargets.length === 0, extraTargets);
+ 
+@@ -190,14 +190,14 @@ function startFakeAhk(port) {
+         const rows = [...matrix.matchAll(/^\|\s*`([a-z]+:[A-Za-z]+)`\s*\|[^|]*\|[^|]*\|\s*\*\*([a-z-]+)\*\*\s*\|\s*\*\*(true|false)\*\*/gm)];
+         const matrixById = new Map(rows.map((m) => [m[1], { status: m[2], allowed: m[3] === 'true' }]));
+         const mismatch = d1.capabilities.filter((c) => { const m = matrixById.get(c.id); return !m || m.status !== c.backendStatus || m.allowed !== c.midiAllowed; }).map((c) => c.id);
+-        check('capability-backend-matrix.md (status + midi-allowed) khớp 100% midi-mapping.xml cho cả 8 capability', matrixById.size === 8 && mismatch.length === 0, { rows: matrixById.size, mismatch });
++        check('capability-backend-matrix.md (status + midi-allowed) khớp 100% midi-mapping.xml cho cả 12 capability', matrixById.size === 12 && mismatch.length === 0, { rows: matrixById.size, mismatch });
+ 
+         // Setup dropdown (chỉ ĐỌC ui/setup.html)
+         const setupHtml = read('ui/setup.html');
+         const uiActions = [...setupHtml.matchAll(/<option value="([a-z]+:[A-Za-z]+)"/g)].map((m) => m[1]);
+         const inD1 = uiActions.filter((a) => d1.capabilities.some((c) => c.id === a)).sort();
+         const notInD1 = uiActions.filter((a) => !d1.capabilities.some((c) => c.id === a)).sort();
+-        check('10 action ID trong dropdown Setup: 7 có trong D1', uiActions.length === 10 && inD1.length === 7, { uiActions, inD1 });
++        check('14 action ID trong dropdown Setup: 11 có trong D1 (A-MAP-01 +4)', uiActions.length === 14 && inD1.length === 11, { uiActions, inD1 });
+         check('3 action ID ngoài D1 đúng như rules.md mục "Namespace exceptions" (fn:autoDetect, keymod:doTone, preset:load)', JSON.stringify(notInD1) === JSON.stringify(['fn:autoDetect', 'keymod:doTone', 'preset:load']), notInD1);
+         const d1OnlyNotUi = d1.capabilities.map((c) => c.id).filter((id) => !uiActions.includes(id));
+         check('D1 capability không có trong UI: chỉ daw:save (đúng như ghi chú trong XML)', JSON.stringify(d1OnlyNotUi) === JSON.stringify(['daw:save']), d1OnlyNotUi);
+diff --git a/tests/unit/MidiLearnDispatch.verify.js b/tests/unit/MidiLearnDispatch.verify.js
+index 3c4bee9..d230f0f 100644
+--- a/tests/unit/MidiLearnDispatch.verify.js
++++ b/tests/unit/MidiLearnDispatch.verify.js
+@@ -248,8 +248,8 @@ async function main() {
+     console.log('\n== SECTION 7: Regression daw:play/stop/record KHÔNG đổi + chứng minh D1 THẬT SỰ là source-of-truth ==');
+     {
+         const keys = Object.keys(d1Loader.CAPABILITY_BACKEND_TARGET).sort();
+-        check('7. CAPABILITY_BACKEND_TARGET đúng CHÍNH XÁC 3 key: daw:play, daw:record, daw:stop (backend metadata, không mở rộng)',
+-            JSON.stringify(keys) === JSON.stringify(['daw:play', 'daw:record', 'daw:stop']), keys);
++        check('7. CAPABILITY_BACKEND_TARGET đúng CHÍNH XÁC 7 key: 3 transport gốc + undo/redo/loop/metronome (A-MAP-01)',
++            JSON.stringify(keys) === JSON.stringify(['daw:loop', 'daw:metronome', 'daw:play', 'daw:record', 'daw:redo', 'daw:stop', 'daw:undo']), keys);
+         check('7. daw:play -> {studio_one, transportPlay}', JSON.stringify(d1Loader.CAPABILITY_BACKEND_TARGET['daw:play']) === JSON.stringify({ targetId: 'studio_one', action: 'transportPlay' }));
+         check('7. daw:stop -> {studio_one, transportStop}', JSON.stringify(d1Loader.CAPABILITY_BACKEND_TARGET['daw:stop']) === JSON.stringify({ targetId: 'studio_one', action: 'transportStop' }));
+         check('7. daw:record -> {studio_one, transportRecord}', JSON.stringify(d1Loader.CAPABILITY_BACKEND_TARGET['daw:record']) === JSON.stringify({ targetId: 'studio_one', action: 'transportRecord' }));
+diff --git a/tests/unit/MidiMacroA01.verify.js b/tests/unit/MidiMacroA01.verify.js
+new file mode 100644
+index 0000000..00c702a
+--- /dev/null
++++ b/tests/unit/MidiMacroA01.verify.js
+@@ -0,0 +1,84 @@
++/* TASK A-MACRO-01 / A-MAP-01 — kiểm tra MIDI Macro (D1-gated, tối đa 5 bước) + 4 lệnh hotkey mới. Chạy: node tests/unit/MidiMacroA01.verify.js */
++const path = require('path');
++const fs = require('fs');
++const root = path.join(__dirname, '..', '..');
++const d1Loader = require(path.join(root, 'core/command-engine-js/d1Loader.js'));
++const runtime = require(path.join(root, 'core/command-engine-js/runtime.js'));
++const { getCapability } = require(path.join(root, 'core/command-engine-js/capabilityRegistry.js'));
++let pass = 0, fail = 0;
++function check(l, c, d) { if (c) { pass++; console.log('  OK   ' + l); } else { fail++; console.log('  FAIL ' + l + (d !== undefined ? ' (thực tế: ' + JSON.stringify(d) + ')' : '')); } }
++
++(async () => {
++    const d1 = await d1Loader.loadD1FromDisk();
++    check('D1 production hợp lệ (12 capability)', d1.ok && d1.capabilities.length === 12, d1.errors);
++
++    console.log('\n== A-MAP-01: 4 lệnh mới có driver thật trong registry ==');
++    for (const [cap, act, keys] of [['daw:undo', 'undo', '^z'], ['daw:redo', 'redo', '^y'], ['daw:loop', 'loopToggle', '/'], ['daw:metronome', 'metronomeToggle', 'c']]) {
++        const t = d1Loader.CAPABILITY_BACKEND_TARGET[cap];
++        const c = getCapability(t && t.targetId, t && t.action);
++        check(cap + ' -> hotkey ' + keys, !!c && c.length === 1 && c[0].driverName === 'hotkey' && c[0].params.keys === keys, c);
++    }
++
++    console.log('\n== buildD1GatedMacros (hàm thuần) ==');
++    const single = new Map([['cc:1:10', {}]]);
++    const mk = (o) => Object.assign({ type: 'cc', channel: 1, number: 20, steps: ['daw:play'] }, o);
++    let r = d1Loader.buildD1GatedMacros([mk({ steps: ['daw:undo', 'daw:play'] })], d1.capabilities, single);
++    check('macro hợp lệ 2 bước được nhận', r.macros.size === 1 && r.macros.get('cc:1:20').steps.length === 2 && r.rejected.length === 0, r);
++    r = d1Loader.buildD1GatedMacros([mk({ steps: ['daw:play', 'daw:stop', 'daw:record', 'daw:undo', 'daw:redo'] })], d1.capabilities, single);
++    check('đúng 5 bước vẫn nhận', r.macros.size === 1, r);
++    r = d1Loader.buildD1GatedMacros([mk({ steps: ['daw:play', 'daw:stop', 'daw:record', 'daw:undo', 'daw:redo', 'daw:loop'] })], d1.capabilities, single);
++    check('6 bước bị loại (TOO_MANY_STEPS)', r.macros.size === 0 && r.rejected[0].reason === 'TOO_MANY_STEPS', r.rejected);
++    r = d1Loader.buildD1GatedMacros([mk({ steps: [] })], d1.capabilities, single);
++    check('0 bước bị loại (EMPTY_MACRO)', r.macros.size === 0 && r.rejected[0].reason === 'EMPTY_MACRO', r.rejected);
++    r = d1Loader.buildD1GatedMacros([mk({ steps: ['daw:save'] })], d1.capabilities, single);
++    check('bước daw:save (midi-allowed=false) bị loại', r.macros.size === 0 && r.rejected[0].reason === 'D1_MIDI_NOT_ALLOWED', r.rejected);
++    r = d1Loader.buildD1GatedMacros([mk({ steps: ['menu:buttonA'] })], d1.capabilities, single);
++    check('bước menu:buttonA (chưa có backend) bị loại', r.macros.size === 0, r.rejected);
++    r = d1Loader.buildD1GatedMacros([mk({ steps: ['abc:xyz'] })], d1.capabilities, single);
++    check('bước không có trong D1 bị loại', r.rejected[0] && r.rejected[0].reason === 'UNKNOWN_CAPABILITY_IN_D1', r.rejected);
++    r = d1Loader.buildD1GatedMacros([mk({ number: 10 })], d1.capabilities, single);
++    check('trùng key với mapping đơn bị loại', r.rejected[0] && r.rejected[0].reason === 'CONFLICTS_WITH_SINGLE_MAPPING', r.rejected);
++    r = d1Loader.buildD1GatedMacros([mk({}), mk({ steps: ['daw:stop'] })], d1.capabilities, single);
++    check('2 macro cùng key: giữ cái đầu, loại cái sau', r.macros.size === 1 && r.rejected[0].reason === 'DUPLICATE_RUNTIME_KEY', r);
++    r = d1Loader.buildD1GatedMacros([mk({ steps: ['macro:x'] })], d1.capabilities, single);
++    check('macro không thể chứa macro (không lặp vô hạn)', r.macros.size === 0, r);
++    r = d1Loader.buildD1GatedMacros([mk({ delayMs: 99999 })], d1.capabilities, single);
++    check('delay bị chặn ở 2000 ms', r.macros.get('cc:1:20').delayMs === 2000, r);
++    r = d1Loader.buildD1GatedMacros(undefined, d1.capabilities, single);
++    check('không có macro nào -> map rỗng, không throw', r.macros.size === 0);
++
++    console.log('\n== Runtime thật: nạp macro + chạy chuỗi bằng driver giả ==');
++    runtime.start({ readSettingsFile: () => ({}) });
++    await new Promise((r) => setTimeout(r, 1500)); // chờ lần nạp D1 ngầm của start() xong, tránh ghi đè index của test
++    const settings = { midiMappingsV1: [{ type: 'cc', channel: 1, number: 10, action: 'daw:play' }], midiMacrosV1: [mk({ steps: ['daw:undo', 'daw:play', 'daw:loop'], delayMs: 5 })] };
++    await runtime.loadD1AndRebuild(settings);
++    check('runtime nạp đúng 1 macro', runtime.getD1GatedMacros().size === 1 && runtime.getD1State().macroCount === 1, runtime.getD1State());
++    const engine = runtime._getEngineForTest();
++    const calls = [];
++    const fake = (ok) => ({ name: 'hotkey', isReady: async () => true, execute: async (p) => { calls.push(p.keys); return ok(p) ? { ok: true } : { ok: false, detail: 'fail' }; } });
++    engine.drivers.set('hotkey', fake(() => true));
++    engine.drivers.delete('mcu'); engine.drivers.delete('midi');
++    let res = await runtime.runMacroForTest('cc:1:20', runtime.getD1GatedMacros().get('cc:1:20'));
++    check('chạy đủ 3 bước đúng thứ tự (^z, Space, /)', res.ok && res.ran === 3 && JSON.stringify(calls) === JSON.stringify(['^z', 'Space', '/']), { res, calls });
++    calls.length = 0;
++    engine.drivers.set('hotkey', fake((p) => p.keys !== 'Space'));
++    res = await runtime.runMacroForTest('cc:1:20', runtime.getD1GatedMacros().get('cc:1:20'));
++    check('bước 2 lỗi -> DỪNG, bước 3 KHÔNG chạy', !res.ok && res.ran === 2 && calls.length === 2, { res, calls });
++    calls.length = 0;
++    engine.drivers.set('hotkey', fake(() => true));
++    const m = runtime.getD1GatedMacros().get('cc:1:20');
++    const [a, b] = await Promise.all([runtime.runMacroForTest('cc:1:20', m), runtime.runMacroForTest('cc:1:20', m)]);
++    check('bấm lại khi đang chạy -> lần 2 bị bỏ qua (BUSY), chuỗi chỉ chạy 1 lần', (a.skipped === 'BUSY') !== (b.skipped === 'BUSY') && calls.length === 3, { calls });
++    await runtime.loadD1AndRebuild({ midiMacrosV1: [mk({ steps: ['daw:play'] })] });
++    check('đổi settings -> macro index được xây lại', runtime.getD1GatedMacros().size === 1 && runtime.getD1GatedMacros().get('cc:1:20').steps.length === 1);
++    runtime.stop();
++
++    console.log('\n== UI tĩnh ==');
++    const html = fs.readFileSync(path.join(root, 'ui/setup.html'), 'utf8');
++    check('setup.html nạp setupMidiMacro.js', html.includes('js/setupMidiMacro.js'));
++    check('dropdown Learn có undo/redo/loop/metronome', ['undo', 'redo', 'loop', 'metronome'].every((x) => html.includes('value="daw:' + x + '"')));
++    check('mọi dòng bảng nhóm có data-map', (html.match(/class="mapping-row" data-map=/g) || []).length === 7);
++    check('Macro card không còn badge "Chưa có Engine thực thi chuỗi action"', !html.includes('Chưa có Engine thực thi chuỗi action'));
++    console.log('\n' + pass + ' PASS, ' + fail + ' FAIL');
++    process.exit(fail ? 1 : 0);
++})();
+diff --git a/ui/css/setup.css b/ui/css/setup.css
+index 1643720..c001ca9 100644
+--- a/ui/css/setup.css
++++ b/ui/css/setup.css
+@@ -271,6 +271,8 @@ select, input[type="text"], input[type="number"] {
+ .overview-table th, .overview-table td { padding: 6px 8px; border-top: 1px solid rgba(255,255,255,.05); text-align: left; }
+ .overview-table th { color: var(--text-dim); font-weight: 600; }
+ .tag-unassigned { font-size: 10px; color: #ff8080; background: rgba(255,77,77,.1); border: 1px solid rgba(255,77,77,.25); padding: 1px 8px; border-radius: 20px; }
++.tag-assigned { font-size: 10px; color: var(--ok); background: rgba(0,255,68,.1); border: 1px solid rgba(0,255,68,.3); padding: 1px 8px; border-radius: 20px; }
++.tag-learned { font-size: 10px; color: var(--soon); background: rgba(255,180,84,.12); border: 1px solid rgba(255,180,84,.3); padding: 1px 8px; border-radius: 20px; }
+ 
+ /* ---------- SAVED MIDI MAPPING ROWS (thật) ---------- */
+ .mapping-saved-row {
+diff --git a/ui/js/audioCalibration.js b/ui/js/audioCalibration.js
+new file mode 100644
+index 0000000..4990431
+--- /dev/null
++++ b/ui/js/audioCalibration.js
+@@ -0,0 +1,63 @@
++/* audioCalibration.js — TASK A-AUDIO-01
++   Hàm THUẦN (không đụng Web Audio/DOM) để đo độ trễ vòng (round-trip) bằng tương quan chéo với một tiếng "chirp" đã biết.
++   Dùng được cả trong trình duyệt (window.AudioCalibration) lẫn Node (module.exports) để test không cần phần cứng. */
++(function (root) {
++    // Chirp quét 1 kHz -> 8 kHz, cửa sổ Hann: có đỉnh tương quan nhọn nên tìm vị trí chính xác tới ~1 mẫu, chịu được nhiễu.
++    function makeChirp(sampleRate, ms, f0, f1) {
++        const n = Math.max(16, Math.round(sampleRate * (ms || 40) / 1000));
++        const a = f0 || 1000, b = f1 || 8000, T = n / sampleRate;
++        const out = new Float32Array(n);
++        for (let i = 0; i < n; i++) {
++            const t = i / sampleRate;
++            const phase = 2 * Math.PI * (a * t + (b - a) * t * t / (2 * T));
++            out[i] = Math.sin(phase) * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)));
++        }
++        return out;
++    }
++
++    // Tìm vị trí (mẫu) khớp nhất của `burst` trong `rec` trong khoảng [from, to). Trả null nếu không đủ tin cậy.
++    // score = tương quan chuẩn hoá (0..1); minScore mặc định 0.35 để loại nhiễu thuần.
++    function findBurst(rec, burst, from, to, minScore) {
++        const M = burst.length;
++        const start = Math.max(0, from | 0), end = Math.min(rec.length - M, to | 0);
++        if (end <= start) return null;
++        let eb = 0; for (let i = 0; i < M; i++) eb += burst[i] * burst[i];
++        if (eb === 0) return null;
++        let best = -1, bestPos = -1, winE = 0;
++        for (let i = 0; i < M; i++) winE += rec[start + i] * rec[start + i];
++        for (let p = start; p <= end; p++) {
++            if (p > start) { const o = rec[p - 1], n = rec[p + M - 1]; winE += n * n - o * o; }
++            let dot = 0; for (let i = 0; i < M; i++) dot += rec[p + i] * burst[i];
++            const denom = Math.sqrt(Math.max(winE, 1e-20) * eb);
++            const sc = dot / denom;
++            if (sc > best) { best = sc; bestPos = p; }
++        }
++        if (best < (minScore == null ? 0.35 : minScore)) return { pos: null, score: best };
++        return { pos: bestPos, score: best };
++    }
++
++    function median(a) { const s = a.slice().sort((x, y) => x - y); const m = s.length >> 1; return s.length ? (s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) : null; }
++
++    // rec: mẫu thu được (mono); sampleRate; burst; scheduledSec: thời điểm (giây, tính từ mẫu 0 của rec) mỗi burst được PHÁT.
++    // Trả { ok, latencyMs (median), perBurstMs[], found, total, scores[] }.
++    function measureRoundTrip(rec, sampleRate, burst, scheduledSec, searchSec) {
++        const win = searchSec || 0.6;
++        const per = [], scores = [];
++        for (const t of scheduledSec) {
++            const r = findBurst(rec, burst, Math.floor((t - 0.02) * sampleRate), Math.floor((t + win) * sampleRate));
++            if (r && r.pos != null) { per.push((r.pos / sampleRate - t) * 1000); scores.push(r.score); }
++        }
++        return { ok: per.length >= Math.ceil(scheduledSec.length / 2), latencyMs: median(per), perBurstMs: per, found: per.length, total: scheduledSec.length, scores };
++    }
++
++    // Độ trễ do hệ thống báo (không cần loopback): baseLatency + outputLatency (giây) -> ms.
++    function reportedLatencyMs(ctx) {
++        if (!ctx) return null;
++        const b = Number(ctx.baseLatency) || 0, o = Number(ctx.outputLatency) || 0;
++        return (b + o) > 0 ? (b + o) * 1000 : null;
++    }
++
++    const api = { makeChirp, findBurst, measureRoundTrip, reportedLatencyMs, median };
++    if (typeof module !== "undefined" && module.exports) module.exports = api;
++    else root.AudioCalibration = api;
++})(typeof window !== "undefined" ? window : globalThis);
+diff --git a/ui/js/i18n.js b/ui/js/i18n.js
+index 4230d32..339b594 100644
+--- a/ui/js/i18n.js
++++ b/ui/js/i18n.js
+@@ -434,10 +434,10 @@
+     ["với MIDI Input ở trên (điều khiển NGƯỢC LẠI, từ controller vào app). Mapping lưu riêng theo từng DAW, đổi DAW không mất mapping DAW khác.", "from the MIDI Input above (the REVERSE direction, from the controller into the app). Mappings are saved separately per DAW; switching DAW does not lose another DAW's mappings."],
+     ["📋 Mapping Overview (DAW đang chọn)", "📋 Mapping Overview (selected DAW)"],
+     ["Sơ đồ nhóm Mapping (khái niệm)", "Mapping Groups Overview (concept)"],
+-    ["Chỉ nhóm \"DAW Control: Play/Stop/Record\" đã nối thật", "Only the \"DAW Control: Play/Stop/Record\" group is truly wired"],
++    ["Nhóm \"DAW Control\" (Play/Stop/Record/Undo/Redo/Loop/Metronome) đã nối thật", "The \"DAW Control\" group (Play/Stop/Record/Undo/Redo/Loop/Metronome) is truly wired"],
+     ["Mapping thật (Learn + Lưu +", "Real mapping (Learn + Save +"],
+     ["dispatch thật tới Studio One", "real dispatch to Studio One"],
+-    ["qua Command Engine) đã có ở Mapping đã lưu bên trên, nhưng chỉ 3 action", "via Command Engine) already exists in the Saved Mappings above, but only 3 actions"],
++    ["qua Command Engine) đã có ở Mapping đã lưu bên trên, nhưng chỉ 7 action", "via Command Engine) already exists in the Saved Mappings above, but only 7 actions"],
+     ["có capability thật trong", "have a real capability in"],
+     ["(nối thật qua", "(truly wired via"],
+     ["ở main process — xem panel \"Command Engine\" ở tab Chọn DAW để biết trạng thái test). Các nhóm còn lại (Menu/Preset/Key-Mod/Plugin) vẫn Learn+Save được nhưng KHÔNG dispatch — bảng dưới chỉ minh hoạ khái niệm.", "in the main process — see the \"Command Engine\" panel in the Select DAW tab for test status). The remaining groups (Menu/Preset/Key-Mod/Plugin) can still be Learned+Saved but are NOT dispatched — the table below only illustrates the concept."],
+@@ -449,7 +449,8 @@
+     ["Phát / Dừng / Ghi", "Play / Stop / Record"],
+     ["Hoàn tác / Làm lại / Marker", "Undo / Redo / Marker"],
+     ["Lặp / Metronome", "Loop / Metronome"],
+-    ["Chưa có Engine thực thi chuỗi action", "No Engine to execute action chains yet"],
++    ["Đã nối Command Engine (tối đa 5 bước)", "Wired to Command Engine (max 5 steps)"],
++    ["Thật — dùng cho Test/Calibration trong Setup", "Real — used for Test/Calibration in Setup"],
+     ["1 MIDI → nhiều Action nối tiếp (Action 1 → Action 2 → Action 3). Command Engine hiện chỉ dispatch 1 action/lần (không có khái niệm chuỗi) — cần thêm logic riêng, giới hạn rõ số bước tối đa (đề xuất ≤5 action/macro) để tránh loop. Chưa làm ở task này vì Transport đơn lẻ (Mục 8) phải ổn định trước.", "1 MIDI → multiple Actions in sequence (Action 1 → Action 2 → Action 3). The Command Engine currently dispatches only 1 action at a time (no concept of chains) — separate logic is needed, with a clearly limited maximum number of steps (suggested ≤5 actions/macro) to avoid loops. Not done in this task because single Transport (Section 8) must be stable first."],
+     ["Bộ điều khiển", "Controller"],
+     ["⚡ Ưu tiên MIDI", "⚡ MIDI Priority"],
+diff --git a/ui/js/setupAudioTest.js b/ui/js/setupAudioTest.js
+new file mode 100644
+index 0000000..30ca98f
+--- /dev/null
++++ b/ui/js/setupAudioTest.js
+@@ -0,0 +1,119 @@
++/* setupAudioTest.js — TASK A-AUDIO-01
++   Nối khu "Sample Rate / Buffer Size / Latency / Audio Test / Calibration" trong Setup:
++   - Sample Rate / Buffer size: lưu vào appSettings (audioSampleRate, audioBufferSize), dùng cho AudioContext của phép đo trong Setup.
++     Buffer size -> latencyHint = size / sampleRate (giây). Trình duyệt chỉ coi đây là GỢI Ý, không bảo đảm đúng từng mẫu.
++   - Latency: độ trễ do HỆ THỐNG báo (baseLatency + outputLatency) sau mỗi lần Test; sau Calibration hiện thêm độ trễ vòng đo thật.
++   - Test: phát tiếng bíp 440 Hz qua Audio Output đã chọn (selectedAudioOutputDeviceId).
++   - Calibration: phát 3 chirp, thu lại bằng MIC Input (selectedMicDeviceId, hoặc mic mặc định), tương quan chéo -> độ trễ vòng (median).
++   KHÔNG đụng audioSource.js/renderer.js/Engine của Menu. Chưa kiểm chứng trên phần cứng thật (xem báo cáo). */
++(function () {
++    const $ = (id) => document.getElementById(id);
++    const AC = () => window.AudioCalibration;
++    const get = (k, d) => { try { const v = typeof getSetting === "function" ? getSetting(k) : undefined; return v === undefined || v === null || v === "" ? d : v; } catch (_) { return d; } };
++    const put = (k, v) => { try { if (typeof setSetting === "function") setSetting(k, v); } catch (_) {} };
++    let busy = false;
++
++    function cfg() {
++        const sr = Number($("audioSampleRateSelect").value) || 48000;
++        const buf = Number($("audioBufferSelect").value) || 256;
++        return { sr, buf, hint: buf / sr };
++    }
++    function setLatency(text, bad) { const el = $("audioLatencyText"); if (el) { el.textContent = text; el.style.color = bad ? "#ff8080" : ""; } }
++
++    async function makeCtx() {
++        const { sr, hint } = cfg();
++        const Ctor = window.AudioContext || window.webkitAudioContext;
++        if (!Ctor) throw new Error("Trình duyệt không có Web Audio API");
++        let ctx;
++        try { ctx = new Ctor({ sampleRate: sr, latencyHint: hint }); } catch (_) { ctx = new Ctor({ latencyHint: hint }); } // thiết bị không nhận sampleRate này -> dùng mặc định, rồi báo giá trị thật
++        const outId = get("selectedAudioOutputDeviceId", "");
++        if (outId && typeof ctx.setSinkId === "function") { try { await ctx.setSinkId(outId); } catch (e) { console.warn("[AudioTest] setSinkId lỗi:", e); } }
++        if (ctx.state === "suspended") await ctx.resume();
++        return ctx;
++    }
++
++    function describe(ctx) {
++        const rep = AC().reportedLatencyMs(ctx);
++        return (rep == null ? "hệ thống không báo độ trễ" : "hệ thống báo ≈ " + rep.toFixed(1) + " ms") + " · " + ctx.sampleRate + " Hz";
++    }
++
++    async function runTest() {
++        if (busy) return; busy = true;
++        const btn = $("btnAudioTest"); btn.disabled = true;
++        let ctx;
++        try {
++            ctx = await makeCtx();
++            const osc = ctx.createOscillator(), g = ctx.createGain();
++            osc.frequency.value = 440; osc.connect(g); g.connect(ctx.destination);
++            const t = ctx.currentTime + 0.05;
++            g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.2, t + 0.03); g.gain.setValueAtTime(0.2, t + 0.35); g.gain.linearRampToValueAtTime(0, t + 0.4);
++            osc.start(t); osc.stop(t + 0.42);
++            setLatency("Đang phát bíp… " + describe(ctx));
++            await new Promise((r) => setTimeout(r, 600));
++            setLatency("Đã phát bíp: " + describe(ctx) + (get("selectedAudioOutputDeviceId", "") ? "" : " (output mặc định)"));
++        } catch (e) {
++            setLatency("Test lỗi: " + (e && e.message || e), true);
++        } finally {
++            try { ctx && await ctx.close(); } catch (_) {}
++            btn.disabled = false; busy = false;
++        }
++    }
++
++    async function runCalibration() {
++        if (busy) return; busy = true;
++        const btn = $("btnAudioCalibrate"); btn.disabled = true;
++        let ctx, stream, proc, src;
++        try {
++            setLatency("Đang đo… giữ yên lặng, đừng chạm mic.");
++            ctx = await makeCtx();
++            const micId = get("selectedMicDeviceId", "");
++            stream = await navigator.mediaDevices.getUserMedia({ audio: Object.assign({ echoCancellation: false, noiseSuppression: false, autoGainControl: false }, micId ? { deviceId: { exact: micId } } : {}) });
++            const sr = ctx.sampleRate;
++            const chunks = [];
++            src = ctx.createMediaStreamSource(stream);
++            proc = ctx.createScriptProcessor(256, 1, 1);
++            const mute = ctx.createGain(); mute.gain.value = 0;
++            let t0 = null;
++            proc.onaudioprocess = (e) => { if (t0 === null) t0 = ctx.currentTime; chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
++            src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
++            await new Promise((r) => setTimeout(r, 200)); // cho luồng thu ổn định
++            const burst = AC().makeChirp(sr, 40, 1000, 8000);
++            const buf = ctx.createBuffer(1, burst.length, sr); buf.copyToChannel(burst, 0);
++            const startCtx = ctx.currentTime + 0.3;
++            const sched = [0, 0.8, 1.6].map((d) => startCtx + d);
++            sched.forEach((t) => { const s = ctx.createBufferSource(); s.buffer = buf; const g = ctx.createGain(); g.gain.value = 0.5; s.connect(g); g.connect(ctx.destination); s.start(t); });
++            await new Promise((r) => setTimeout(r, 2700));
++            const total = chunks.reduce((n, c) => n + c.length, 0);
++            const rec = new Float32Array(total); let o = 0; chunks.forEach((c) => { rec.set(c, o); o += c.length; });
++            // Mẫu 0 của rec ≈ t0 trên đồng hồ ctx (sai số tối đa ~ 1 buffer = 256 mẫu).
++            const res = AC().measureRoundTrip(rec, sr, burst, sched.map((t) => t - t0), 0.6);
++            const bufMs = (256 / sr) * 1000;
++            if (!res.ok) {
++                setLatency("Calibration KHÔNG nghe thấy tiếng chirp (" + res.found + "/" + res.total + "). Tăng âm lượng loa/đưa mic gần loa, hoặc dùng cáp loopback.", true);
++            } else {
++                put("audioRoundTripMs", Math.round(res.latencyMs * 10) / 10);
++                setLatency("Độ trễ vòng ≈ " + res.latencyMs.toFixed(1) + " ms (±" + bufMs.toFixed(1) + " ms, " + res.found + "/" + res.total + " lần nghe thấy) · " + describe(ctx));
++            }
++        } catch (e) {
++            setLatency("Calibration lỗi: " + (e && e.message || e), true);
++        } finally {
++            try { proc && (proc.onaudioprocess = null); proc && proc.disconnect(); src && src.disconnect(); } catch (_) {}
++            try { stream && stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
++            try { ctx && await ctx.close(); } catch (_) {}
++            btn.disabled = false; busy = false;
++        }
++    }
++
++    function init() {
++        if (!$("audioEngineCard") || !window.AudioCalibration) return;
++        $("audioSampleRateSelect").value = String(get("audioSampleRate", 48000));
++        $("audioBufferSelect").value = String(get("audioBufferSize", 256));
++        $("audioSampleRateSelect").addEventListener("change", () => put("audioSampleRate", cfg().sr));
++        $("audioBufferSelect").addEventListener("change", () => put("audioBufferSize", cfg().buf));
++        $("btnAudioTest").addEventListener("click", runTest);
++        $("btnAudioCalibrate").addEventListener("click", runCalibration);
++        const rt = get("audioRoundTripMs", null);
++        if (rt !== null) setLatency("Lần đo trước: độ trễ vòng ≈ " + rt + " ms");
++    }
++    window.addEventListener("load", () => setTimeout(init, 450));
++})();
+diff --git a/ui/js/setupMidiInput.js b/ui/js/setupMidiInput.js
+index fa41682..5d413c5 100644
+--- a/ui/js/setupMidiInput.js
++++ b/ui/js/setupMidiInput.js
+@@ -184,9 +184,31 @@
+         delete learnResult.dataset.channel;
+     }
+ 
+-    const DISPATCHABLE_ACTIONS = new Set(["daw:play", "daw:stop", "daw:record"]);
++    // TASK A-MAP-01 — thêm 4 lệnh hotkey (khớp CAPABILITY_BACKEND_TARGET trong core/command-engine-js/d1Loader.js).
++    const DISPATCHABLE_ACTIONS = new Set(["daw:play", "daw:stop", "daw:record", "daw:undo", "daw:redo", "daw:loop", "daw:metronome"]);
++
++    // TASK A-MAP-01 — "Sơ đồ nhóm Mapping": mỗi dòng (data-map="id1,id2,...") hiện trạng thái THẬT từ mapping đã lưu.
++    //   Đã gán = đã Learn VÀ có capability chạy thật; Đã lưu = đã Learn nhưng chưa có backend; Chưa gán = chưa Learn.
++    function renderGroupTable() {
++        const rows = document.querySelectorAll(".mapping-row[data-map]");
++        if (!rows.length) return;
++        const saved = new Set(getMappings().map((m) => m.action));
++        rows.forEach((row) => {
++            const ids = (row.getAttribute("data-map") || "").split(",").filter(Boolean);
++            const tag = row.querySelector("span:last-child");
++            if (!tag) return;
++            const done = ids.filter((id) => saved.has(id));
++            const wired = done.filter((id) => DISPATCHABLE_ACTIONS.has(id));
++            let cls = "tag-unassigned", text = "Chưa gán";
++            if (wired.length > 0) { cls = "tag-assigned"; text = "Đã gán " + wired.length + "/" + ids.length; }
++            else if (done.length > 0) { cls = "tag-learned"; text = "Đã lưu " + done.length + "/" + ids.length + " — chưa chạy"; }
++            tag.className = cls;
++            if (tag.textContent !== text) tag.textContent = text;
++        });
++    }
+ 
+     function renderMappingList() {
++        renderGroupTable();
+         const { mappingList } = els();
+         if (!mappingList) return;
+         const list = getMappings();
+diff --git a/ui/js/setupMidiMacro.js b/ui/js/setupMidiMacro.js
+new file mode 100644
+index 0000000..ef5fb35
+--- /dev/null
++++ b/ui/js/setupMidiMacro.js
+@@ -0,0 +1,69 @@
++/* setupMidiMacro.js — TASK A-MACRO-01
++   Giao diện Setup cho MIDI Macro: 1 MIDI trigger -> chuỗi tối đa 5 action. Lưu vào appSettings key "midiMacrosV1"
++   (cùng hệ thống lưu của midiMappingsV1). Bộ chạy thật nằm ở main process: core/command-engine-js/runtime.js (D1-gated). */
++(function () {
++    const KEY = "midiMacrosV1";
++    const MAPPING_KEY = "midiMappingsV1";
++    const MAX_STEPS = 5;
++    // Khớp CAPABILITY_BACKEND_TARGET (core/command-engine-js/d1Loader.js).
++    const STEP_OPTIONS = [["daw:play", "Play"], ["daw:stop", "Stop"], ["daw:record", "Record"], ["daw:undo", "Undo"], ["daw:redo", "Redo"], ["daw:loop", "Loop"], ["daw:metronome", "Metronome"]];
++    const $ = (id) => document.getElementById(id);
++    const get = (k) => { try { const v = typeof getSetting === "function" ? getSetting(k) : null; return Array.isArray(v) ? v : []; } catch (_) { return []; } };
++
++    function buildStepSelects() {
++        const box = $("macroSteps");
++        if (!box || box.children.length) return;
++        for (let i = 1; i <= MAX_STEPS; i++) {
++            const sel = document.createElement("select");
++            sel.className = "ph-select"; sel.id = "macroStep" + i;
++            sel.innerHTML = '<option value="">' + (i === 1 ? "Bước 1 (bắt buộc)…" : "Bước " + i + " (tuỳ chọn)") + "</option>" +
++                STEP_OPTIONS.map(([v, t]) => '<option value="' + v + '">' + t + "</option>").join("");
++            box.appendChild(sel);
++        }
++    }
++
++    function render() {
++        const list = $("macroList"); if (!list) return;
++        const macros = get(KEY);
++        if (!macros.length) { list.innerHTML = '<div class="midi-monitor-empty">Chưa có Macro nào.</div>'; return; }
++        list.innerHTML = "";
++        macros.forEach((m, idx) => {
++            const row = document.createElement("div");
++            row.className = "mapping-saved-row";
++            const names = m.steps.map((s) => (STEP_OPTIONS.find((o) => o[0] === s) || [s, s])[1]).join(" → ");
++            row.innerHTML = "<span>" + String(m.type).toUpperCase() + " " + m.number + " ch" + m.channel + "</span><span>→ " + names + "</span>" +
++                '<span class="badge badge-live">trễ ' + (m.delayMs ?? 150) + " ms</span>" +
++                '<button class="setup-btn macro-del-btn" data-idx="' + idx + '">🗑</button>';
++            list.appendChild(row);
++        });
++        list.querySelectorAll(".macro-del-btn").forEach((b) => b.addEventListener("click", () => {
++            const cur = get(KEY); cur.splice(Number(b.dataset.idx), 1); persist(cur); render();
++        }));
++    }
++
++    function persist(list) {
++        if (typeof setSetting === "function") setSetting(KEY, list);
++        try { window.electronAPI && window.electronAPI.notifySetupChanged && window.electronAPI.notifySetupChanged(); } catch (_) {}
++    }
++
++    function say(msg, ok) { const el = $("macroStatus"); if (el) { el.textContent = msg; el.style.color = ok ? "" : "#ff8080"; } }
++
++    function save() {
++        const type = $("macroType").value;
++        const channel = Number($("macroChannel").value), number = Number($("macroNumber").value), delayMs = Number($("macroDelay").value);
++        if (!Number.isInteger(channel) || channel < 1 || channel > 16) return say("Channel phải từ 1 đến 16.", false);
++        if (!Number.isInteger(number) || number < 0 || number > 127) return say("Number phải từ 0 đến 127.", false);
++        const steps = [];
++        for (let i = 1; i <= MAX_STEPS; i++) { const v = $("macroStep" + i).value; if (v) steps.push(v); }
++        if (!steps.length) return say("Chọn ít nhất 1 bước.", false);
++        const dup = get(MAPPING_KEY).find((m) => m.type === type && Number(m.channel) === channel && Number(m.number) === number);
++        if (dup) return say("Trùng Mapping đơn đã lưu (" + dup.action + ") — chọn số khác.", false);
++        const cur = get(KEY);
++        if (cur.some((m) => m.type === type && Number(m.channel) === channel && Number(m.number) === number)) return say("Đã có Macro dùng đúng số MIDI này.", false);
++        cur.push({ id: "macro-" + Date.now(), type, channel, number, steps, delayMs: Number.isFinite(delayMs) && delayMs >= 0 ? Math.min(delayMs, 2000) : 150 });
++        persist(cur); render();
++        say("Đã lưu Macro (" + steps.length + " bước).", true);
++    }
++
++    window.addEventListener("load", () => setTimeout(() => { buildStepSelects(); render(); $("macroSaveBtn")?.addEventListener("click", save); }, 450));
++})();
+diff --git a/ui/setup.html b/ui/setup.html
+index 4f0275f..7bb6fdd 100644
+--- a/ui/setup.html
++++ b/ui/setup.html
+@@ -320,17 +320,20 @@
+                         thiết bị này. Việc âm thanh thực sự phát ra đúng loa vật lý cần nghe kiểm tra trên máy thật.</i></p>
+                 </div>
+ 
+-                <div class="panel-card">
++                <div class="panel-card" id="audioEngineCard">
+                     <div class="panel-card-title">Sample Rate / Buffer Size / Latency / Audio Test / Calibration
+-                        <span class="badge badge-unwired">Chưa có Engine</span>
++                        <span class="badge badge-live" id="audioEngineBadge">Thật — dùng cho Test/Calibration trong Setup</span>
+                     </div>
+                     <div class="placeholder-grid">
+-                        <label class="ph-field">Sample Rate<select disabled><option>48000 Hz</option></select></label>
+-                        <label class="ph-field">Buffer size<select disabled><option>256 samples</option></select></label>
+-                        <label class="ph-field">Latency<span class="hint-text">— chưa đo được</span></label>
+-                        <label class="ph-field">Audio Test<button class="setup-btn" disabled>▶ Test</button></label>
+-                        <label class="ph-field">Calibration<button class="setup-btn" disabled>Chạy Calibration Audio</button></label>
++                        <label class="ph-field">Sample Rate<select id="audioSampleRateSelect"><option value="44100">44100 Hz</option><option value="48000" selected>48000 Hz</option><option value="96000">96000 Hz</option></select></label>
++                        <label class="ph-field">Buffer size<select id="audioBufferSelect"><option value="128">128 samples</option><option value="256" selected>256 samples</option><option value="512">512 samples</option><option value="1024">1024 samples</option></select></label>
++                        <label class="ph-field">Latency<span class="hint-text" id="audioLatencyText">— chưa đo được</span></label>
++                        <label class="ph-field">Audio Test<button class="setup-btn" id="btnAudioTest">▶ Test</button></label>
++                        <label class="ph-field">Calibration<button class="setup-btn" id="btnAudioCalibrate">Chạy Calibration Audio</button></label>
+                     </div>
++                    <p class="hint-text" id="audioEngineNote" style="margin-top:8px;">Test phát 1 tiếng bíp qua "Audio Output" đã chọn ở trên. Calibration phát 3 tiếng chirp
++                        qua loa rồi thu lại bằng "MIC Input" để đo độ trễ vòng (cần loa/tai nghe để mic nghe được, hoặc cáp loopback). Sample Rate/Buffer chỉ áp dụng cho
++                        phép đo trong Setup, KHÔNG đổi cấu hình âm thanh đang chạy của Menu.</p>
+                 </div>
+             </section>
+ 
+@@ -409,6 +412,10 @@
+                             <option value="daw:play">Play</option>
+                             <option value="daw:stop">Stop</option>
+                             <option value="daw:record">Record</option>
++                            <option value="daw:undo">Undo</option>
++                            <option value="daw:redo">Redo</option>
++                            <option value="daw:loop">Loop</option>
++                            <option value="daw:metronome">Metronome</option>
+                         </optgroup>
+                         <optgroup label="Plugin Control">
+                             <option value="plugin:retune">Retune</option>
+@@ -503,11 +510,11 @@
+ 
+                 <div class="panel-card">
+                     <div class="panel-card-title">Sơ đồ nhóm Mapping (khái niệm)
+-                        <span class="badge badge-soon">Chỉ nhóm "DAW Control: Play/Stop/Record" đã nối thật</span>
++                        <span class="badge badge-soon">Nhóm "DAW Control" (Play/Stop/Record/Undo/Redo/Loop/Metronome) đã nối thật</span>
+                     </div>
+                     <p class="hint-text">Mapping thật (Learn + Lưu + <b>dispatch thật tới Studio One</b> qua Command
+-                        Engine) đã có ở Mapping đã lưu bên trên, nhưng chỉ 3 action
+-                        <code>daw:play/daw:stop/daw:record</code> có capability thật trong
++                        Engine) đã có ở Mapping đã lưu bên trên, nhưng chỉ 7 action
++                        <code>daw:play/stop/record/undo/redo/loop/metronome</code> có capability thật trong
+                         <code>capabilityRegistry.js</code> (nối thật qua <code>core/command-engine-js/runtime.js</code>
+                         ở main process — xem panel "Command Engine" ở tab Chọn DAW để biết trạng thái test). Các nhóm
+                         còn lại (Menu/Preset/Key-Mod/Plugin) vẫn Learn+Save được nhưng KHÔNG dispatch — bảng dưới chỉ
+@@ -519,42 +526,38 @@
+                     <div class="mapping-tabs">
+                         <div class="mapping-block">
+                             <div class="mapping-block-title">Menu</div>
+-                            <div class="mapping-row"><span>Button A / Button B</span><span class="tag-unassigned">Chưa gán</span></div>
+-                            <div class="mapping-row"><span>Encoder 1 / Encoder 2</span><span class="tag-unassigned">Chưa gán</span></div>
++                            <div class="mapping-row" data-map="menu:buttonA,menu:buttonB"><span>Button A / Button B</span><span class="tag-unassigned">Chưa gán</span></div>
++                            <div class="mapping-row" data-map=""><span>Encoder 1 / Encoder 2</span><span class="tag-unassigned">Chưa gán</span></div>
+                         </div>
+                         <div class="mapping-block">
+                             <div class="mapping-block-title">DAW</div>
+-                            <div class="mapping-row"><span>Play / Stop / Record</span><span class="tag-unassigned">Chưa gán</span></div>
+-                            <div class="mapping-row"><span>Undo / Redo / Marker</span><span class="tag-unassigned">Chưa gán</span></div>
+-                            <div class="mapping-row"><span>Loop / Metronome</span><span class="tag-unassigned">Chưa gán</span></div>
++                            <div class="mapping-row" data-map="daw:play,daw:stop,daw:record"><span>Play / Stop / Record</span><span class="tag-unassigned">Chưa gán</span></div>
++                            <div class="mapping-row" data-map="daw:undo,daw:redo,daw:marker"><span>Undo / Redo / Marker</span><span class="tag-unassigned">Chưa gán</span></div>
++                            <div class="mapping-row" data-map="daw:loop,daw:metronome"><span>Loop / Metronome</span><span class="tag-unassigned">Chưa gán</span></div>
+                         </div>
+                         <div class="mapping-block">
+                             <div class="mapping-block-title">Plugin</div>
+-                            <div class="mapping-row"><span>Retune / Humanize / Flex Tune</span><span class="tag-unassigned">Chưa gán</span></div>
+-                            <div class="mapping-row"><span>Formant / Mix / Output</span><span class="tag-unassigned">Chưa gán</span></div>
++                            <div class="mapping-row" data-map="plugin:retune,plugin:humanize,plugin:flextune"><span>Retune / Humanize / Flex Tune</span><span class="tag-unassigned">Chưa gán</span></div>
++                            <div class="mapping-row" data-map="plugin:formant,plugin:mix,plugin:output"><span>Formant / Mix / Output</span><span class="tag-unassigned">Chưa gán</span></div>
+                         </div>
+                     </div>
+                 </div>
+ 
+-                <div class="panel-card">
+-                    <div class="panel-card-title">🔗 MIDI Macro <span class="badge badge-unwired">Chưa có Engine thực thi chuỗi action</span></div>
+-                    <p class="hint-text">1 MIDI → nhiều Action nối tiếp (Action 1 → Action 2 → Action 3). Command
+-                        Engine hiện chỉ dispatch 1 action/lần (không có khái niệm chuỗi) — cần thêm logic riêng, giới
+-                        hạn rõ số bước tối đa (đề xuất ≤5 action/macro) để tránh loop. Chưa làm ở task này vì Transport
+-                        đơn lẻ (Mục 8) phải ổn định trước.</p>
+-                </div>
+-
+-                <div class="panel-card">
+-                    <div class="panel-card-title">🔀 MIDI Workflow</div>
+-                    <div class="workflow-diagram">
+-                        <span class="workflow-step">Controller</span>
+-                        <span class="workflow-arrow">↓</span>
+-                        <span class="workflow-step workflow-step--main">AUTO MENU AI</span>
+-                        <span class="workflow-arrow">↓</span>
+-                        <span class="workflow-step">DAW</span>
+-                        <span class="workflow-arrow">↓</span>
+-                        <span class="workflow-step">Plugin</span>
++                <div class="panel-card" id="macroCard">
++                    <div class="panel-card-title">🔗 MIDI Macro <span class="badge badge-live" id="macroBadge">Đã nối Command Engine (tối đa 5 bước)</span></div>
++                    <p class="hint-text">1 MIDI → nhiều Action nối tiếp (Action 1 → Action 2 → … tối đa 5 bước). Mỗi bước phải là
++                        action đã nối thật (Play/Stop/Record/Undo/Redo/Loop/Metronome). Một bước lỗi thì chuỗi DỪNG. Bấm lại khi
++                        macro đang chạy sẽ bị bỏ qua (không lặp). Số Type/Channel/Number không được trùng Mapping đơn đã lưu.</p>
++                    <div class="midi-row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
++                        <select id="macroType" class="ph-select"><option value="cc">CC</option><option value="note">Note</option></select>
++                        <input id="macroChannel" class="ph-select" type="number" min="1" max="16" value="1" placeholder="Channel 1-16" style="width:110px;">
++                        <input id="macroNumber" class="ph-select" type="number" min="0" max="127" value="0" placeholder="Number 0-127" style="width:110px;">
++                        <input id="macroDelay" class="ph-select" type="number" min="0" max="2000" value="150" placeholder="Trễ giữa bước (ms)" style="width:150px;">
+                     </div>
++                    <div id="macroSteps" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;"></div>
++                    <button id="macroSaveBtn" class="setup-btn" style="margin-top:8px;">💾 Lưu Macro</button>
++                    <div class="status-text" id="macroStatus" style="margin-top:6px;"></div>
++                    <div class="midi-monitor" id="macroList" style="margin-top:8px;"><div class="midi-monitor-empty">Chưa có Macro nào.</div></div>
+                 </div>
+ 
+                 <div class="panel-card">
+@@ -890,9 +893,12 @@
+     <script src="js/setupLicense.js"></script>
+     <script src="js/setupEffects.js"></script>
+     <script src="js/setupVuMeter.js"></script>
++    <script src="js/audioCalibration.js"></script>
++    <script src="js/setupAudioTest.js"></script>
+     <script src="js/midiHealth.js"></script>
+     <script src="js/setupMidiMonitor.js"></script>
+     <script src="js/setupMidiInput.js"></script>
++    <script src="js/setupMidiMacro.js"></script>
+     <!-- TASK A55 — load/validate/save thật cho nhóm Startup & Paths (dựa vào
+          window.getStartupPaths/setStartupPaths ở js/appSettings.js, phải nạp SAU file đó). -->
+     <script src="js/setupStartupPaths.js"></script>

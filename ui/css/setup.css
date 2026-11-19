@@ -271,6 +271,8 @@ select, input[type="text"], input[type="number"] {
 .overview-table th, .overview-table td { padding: 6px 8px; border-top: 1px solid rgba(255,255,255,.05); text-align: left; }
 .overview-table th { color: var(--text-dim); font-weight: 600; }
 .tag-unassigned { font-size: 10px; color: #ff8080; background: rgba(255,77,77,.1); border: 1px solid rgba(255,77,77,.25); padding: 1px 8px; border-radius: 20px; }
+.tag-assigned { font-size: 10px; color: var(--ok); background: rgba(0,255,68,.1); border: 1px solid rgba(0,255,68,.3); padding: 1px 8px; border-radius: 20px; }
+.tag-learned { font-size: 10px; color: var(--soon); background: rgba(255,180,84,.12); border: 1px solid rgba(255,180,84,.3); padding: 1px 8px; border-radius: 20px; }
 
 /* ---------- SAVED MIDI MAPPING ROWS (thật) ---------- */
 .mapping-saved-row {

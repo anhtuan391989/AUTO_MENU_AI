@@ -248,8 +248,8 @@ async function main() {
     console.log('\n== SECTION 7: Regression daw:play/stop/record KHÔNG đổi + chứng minh D1 THẬT SỰ là source-of-truth ==');
     {
         const keys = Object.keys(d1Loader.CAPABILITY_BACKEND_TARGET).sort();
-        check('7. CAPABILITY_BACKEND_TARGET đúng CHÍNH XÁC 3 key: daw:play, daw:record, daw:stop (backend metadata, không mở rộng)',
-            JSON.stringify(keys) === JSON.stringify(['daw:play', 'daw:record', 'daw:stop']), keys);
+        check('7. CAPABILITY_BACKEND_TARGET đúng CHÍNH XÁC 7 key: 3 transport gốc + undo/redo/loop/metronome (A-MAP-01)',
+            JSON.stringify(keys) === JSON.stringify(['daw:loop', 'daw:metronome', 'daw:play', 'daw:record', 'daw:redo', 'daw:stop', 'daw:undo']), keys);
         check('7. daw:play -> {studio_one, transportPlay}', JSON.stringify(d1Loader.CAPABILITY_BACKEND_TARGET['daw:play']) === JSON.stringify({ targetId: 'studio_one', action: 'transportPlay' }));
         check('7. daw:stop -> {studio_one, transportStop}', JSON.stringify(d1Loader.CAPABILITY_BACKEND_TARGET['daw:stop']) === JSON.stringify({ targetId: 'studio_one', action: 'transportStop' }));
         check('7. daw:record -> {studio_one, transportRecord}', JSON.stringify(d1Loader.CAPABILITY_BACKEND_TARGET['daw:record']) === JSON.stringify({ targetId: 'studio_one', action: 'transportRecord' }));

@@ -184,9 +184,31 @@
         delete learnResult.dataset.channel;
     }
 
-    const DISPATCHABLE_ACTIONS = new Set(["daw:play", "daw:stop", "daw:record"]);
+    // TASK A-MAP-01 — thêm 4 lệnh hotkey (khớp CAPABILITY_BACKEND_TARGET trong core/command-engine-js/d1Loader.js).
+    const DISPATCHABLE_ACTIONS = new Set(["daw:play", "daw:stop", "daw:record", "daw:undo", "daw:redo", "daw:loop", "daw:metronome"]);
+
+    // TASK A-MAP-01 — "Sơ đồ nhóm Mapping": mỗi dòng (data-map="id1,id2,...") hiện trạng thái THẬT từ mapping đã lưu.
+    //   Đã gán = đã Learn VÀ có capability chạy thật; Đã lưu = đã Learn nhưng chưa có backend; Chưa gán = chưa Learn.
+    function renderGroupTable() {
+        const rows = document.querySelectorAll(".mapping-row[data-map]");
+        if (!rows.length) return;
+        const saved = new Set(getMappings().map((m) => m.action));
+        rows.forEach((row) => {
+            const ids = (row.getAttribute("data-map") || "").split(",").filter(Boolean);
+            const tag = row.querySelector("span:last-child");
+            if (!tag) return;
+            const done = ids.filter((id) => saved.has(id));
+            const wired = done.filter((id) => DISPATCHABLE_ACTIONS.has(id));
+            let cls = "tag-unassigned", text = "Chưa gán";
+            if (wired.length > 0) { cls = "tag-assigned"; text = "Đã gán " + wired.length + "/" + ids.length; }
+            else if (done.length > 0) { cls = "tag-learned"; text = "Đã lưu " + done.length + "/" + ids.length + " — chưa chạy"; }
+            tag.className = cls;
+            if (tag.textContent !== text) tag.textContent = text;
+        });
+    }
 
     function renderMappingList() {
+        renderGroupTable();
         const { mappingList } = els();
         if (!mappingList) return;
         const list = getMappings();

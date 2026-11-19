@@ -154,7 +154,7 @@ function startFakeAhk(port) {
     {
         d1 = await d1Loader.loadD1FromDisk();
         check('loadD1FromDisk(): XML well-formed + XSD (xmllint-wasm) + Semantic đều PASS trên docs/d1/midi-mapping.xml thật', d1.ok === true && d1.stage === 'ok', d1);
-        check('D1 production có đúng 8 capability', d1.ok && d1.capabilities.length === 8, d1.capabilities && d1.capabilities.length);
+        check('D1 production có đúng 12 capability (A-MAP-01 +4)', d1.ok && d1.capabilities.length === 12, d1.capabilities && d1.capabilities.length);
 
         // ACTION_TO_CAPABILITY: không còn tồn tại trong CODE (chỉ còn trong comment/tài liệu)
         const codeFiles = ['core/command-engine-js/runtime.js', 'core/command-engine-js/d1Loader.js', 'core/command-engine-js/commandEngine.js', 'core/command-engine-js/capabilityRegistry.js', 'app/main.js', 'app/preload.js', 'ui/js/vocalCommandRouter.js', 'ui/js/appSettings.js', 'ui/js/actionRegistry.js', 'ui/js/setupMidiInput.js'];
@@ -181,7 +181,7 @@ function startFakeAhk(port) {
             }
         }
         consistent = problems.length === 0;
-        check('D1 <-> CAPABILITY_BACKEND_TARGET <-> capabilityRegistry nhất quán cho cả 8 capability (implemented có đủ driver; còn lại không có target)', consistent, problems);
+        check('D1 <-> CAPABILITY_BACKEND_TARGET <-> capabilityRegistry nhất quán cho cả 12 capability (implemented có đủ driver; còn lại không có target)', consistent, problems);
         const extraTargets = Object.keys(d1Loader.CAPABILITY_BACKEND_TARGET).filter((id) => !d1.capabilities.some((c) => c.id === id));
         check('CAPABILITY_BACKEND_TARGET không chứa capability nào ngoài D1', extraTargets.length === 0, extraTargets);
 
@@ -190,14 +190,14 @@ function startFakeAhk(port) {
         const rows = [...matrix.matchAll(/^\|\s*`([a-z]+:[A-Za-z]+)`\s*\|[^|]*\|[^|]*\|\s*\*\*([a-z-]+)\*\*\s*\|\s*\*\*(true|false)\*\*/gm)];
         const matrixById = new Map(rows.map((m) => [m[1], { status: m[2], allowed: m[3] === 'true' }]));
         const mismatch = d1.capabilities.filter((c) => { const m = matrixById.get(c.id); return !m || m.status !== c.backendStatus || m.allowed !== c.midiAllowed; }).map((c) => c.id);
-        check('capability-backend-matrix.md (status + midi-allowed) khớp 100% midi-mapping.xml cho cả 8 capability', matrixById.size === 8 && mismatch.length === 0, { rows: matrixById.size, mismatch });
+        check('capability-backend-matrix.md (status + midi-allowed) khớp 100% midi-mapping.xml cho cả 12 capability', matrixById.size === 12 && mismatch.length === 0, { rows: matrixById.size, mismatch });
 
         // Setup dropdown (chỉ ĐỌC ui/setup.html)
         const setupHtml = read('ui/setup.html');
         const uiActions = [...setupHtml.matchAll(/<option value="([a-z]+:[A-Za-z]+)"/g)].map((m) => m[1]);
         const inD1 = uiActions.filter((a) => d1.capabilities.some((c) => c.id === a)).sort();
         const notInD1 = uiActions.filter((a) => !d1.capabilities.some((c) => c.id === a)).sort();
-        check('10 action ID trong dropdown Setup: 7 có trong D1', uiActions.length === 10 && inD1.length === 7, { uiActions, inD1 });
+        check('14 action ID trong dropdown Setup: 11 có trong D1 (A-MAP-01 +4)', uiActions.length === 14 && inD1.length === 11, { uiActions, inD1 });
         check('3 action ID ngoài D1 đúng như rules.md mục "Namespace exceptions" (fn:autoDetect, keymod:doTone, preset:load)', JSON.stringify(notInD1) === JSON.stringify(['fn:autoDetect', 'keymod:doTone', 'preset:load']), notInD1);
         const d1OnlyNotUi = d1.capabilities.map((c) => c.id).filter((id) => !uiActions.includes(id));
         check('D1 capability không có trong UI: chỉ daw:save (đúng như ghi chú trong XML)', JSON.stringify(d1OnlyNotUi) === JSON.stringify(['daw:save']), d1OnlyNotUi);

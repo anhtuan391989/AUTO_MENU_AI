@@ -54,6 +54,11 @@ const registry = {
         mcu: { note: 0x5f },
         hotkey: { keys: '*' }, // kiểm tra lại đúng Key Command bạn đã gán cho Record
       },
+      // TASK A-MAP-01 — phím tắt mặc định của Studio One (CHƯA kiểm chứng trên máy thật; đổi nếu Key Command của bạn khác).
+      undo: { hotkey: { keys: '^z' } },
+      redo: { hotkey: { keys: '^y' } },
+      loopToggle: { hotkey: { keys: '/' } },
+      metronomeToggle: { hotkey: { keys: 'c' } },
       saveSong: {
         hotkey: { keys: '^s' }, // Ctrl+S
       },

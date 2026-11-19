@@ -320,17 +320,20 @@
                         thiết bị này. Việc âm thanh thực sự phát ra đúng loa vật lý cần nghe kiểm tra trên máy thật.</i></p>
                 </div>
 
-                <div class="panel-card">
+                <div class="panel-card" id="audioEngineCard">
                     <div class="panel-card-title">Sample Rate / Buffer Size / Latency / Audio Test / Calibration
-                        <span class="badge badge-unwired">Chưa có Engine</span>
+                        <span class="badge badge-live" id="audioEngineBadge">Thật — dùng cho Test/Calibration trong Setup</span>
                     </div>
                     <div class="placeholder-grid">
-                        <label class="ph-field">Sample Rate<select disabled><option>48000 Hz</option></select></label>
-                        <label class="ph-field">Buffer size<select disabled><option>256 samples</option></select></label>
-                        <label class="ph-field">Latency<span class="hint-text">— chưa đo được</span></label>
-                        <label class="ph-field">Audio Test<button class="setup-btn" disabled>▶ Test</button></label>
-                        <label class="ph-field">Calibration<button class="setup-btn" disabled>Chạy Calibration Audio</button></label>
+                        <label class="ph-field">Sample Rate<select id="audioSampleRateSelect"><option value="44100">44100 Hz</option><option value="48000" selected>48000 Hz</option><option value="96000">96000 Hz</option></select></label>
+                        <label class="ph-field">Buffer size<select id="audioBufferSelect"><option value="128">128 samples</option><option value="256" selected>256 samples</option><option value="512">512 samples</option><option value="1024">1024 samples</option></select></label>
+                        <label class="ph-field">Latency<span class="hint-text" id="audioLatencyText">— chưa đo được</span></label>
+                        <label class="ph-field">Audio Test<button class="setup-btn" id="btnAudioTest">▶ Test</button></label>
+                        <label class="ph-field">Calibration<button class="setup-btn" id="btnAudioCalibrate">Chạy Calibration Audio</button></label>
                     </div>
+                    <p class="hint-text" id="audioEngineNote" style="margin-top:8px;">Test phát 1 tiếng bíp qua "Audio Output" đã chọn ở trên. Calibration phát 3 tiếng chirp
+                        qua loa rồi thu lại bằng "MIC Input" để đo độ trễ vòng (cần loa/tai nghe để mic nghe được, hoặc cáp loopback). Sample Rate/Buffer chỉ áp dụng cho
+                        phép đo trong Setup, KHÔNG đổi cấu hình âm thanh đang chạy của Menu.</p>
                 </div>
             </section>
 
@@ -409,6 +412,10 @@
                             <option value="daw:play">Play</option>
                             <option value="daw:stop">Stop</option>
                             <option value="daw:record">Record</option>
+                            <option value="daw:undo">Undo</option>
+                            <option value="daw:redo">Redo</option>
+                            <option value="daw:loop">Loop</option>
+                            <option value="daw:metronome">Metronome</option>
                         </optgroup>
                         <optgroup label="Plugin Control">
                             <option value="plugin:retune">Retune</option>
@@ -503,11 +510,11 @@
 
                 <div class="panel-card">
                     <div class="panel-card-title">Sơ đồ nhóm Mapping (khái niệm)
-                        <span class="badge badge-soon">Chỉ nhóm "DAW Control: Play/Stop/Record" đã nối thật</span>
+                        <span class="badge badge-soon">Nhóm "DAW Control" (Play/Stop/Record/Undo/Redo/Loop/Metronome) đã nối thật</span>
                     </div>
                     <p class="hint-text">Mapping thật (Learn + Lưu + <b>dispatch thật tới Studio One</b> qua Command
-                        Engine) đã có ở Mapping đã lưu bên trên, nhưng chỉ 3 action
-                        <code>daw:play/daw:stop/daw:record</code> có capability thật trong
+                        Engine) đã có ở Mapping đã lưu bên trên, nhưng chỉ 7 action
+                        <code>daw:play/stop/record/undo/redo/loop/metronome</code> có capability thật trong
                         <code>capabilityRegistry.js</code> (nối thật qua <code>core/command-engine-js/runtime.js</code>
                         ở main process — xem panel "Command Engine" ở tab Chọn DAW để biết trạng thái test). Các nhóm
                         còn lại (Menu/Preset/Key-Mod/Plugin) vẫn Learn+Save được nhưng KHÔNG dispatch — bảng dưới chỉ
@@ -519,42 +526,38 @@
                     <div class="mapping-tabs">
                         <div class="mapping-block">
                             <div class="mapping-block-title">Menu</div>
-                            <div class="mapping-row"><span>Button A / Button B</span><span class="tag-unassigned">Chưa gán</span></div>
-                            <div class="mapping-row"><span>Encoder 1 / Encoder 2</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row" data-map="menu:buttonA,menu:buttonB"><span>Button A / Button B</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row" data-map=""><span>Encoder 1 / Encoder 2</span><span class="tag-unassigned">Chưa gán</span></div>
                         </div>
                         <div class="mapping-block">
                             <div class="mapping-block-title">DAW</div>
-                            <div class="mapping-row"><span>Play / Stop / Record</span><span class="tag-unassigned">Chưa gán</span></div>
-                            <div class="mapping-row"><span>Undo / Redo / Marker</span><span class="tag-unassigned">Chưa gán</span></div>
-                            <div class="mapping-row"><span>Loop / Metronome</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row" data-map="daw:play,daw:stop,daw:record"><span>Play / Stop / Record</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row" data-map="daw:undo,daw:redo,daw:marker"><span>Undo / Redo / Marker</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row" data-map="daw:loop,daw:metronome"><span>Loop / Metronome</span><span class="tag-unassigned">Chưa gán</span></div>
                         </div>
                         <div class="mapping-block">
                             <div class="mapping-block-title">Plugin</div>
-                            <div class="mapping-row"><span>Retune / Humanize / Flex Tune</span><span class="tag-unassigned">Chưa gán</span></div>
-                            <div class="mapping-row"><span>Formant / Mix / Output</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row" data-map="plugin:retune,plugin:humanize,plugin:flextune"><span>Retune / Humanize / Flex Tune</span><span class="tag-unassigned">Chưa gán</span></div>
+                            <div class="mapping-row" data-map="plugin:formant,plugin:mix,plugin:output"><span>Formant / Mix / Output</span><span class="tag-unassigned">Chưa gán</span></div>
                         </div>
                     </div>
                 </div>
 
-                <div class="panel-card">
-                    <div class="panel-card-title">🔗 MIDI Macro <span class="badge badge-unwired">Chưa có Engine thực thi chuỗi action</span></div>
-                    <p class="hint-text">1 MIDI → nhiều Action nối tiếp (Action 1 → Action 2 → Action 3). Command
-                        Engine hiện chỉ dispatch 1 action/lần (không có khái niệm chuỗi) — cần thêm logic riêng, giới
-                        hạn rõ số bước tối đa (đề xuất ≤5 action/macro) để tránh loop. Chưa làm ở task này vì Transport
-                        đơn lẻ (Mục 8) phải ổn định trước.</p>
-                </div>
-
-                <div class="panel-card">
-                    <div class="panel-card-title">🔀 MIDI Workflow</div>
-                    <div class="workflow-diagram">
-                        <span class="workflow-step">Controller</span>
-                        <span class="workflow-arrow">↓</span>
-                        <span class="workflow-step workflow-step--main">AUTO MENU AI</span>
-                        <span class="workflow-arrow">↓</span>
-                        <span class="workflow-step">DAW</span>
-                        <span class="workflow-arrow">↓</span>
-                        <span class="workflow-step">Plugin</span>
+                <div class="panel-card" id="macroCard">
+                    <div class="panel-card-title">🔗 MIDI Macro <span class="badge badge-live" id="macroBadge">Đã nối Command Engine (tối đa 5 bước)</span></div>
+                    <p class="hint-text">1 MIDI → nhiều Action nối tiếp (Action 1 → Action 2 → … tối đa 5 bước). Mỗi bước phải là
+                        action đã nối thật (Play/Stop/Record/Undo/Redo/Loop/Metronome). Một bước lỗi thì chuỗi DỪNG. Bấm lại khi
+                        macro đang chạy sẽ bị bỏ qua (không lặp). Số Type/Channel/Number không được trùng Mapping đơn đã lưu.</p>
+                    <div class="midi-row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                        <select id="macroType" class="ph-select"><option value="cc">CC</option><option value="note">Note</option></select>
+                        <input id="macroChannel" class="ph-select" type="number" min="1" max="16" value="1" placeholder="Channel 1-16" style="width:110px;">
+                        <input id="macroNumber" class="ph-select" type="number" min="0" max="127" value="0" placeholder="Number 0-127" style="width:110px;">
+                        <input id="macroDelay" class="ph-select" type="number" min="0" max="2000" value="150" placeholder="Trễ giữa bước (ms)" style="width:150px;">
                     </div>
+                    <div id="macroSteps" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;"></div>
+                    <button id="macroSaveBtn" class="setup-btn" style="margin-top:8px;">💾 Lưu Macro</button>
+                    <div class="status-text" id="macroStatus" style="margin-top:6px;"></div>
+                    <div class="midi-monitor" id="macroList" style="margin-top:8px;"><div class="midi-monitor-empty">Chưa có Macro nào.</div></div>
                 </div>
 
                 <div class="panel-card">
@@ -890,9 +893,12 @@
     <script src="js/setupLicense.js"></script>
     <script src="js/setupEffects.js"></script>
     <script src="js/setupVuMeter.js"></script>
+    <script src="js/audioCalibration.js"></script>
+    <script src="js/setupAudioTest.js"></script>
     <script src="js/midiHealth.js"></script>
     <script src="js/setupMidiMonitor.js"></script>
     <script src="js/setupMidiInput.js"></script>
+    <script src="js/setupMidiMacro.js"></script>
     <!-- TASK A55 — load/validate/save thật cho nhóm Startup & Paths (dựa vào
          window.getStartupPaths/setStartupPaths ở js/appSettings.js, phải nạp SAU file đó). -->
     <script src="js/setupStartupPaths.js"></script>

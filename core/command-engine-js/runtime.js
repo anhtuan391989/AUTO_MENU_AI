@@ -46,6 +46,10 @@ let lastDispatchAt = new Map(); // key -> timestamp, chống double-fire khi con
 // xem loadD1AndRebuild() bên dưới; trong lúc chưa nạp xong hoặc nạp lỗi, dispatchFromMidi()
 // tự động không làm gì (an toàn, không crash, không dispatch nhầm).
 let d1GatedMappingIndex = new Map();
+// TASK A-MACRO-01 — macro index (key -> {id, steps, delayMs}), xây cùng lúc với d1GatedMappingIndex; rỗng khi D1 fail (fail-closed).
+let d1GatedMacroIndex = new Map();
+let macroRunning = new Set(); // key đang chạy — bấm lại khi chưa xong thì bỏ qua (không xếp chồng/lặp)
+let lastMacroResult = null;
 let d1State = { ok: false, stage: "not-loaded", errors: [], lastLoadedAt: null };
 
 // ---------------------------------------------------------------------------
@@ -276,11 +280,15 @@ async function loadD1AndRebuild(settings) {
         log(`[D1] Validate THẤT BẠI (stage=${result.stage}) — mapping D1-gated bị RỖNG (fail-closed, không dispatch qua MIDI cho tới khi D1 hợp lệ trở lại).`, result.errors);
         d1State = { ok: false, stage: result.stage, errors: result.errors, lastLoadedAt: Date.now() };
         d1GatedMappingIndex = new Map(); // fail-closed — KHÔNG giữ mapping cũ nếu lần load lại này fail
+        d1GatedMacroIndex = new Map();
         return;
     }
     const { mapping, rejected } = d1Loader.buildD1GatedMapping(settings?.midiMappingsV1, result.capabilities);
     d1GatedMappingIndex = mapping;
-    d1State = { ok: true, stage: "ok", errors: [], lastLoadedAt: Date.now(), capabilityCount: result.capabilities.length, mappingCount: mapping.size, rejectedCount: rejected.length };
+    const macroBuilt = d1Loader.buildD1GatedMacros(settings?.midiMacrosV1, result.capabilities, mapping);
+    d1GatedMacroIndex = macroBuilt.macros;
+    if (macroBuilt.rejected.length) log(`[D1] ${macroBuilt.rejected.length} macro bị loại:`, macroBuilt.rejected);
+    d1State = { ok: true, stage: "ok", errors: [], lastLoadedAt: Date.now(), capabilityCount: result.capabilities.length, mappingCount: mapping.size, rejectedCount: rejected.length, macroCount: macroBuilt.macros.size, macroRejectedCount: macroBuilt.rejected.length };
     log(`[D1] Validate PASS — ${result.capabilities.length} capability, ${mapping.size} binding được cài vào mapping thật, ${rejected.length} binding bị loại (xem lý do trong rejected).`, rejected);
 }
 
@@ -290,7 +298,8 @@ async function dispatchFromMidi(msg) {
     // TASK B38 — nguồn dispatch thật DUY NHẤT: d1GatedMappingIndex (xây từ D1 XML đã qua
     // XSD+Semantic). Không có bảng hard-code nào chạy song song nữa (đã xoá ở B38-FIX).
     const target = d1GatedMappingIndex.get(key);
-    if (!target || !engine) return;
+    const macro = target ? null : d1GatedMacroIndex.get(key); // macro và mapping đơn không bao giờ trùng key (buildD1GatedMacros loại)
+    if ((!target && !macro) || !engine) return;
 
     // Chống 1 event bắn nhiều lệnh nếu listener bị gắn trùng (Mục 12 — connect() x3).
     const now = Date.now();
@@ -298,8 +307,36 @@ async function dispatchFromMidi(msg) {
     if (now - lastAt < 60) return; // debounce 60ms, không phải business logic — chỉ chống double-listener
     lastDispatchAt.set(key, now);
 
+    if (macro) { await runMacro(key, macro); return; }
     const result = await engine.dispatch({ targetId: target.targetId, action: target.action });
     log("dispatch", key, "->", target.capabilityId, "(" + target.action + ")", result);
+}
+
+/**
+ * TASK A-MACRO-01 — chạy chuỗi bước của 1 macro tuần tự. Bước lỗi -> DỪNG chuỗi (không chạy tiếp lệnh sau trên trạng thái không rõ).
+ * Đang chạy thì bấm lại bị bỏ qua. Kết quả lưu ở lastMacroResult (getHealth().macro).
+ */
+async function runMacro(key, macro) {
+    if (macroRunning.has(key)) { log("macro", key, "đang chạy — bỏ qua lần bấm lại."); return { ok: false, skipped: "BUSY" }; }
+    macroRunning.add(key);
+    const results = [];
+    let ok = true;
+    try {
+        for (let i = 0; i < macro.steps.length; i++) {
+            const st = macro.steps[i];
+            let r;
+            try { r = await engine.dispatch({ targetId: st.targetId, action: st.action }); }
+            catch (err) { r = { ok: false, detail: String(err && err.message || err) }; }
+            results.push({ step: i + 1, capabilityId: st.capabilityId, ok: !!(r && r.ok), driverUsed: r && r.driverUsed || null });
+            if (!r || !r.ok) { ok = false; break; }
+            if (i < macro.steps.length - 1 && macro.delayMs > 0) await new Promise((res) => setTimeout(res, macro.delayMs));
+        }
+    } finally {
+        macroRunning.delete(key);
+    }
+    lastMacroResult = { key, id: macro.id, ok, ran: results.length, total: macro.steps.length, results, at: Date.now() };
+    log("macro", key, "->", ok ? "OK" : "DỪNG (bước lỗi)", results);
+    return lastMacroResult;
 }
 
 function makeErrorDetail(stage, message, portName, available) {
@@ -773,6 +810,10 @@ module.exports = {
     // d1GatedMappingIndex/d1State mà không cần đợi timer đoán mò. KHÔNG export dispatchFromMidi()
     // (vẫn giữ nguyên lý do cũ — side-effect trên state module-private).
     loadD1AndRebuild,
+    getD1GatedMacros: () => d1GatedMacroIndex,
+    _getEngineForTest: () => engine,
+    getLastMacroResult: () => lastMacroResult,
+    runMacroForTest: runMacro,
     getD1GatedMapping: () => d1GatedMappingIndex,
     getD1State: () => d1State,
 };

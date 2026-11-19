@@ -82,7 +82,7 @@ async function main() {
         check('midi-mapping.xml well-formed + validate PASS qua XSD (xmllint-wasm)', await xsdOk(xmlText));
         const result = validateSemantics(xmlText);
         check('midi-mapping.xml PASS luôn Semantic Validator (schemaVersion hỗ trợ, midi-allowed khớp backend-status, 0 binding nên Rule M4/M6 không có gì để vi phạm)', result.ok, result.errors);
-        check('8 capability đúng như capability-backend-matrix.md (3 implemented, 1 pending-backend, 4 not-supported)', result.doc.capabilities.length === 8, result.doc.capabilities.length);
+        check('12 capability đúng như capability-backend-matrix.md (7 implemented, 1 pending-backend, 4 not-supported) — A-MAP-01 thêm 4 hotkey transport', result.doc.capabilities.length === 12, result.doc.capabilities.length);
         check('0 binding trong bản production (đúng Rule M3 — không tự bịa MIDI mapping)', result.doc.bindings.length === 0, result.doc.bindings.length);
     }
 

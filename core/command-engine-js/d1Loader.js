@@ -64,6 +64,11 @@ const CAPABILITY_BACKEND_TARGET = {
     'daw:play': { targetId: 'studio_one', action: 'transportPlay' },
     'daw:stop': { targetId: 'studio_one', action: 'transportStop' },
     'daw:record': { targetId: 'studio_one', action: 'transportRecord' },
+    // TASK A-MAP-01 — 4 lệnh mở rộng (hotkey-only, xem capabilityRegistry.js studio_one.actions)
+    'daw:undo': { targetId: 'studio_one', action: 'undo' },
+    'daw:redo': { targetId: 'studio_one', action: 'redo' },
+    'daw:loop': { targetId: 'studio_one', action: 'loopToggle' },
+    'daw:metronome': { targetId: 'studio_one', action: 'metronomeToggle' },
 };
 
 /**
@@ -168,8 +173,50 @@ function buildD1GatedMapping(legacyMidiMappings, d1Capabilities) {
     return { mapping, rejected };
 }
 
+/**
+ * TASK A-MACRO-01 — buildD1GatedMacros(macros, d1Capabilities, singleMapping)
+ * 1 MIDI trigger -> chuỗi 1..MACRO_MAX_STEPS capability chạy nối tiếp. Dùng ĐÚNG cổng D1 như buildD1GatedMapping:
+ * mỗi bước phải là capability có trong D1, midi-allowed=true VÀ có CAPABILITY_BACKEND_TARGET. Macro KHÔNG được chứa macro
+ * (bước chỉ là capability id) nên không thể lặp vô hạn. Trigger trùng key với mapping đơn -> loại (không để 2 thứ cùng nghe 1 nút).
+ * @returns {{ macros: Map<string,{id:string,steps:Array,delayMs:number}>, rejected: Array }}
+ */
+const MACRO_MAX_STEPS = 5;
+const MACRO_DEFAULT_DELAY_MS = 150;
+const MACRO_MAX_DELAY_MS = 2000;
+function buildD1GatedMacros(macros, d1Capabilities, singleMapping) {
+    const capById = new Map((d1Capabilities || []).map((c) => [c.id, c]));
+    const out = new Map();
+    const rejected = [];
+    for (const m of Array.isArray(macros) ? macros : []) {
+        if (!m || !m.type || m.channel == null || m.number == null || !Array.isArray(m.steps)) continue;
+        const key = `${m.type}:${m.channel}:${m.number}`;
+        const id = m.id || key;
+        if (m.steps.length < 1) { rejected.push({ key, id, reason: 'EMPTY_MACRO' }); continue; }
+        if (m.steps.length > MACRO_MAX_STEPS) { rejected.push({ key, id, reason: 'TOO_MANY_STEPS', max: MACRO_MAX_STEPS }); continue; }
+        let bad = null;
+        const steps = [];
+        for (const capId of m.steps) {
+            const cap = capById.get(capId);
+            const target = CAPABILITY_BACKEND_TARGET[capId];
+            if (!cap) { bad = { step: capId, reason: 'UNKNOWN_CAPABILITY_IN_D1' }; break; }
+            if (cap.midiAllowed !== true) { bad = { step: capId, reason: 'D1_MIDI_NOT_ALLOWED' }; break; }
+            if (!target) { bad = { step: capId, reason: 'NO_BACKEND_TARGET' }; break; }
+            steps.push({ capabilityId: capId, targetId: target.targetId, action: target.action });
+        }
+        if (bad) { rejected.push({ key, id, ...bad }); continue; }
+        if (singleMapping && singleMapping.has(key)) { rejected.push({ key, id, reason: 'CONFLICTS_WITH_SINGLE_MAPPING' }); continue; }
+        if (out.has(key)) { rejected.push({ key, id, reason: 'DUPLICATE_RUNTIME_KEY' }); continue; }
+        const d = Number(m.delayMs);
+        const delayMs = Number.isFinite(d) && d >= 0 ? Math.min(d, MACRO_MAX_DELAY_MS) : MACRO_DEFAULT_DELAY_MS;
+        out.set(key, { id, steps, delayMs });
+    }
+    return { macros: out, rejected };
+}
+
 module.exports = {
     loadAndValidateD1,
+    buildD1GatedMacros,
+    MACRO_MAX_STEPS,
     loadD1FromDisk,
     buildD1GatedMapping,
     CAPABILITY_BACKEND_TARGET,

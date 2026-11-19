@@ -44,6 +44,24 @@
       <description>Gửi lệnh Record cho DAW đang chọn (transport control).</description>
     </capability>
 
+    <!-- TASK A-MAP-01 — 4 capability transport mở rộng, backend = hotkey Studio One (capabilityRegistry.js).
+         Chỉ CODE VERIFIED (chưa có bằng chứng Studio One thật nhận phím — cần AHK service chạy + cửa sổ Studio One ở foreground). -->
+    <capability id="daw:undo" backend-status="implemented" midi-allowed="true">
+      <description>Gửi lệnh Undo (Hoàn tác) cho DAW đang chọn qua hotkey.</description>
+    </capability>
+
+    <capability id="daw:redo" backend-status="implemented" midi-allowed="true">
+      <description>Gửi lệnh Redo (Làm lại) cho DAW đang chọn qua hotkey.</description>
+    </capability>
+
+    <capability id="daw:loop" backend-status="implemented" midi-allowed="true">
+      <description>Bật/tắt Loop của DAW đang chọn qua hotkey.</description>
+    </capability>
+
+    <capability id="daw:metronome" backend-status="implemented" midi-allowed="true">
+      <description>Bật/tắt Metronome (Click) của DAW đang chọn qua hotkey.</description>
+    </capability>
+
     <!-- daw:save — mục 11 đề bài B23: capabilityRegistry.js CÓ định nghĩa
          driver (registry.studio_one.actions.saveSong, hotkey Ctrl+S) nhưng
          runtime.js:ACTION_TO_CAPABILITY KHÔNG có entry nào trỏ tới đây —
