@@ -2479,7 +2479,7 @@ function startAiRealtimeLoop() {
     // TASK AI-KEY-FAST-02 — "danh tính" của watcher: token chu trình + epoch engine + nguồn audio lúc tạo.
     // triggerAiKeyDetect() dùng nó để biết watcher đang chạy còn hợp lệ hay không (đặt TRƯỚC detectOnce).
     window.__keyWatcherMeta = { gen: cycleGen, epoch: window.__aiEngineEpoch, src: window.__aiEngineSrc };
-    window.__keyDetectStopWatcher = KeyEngine.detectOnce((result) => {
+    window.__keyDetectStopWatcher = (typeof __akDetectOnce === "function" ? __akDetectOnce : KeyEngine.detectOnce)((result) => { // AUTOKEY-TEMP-01: mặc định = KeyEngine.detectOnce (y như cũ); chế độ "Auto Key tạm thời" = AutoKeyLive.detectOnce
 
         // Kết quả của bài trước đến muộn: bỏ, KHÔNG ghi đè trạng thái bài mới (chu trình mới đã có vòng dò riêng).
         if (cycleGen !== __aiCycleGen) { if (typeof aiDiag === "function") aiDiag("KEY_RESULT_STALE_DROPPED", { resultGen: cycleGen, key: result.key }); return; }
@@ -2514,7 +2514,7 @@ function startAiRealtimeLoop() {
         // Mỗi Key AI CHỐT (đã qua cổng của KeyEngine) được so với Key Database bằng đúng luật __aiBeatsDatabase (khác Key,
         // tin cậy >= 0.85, không phải cặp láng giềng cách 5). Đạt -> AI thay Database cho bài này; không đạt -> giữ Database.
         // Manual vẫn cao nhất (không bị đụng). Không ghi gì lên Server.
-        if (keySource.songDb.active && !__dbBypass.active && !(keySource.manual && (keySource.manual.active || keySource.manual.sending))
+        if (keySource.songDb.active && !__dbBypass.active && !(result && result.engine === "autokey-live") && !(keySource.manual && (keySource.manual.active || keySource.manual.sending))
             && (__aiBeatsDatabase(result.key, result.confidence, keySource.songDb.value).ok || (typeof __aiConsistentWins !== "undefined" && __aiConsistentWins))) {
             __dbBypass.active = true;
             if (typeof aiDiag === "function") aiDiag("DB_BYPASS_AUTO_ON", { db: keySource.songDb.value, ai: result.key, conf: result.confidence });
@@ -2528,7 +2528,7 @@ function startAiRealtimeLoop() {
         // main process tự kiểm tra tên bài, độ tin cậy, trùng lặp và lỗi mạng — lỗi ở đây KHÔNG được ảnh hưởng luồng AI.
         // Điều kiện nằm TRONG try: chỉ gửi khi chắc chắn songDb tồn tại và chưa có bài; mọi lỗi đều bị nuốt.
         try {
-            if (keySource.songDb && !keySource.songDb.active) {
+            if (keySource.songDb && !keySource.songDb.active && !(result && result.engine === "autokey-live")) { // AUTOKEY-TEMP-01: Key của chế độ thử nghiệm KHÔNG được ghi lên Key Server
                 window.electronAPI?.submitDetectedKey?.({ key: result.key, confidence: result.confidence })?.catch?.(() => {});
             }
         } catch (e) {}
@@ -2536,7 +2536,7 @@ function startAiRealtimeLoop() {
 
         if (getActiveSourceName() === "ai" && !(keySource.manual && keySource.manual.sending)) { // sending: người dùng vừa bấm SEND Manual, chưa xác nhận -> AI không chen vào
 
-            if (keyInfoEl && !__autoKeyRun.busy) keyInfoEl.textContent = `Auto Detect (${Math.round(result.confidence * 100)}% tin cậy)`; // AUTO-KEY-DETAIL-03: Dò tay đang chạy -> không đè dòng trạng thái Auto-Key
+            if (keyInfoEl && !__autoKeyRun.busy) keyInfoEl.textContent = `${result.engine === "autokey-live" ? "Auto Key tạm" : "Auto Detect"} (${Math.round(result.confidence * 100)}% tin cậy)`; // AUTO-KEY-DETAIL-03: Dò tay đang chạy -> không đè dòng trạng thái Auto-Key
             applyActiveKeyToPlugin("AI Detect");
             startModulationWatcher();
 
@@ -3604,6 +3604,7 @@ function bindAiEnginesToSystemAudio(systemAudio) {
         // Từ đây, mỗi engine tự tạo analyser riêng + tự chạy vòng lặp riêng của nó.
         BPMEngine.init(audioContext, source);
         KeyEngine.init(audioContext, source);
+        if (typeof __akBind === "function") __akBind(audioContext, source); // AUTOKEY-TEMP-01: bắt đầu chu trình mới cho Auto Key tạm thời (chỉ chạy khi chế độ BẬT)
         // TASK AI-KEY-FAST-02 — mỗi lần bind (AUTO DETECT, reconnect, đổi thiết bị) = engine mới => epoch mới;
         // watcher tạo trước đó (epoch/nguồn cũ) bị triggerAiKeyDetect() coi là không còn hợp lệ.
         window.__aiEngineEpoch = (window.__aiEngineEpoch || 0) + 1;
@@ -3658,6 +3659,7 @@ function bindAiEnginesToSystemAudio(systemAudio) {
             // keySource.ai.value/lock/gửi Plugin — những việc đó vẫn 100% qua startAiRealtimeLoop()
             // (mục 7B) như cũ.
             KeyEngine.onProvisionalEstimate((estimate) => {
+                if (typeof __akTempOn === "function" && __akTempOn()) return; // AUTOKEY-TEMP-01: đang dùng Auto Key tạm thời -> không hiện Key tạm / không tự sửa Key của AI cũ
                 if (typeof __aiCoreCfg === "function" && !__aiCoreCfg().predict) { // A117: Setup > Lõi AI > "Dự đoán" TẮT -> không hiện "Key tạm (đang dò...)", chỉ hiện Key đã chốt
                     if (keySource.ai.provisional) { keySource.ai.provisional = null; refreshKeySourceDisplay(); }
                     return;
@@ -3749,6 +3751,7 @@ async function startAudioMonitor() {
         // cần thêm gì cho chiều reconnect.
         if (typeof BPMEngine !== "undefined") BPMEngine.stop();
         if (typeof KeyEngine !== "undefined") KeyEngine.stop();
+        if (typeof AutoKeyLive !== "undefined") AutoKeyLive.stop(); // AUTOKEY-TEMP-01
         if (window.__keyDetectStopWatcher) { window.__keyDetectStopWatcher(); window.__keyDetectStopWatcher = null; }
         if (typeof ModEngine !== "undefined") ModEngine.stop();
         resetAiDisplaysToListening();
@@ -3793,6 +3796,7 @@ async function startAudioMonitor() {
             setSystemAudioVuNoData(true);
             if (typeof BPMEngine !== "undefined") BPMEngine.stop();
             if (typeof KeyEngine !== "undefined") KeyEngine.stop();
+        if (typeof AutoKeyLive !== "undefined") AutoKeyLive.stop(); // AUTOKEY-TEMP-01
             if (window.__keyDetectStopWatcher) { window.__keyDetectStopWatcher(); window.__keyDetectStopWatcher = null; }
             if (typeof ModEngine !== "undefined") ModEngine.stop();
             resetAiDisplaysToListening();
@@ -4106,6 +4110,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
     if (typeof initAudioChillPopup === "function") initAudioChillPopup(); // AUDIO-CHILL-01 — chuột phải MUSIC: nút Audio chill + knob VST
     if (typeof initFxAutoMenu === "function") initFxAutoMenu(); // FX-AUTO-TOGGLE-01 — chuột phải FX: ô tích Auto bật FX khi có nhạc
+    if (typeof initAutoKeyTempCard === "function") initAutoKeyTempCard(); // AUTOKEY-TEMP-01 — chuột phải AUTO DETECT: Dò bằng AI / Auto Key tạm thời (chọn 1)
     if (typeof initAutoDetectModePopup === "function") initAutoDetectModePopup(); // AUTODETECT-MODE-01 — chuột phải AUTO DETECT: Tự dò bằng tay / Dò bằng AI (chọn 1)
 if (typeof initKeyServerCorrectCard === "function") initKeyServerCorrectCard(); // KEY-SERVER-CORRECT-01 — chuột phải SEND (khối KEY): lưu Key đúng vào Server + songs.json
 
@@ -4440,3 +4445,108 @@ function bridgeSemitoneDelta(fromKeyName, toKeyName) {
     window.addEventListener("focus", refresh); // quay lại từ Cài đặt (đổi ngôn ngữ / gia hạn) thì cập nhật ngay
 })();
 /* LICENSE-MARQUEE-01 END */
+
+/* AUTOKEY-TEMP-01 BEGIN
+   Chế độ "Auto Key tạm thời": dò Key bằng ĐÚNG thuật toán của phần mềm AutoKey Live Studio (ui/js/engines/autoKeyLiveEngine.js),
+   chạy THAY cho KeyEngine.detectOnce trong chu trình dò Key. Thuật toán AI cũ của Menu (keyEngine.js) giữ nguyên 100% và vẫn là MẶC ĐỊNH.
+   Chọn chế độ: bấm CHUỘT PHẢI nút AUTO DETECT -> thẻ nổi 2 ô tích, CHỈ CHỌN 1 TRONG 2 (luôn có đúng 1 ô được tích):
+     [x] Dò bằng AI           -> như cũ (setting keyDetectMode = "ai", mặc định)
+     [ ] Auto Key tạm thời    -> thuật toán AutoKey Live Studio (keyDetectMode = "autokey-temp")
+   Đổi chế độ có hiệu lực NGAY (chạy lại chu trình dò như đổi bài). Kết quả đi CÙNG đường với Key AI (Song Database / Manual vẫn ưu tiên cao hơn),
+   nhưng Key của chế độ này KHÔNG tự ghi lên Key Server và KHÔNG tự thay Key Database (chỉ thay khi người dùng bấm AUTO DETECT).
+   KHÔNG sửa HTML: engine được nạp bằng script động; thẻ tạo bằng JS. Mọi lỗi chỉ bị bỏ qua, Menu vẫn chạy bằng AI như cũ. */
+var __AK_TEMP_SETTING = "keyDetectMode";
+function __akTempOn() { try { return getSetting(__AK_TEMP_SETTING, "ai") === "autokey-temp"; } catch (e) { return false; } }
+function __akEngineLoaded() { return typeof AutoKeyLive !== "undefined" && !!AutoKeyLive && typeof AutoKeyLive.init === "function"; }
+var __akLoadPromise = null;
+function __akLoadEngine() { // nạp js/engines/autoKeyLiveEngine.js bằng script động (không sửa index.html)
+    if (__akEngineLoaded()) return Promise.resolve(true);
+    if (__akLoadPromise) return __akLoadPromise;
+    __akLoadPromise = new Promise((resolve) => {
+        try {
+            const s = document.createElement("script");
+            s.src = "js/engines/autoKeyLiveEngine.js";
+            s.onload = () => resolve(__akEngineLoaded());
+            s.onerror = () => { __akLoadPromise = null; console.error("AUTOKEY-TEMP-01: không nạp được autoKeyLiveEngine.js — dùng AI như cũ"); resolve(false); };
+            document.head.appendChild(s);
+        } catch (e) { __akLoadPromise = null; resolve(false); }
+    });
+    return __akLoadPromise;
+}
+var __akLastBind = null; // { audioContext, source } của lần bind gần nhất
+function __akApplyBind() {
+    try { AutoKeyLive.setEnabled(__akTempOn()); if (__akLastBind) AutoKeyLive.init(__akLastBind.audioContext, __akLastBind.source); }
+    catch (e) { console.error("AUTOKEY-TEMP-01: bind lỗi (bỏ qua, dùng AI như cũ):", e); }
+}
+function __akBind(audioContext, source) { // gọi mỗi lần bindAiEnginesToSystemAudio (đổi bài, AUTO DETECT, reconnect) = chu trình mới
+    __akLastBind = { audioContext, source };
+    if (__akEngineLoaded()) { __akApplyBind(); return; }
+    if (__akTempOn()) __akLoadEngine().then((ok) => { if (ok && __akLastBind) __akApplyBind(); });
+}
+function __akDetectOnce(cb) { // nguồn dò Key cho startAiRealtimeLoop: Auto Key tạm thời nếu BẬT và sẵn sàng, ngược lại AI cũ
+    if (__akTempOn() && __akEngineLoaded() && AutoKeyLive.isReady()) return AutoKeyLive.detectOnce(cb);
+    return KeyEngine.detectOnce(cb);
+}
+function initAutoKeyTempCard() {
+    const btn = document.getElementById("autoDetectBtn");
+    if (!btn || document.getElementById("autoKeyTempCard")) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
+    const baseTitle = btn.title || "";
+    const card = document.createElement("div");
+    card.id = "autoKeyTempCard";
+    card.style.cssText = "position:fixed;display:none;z-index:3000;background:#081523;border:1px solid #1f3a57;border-radius:8px;padding:8px 12px;color:#cfe3f7;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.5);";
+    const addRow = (id, text, first) => {
+        const label = document.createElement("label");
+        label.style.cssText = "display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;" + (first ? "" : "margin-top:6px;");
+        const chk = document.createElement("input"); chk.type = "checkbox"; chk.id = id; chk.style.cursor = "pointer";
+        const span = document.createElement("span"); span.textContent = text;
+        label.appendChild(chk); label.appendChild(span); card.appendChild(label);
+        return chk;
+    };
+    const aiChk = addRow("keyModeAiChk", "Dò bằng AI", true);
+    const akChk = addRow("keyModeAutoKeyChk", "Auto Key tạm thời", false);
+    document.body.appendChild(card);
+    const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // tự ẩn sau 5 giây (A97)
+    const hide = () => { card.style.display = "none"; auto.disarm(); };
+    const show = (temp) => { akChk.checked = temp; aiChk.checked = !temp; btn.title = temp ? "Auto Key tạm thời đang BẬT — chuột phải để đổi" : baseTitle; };
+    const choose = (temp) => {
+        const was = __akTempOn();
+        show(temp);
+        if (was === temp) return; // không đổi: khỏi ghi file / khỏi dò lại
+        setSetting(__AK_TEMP_SETTING, temp ? "autokey-temp" : "ai");
+        if (temp) __akLoadEngine();
+        if (typeof isManualKeyHeld === "function" && isManualKeyHeld()) return; // đang giữ Key tay: chỉ lưu chế độ, có hiệu lực ở bài/lần dò sau
+        const sys = window.__systemAudioSource;
+        if (typeof AudioSourceState !== "undefined" && sys?.getState?.() === AudioSourceState.RUNNING) { // chạy lại chu trình dò, KHÔNG phải người dùng bấm AUTO DETECT (không bỏ qua Database)
+            __autoDetectInternal = true;
+            const run = () => { try { document.getElementById("autoDetectBtn")?.click(); } finally { __autoDetectInternal = false; } };
+            if (temp && !__akEngineLoaded()) { __akLoadEngine().then(run, run); } else { run(); }
+        }
+    };
+    // Chọn 1 trong 2: tích ô này => ô kia tự bỏ; bỏ tích ô đang chọn => giữ nguyên (luôn còn đúng 1 ô).
+    akChk.addEventListener("change", () => choose(true));
+    aiChk.addEventListener("change", () => choose(false));
+    btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (card.style.display !== "none") { hide(); return; }
+        show(__akTempOn()); // đọc trạng thái hiện tại mỗi lần mở
+        card.style.display = "block";
+        const r = btn.getBoundingClientRect();
+        const w = card.offsetWidth, h = card.offsetHeight;
+        const left = Math.max(4, Math.min(window.innerWidth - w - 4, r.left + r.width / 2 - w / 2));
+        let top = r.top - h - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
+        if (top < 4) top = r.bottom + 6;
+        card.style.left = left + "px";
+        card.style.top = top + "px";
+        auto.arm();
+    });
+    document.addEventListener("mousedown", (e) => {
+        const tg = e.target;
+        if (card.contains(tg)) return;
+        if (tg && tg.closest && tg.closest("#autoDetectBtn")) return; // chuột phải mở/đóng do handler contextmenu lo
+        hide();
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+    show(__akTempOn()); // đặt chú thích nút ngay từ lúc mở app
+}
+try { if (__akTempOn()) __akLoadEngine(); } catch (e) { /* bỏ qua */ } // đang ở chế độ Auto Key tạm thời từ lần trước: nạp sẵn engine
+/* AUTOKEY-TEMP-01 END */
