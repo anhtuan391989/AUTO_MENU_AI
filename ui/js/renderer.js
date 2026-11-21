@@ -2528,7 +2528,7 @@ function startAiRealtimeLoop() {
         // main process tự kiểm tra tên bài, độ tin cậy, trùng lặp và lỗi mạng — lỗi ở đây KHÔNG được ảnh hưởng luồng AI.
         // Điều kiện nằm TRONG try: chỉ gửi khi chắc chắn songDb tồn tại và chưa có bài; mọi lỗi đều bị nuốt.
         try {
-            if (keySource.songDb && !keySource.songDb.active && !(result && result.engine === "autokey-live")) { // AUTOKEY-TEMP-01: Key của chế độ thử nghiệm KHÔNG được ghi lên Key Server
+            if (result && result.engine === "autokey-live") { /* AUTOKEY-TEMP-01: Key của chế độ thử nghiệm KHÔNG được ghi lên Key Server */ } else if (keySource.songDb && !keySource.songDb.active) {
                 window.electronAPI?.submitDetectedKey?.({ key: result.key, confidence: result.confidence })?.catch?.(() => {});
             }
         } catch (e) {}
@@ -2536,7 +2536,8 @@ function startAiRealtimeLoop() {
 
         if (getActiveSourceName() === "ai" && !(keySource.manual && keySource.manual.sending)) { // sending: người dùng vừa bấm SEND Manual, chưa xác nhận -> AI không chen vào
 
-            if (keyInfoEl && !__autoKeyRun.busy) keyInfoEl.textContent = `${result.engine === "autokey-live" ? "Auto Key tạm" : "Auto Detect"} (${Math.round(result.confidence * 100)}% tin cậy)`; // AUTO-KEY-DETAIL-03: Dò tay đang chạy -> không đè dòng trạng thái Auto-Key
+            if (keyInfoEl && !__autoKeyRun.busy) keyInfoEl.textContent = `Auto Detect (${Math.round(result.confidence * 100)}% tin cậy)`; // AUTO-KEY-DETAIL-03: Dò tay đang chạy -> không đè dòng trạng thái Auto-Key
+            if (result.engine === "autokey-live" && keyInfoEl && !__autoKeyRun.busy) keyInfoEl.textContent = __akStatusLine(result); // AUTOKEY-TEMP-01: "Auto Key tạm: BẮT NHANH LIVE (xx%)" / "DÒ XONG (xx%)"
             applyActiveKeyToPlugin("AI Detect");
             startModulationWatcher();
 
@@ -4474,8 +4475,23 @@ function __akLoadEngine() { // nạp js/engines/autoKeyLiveEngine.js bằng scri
     return __akLoadPromise;
 }
 var __akLastBind = null; // { audioContext, source } của lần bind gần nhất
+// Dòng trạng thái khối KEY của Auto Key tạm thời: phần trăm tin cậy LUÔN hiện và tự cập nhật (nhãn như AutoKey Live Studio).
+function __akStatusLine(result) {
+    let txt = "";
+    try { txt = AutoKeyLive.getState().status || ""; } catch (e) { /* dùng dòng dự phòng */ }
+    if (!txt && result) return `Auto Key tạm (${Math.round(result.confidence * 100)}% tin cậy)`;
+    return "Auto Key tạm: " + txt;
+}
+function __akShowStatus(s) { // gọi mỗi khi mức tin cậy đã chốt đổi (kể cả khi Key không đổi) -> cập nhật % ngay
+    try {
+        if (!s || !s.key || !__akTempOn()) return;
+        if (typeof getActiveSourceName === "function" && getActiveSourceName() !== "ai") return; // Manual / Song Database đang điều khiển: không đè dòng của họ
+        if (typeof keyInfoEl === "undefined" || !keyInfoEl || (typeof __autoKeyRun !== "undefined" && __autoKeyRun.busy)) return;
+        keyInfoEl.textContent = "Auto Key tạm: " + s.text;
+    } catch (e) { /* chỉ hiển thị */ }
+}
 function __akApplyBind() {
-    try { AutoKeyLive.setEnabled(__akTempOn()); if (__akLastBind) AutoKeyLive.init(__akLastBind.audioContext, __akLastBind.source); }
+    try { AutoKeyLive.setEnabled(__akTempOn()); if (typeof AutoKeyLive.onStatus === "function") AutoKeyLive.onStatus(__akShowStatus); if (__akLastBind) AutoKeyLive.init(__akLastBind.audioContext, __akLastBind.source); }
     catch (e) { console.error("AUTOKEY-TEMP-01: bind lỗi (bỏ qua, dùng AI như cũ):", e); }
 }
 function __akBind(audioContext, source) { // gọi mỗi lần bindAiEnginesToSystemAudio (đổi bài, AUTO DETECT, reconnect) = chu trình mới

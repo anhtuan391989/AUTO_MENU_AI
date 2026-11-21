@@ -73,6 +73,12 @@ console.log('D. Logic chốt: chốt ngay đoạn đầu; chỉ cập nhật khi
     const before = s.state.bestConf; ok(s.pushChunk(chord(P.F)) === null && s.state.bestConf > before, 'đoạn 3: tin cậy cao hơn nhưng CÙNG Key -> không báo lại, chỉ nâng mức');
     ok(/^DÒ XONG \(\d+%\)$/.test(s.state.status), 'tin cậy >= 85% -> "DÒ XONG (xx%)": ' + s.state.status);
     ok(s.pushChunk(new Float32Array(72000)) === null && s.state.chunks === 3, 'đoạn im lặng không tính, không báo');
+    // % tin cậy LUÔN hiện: trạng thái được báo ở đoạn đầu và MỖI lần mức đã chốt tăng — kể cả khi Key không đổi (pushChunk trả null)
+    const evs = []; const s3 = C.createSession(SR, (e) => evs.push(e));
+    s3.pushChunk(chord(P.C)); s3.pushChunk(chord(P.G)); s3.pushChunk(chord(P.F));
+    ok(evs.length === 2 && evs[0].kind === 'quick' && evs[0].text === 'BẮT NHANH LIVE (' + evs[0].percent + '%)' && evs[0].key === 'C Major', 'đoạn đầu báo "BẮT NHANH LIVE (xx%)" kèm Key: ' + (evs[0] && evs[0].text));
+    ok(evs[1] && evs[1].kind === 'done' && evs[1].percent > evs[0].percent && evs[1].key === 'C Major' && /^DÒ XONG \(\d+%\)$/.test(evs[1].text), '% tăng (cùng Key) vẫn được báo: ' + (evs[0] && evs[0].percent) + '% -> ' + (evs[1] && evs[1].text));
+    ok(s3.pushChunk(chord(P.F)) === null && evs.length === 2, 'mức không tăng -> không báo thừa (không nháy chữ)');
     const s2 = C.createSession(SR); const seq = ['Am', 'F', 'C', 'G'].map((k) => s2.pushChunk(chord(P[k])));
     ok(seq[0] && seq[0].key === 'A Minor' && !seq[1] && !seq[2] && seq[3] && seq[3].key === 'C Major' && seq[3].reason === 'confidence-up' && seq[3].confidence > seq[0].confidence, 'Key ĐỔI + tin cậy tăng -> báo lại: A Minor -> C Major (' + (seq[3] ? Math.round(seq[3].confidence * 100) : '?') + '%)');
 }
@@ -86,8 +92,10 @@ console.log('E. Engine chạy trên AudioContext giả (SYSTEM_AUDIO)');
     ok(nodes.length === 0 && AK.getState().capturing === false, 'chế độ TẮT -> KHÔNG bắt âm thanh (không tốn CPU)');
     AK.setEnabled(true); AK.init(ctx, src);
     ok(nodes.length === 1 && AK.getState().capturing && AK.isReady(), 'chế độ BẬT + init -> bắt âm thanh từ nguồn');
+    const sts = []; AK.onStatus((e) => sts.push(e));
     let got = null; AK.detectOnce((r) => { got = r; });
     feed(nodes[0], chord(P.C, 1.6));
+    ok(sts.length >= 1 && sts[0].kind === 'quick' && sts[0].percent === Math.round(got.confidence * 100) && AK.getState().status === sts[sts.length - 1].text, 'engine báo % tin cậy ra ngoài qua onStatus: ' + (sts[0] && sts[0].text));
     ok(got && got.key === 'C Major' && got.engine === 'autokey-live', 'nghe 1.6 s -> chốt: ' + (got && got.key));
     ok(AK.getState().statusKind === 'quick' || AK.getState().statusKind === 'done', 'getState báo trạng thái');
     // kết quả đến khi chưa có người nghe -> giữ lại, giao ở detectOnce kế tiếp (renderer gọi lại detectOnce sau mỗi kết quả)
@@ -100,6 +108,7 @@ console.log('E. Engine chạy trên AudioContext giả (SYSTEM_AUDIO)');
         let gone = false; const stopFn = AK.detectOnce(() => { gone = true; }); stopFn(); feed(nodes[nodes.length - 1], chord(P.C, 1.6));
         ok(gone === false, 'hàm huỷ watcher hoạt động (không báo sau khi huỷ)');
         AK.setEnabled(false); ok(AK.getState().capturing === false && AK.isReady() === false, 'tắt chế độ -> dừng bắt âm thanh');
+        AK.onStatus(null);
         part2();
     }, 20);
 }
@@ -151,6 +160,20 @@ function build(opts) {
     ok(sbH.__getMode() === 'autokey-temp' && !sbH.__els.btn.clicks, 'đang GIỮ Key tay -> chỉ lưu chế độ, KHÔNG dò lại/đè Key tay');
     const sbN = build({ running: false }); sbN.document.body.children[0].children[1].children[0].listeners.change[0]();
     ok(sbN.__getMode() === 'autokey-temp' && !sbN.__els.btn.clicks, 'SYSTEM_AUDIO chưa chạy -> chỉ lưu chế độ (có hiệu lực khi nguồn chạy)');
+    { // dòng trạng thái khối KEY
+        const mkS = (mode, src, busy) => { const x = build({ startMode: mode }); x.keyInfoEl = { textContent: 'GIỮ' }; x.getActiveSourceName = () => src; x.__autoKeyRun = { busy: !!busy }; return x; };
+        const st = { key: 'C Major', text: 'BẮT NHANH LIVE (92%)' };
+        const a = mkS('autokey-temp', 'ai'); vm.runInContext('__akShowStatus(' + JSON.stringify(st) + ')', a);
+        ok(a.keyInfoEl.textContent === 'Auto Key tạm: BẮT NHANH LIVE (92%)', 'chế độ BẬT: dòng KEY hiện "' + a.keyInfoEl.textContent + '"');
+        vm.runInContext('__akShowStatus({ key: "C Major", text: "DÒ XONG (99%)" })', a);
+        ok(a.keyInfoEl.textContent === 'Auto Key tạm: DÒ XONG (99%)', '% tự cập nhật: "' + a.keyInfoEl.textContent + '"');
+        const b = mkS('ai', 'ai'); vm.runInContext('__akShowStatus(' + JSON.stringify(st) + ')', b); ok(b.keyInfoEl.textContent === 'GIỮ', 'chế độ AI: dòng KEY KHÔNG bị đụng');
+        const c = mkS('autokey-temp', 'manual'); vm.runInContext('__akShowStatus(' + JSON.stringify(st) + ')', c); ok(c.keyInfoEl.textContent === 'GIỮ', 'Manual đang điều khiển: không đè dòng Manual Key');
+        const d = mkS('autokey-temp', 'songDb'); vm.runInContext('__akShowStatus(' + JSON.stringify(st) + ')', d); ok(d.keyInfoEl.textContent === 'GIỮ', 'Song Database đang điều khiển: không đè');
+        const e = mkS('autokey-temp', 'ai', true); vm.runInContext('__akShowStatus(' + JSON.stringify(st) + ')', e); ok(e.keyInfoEl.textContent === 'GIỮ', 'Auto-Key cũ đang chạy: không đè');
+        const f = mkS('autokey-temp', 'ai'); f.AutoKeyLive.getState = () => ({ status: 'DÒ XONG (97%)' });
+        ok(vm.runInContext('__akStatusLine({ confidence: 0.97 })', f) === 'Auto Key tạm: DÒ XONG (97%)' && vm.runInContext('(function(){ AutoKeyLive.getState = () => ({ status: "" }); return __akStatusLine({ confidence: 0.97 }); })()', f) === 'Auto Key tạm (97% tin cậy)', 'dòng trạng thái lúc có Key: nhãn engine; dự phòng "(xx% tin cậy)" nếu chưa có nhãn');
+    }
     const sbK = build({ startMode: 'autokey-temp' });
     ok(sbK.__akTempOn === undefined ? vm.runInContext('__akTempOn()', sbK) === true : true, 'mở app khi đang ở chế độ Auto Key tạm thời -> nhận đúng chế độ đã lưu');
     ok(vm.runInContext('__akDetectOnce(function(){})', sbK) === undefined, 'chế độ BẬT + engine sẵn sàng -> chu trình dò dùng AutoKeyLive.detectOnce (không phải KeyEngine)');
@@ -161,17 +184,19 @@ function build(opts) {
 console.log('G. Các điểm nối trong renderer.js + KHÔNG sửa HTML / KeyEngine');
 ok(/window\.__keyDetectStopWatcher = \(typeof __akDetectOnce === "function" \? __akDetectOnce : KeyEngine\.detectOnce\)\(\(result\) => \{/.test(r), 'chu trình dò Key chọn nguồn qua __akDetectOnce (mặc định vẫn KeyEngine.detectOnce)');
 ok(/!\(result && result\.engine === "autokey-live"\) && !\(keySource\.manual && \(keySource\.manual\.active/.test(r), 'Key của Auto Key tạm KHÔNG tự thay Key Database (DB_BYPASS_AUTO)');
-ok(/!keySource\.songDb\.active && !\(result && result\.engine === "autokey-live"\)\) \{[^\n]*\n\s+window\.electronAPI\?\.submitDetectedKey/.test(r), 'Key của Auto Key tạm KHÔNG ghi lên Key Server');
+ok(/if \(result && result\.engine === "autokey-live"\) \{[^\n]*\} else if \(keySource\.songDb && !keySource\.songDb\.active\) \{\s*\n\s*window\.electronAPI\?\.submitDetectedKey/.test(r), 'Key của Auto Key tạm KHÔNG ghi lên Key Server (dòng gốc `if (keySource.songDb && !keySource.songDb.active)` giữ nguyên)');
 ok(/KeyEngine\.onProvisionalEstimate\(\(estimate\) => \{\n\s+if \(typeof __akTempOn === "function" && __akTempOn\(\)\) return;/.test(r), 'Key tạm/tự sửa của AI cũ im lặng khi đang dùng Auto Key tạm thời');
 ok(/KeyEngine\.init\(audioContext, source\);\n\s+if \(typeof __akBind === "function"\) __akBind\(audioContext, source\);/.test(r), 'bindAiEnginesToSystemAudio khởi động chu trình mới cho engine');
 ok((r.match(/if \(typeof AutoKeyLive !== "undefined"\) AutoKeyLive\.stop\(\); \/\/ AUTOKEY-TEMP-01/g) || []).length === 2, 'mất thiết bị (2 chỗ) -> engine dừng bắt âm thanh');
 ok(/if \(typeof initAutoKeyTempCard === "function"\) initAutoKeyTempCard\(\);/.test(r), 'thẻ chuột phải được khởi tạo lúc mở app');
-ok(/keyInfoEl\.textContent = `\$\{result\.engine === "autokey-live" \? "Auto Key tạm" : "Auto Detect"\}/.test(r), 'dòng trạng thái hiện "Auto Key tạm (xx% tin cậy)"');
+ok(/keyInfoEl && !__autoKeyRun\.busy\) keyInfoEl\.textContent = `Auto Detect \(/.test(r) && /result\.engine === "autokey-live" && keyInfoEl && !__autoKeyRun\.busy\) keyInfoEl\.textContent = __akStatusLine\(result\)/.test(r), 'dòng trạng thái: AI cũ vẫn "Auto Detect (xx% tin cậy)" (nguyên văn); Auto Key tạm dùng nhãn riêng (__akStatusLine)');
+ok(/AutoKeyLive\.onStatus === "function"\) AutoKeyLive\.onStatus\(__akShowStatus\)/.test(r), 'mỗi lần bind, engine được nối với dòng trạng thái KEY (% tự cập nhật)');
 const html = rd('ui/index.html'); ok(!/autoKeyLive|AutoKeyLive|keyModeAutoKey/.test(html), 'index.html KHÔNG bị sửa (không thêm script/nút nào)');
 const ke = rd('ui/js/engines/keyEngine.js'); ok(!/AutoKeyLive|autokey-live/.test(ke), 'keyEngine.js (AI cũ) không bị sửa');
 const eng = rd('ui/js/engines/autoKeyLiveEngine.js'); ok(!/KeyEngine|require\(|fetch\(|XMLHttpRequest/.test(eng.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')), 'engine độc lập: không gọi KeyEngine, không mạng');
 const I = require(path.join(__dirname, '../../ui/js/i18n.js'));
 I.setLang('en'); ok(I.translate('Auto Key tạm thời') === 'Temporary Auto Key' && I.translate('Auto Key tạm (87% tin cậy)') === 'Temp Auto Key (87% confidence)', '[en] chữ mới được dịch');
+ok(I.translate('Auto Key tạm: BẮT NHANH LIVE (92%)') === 'Temp Auto Key: QUICK LIVE LOCK (92%)' && I.translate('Auto Key tạm: DÒ XONG (99%)') === 'Temp Auto Key: DONE (99%)', '[en] nhãn % mới được dịch');
 I.setLang('vi'); ok(I.translate('Temporary Auto Key') === 'Auto Key tạm thời', '[vi] trả lại tiếng Việt');
 console.log('\n' + pass + ' PASS / ' + fail + ' FAIL'); process.exit(fail ? 1 : 0);
 }

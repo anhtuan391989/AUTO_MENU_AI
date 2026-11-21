@@ -12,6 +12,8 @@
      - Tin cậy = clip(0.52 + 0.36·điểm_tốt_nhất + 0.85·(điểm_tốt_nhất − điểm_hạng_2), 0.50, 0.99).
      - Chốt: đoạn hợp lệ đầu tiên chốt NGAY ("BẮT NHANH LIVE"); các đoạn sau CHỈ cập nhật khi tin cậy CAO HƠN mức đã chốt
        và Key khác Key đã gửi; tin cậy >= 0.85 => "DÒ XONG".
+   - Hiển thị: Menu hiện "BẮT NHANH LIVE (xx%)" rồi "DÒ XONG (xx%)" và CẬP NHẬT % mỗi khi mức tin cậy đã chốt tăng (kể cả khi Key không đổi)
+     — khác AutoKey gốc (chỉ đổi nhãn ở >= 85%) ở đúng chỗ này, chỉ là phần hiển thị, không ảnh hưởng Key được chọn.
    Engine này ĐỘC LẬP với KeyEngine (thuật toán AI cũ của Menu giữ nguyên 100%). Chỉ được dùng khi người dùng chọn
    "Auto Key tạm thời" trong thẻ chuột phải nút AUTO DETECT. Giao diện trả kết quả CÙNG HÌNH DẠNG KeyEngine.detectOnce
    ({ key: "G# Minor", rootIndex, mode, confidence, margin, top2 }) nên phần còn lại của Menu dùng y như Key AI.
@@ -201,12 +203,21 @@
     }
 
     // Phiên dò của MỘT bài: giữ tổng cộng dồn + trạng thái chốt. pushChunk(chunk) trả về sự kiện cần báo hoặc null.
-    function createSession(sampleRate) {
+    function createSession(sampleRate, onStatus) {
         const st = { cumFull: new Float64Array(12), cumBass: new Float64Array(12), chunks: 0, firstLocked: false, bestConf: 0.0,
             lastRoot: -1, lastMode: null, status: "", statusKind: "idle", last: null };
         function toResult(ev, why) {
             return { key: NOTE_NAMES[ev.rootIndex] + " " + ev.mode, rootIndex: ev.rootIndex, mode: ev.mode, confidence: ev.confidence,
                 margin: ev.margin, top2: ev.top2, bassAgreement: null, engine: ENGINE_TAG, reason: why };
+        }
+        // Phần trăm tin cậy LUÔN hiện: báo trạng thái mỗi khi mức đã chốt thay đổi (đoạn đầu và mỗi lần tin cậy tăng).
+        function setStatus(kind, pct) {
+            st.statusKind = kind;
+            st.status = (kind === "done" ? "DÒ XONG (" : "BẮT NHANH LIVE (") + pct + "%)";
+            if (typeof onStatus === "function") {
+                try { onStatus({ key: st.lastRoot >= 0 ? NOTE_NAMES[st.lastRoot] + " " + st.lastMode : null, confidence: st.bestConf, percent: pct, kind, text: st.status, chunks: st.chunks }); }
+                catch (e) { /* chỉ hiển thị, không ảnh hưởng dò Key */ }
+            }
         }
         return {
             state: st,
@@ -220,8 +231,8 @@
                 const pct = Math.round(ev.confidence * 100);
                 if (!st.firstLocked) { // BẮT NHANH LIVE: đoạn hợp lệ đầu tiên chốt ngay
                     st.firstLocked = true; st.bestConf = ev.confidence; st.lastRoot = ev.rootIndex; st.lastMode = ev.mode;
-                    st.status = "BẮT NHANH LIVE (" + pct + "%)"; st.statusKind = "quick";
                     st.last = toResult(ev, "first-chunk");
+                    setStatus("quick", pct);
                     return st.last;
                 }
                 if (ev.confidence > st.bestConf) { // chỉ nâng khi tin cậy CAO HƠN
@@ -231,7 +242,7 @@
                         st.lastRoot = ev.rootIndex; st.lastMode = ev.mode; out = toResult(ev, "confidence-up");
                         st.last = out;
                     }
-                    if (ev.confidence >= DONE_CONFIDENCE) { st.status = "DÒ XONG (" + pct + "%)"; st.statusKind = "done"; }
+                    setStatus(ev.confidence >= DONE_CONFIDENCE ? "done" : "quick", pct); // % luôn cập nhật theo mức tin cậy đã chốt (AutoKey gốc chỉ đổi nhãn ở >= 85%)
                     return out;
                 }
                 return null;
@@ -241,7 +252,7 @@
 
     // ---------- Engine chạy thật trên SYSTEM_AUDIO (cùng audioContext + source như KeyEngine.init) ----------
     let audioCtx = null, sourceNode = null, processor = null, muteGain = null, chunker = null, session = null;
-    let enabled = false, listener = null, pending = null;
+    let enabled = false, listener = null, pending = null, statusListener = null;
 
     function teardownCapture() {
         try { if (processor) { processor.onaudioprocess = null; processor.disconnect(); } } catch (e) { /* bỏ qua */ }
@@ -254,6 +265,7 @@
         const cb = listener; listener = null;
         try { cb(result); } catch (e) { console.error("[AutoKeyLive] callback lỗi:", e); }
     }
+    function newSession(sr) { return createSession(sr, (s) => { if (statusListener) statusListener(s); }); }
     function onChunk(chunk) {
         if (!session) return;
         const r = session.pushChunk(chunk);
@@ -262,7 +274,7 @@
     function startCapture() {
         if (processor || !enabled || !audioCtx || !sourceNode) return false;
         try {
-            session = session || createSession(audioCtx.sampleRate);
+            session = session || newSession(audioCtx.sampleRate);
             chunker = createChunker(audioCtx.sampleRate, onChunk);
             processor = audioCtx.createScriptProcessor(4096, 1, 1); // 1 kênh vào: tự trộn mono = trung bình các kênh (như np.mean)
             muteGain = audioCtx.createGain(); muteGain.gain.value = 0; // không phát tiếng ra loa
@@ -281,7 +293,7 @@
         init(audioContext, source) {
             teardownCapture();
             audioCtx = audioContext || null; sourceNode = source || null;
-            session = audioCtx ? createSession(audioCtx.sampleRate) : null;
+            session = audioCtx ? newSession(audioCtx.sampleRate) : null;
             pending = null; listener = null;
             if (enabled) startCapture();
         },
@@ -293,6 +305,8 @@
             return function stopWatcher() { if (listener === cb) listener = null; };
         },
         stop() { teardownCapture(); listener = null; },
+        // Nhận phần trăm tin cậy MỖI KHI thay đổi (khác detectOnce: không tự gỡ). cb({ key, confidence, percent, kind: "quick"|"done", text }). Truyền null để gỡ.
+        onStatus(cb) { statusListener = typeof cb === "function" ? cb : null; },
         isReady() { return enabled && !!audioCtx && !!sourceNode; },
         getState() { const s = session ? session.state : null; return { enabled, capturing: !!processor, chunks: s ? s.chunks : 0, bestConfidence: s ? s.bestConf : 0, status: s ? s.status : "", statusKind: s ? s.statusKind : "idle", last: s ? s.last : null }; },
         // Phần thuần (không cần trình duyệt) — dùng cho kiểm thử
