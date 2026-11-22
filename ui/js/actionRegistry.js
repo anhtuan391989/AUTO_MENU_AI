@@ -234,16 +234,18 @@ const KNOB_CC_ANCHORS = (() => {
 })();
 
 // FX-BUS-KNOB-01 — Knob FX (mặc định 50) chỉnh ĐỒNG THỜI volume 4 bus theo kiểu CỘNG/TRỪ so với mức gốc của từng bus:
-// 50 = giữ mức gốc · 0 = trừ FX_BUS_RANGE_DB dB · 100 = cộng FX_BUS_RANGE_DB dB (không vượt +10 dB là mức tối đa của fader).
+// 50 = giữ mức gốc · 100 = +10 dB (mức tối đa của fader) · 0 = −100 dB (mức tối thiểu = tắt hẳn). Hai nửa 0..50 và 50..100 nội suy tuyến tính theo dB.
 // BẢN ĐẦU (PROVISIONAL): mức gốc lấy theo Mixer của người dùng (Delay −22 · Verb ngắn −12 · Verb dài −16 · Com Verb −30 dB);
 // đường cong CC→dB: đoạn CC ≥ 64 lấy từ số đo thật của fader Beat; đoạn CC < 64 là ƯỚC LƯỢNG (chưa đo) — cần đo lại rồi chỉnh bảng FX_BUS_TAPER.
-const FX_BUS_RANGE_DB = 12;
+const FX_BUS_MAX_DB = 10;
+const FX_BUS_MIN_DB = -100;
 const FX_BUS_BASE_DB = Object.freeze({
     FX_BUS_DELAY_VOLUME: -22, FX_BUS_VERB_SHORT_VOLUME: -12, FX_BUS_VERB_LONG_VOLUME: -16, FX_BUS_COM_VERB_VOLUME: -30
 });
-const FX_BUS_TAPER = Object.freeze([[0, -90], [16, -60], [32, -40], [48, -24], [64, -11.3], [81, -5.1], [95, -0.5], [97, 0.2], [98, 0.5], [99, 0.8], [114, 5.7], [127, 10]]);
+const FX_BUS_TAPER = Object.freeze([[0, -100], [16, -60], [32, -40], [48, -24], [64, -11.3], [81, -5.1], [95, -0.5], [97, 0.2], [98, 0.5], [99, 0.8], [114, 5.7], [127, 10]]);
 function fxBusKnobToCc(action, v) {
-    const target = Math.min(10, FX_BUS_BASE_DB[action] + (v - 50) / 50 * FX_BUS_RANGE_DB);
+    const base = FX_BUS_BASE_DB[action];
+    const target = v >= 50 ? base + (v - 50) / 50 * (FX_BUS_MAX_DB - base) : base + (50 - v) / 50 * (FX_BUS_MIN_DB - base);
     const t = FX_BUS_TAPER;
     if (target <= t[0][1]) return t[0][0];
     for (let i = 0; i < t.length - 1; i++) {
