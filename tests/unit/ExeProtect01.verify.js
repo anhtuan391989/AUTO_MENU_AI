@@ -81,7 +81,7 @@ ok(seen.size > 60, 'quét được ' + seen.size + ' file đang dùng (kiểm ch
 // 6) Loại file rác nặng + giữ lại thứ bắt buộc
 ok(files.includes('!**/*.rar'), 'loại *.rar (ui/ui.rar ~35MB đang bị đóng nhầm vào bản cài)');
 ok(files.includes('!**/*.example.js'), 'loại *.example.js');
-['app/**/*', 'core/**/*', 'ui/**/*', 'ahk/**/*', 'data/songs.json', 'docs/d1/midi-mapping.xml', 'docs/d1/midi-mapping.xsd', 'docs/d1/semanticValidate.js']
+['app/**/*', 'core/**/*', 'ui/**/*', 'ahk/**/*', 'docs/d1/midi-mapping.xml', 'docs/d1/midi-mapping.xsd', 'docs/d1/semanticValidate.js']
     .forEach((x) => ok(files.includes(x), 'vẫn đóng gói: ' + x));
 ok(fs.existsSync(path.join(ROOT, 'app/license-public-key.txt')), 'app/license-public-key.txt vẫn còn (đọc được qua asar)');
 

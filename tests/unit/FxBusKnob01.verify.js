@@ -28,13 +28,16 @@ for (const x of BUS) {
 ok(cc('FX_BUS_DELAY_VOLUME', 50, 'Cubase 13') === 64, 'DAW khác: công thức tuyến tính cũ (50 -> 64)');
 
 // FX-BUS-RANGE-01 — knob 100 = +10 dB (CC127, tối đa fader) · knob 0 = −100 dB (CC0, tối thiểu) · knob 50 = giữ mức gốc từng bus
-const dbAt = (ccv) => { const T = [[0, -100], [16, -60], [32, -40], [48, -24], [64, -11.3], [81, -5.1], [95, -0.5], [97, 0.2], [98, 0.5], [99, 0.8], [114, 5.7], [127, 10]]; for (let i = 0; i < T.length - 1; i++) if (ccv >= T[i][0] && ccv <= T[i + 1][0]) return T[i][1] + (T[i + 1][1] - T[i][1]) * (ccv - T[i][0]) / (T[i + 1][0] - T[i][0]); return 10; };
+const dbAt = (ccv) => { const T = [[0, -100], [16, -60], [32, -40], [48, -24], [58, -15.3], [64, -11.3], [81, -5.1], [95, -0.5], [97, 0.2], [98, 0.5], [99, 0.8], [114, 5.7], [127, 10]]; for (let i = 0; i < T.length - 1; i++) if (ccv >= T[i][0] && ccv <= T[i + 1][0]) return T[i][1] + (T[i + 1][1] - T[i][1]) * (ccv - T[i][0]) / (T[i + 1][0] - T[i][0]); return 10; };
 ok(/FX_BUS_MAX_DB = 10;/.test(reg) && /FX_BUS_MIN_DB = -100;/.test(reg) && /FX_BUS_TAPER = Object\.freeze\(\[\[0, -100\]/.test(reg), 'FX bus: hằng số +10 max / −100 min có trong actionRegistry');
 for (const x of BUS) {
   ok(cc(x, 100) === 127, `${x}: knob 100 -> CC127 (+10 dB max)`, cc(x, 100));
   ok(cc(x, 0) === 0, `${x}: knob 0 -> CC0 (−100 dB min)`, cc(x, 0));
   ok(Math.abs(dbAt(cc(x, 50)) - c.base[x]) < 1.5, `${x}: knob 50 vẫn ≈ mức gốc ${c.base[x]} dB`, dbAt(cc(x, 50)));
 }
+ok(/\[58, -15\.3\]/.test(reg), 'taper có điểm đo thật CC58 = -15.3 dB (FX-BUS-TAPER-02)');
+ok(cc('FX_BUS_VERB_LONG_VOLUME', 50) === 57 && Math.abs(dbAt(57) - (-16)) <= 0.3, 'Verb dài knob 50 -> CC57 ~ -16 dB (không còn -15.3)', [cc('FX_BUS_VERB_LONG_VOLUME', 50), dbAt(57)]);
+ok(cc('FX_BUS_VERB_SHORT_VOLUME', 50) === 63 && Math.abs(dbAt(63) - (-12)) <= 0.3, 'Verb ngắn knob 50 -> CC63 ~ -12 dB', [cc('FX_BUS_VERB_SHORT_VOLUME', 50), dbAt(63)]);
 ok(cc('FX_BUS_COM_VERB_VOLUME', 101) === 127 && cc('FX_BUS_COM_VERB_VOLUME', -5) === 0, 'FX bus: ngoài 0..100 bị kẹp, không vượt +10 / −100');
 
 // Nối dây
