@@ -91,6 +91,13 @@
       "core/fast_key_detector.py",
       "core/integration/smtc-daemon.ps1"
     ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
     "npmRebuild": false,
     "directories": {
       "output": "dist"
