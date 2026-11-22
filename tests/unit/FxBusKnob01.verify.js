@@ -51,6 +51,9 @@ const nums = m ? [...m[1].matchAll(/(\w+): (\d+)/g)].map((x) => [x[1], +x[2]]) :
 ok(nums.length === 4 && new Set(nums.map((x) => x[1])).size === 4 && nums.every(([k, n]) => BUS.includes(k) && n >= 28 && n <= 31), 'bộ điền nhanh FX BUS: 4 CC khác nhau 28–31, kênh 15', nums);
 const used = [...setup.matchAll(/dawQfMake\(15, 127, \{([^}]*)\}\)/g)].flatMap((x) => [...x[1].matchAll(/(\w+): (\d+)/g)].map((y) => y[1] + ':' + y[2]));
 const studioNums = used.filter((s) => !/_(VOLUME)$/.test(s.split(':')[0]) || BUS.includes(s.split(':')[0])).map((s) => s.split(':')[1]);
+// FX-BUS-CC-01 — thứ tự CC khớp Studio One thật của người dùng (ảnh External Devices): CC28 Com Verb · CC29 Verb dài · CC30 Verb ngắn · CC31 Delay
+const want = { FX_BUS_COM_VERB_VOLUME: 28, FX_BUS_VERB_LONG_VOLUME: 29, FX_BUS_VERB_SHORT_VOLUME: 30, FX_BUS_DELAY_VOLUME: 31 };
+ok(Object.entries(want).every(([k, n]) => nums.some(([kk, nn]) => kk === k && nn === n)), 'bộ điền nhanh FX BUS: Com Verb 28 · Verb dài 29 · Verb ngắn 30 · Delay 31 (khớp Studio One)', nums);
 ok(!ren.slice(ren.indexOf('function loadData()')).slice(0, 4000).includes('dispatchKnobVolume(\'fxMasterKnob'), 'loadData không gửi MIDI cho knob FX');
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);
