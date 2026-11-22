@@ -37,8 +37,13 @@ const path = require("path");
 
 // EXE-PROTECT-02 — mật khẩu mặc định KHÔNG còn nằm trong mã nguồn ở dạng chữ rõ (bản cài .exe ai mở file cũng đọc được).
 // Chỉ còn {salt, hash} scrypt một chiều của mật khẩu mặc định (cùng cách SetupLock.js): đăng nhập bằng mật khẩu mặc định cũ VẪN hoạt động y như trước.
-const DEFAULT_SALT_HEX = "aba66d15677628b3eb5d0af9269ab37a";
-const DEFAULT_HASH_HEX = "33c8b1d9c7c25bc38049a075035abbc96449b706bf172b309a6b07b2d134e445b11057b3d0e6e6b3ba52bfdea3cc1889ad4270bb734e877d77860f2d7d505e6a";
+const DEFAULT_SALT_HEX = "73fc127ddf6ca35f690f3a2f7cc55ecc";
+const DEFAULT_HASH_HEX = "354ad2620c352f74b103be6d0380b91b2e1f03ff74b366d19bb2a9acd91cbb3561a91f8acabacb5f5d5394bec3011be28e18fedf213e064e6e8cc4843885ab97";
+// EXE-PROTECT-03 — mật khẩu mặc định ĐỜI CŨ (đã từng nằm trong mã nguồn nên coi như đã lộ). Hằng số này KHÔNG BAO GIỜ đổi.
+// Máy nào đã tạo admin-auth.json bằng mật khẩu mặc định đời cũ mà chưa tự đổi mật khẩu sẽ được tự nâng lên mật khẩu mặc định hiện tại
+// (DEFAULT_*_HEX ở trên, do tools/set-admin-password đặt) ở lần xác thực kế tiếp. Máy đã tự đổi mật khẩu thì không bị đụng tới.
+const LEGACY_DEFAULT_SALT_HEX = "aba66d15677628b3eb5d0af9269ab37a";
+const LEGACY_DEFAULT_HASH_HEX = "33c8b1d9c7c25bc38049a075035abbc96449b706bf172b309a6b07b2d134e445b11057b3d0e6e6b3ba52bfdea3cc1889ad4270bb734e877d77860f2d7d505e6a";
 const MIN_PASSWORD_LENGTH = 6;
 const SCRYPT_KEYLEN = 64;
 const FILE_NAME = "admin-auth.json";
@@ -132,8 +137,20 @@ function createAdminAuth(deps) {
     }
 
     function bootstrapIfMissing() {
-        if (fs.existsSync(filePath)) return;
-        writeRecord({ salt: DEFAULT_SALT_HEX, hash: DEFAULT_HASH_HEX, updatedAt: new Date().toISOString() });
+        if (!fs.existsSync(filePath)) {
+            writeRecord({ salt: DEFAULT_SALT_HEX, hash: DEFAULT_HASH_HEX, updatedAt: new Date().toISOString() });
+            return;
+        }
+        // EXE-PROTECT-03: nâng cấp máy còn dùng mật khẩu mặc định đời cũ lên mật khẩu mặc định hiện tại (chỉ khi hai cái khác nhau).
+        if (DEFAULT_SALT_HEX === LEGACY_DEFAULT_SALT_HEX && DEFAULT_HASH_HEX === LEGACY_DEFAULT_HASH_HEX) return;
+        try {
+            const rec = readRecord();
+            if (rec && rec.salt === LEGACY_DEFAULT_SALT_HEX && rec.hash === LEGACY_DEFAULT_HASH_HEX) {
+                writeRecord({ salt: DEFAULT_SALT_HEX, hash: DEFAULT_HASH_HEX, updatedAt: new Date().toISOString() });
+            }
+        } catch {
+            // Không đọc được file (hỏng / không giải mã được) -> để verify() báo lỗi đúng như trước, không tự ghi đè.
+        }
     }
 
     function isBootstrapped() {
