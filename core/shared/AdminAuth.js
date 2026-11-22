@@ -9,7 +9,7 @@
 // KHÔNG tự làm logic hash/so sánh ở đó (đúng nguyên tắc "không bypass từ renderer").
 //
 // AN TOÀN MẬT KHẨU (đúng mục 8 trong đặc tả Task A):
-//   1) Password KHÔNG BAO GIỜ được lưu dạng đọc được ("Kh0i_AI!" không nằm trong
+//   1) Password KHÔNG BAO GIỜ được lưu dạng đọc được (mật khẩu mặc định cũng không nằm trong
 //      bất kỳ file nào trên đĩa sau khi bootstrap). Chỉ lưu {salt, hash} với
 //      hash = scrypt(password, salt) — hàm băm một chiều, không thể đảo ngược.
 //   2) Lớp bảo vệ THỨ HAI, đúng yêu cầu "bảo vệ bằng cơ chế phù hợp với
@@ -35,7 +35,10 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-const DEFAULT_PASSWORD = "Kh0i_AI!";
+// EXE-PROTECT-02 — mật khẩu mặc định KHÔNG còn nằm trong mã nguồn ở dạng chữ rõ (bản cài .exe ai mở file cũng đọc được).
+// Chỉ còn {salt, hash} scrypt một chiều của mật khẩu mặc định (cùng cách SetupLock.js): đăng nhập bằng mật khẩu mặc định cũ VẪN hoạt động y như trước.
+const DEFAULT_SALT_HEX = "aba66d15677628b3eb5d0af9269ab37a";
+const DEFAULT_HASH_HEX = "33c8b1d9c7c25bc38049a075035abbc96449b706bf172b309a6b07b2d134e445b11057b3d0e6e6b3ba52bfdea3cc1889ad4270bb734e877d77860f2d7d505e6a";
 const MIN_PASSWORD_LENGTH = 6;
 const SCRYPT_KEYLEN = 64;
 const FILE_NAME = "admin-auth.json";
@@ -130,9 +133,7 @@ function createAdminAuth(deps) {
 
     function bootstrapIfMissing() {
         if (fs.existsSync(filePath)) return;
-        const salt = crypto.randomBytes(16).toString("hex");
-        const hash = scryptHash(DEFAULT_PASSWORD, salt);
-        writeRecord({ salt, hash, updatedAt: new Date().toISOString() });
+        writeRecord({ salt: DEFAULT_SALT_HEX, hash: DEFAULT_HASH_HEX, updatedAt: new Date().toISOString() });
     }
 
     function isBootstrapped() {
@@ -228,7 +229,6 @@ function getDefaultInstance() {
 
 module.exports = {
     createAdminAuth,
-    DEFAULT_PASSWORD,
     MIN_PASSWORD_LENGTH,
     verify: (password) => getDefaultInstance().verify(password),
     changePassword: (currentPassword, newPassword) => getDefaultInstance().changePassword(currentPassword, newPassword),

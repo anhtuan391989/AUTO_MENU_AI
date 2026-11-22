@@ -1,0 +1,216 @@
+From af05a4ff5261d44ad3af96f02b73c8d96967c530 Mon Sep 17 00:00:00 2001
+From: Claude A <claude@local>
+Date: Sun, 22 Nov 2026 06:37:53 +0000
+Subject: [PATCH] =?UTF-8?q?EXE-PROTECT-02:=20b=E1=BB=8F=20m=E1=BA=ADt=20kh?=
+ =?UTF-8?q?=E1=BA=A9u=20m=E1=BA=B7c=20=C4=91=E1=BB=8Bnh=20Admin=20d?=
+ =?UTF-8?q?=E1=BA=A1ng=20ch=E1=BB=AF=20r=C3=B5=20kh=E1=BB=8Fi=20AdminAuth.?=
+ =?UTF-8?q?js=20(gi=E1=BB=AF=20nguy=C3=AAn=20h=C3=A0nh=20vi=20=C4=91=C4=83?=
+ =?UTF-8?q?ng=20nh=E1=BA=ADp)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Y3Me4YGLz39DbK1HnaR9zx
+---
+ core/shared/AdminAuth.js          | 12 ++++----
+ tests/unit/AdminAuthA52.verify.js | 23 +++++++++------
+ tests/unit/ExeProtect02.verify.js | 49 +++++++++++++++++++++++++++++++
+ 3 files changed, 69 insertions(+), 15 deletions(-)
+ create mode 100644 tests/unit/ExeProtect02.verify.js
+
+diff --git a/core/shared/AdminAuth.js b/core/shared/AdminAuth.js
+index 14ccffb..0ef4b99 100644
+--- a/core/shared/AdminAuth.js
++++ b/core/shared/AdminAuth.js
+@@ -9,7 +9,7 @@
+ // KHÔNG tự làm logic hash/so sánh ở đó (đúng nguyên tắc "không bypass từ renderer").
+ //
+ // AN TOÀN MẬT KHẨU (đúng mục 8 trong đặc tả Task A):
+-//   1) Password KHÔNG BAO GIỜ được lưu dạng đọc được ("Kh0i_AI!" không nằm trong
++//   1) Password KHÔNG BAO GIỜ được lưu dạng đọc được (mật khẩu mặc định cũng không nằm trong
+ //      bất kỳ file nào trên đĩa sau khi bootstrap). Chỉ lưu {salt, hash} với
+ //      hash = scrypt(password, salt) — hàm băm một chiều, không thể đảo ngược.
+ //   2) Lớp bảo vệ THỨ HAI, đúng yêu cầu "bảo vệ bằng cơ chế phù hợp với
+@@ -35,7 +35,10 @@ const crypto = require("crypto");
+ const fs = require("fs");
+ const path = require("path");
+ 
+-const DEFAULT_PASSWORD = "Kh0i_AI!";
++// EXE-PROTECT-02 — mật khẩu mặc định KHÔNG còn nằm trong mã nguồn ở dạng chữ rõ (bản cài .exe ai mở file cũng đọc được).
++// Chỉ còn {salt, hash} scrypt một chiều của mật khẩu mặc định (cùng cách SetupLock.js): đăng nhập bằng mật khẩu mặc định cũ VẪN hoạt động y như trước.
++const DEFAULT_SALT_HEX = "aba66d15677628b3eb5d0af9269ab37a";
++const DEFAULT_HASH_HEX = "33c8b1d9c7c25bc38049a075035abbc96449b706bf172b309a6b07b2d134e445b11057b3d0e6e6b3ba52bfdea3cc1889ad4270bb734e877d77860f2d7d505e6a";
+ const MIN_PASSWORD_LENGTH = 6;
+ const SCRYPT_KEYLEN = 64;
+ const FILE_NAME = "admin-auth.json";
+@@ -130,9 +133,7 @@ function createAdminAuth(deps) {
+ 
+     function bootstrapIfMissing() {
+         if (fs.existsSync(filePath)) return;
+-        const salt = crypto.randomBytes(16).toString("hex");
+-        const hash = scryptHash(DEFAULT_PASSWORD, salt);
+-        writeRecord({ salt, hash, updatedAt: new Date().toISOString() });
++        writeRecord({ salt: DEFAULT_SALT_HEX, hash: DEFAULT_HASH_HEX, updatedAt: new Date().toISOString() });
+     }
+ 
+     function isBootstrapped() {
+@@ -228,7 +229,6 @@ function getDefaultInstance() {
+ 
+ module.exports = {
+     createAdminAuth,
+-    DEFAULT_PASSWORD,
+     MIN_PASSWORD_LENGTH,
+     verify: (password) => getDefaultInstance().verify(password),
+     changePassword: (currentPassword, newPassword) => getDefaultInstance().changePassword(currentPassword, newPassword),
+diff --git a/tests/unit/AdminAuthA52.verify.js b/tests/unit/AdminAuthA52.verify.js
+index 73acb9f..7494af1 100644
+--- a/tests/unit/AdminAuthA52.verify.js
++++ b/tests/unit/AdminAuthA52.verify.js
+@@ -37,6 +37,9 @@ function assert(cond, label) {
+     else { fail++; console.error('  FAIL ', label); }
+ }
+ 
++// Mật khẩu mặc định chỉ tồn tại trong TEST (không đóng gói vào bản cài).
++const DEFAULT_PASSWORD = 'Kh0i_AI!';
++
+ function freshModule() {
+     delete require.cache[require.resolve(adminAuthPath)];
+     return require(adminAuthPath);
+@@ -73,11 +76,13 @@ function makeFakeSafeStorage(available) {
+ 
+ console.log('== Mục 1-2: Bootstrap mặc định + verify đúng password ==');
+ {
+-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
++    const { createAdminAuth } = freshModule();
+     const dir = makeTempDir();
+     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
+ 
+-    assert(DEFAULT_PASSWORD === 'Kh0i_AI!', 'Hằng số DEFAULT_PASSWORD đúng "Kh0i_AI!"');
++    // EXE-PROTECT-02: module KHÔNG còn export mật khẩu mặc định và mã nguồn không còn chuỗi chữ rõ; chỉ còn salt+hash.
++    assert(freshModule().DEFAULT_PASSWORD === undefined, 'AdminAuth không còn export DEFAULT_PASSWORD');
++    assert(!/Kh0i_AI/.test(fs.readFileSync(path.join(__dirname, '..', '..', 'core', 'shared', 'AdminAuth.js'), 'utf8')), 'AdminAuth.js không còn chứa mật khẩu mặc định dạng chữ rõ');
+     assert(auth.isBootstrapped() === false, 'Chưa gọi verify() lần nào -> isBootstrapped()=false');
+ 
+     const r = auth.verify(DEFAULT_PASSWORD);
+@@ -87,7 +92,7 @@ console.log('== Mục 1-2: Bootstrap mặc định + verify đúng password ==')
+ 
+ console.log('\n== Mục 3: verify sai password -> ok=false, không throw ==');
+ {
+-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
++    const { createAdminAuth } = freshModule();
+     const dir = makeTempDir();
+     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
+ 
+@@ -108,7 +113,7 @@ console.log('\n== Mục 3: verify sai password -> ok=false, không throw ==');
+ 
+ console.log('\n== Mục 4: Password KHÔNG BAO GIỜ ghi plaintext ra đĩa ==');
+ {
+-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
++    const { createAdminAuth } = freshModule();
+     const dir = makeTempDir();
+     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
+     auth.verify(DEFAULT_PASSWORD); // trigger bootstrap + ghi file
+@@ -120,7 +125,7 @@ console.log('\n== Mục 4: Password KHÔNG BAO GIỜ ghi plaintext ra đĩa ==')
+ 
+ console.log('\n== Mục 5: Change Password bắt buộc đúng password hiện tại ==');
+ {
+-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
++    const { createAdminAuth } = freshModule();
+     const dir = makeTempDir();
+     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
+     auth.bootstrapIfMissing();
+@@ -132,7 +137,7 @@ console.log('\n== Mục 5: Change Password bắt buộc đúng password hiện t
+ 
+ console.log('\n== Mục 6-7: Password mới không hợp lệ (quá ngắn / toàn số PIN) bị từ chối ==');
+ {
+-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
++    const { createAdminAuth } = freshModule();
+     const dir = makeTempDir();
+     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
+     auth.bootstrapIfMissing();
+@@ -148,7 +153,7 @@ console.log('\n== Mục 6-7: Password mới không hợp lệ (quá ngắn / to
+ 
+ console.log('\n== Mục 8-9: Đổi password hợp lệ -> verify được password mới, KHÔNG còn verify được password cũ ==');
+ {
+-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
++    const { createAdminAuth } = freshModule();
+     const dir = makeTempDir();
+     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
+     auth.bootstrapIfMissing();
+@@ -162,7 +167,7 @@ console.log('\n== Mục 8-9: Đổi password hợp lệ -> verify được passw
+ 
+ console.log('\n== Mục 10-11: safeStorage khả dụng -> file mã hoá thêm 1 lớp, roundtrip đúng qua encrypt/decrypt thật ==');
+ {
+-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
++    const { createAdminAuth } = freshModule();
+     const dir = makeTempDir();
+     const fakeSafeStorage = makeFakeSafeStorage(true);
+     const auth = createAdminAuth({ userDataDir: dir, safeStorage: fakeSafeStorage });
+@@ -180,7 +185,7 @@ console.log('\n== Mục 10-11: safeStorage khả dụng -> file mã hoá thêm 1
+ 
+ console.log('\n== Mục 12: safeStorage KHÔNG khả dụng (null) -> vẫn hoạt động đúng, không throw, không plaintext ==');
+ {
+-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
++    const { createAdminAuth } = freshModule();
+     const dir = makeTempDir();
+     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
+ 
+diff --git a/tests/unit/ExeProtect02.verify.js b/tests/unit/ExeProtect02.verify.js
+new file mode 100644
+index 0000000..22731b1
+--- /dev/null
++++ b/tests/unit/ExeProtect02.verify.js
+@@ -0,0 +1,49 @@
++// EXE-PROTECT-02 — chạy: node tests/unit/ExeProtect02.verify.js
++// Mật khẩu mặc định Admin không còn nằm dạng chữ rõ trong phần được đóng gói vào bản cài .exe,
++// nhưng đăng nhập bằng mật khẩu mặc định cũ VẪN hoạt động y như trước (không đổi hành vi).
++const fs = require('fs'), path = require('path'), os = require('os');
++const ROOT = path.join(__dirname, '..', '..');
++let pass = 0, fail = 0;
++const ok = (c, m) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m); } };
++const DEFAULT_PASSWORD = 'Kh0i_AI!'; // chỉ tồn tại trong test, không đóng gói
++const PKG = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
++
++// 1) Không còn chuỗi mật khẩu mặc định ở mọi file nằm trong phạm vi đóng gói (app/core/ui/ahk)
++const hits = [];
++const walk = (d) => { for (const n of fs.readdirSync(d)) { const p = path.join(d, n); const st = fs.statSync(p); if (st.isDirectory()) walk(p); else if (/\.(js|html|json|ahk|ps1|py|css)$/.test(n)) { try { if (fs.readFileSync(p, 'utf8').includes('Kh0i_AI')) hits.push(path.relative(ROOT, p)); } catch (e) { /* bỏ qua */ } } } };
++['app', 'core', 'ui', 'ahk'].forEach((d) => walk(path.join(ROOT, d)));
++ok(hits.length === 0, 'Không file nào trong app/core/ui/ahk chứa mật khẩu mặc định dạng chữ rõ' + (hits.length ? ' — còn: ' + hits.join(', ') : ''));
++ok(PKG.build.files.includes('!**/*.md'), 'file .md (báo cáo) không đóng gói vào bản cài');
++
++// 2) Hành vi: mật khẩu mặc định cũ vẫn đăng nhập được
++const modPath = require.resolve(path.join(ROOT, 'core/shared/AdminAuth.js'));
++const fresh = () => { delete require.cache[modPath]; return require(modPath); };
++const mk = () => fs.mkdtempSync(path.join(os.tmpdir(), 'exeprot02-'));
++{
++    const M = fresh();
++    ok(M.DEFAULT_PASSWORD === undefined, 'AdminAuth không export DEFAULT_PASSWORD');
++    const dir = mk();
++    const a = M.createAdminAuth({ userDataDir: dir, safeStorage: null });
++    ok(a.verify(DEFAULT_PASSWORD).ok === true, 'Đăng nhập bằng mật khẩu mặc định cũ vẫn ĐÚNG');
++    ok(a.verify('sai-mat-khau').ok === false, 'Mật khẩu sai vẫn bị từ chối');
++    const rec = JSON.parse(fs.readFileSync(path.join(dir, 'admin-auth.json'), 'utf8'));
++    ok(!JSON.stringify(rec).includes(DEFAULT_PASSWORD), 'File admin-auth.json không chứa mật khẩu gốc');
++    ok(/^[0-9a-f]{32}$/.test(rec.salt) && /^[0-9a-f]{128}$/.test(rec.hash), 'Bản ghi là salt+hash scrypt hợp lệ');
++
++    // đổi mật khẩu -> dùng salt NGẪU NHIÊN mới, mật khẩu mặc định hết hiệu lực
++    const r = a.changePassword(DEFAULT_PASSWORD, 'Moi!Pass#2026');
++    ok(r.ok === true, 'Đổi mật khẩu từ mặc định vẫn thành công');
++    const rec2 = JSON.parse(fs.readFileSync(path.join(dir, 'admin-auth.json'), 'utf8'));
++    ok(rec2.salt !== rec.salt && rec2.hash !== rec.hash, 'Sau khi đổi: salt/hash mới (không còn dùng salt cố định của mật khẩu mặc định)');
++    ok(a.verify(DEFAULT_PASSWORD).ok === false && a.verify('Moi!Pass#2026').ok === true, 'Mật khẩu mặc định hết hiệu lực, mật khẩu mới dùng được');
++}
++{ // hai máy khác nhau cùng bootstrap: bản ghi giống nhau (salt cố định) nhưng vẫn là hash một chiều, và verify chạy đúng
++    const M = fresh();
++    const d1 = mk(), d2 = mk();
++    const a1 = M.createAdminAuth({ userDataDir: d1, safeStorage: null }), a2 = M.createAdminAuth({ userDataDir: d2, safeStorage: null });
++    a1.verify(DEFAULT_PASSWORD); a2.verify(DEFAULT_PASSWORD);
++    ok(a1.verify(DEFAULT_PASSWORD).ok && a2.verify(DEFAULT_PASSWORD).ok, 'Hai thư mục dữ liệu độc lập đều đăng nhập được bằng mật khẩu mặc định');
++}
++
++console.log(`\n${pass} PASS / ${fail} FAIL`);
++process.exit(fail ? 1 : 0);
+-- 
+2.43.0
+

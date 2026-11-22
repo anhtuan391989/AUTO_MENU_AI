@@ -37,6 +37,9 @@ function assert(cond, label) {
     else { fail++; console.error('  FAIL ', label); }
 }
 
+// Mật khẩu mặc định chỉ tồn tại trong TEST (không đóng gói vào bản cài).
+const DEFAULT_PASSWORD = 'Kh0i_AI!';
+
 function freshModule() {
     delete require.cache[require.resolve(adminAuthPath)];
     return require(adminAuthPath);
@@ -73,11 +76,13 @@ function makeFakeSafeStorage(available) {
 
 console.log('== Mục 1-2: Bootstrap mặc định + verify đúng password ==');
 {
-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
+    const { createAdminAuth } = freshModule();
     const dir = makeTempDir();
     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
 
-    assert(DEFAULT_PASSWORD === 'Kh0i_AI!', 'Hằng số DEFAULT_PASSWORD đúng "Kh0i_AI!"');
+    // EXE-PROTECT-02: module KHÔNG còn export mật khẩu mặc định và mã nguồn không còn chuỗi chữ rõ; chỉ còn salt+hash.
+    assert(freshModule().DEFAULT_PASSWORD === undefined, 'AdminAuth không còn export DEFAULT_PASSWORD');
+    assert(!/Kh0i_AI/.test(fs.readFileSync(path.join(__dirname, '..', '..', 'core', 'shared', 'AdminAuth.js'), 'utf8')), 'AdminAuth.js không còn chứa mật khẩu mặc định dạng chữ rõ');
     assert(auth.isBootstrapped() === false, 'Chưa gọi verify() lần nào -> isBootstrapped()=false');
 
     const r = auth.verify(DEFAULT_PASSWORD);
@@ -87,7 +92,7 @@ console.log('== Mục 1-2: Bootstrap mặc định + verify đúng password ==')
 
 console.log('\n== Mục 3: verify sai password -> ok=false, không throw ==');
 {
-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
+    const { createAdminAuth } = freshModule();
     const dir = makeTempDir();
     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
 
@@ -108,7 +113,7 @@ console.log('\n== Mục 3: verify sai password -> ok=false, không throw ==');
 
 console.log('\n== Mục 4: Password KHÔNG BAO GIỜ ghi plaintext ra đĩa ==');
 {
-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
+    const { createAdminAuth } = freshModule();
     const dir = makeTempDir();
     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
     auth.verify(DEFAULT_PASSWORD); // trigger bootstrap + ghi file
@@ -120,7 +125,7 @@ console.log('\n== Mục 4: Password KHÔNG BAO GIỜ ghi plaintext ra đĩa ==')
 
 console.log('\n== Mục 5: Change Password bắt buộc đúng password hiện tại ==');
 {
-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
+    const { createAdminAuth } = freshModule();
     const dir = makeTempDir();
     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
     auth.bootstrapIfMissing();
@@ -132,7 +137,7 @@ console.log('\n== Mục 5: Change Password bắt buộc đúng password hiện t
 
 console.log('\n== Mục 6-7: Password mới không hợp lệ (quá ngắn / toàn số PIN) bị từ chối ==');
 {
-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
+    const { createAdminAuth } = freshModule();
     const dir = makeTempDir();
     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
     auth.bootstrapIfMissing();
@@ -148,7 +153,7 @@ console.log('\n== Mục 6-7: Password mới không hợp lệ (quá ngắn / to�
 
 console.log('\n== Mục 8-9: Đổi password hợp lệ -> verify được password mới, KHÔNG còn verify được password cũ ==');
 {
-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
+    const { createAdminAuth } = freshModule();
     const dir = makeTempDir();
     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
     auth.bootstrapIfMissing();
@@ -162,7 +167,7 @@ console.log('\n== Mục 8-9: Đổi password hợp lệ -> verify được passw
 
 console.log('\n== Mục 10-11: safeStorage khả dụng -> file mã hoá thêm 1 lớp, roundtrip đúng qua encrypt/decrypt thật ==');
 {
-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
+    const { createAdminAuth } = freshModule();
     const dir = makeTempDir();
     const fakeSafeStorage = makeFakeSafeStorage(true);
     const auth = createAdminAuth({ userDataDir: dir, safeStorage: fakeSafeStorage });
@@ -180,7 +185,7 @@ console.log('\n== Mục 10-11: safeStorage khả dụng -> file mã hoá thêm 1
 
 console.log('\n== Mục 12: safeStorage KHÔNG khả dụng (null) -> vẫn hoạt động đúng, không throw, không plaintext ==');
 {
-    const { createAdminAuth, DEFAULT_PASSWORD } = freshModule();
+    const { createAdminAuth } = freshModule();
     const dir = makeTempDir();
     const auth = createAdminAuth({ userDataDir: dir, safeStorage: null });
 
