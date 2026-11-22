@@ -743,7 +743,8 @@ async function applyPresetTransition(prev, next, ctx = {}) {
 window.ActionRegistry = {
     ACTIONS,
     sendInsertsState, // INSERTS-01
-    sendFxSendsLink, // FX-SENDS-01    applyPresetTransition,
+    sendFxSendsLink, // FX-SENDS-01
+    applyPresetTransition, // A95
 
     ACTION_STATUS,
     SUPPORTED_DAWS,
