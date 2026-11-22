@@ -730,6 +730,10 @@ const DAW_MIDI_ACTIONS = [
     { action: "LOFI_STATE", label: "LOFI ON/OFF kiểu bypass (nút sáng = LOFI bật = gửi 0; tắt = gửi 127) — kết hợp với preset khác" },
     // BE-BTN-01 — nút BÈ = Harmony Player của Auto-Tune: ON/OFF độc lập (sáng = bật = gửi 0; tắt = gửi 127). Mặc định kênh 15 CC 104.
     { action: "BE_STATE", label: "BÈ = Harmony Player Auto-Tune ON/OFF (nút sáng = bật = gửi 0; tắt = gửi 127) — kênh 15 CC 104" },
+    // BE-MULTI-01 — nút BÈ gửi cả Auto-Tune 2/3/4 (giống nút TUNE): mỗi Auto-Tune 1 CC riêng, mặc định kênh 15 CC 105/106/107.
+    { action: "BE_STATE_2", label: "BÈ ON/OFF — Harmony Player Auto-Tune 2 (nút BÈ gửi cả 4) — kênh 15 CC 105" },
+    { action: "BE_STATE_3", label: "BÈ ON/OFF — Harmony Player Auto-Tune 3 (nút BÈ gửi cả 4) — kênh 15 CC 106" },
+    { action: "BE_STATE_4", label: "BÈ ON/OFF — Harmony Player Auto-Tune 4 (nút BÈ gửi cả 4) — kênh 15 CC 107" },
     // TASK A96 — popup chuột phải MUSIC: nút AUDIO CHILL (sáng = bật = 127, tắt = 0) và knob AUDIO CHILL (CC 0..127). Mặc định kênh 15 CC 94 / 95.
     { action: "AUDIO_CHILL_STATE", label: "AUDIO CHILL — nút ON/OFF kiểu bypass (nút sáng = bật = gửi 0; tắt = gửi 127)" },
     { action: "AUDIO_CHILL_KNOB", label: "AUDIO CHILL — knob điều khiển 1 VST (CC 0..127)" },
@@ -768,6 +772,7 @@ const KNOB_MIDI_ACTION_SET = new Set(["BEAT_INPUT_VOLUME", "MASTER_OUTPUT_VOLUME
 const DAW_SELECT_ACTION_SET = new Set(["MUSIC_SELECT", "MIC1_SELECT", "MIC2_SELECT"]); // MENU-FIX-02
 const MIDI_CONFLICT_GUARD_SET = new Set([...DAW_STATE_ACTION_SET, ...KNOB_MIDI_ACTION_SET, ...DAW_SELECT_ACTION_SET, "TUNE_BYPASS", "TUNE_BYPASS_2", "TUNE_BYPASS_3", "TUNE_BYPASS_4", "LOFI_STATE", "REMIX_PLUGIN_1", "REMIX_PLUGIN_2", "AUDIO_CHILL_STATE", "AUDIO_CHILL_KNOB"]); // A82: lệnh bypass Auto-Tune cũng là nhóm bảo vệ (không trùng CC)
 MIDI_CONFLICT_GUARD_SET.add("BE_STATE"); // BE-BTN-01: nút BÈ cũng thuộc nhóm bảo vệ trùng CC
+["BE_STATE_2", "BE_STATE_3", "BE_STATE_4"].forEach((a) => MIDI_CONFLICT_GUARD_SET.add(a)); // BE-MULTI-01
 ["INSERTS_MIC1", "INSERTS_MIC2", "INSERTS_ALL"].forEach((a) => MIDI_CONFLICT_GUARD_SET.add(a)); // INSERTS-01
 ["FX_SENDS_1", "FX_SENDS_2", "FX_SENDS_3", "FX_SENDS_4", "FX_SENDS_5", "FX_SENDS_6"].forEach((a) => MIDI_CONFLICT_GUARD_SET.add(a)); // FX-SENDS-01: 6 CC Sends cũng thuộc nhóm bảo vệ trùng CC
 function findMidiOutMappingConflict(action, mapping) {
@@ -831,6 +836,13 @@ function getDawMidiOutMapping(action) {
     if (action === "BE_STATE") { // BE-BTN-01 — khớp getMidiOutMapping() ở actionRegistry.js
         return { kind: "cc", channel: 15, number: 104, value: 127, source: "DEFAULT_PRESET" };
     }
+    if (/^BE_STATE_[234]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) { // BE-MULTI-01 — khớp getMidiOutMapping() ở actionRegistry.js
+        return { kind: "cc", channel: 15, number: 103 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
+    }
+    { // FX-BUS-CC-02 — khớp getMidiOutMapping() ở actionRegistry.js
+        const FXB = { FX_BUS_COM_VERB_VOLUME: 28, FX_BUS_VERB_LONG_VOLUME: 29, FX_BUS_VERB_SHORT_VOLUME: 30, FX_BUS_DELAY_VOLUME: 31 };
+        if (Object.prototype.hasOwnProperty.call(FXB, action) && !/^cubase/i.test(String(daw).trim())) return { kind: "cc", channel: 15, number: FXB[action], value: 127, source: "DEFAULT_PRESET" };
+    }
     if (action === "LOFI_STATE") { // A94 — khớp getMidiOutMapping() ở actionRegistry.js
         const cubase = /^cubase/i.test(String(daw).trim());
         return { kind: "cc", channel: 16, number: cubase ? 119 : 118, value: 127, source: "DEFAULT_PRESET" };
@@ -886,7 +898,7 @@ const DAW_MIDI_PROFILES = Object.freeze({
                 TUNE_BYPASS_3: Object.freeze({ kind: "cc", channel: 15, number: 90, value: 127 }),
                 TUNE_BYPASS_4: Object.freeze({ kind: "cc", channel: 15, number: 91, value: 127 }) }) }),
             lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(16, 127, { LOFI_STATE: 118 }) }), // A94
-            be: Object.freeze({ title: "BÈ ON/OFF", count: 1, mappings: dawQfMake(15, 127, { BE_STATE: 104 }) }), // BE-BTN-01
+            be: Object.freeze({ title: "BÈ ON/OFF", count: 4, mappings: dawQfMake(15, 127, { BE_STATE: 104, BE_STATE_2: 105, BE_STATE_3: 106, BE_STATE_4: 107 }) }), // BE-BTN-01 + BE-MULTI-01 (Auto-Tune 2/3/4)
             // PRESET-CC-01 — 4 CC (kênh 16, giá trị 127) cho 4 nút Preset NORM/LOFI/RAP/REMIX: mỗi nút gửi 1 CC riêng; trong Studio Pro gán từng CC vào macro/preset
             // (bật-tắt plugin hoặc đặt thông số cài sẵn). Dùng CC 114–117: không trùng LIVE 102–109, CHỌN TRACK 110–112, TUNE 113; tránh CC 120–127 (lệnh hệ thống MIDI).
             preset: Object.freeze({ title: "PRESET NORM/LOFI/RAP/REMIX", count: 6, mappings: Object.freeze({ ...dawQfMake(16, 127, { PRESET_NORM: 114, PRESET_LOFI: 115, PRESET_RAP: 116, PRESET_REMIX: 117 }), REMIX_PLUGIN_1: Object.freeze({ kind: "cc", channel: 15, number: 92, value: 0 }), REMIX_PLUGIN_2: Object.freeze({ kind: "cc", channel: 15, number: 93, value: 0 }) }) }), // A95: +2 CC plugin REMIX (kênh 15)

@@ -30,8 +30,10 @@ function makeAR(daw, saved) {
     ok(AR.ACTIONS.BE_STATE === 'BE_STATE' && d && d.on === 'BE_STATE' && d.off === 'BE_STATE' && d.values.on === 0 && d.values.off === 127, 'control BE: 1 action, bật gửi 0, tắt gửi 127');
     let r = await AR.setDawControlState('BE', true, {});
     ok(r.ok && JSON.stringify(AR.__sent[0]) === JSON.stringify([104, 0, 14]), 'BÈ BẬT -> CC104 = 0, kênh 15 (index 14), không cần Setup');
+    ok(JSON.stringify(AR.__sent.slice(1, 4)) === JSON.stringify([[105, 0, 14], [106, 0, 14], [107, 0, 14]]), 'BÈ BẬT -> gửi kèm Auto-Tune 2/3/4: CC105/106/107 = 0 (BE-MULTI-01)');
     r = await AR.setDawControlState('BE', false, {});
-    ok(r.ok && JSON.stringify(AR.__sent[1]) === JSON.stringify([104, 127, 14]), 'BÈ TẮT -> CC104 = 127');
+    ok(r.ok && JSON.stringify(AR.__sent[4]) === JSON.stringify([104, 127, 14]), 'BÈ TẮT -> CC104 = 127');
+    ok(JSON.stringify(AR.__sent.slice(5, 8)) === JSON.stringify([[105, 127, 14], [106, 127, 14], [107, 127, 14]]), 'BÈ TẮT -> gửi kèm Auto-Tune 2/3/4: CC105/106/107 = 127 (BE-MULTI-01)');
     AR = makeAR('Cubase 14'); await AR.setDawControlState('BE', true, {});
     ok(JSON.stringify(AR.__sent[0]) === JSON.stringify([14, 0, 0]), 'Cubase (C63): kênh 1 CC14 (núm BẬT BÈ trong MIDI Remote)');
     AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { BE_STATE: { kind: 'cc', channel: 15, number: 77, value: 127 } } }); await AR.setDawControlState('BE', true, {});

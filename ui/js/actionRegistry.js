@@ -157,6 +157,10 @@ const ACTIONS = Object.freeze({
     // Đây là nút BẬT (không phải bypass): nút SÁNG = Harmony Player BẬT => gửi 0; nút TẮT => gửi 127 (đã thử thực tế: Auto-Tune nhận ngược nên đảo giá trị — BE-BTN-02).
     // Mặc định (mọi DAW): kênh 15, CC 104 — không trùng bộ kênh 15 đã dùng (20-37, 85-95, 102-103). Mapping Khói tự lưu luôn thắng.
     BE_STATE: "BE_STATE",
+    // BE-MULTI-01 — nút BÈ gửi thêm Harmony Player cho Auto-Tune 2/3/4 (giống TUNE_BYPASS_2/3/4): kênh 15, CC 105/106/107.
+    BE_STATE_2: "BE_STATE_2",
+    BE_STATE_3: "BE_STATE_3",
+    BE_STATE_4: "BE_STATE_4",
     // TASK A96 — popup chuột phải nút MUSIC: (1) nút AUDIO CHILL = công tắc ON/OFF (sáng = BẬT = 127, tắt = TẮT = 0; đã đảo theo cách nối thật của Khói) — kênh 15 CC 94;
     // (2) knob AUDIO CHILL = điều khiển 1 tham số VST bằng CC 0..127 tuyến tính — kênh 15 CC 95. Hai điều khiển ĐỘC LẬP nhau (knob xoay được dù nút bật hay tắt).
     AUDIO_CHILL_STATE: "AUDIO_CHILL_STATE",
@@ -327,6 +331,16 @@ function getMidiOutMapping(action) {
     // BE-BTN-01 — preset mặc định nút BÈ (Harmony Player): kênh 15, CC 104, mọi DAW. Giá trị gửi do nút quyết định (0 = BẬT, 127 = TẮT — đảo theo thực tế Auto-Tune).
     if (action === "BE_STATE") {
         return { kind: "cc", channel: 15, number: 104, value: 127, source: "DEFAULT_PRESET" };
+    }
+    // BE-MULTI-01 — BÈ cho Auto-Tune 2/3/4: kênh 15, CC 105/106/107 (không trùng bộ kênh 15 đã dùng: 20-37, 40-48, 85-95, 102-104). Giá trị gửi do nút BÈ quyết định (0 = BẬT, 127 = TẮT). Cubase chưa có CC kiểm chứng => không có mặc định.
+    if (/^BE_STATE_[234]$/.test(String(action)) && !/^cubase/i.test(String(daw).trim())) {
+        return { kind: "cc", channel: 15, number: 103 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
+    }
+    // FX-BUS-CC-02 — 4 CC âm lượng bus FX MẶC ĐỊNH (không cần bấm điền nhanh; máy mới cài vẫn đúng): kênh 15, khớp Studio One thật:
+    // CC28 Com Verb · CC29 Verb dài · CC30 Verb ngắn · CC31 Delay. Cubase dùng bảng riêng ở trên; mapping đã lưu luôn thắng.
+    const FX_BUS_DEFAULT_CC = { FX_BUS_COM_VERB_VOLUME: 28, FX_BUS_VERB_LONG_VOLUME: 29, FX_BUS_VERB_SHORT_VOLUME: 30, FX_BUS_DELAY_VOLUME: 31 }; // tự chứa trong hàm để các test cắt hàm vẫn chạy
+    if (Object.prototype.hasOwnProperty.call(FX_BUS_DEFAULT_CC, action) && !/^cubase/i.test(String(daw).trim())) {
+        return { kind: "cc", channel: 15, number: FX_BUS_DEFAULT_CC[action], value: 127, source: "DEFAULT_PRESET" };
     }
     // TASK A92 — preset mặc định SCALE gửi tới Auto-Tune (Studio One/Studio Pro): kênh 15, CC 26 (Major=0, Minor=5). Khớp bộ "scale" trong DAW_MIDI_PROFILES (setup.js).
     // Chỉ khi chưa lưu mapping riêng (mapping đã lưu luôn thắng). KEY gốc KHÔNG có mặc định CC: vẫn gửi bằng nốt MIDI như cũ (KEY_ROOT chỉ dùng CC khi người dùng tự lưu CC 27). Cubase chưa có bộ CC kiểm chứng nên không có mặc định.
@@ -636,6 +650,18 @@ async function setDawControlState(control, targetOn, context = {}) {
             } catch (e) { tuneExtra[ex] = "FAIL"; }
         }
     }
+    // BE-MULTI-01 — nút BÈ: gửi thêm Harmony Player cho Auto-Tune 2/3/4 (mỗi cái 1 CC), cùng giá trị với CC chính (0 = BẬT, 127 = TẮT). Lỗi/chưa cấu hình ở các CC phụ KHÔNG làm hỏng kết quả của CC chính.
+    let beExtra = null;
+    if (control === "BE" && mode === "explicit" && res && res.ok) {
+        beExtra = {};
+        for (const ex of [ACTIONS.BE_STATE_2, ACTIONS.BE_STATE_3, ACTIONS.BE_STATE_4]) {
+            try {
+                if (!isMidiMappingConfigured(ex)) { beExtra[ex] = "NOT_CONFIGURED"; continue; }
+                const rx = await executeAction(ex, { reason, value: targetOn ? def.values.on : def.values.off });
+                beExtra[ex] = rx && rx.ok ? "OK" : "FAIL";
+            } catch (e) { beExtra[ex] = "FAIL"; }
+        }
+    }
     // FX-SENDS-01 — nút FX: gửi thêm 6 CC cho 6 nút nguồn Sends (xem sendFxSendsLink). Đường FX ON/OFF "explicit" gọi ở đây (bấm tay + FX Auto);
     // đường FX cũ (chưa lưu FX ON/OFF) do renderer.js gọi sendFxSendsLink ở __fxManualToggle. Lỗi ở các CC phụ KHÔNG làm hỏng kết quả của FX chính.
     let sendsExtra = null;
@@ -646,6 +672,7 @@ async function setDawControlState(control, targetOn, context = {}) {
     const out = {
         ...res,
         ...(tuneExtra ? { tuneExtra } : {}),
+        ...(beExtra ? { beExtra } : {}),
         ...(sendsExtra ? { sendsExtra } : {}),
         control,
         target: targetOn ? "ON" : "OFF",
