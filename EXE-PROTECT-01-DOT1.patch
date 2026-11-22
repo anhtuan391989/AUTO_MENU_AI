@@ -1,0 +1,278 @@
+From 48fe081e5832d0c4b5da39831e7be093184bf831 Mon Sep 17 00:00:00 2001
+From: Claude A <claude@local>
+Date: Sat, 21 Nov 2026 21:36:03 +0000
+Subject: [PATCH] =?UTF-8?q?EXE-PROTECT-01=20(=C4=90=E1=BB=A3t=201):=20asar?=
+ =?UTF-8?q?=20+=20asarUnpack,=20lo=E1=BA=A1i=20file=20ch=E1=BA=BFt/rar,=20?=
+ =?UTF-8?q?t=E1=BA=AFt=20DevTools=20b=E1=BA=A3n=20c=C3=A0i?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Y3Me4YGLz39DbK1HnaR9zx
+---
+ app/keyAnalyzer.js                      |  4 +-
+ app/main.js                             | 20 ++++-
+ core/integration/WindowsMediaSession.js |  2 +-
+ core/shared/RuntimePaths.js             | 13 +++-
+ package.json                            | 23 +++++-
+ tests/unit/ExeProtect01.verify.js       | 97 +++++++++++++++++++++++++
+ tests/unit/InstalledUpdater02.verify.js |  3 +-
+ 7 files changed, 153 insertions(+), 9 deletions(-)
+ create mode 100644 tests/unit/ExeProtect01.verify.js
+
+diff --git a/app/keyAnalyzer.js b/app/keyAnalyzer.js
+index d631ec4..75428ca 100644
+--- a/app/keyAnalyzer.js
++++ b/app/keyAnalyzer.js
+@@ -45,8 +45,8 @@ function createKeyAnalyzer(deps) {
+     const spawnFn = d.spawn || childProcess.spawn;
+     const fsx = d.fs || fs;
+     const log = d.logger || { log() {}, error() {} };
+-    const scriptPath = d.scriptPath || path.join(__dirname, "..", "core", "key_detector.py");
+-    const fastScriptPath = d.fastScriptPath || path.join(__dirname, "..", "core", "fast_key_detector.py");
++    const scriptPath = d.scriptPath || require("../core/shared/RuntimePaths").unpackedPath(path.join(__dirname, "..", "core", "key_detector.py")); // EXE-PROTECT-01: Python đọc file ở app.asar.unpacked
++    const fastScriptPath = d.fastScriptPath || require("../core/shared/RuntimePaths").unpackedPath(path.join(__dirname, "..", "core", "fast_key_detector.py"));
+     const timeoutMs = Number.isFinite(d.timeoutMs) ? d.timeoutMs : DEFAULT_TIMEOUT_MS;
+     const tmpDir = d.tmpDir || os.tmpdir();
+ 
+diff --git a/app/main.js b/app/main.js
+index 5aeb6d9..fe9658d 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -9,6 +9,22 @@ const fs = require("fs");
+ const { execFile, spawn } = require("child_process"); // A120: spawn dùng ở openYoutubeRobust/spawnOpen (module-level); trước đây chỉ khai báo trong callback whenReady => "spawn is not defined"
+ const https = require("https");
+ const os = require("os");
++const RuntimePaths = require("../core/shared/RuntimePaths"); // EXE-PROTECT-01
++
++// EXE-PROTECT-01 — CHỈ bản cài .exe: bỏ menu mặc định của Electron và chặn DevTools (F12 / Ctrl+Shift+I/J/C), để người dùng không mở được
++// công cụ xem/sửa code khi app đang chạy. Chạy từ mã nguồn (npm start) KHÔNG bị ảnh hưởng. Không đổi giao diện/HTML.
++if (app.isPackaged) {
++    app.on("web-contents-created", (event, wc) => {
++        try {
++            wc.on("devtools-opened", () => { try { wc.closeDevTools(); } catch (err) { /* bỏ qua */ } });
++            wc.on("before-input-event", (ev, input) => {
++                const k = String(input && input.key || "").toLowerCase();
++                if (input && input.type === "keyDown" && (k === "f12" || (input.control && input.shift && (k === "i" || k === "j" || k === "c")))) ev.preventDefault();
++            });
++        } catch (err) { console.error("EXE-PROTECT-01 chặn DevTools lỗi (bỏ qua):", err); }
++    });
++    app.whenReady().then(() => { try { Menu.setApplicationMenu(null); } catch (err) { console.error("EXE-PROTECT-01 bỏ menu lỗi (bỏ qua):", err); } });
++}
+ 
+ let mainWin = null;
+ let setupWin = null;
+@@ -1762,7 +1778,7 @@ ipcMain.handle("find-ahk-path", () => findAhkExecutable());
+ 
+ function runAhkCapture(totalPoints, ahkExePath, screenMode) { // screenMode=true: toạ độ TUYỆT ĐỐI trên màn hình (SILENT-CLICK-01); mặc định giữ nguyên cách cũ
+     return new Promise((resolve, reject) => {
+-        const scriptPath = path.join(__dirname, "..", "ahk", "AHK.ahk");
++        const scriptPath = RuntimePaths.unpackedPath(path.join(__dirname, "..", "ahk", "AHK.ahk")); // EXE-PROTECT-01
+         const outputFile = path.join(getDownloadTempDir(), `capture_${Date.now()}.txt`);
+         const cancelFile = outputFile + ".cancelled";
+ 
+@@ -1839,7 +1855,7 @@ ipcMain.handle("setup-capture", async (event, { name, points }) => {
+ // ================================
+ function runAhkClick(x, y, ahkExePath) {
+     return new Promise((resolve, reject) => {
+-        const scriptPath = path.join(__dirname, "..", "ahk", "click.ahk");
++        const scriptPath = RuntimePaths.unpackedPath(path.join(__dirname, "..", "ahk", "click.ahk")); // EXE-PROTECT-01
+         execFile(ahkExePath, [scriptPath, String(x), String(y)], (err) => {
+             if (err) {
+                 reject(new Error("Không click được qua AutoHotkey: " + err.message));
+diff --git a/core/integration/WindowsMediaSession.js b/core/integration/WindowsMediaSession.js
+index 36ae888..1bca26c 100644
+--- a/core/integration/WindowsMediaSession.js
++++ b/core/integration/WindowsMediaSession.js
+@@ -33,7 +33,7 @@ const SnapshotCache = require("./SnapshotCache");
+  */
+ 
+ const DEFAULT_CONFIG = require("./config.default.json");
+-const DEFAULT_SCRIPT_PATH = path.resolve(__dirname, "smtc-daemon.ps1");
++const DEFAULT_SCRIPT_PATH = require("../shared/RuntimePaths").unpackedPath(path.resolve(__dirname, "smtc-daemon.ps1")); // EXE-PROTECT-01: PowerShell -File đọc ở app.asar.unpacked
+ 
+ class WindowsMediaSession extends EventEmitter {
+ 
+diff --git a/core/shared/RuntimePaths.js b/core/shared/RuntimePaths.js
+index a81c497..bffa8cb 100644
+--- a/core/shared/RuntimePaths.js
++++ b/core/shared/RuntimePaths.js
+@@ -49,4 +49,15 @@ function bundledDir(name, opts) {
+     return path.join(o.projectRoot || PROJECT_ROOT, name);
+ }
+ 
+-module.exports = { PROJECT_ROOT, isPackaged, writableDir, bundledDir };
++/**
++ * EXE-PROTECT-01 — Bản cài .exe đóng gói code vào app.asar. Chương trình BÊN NGOÀI (AutoHotkey, Python, PowerShell)
++ * không đọc được file nằm trong .asar, nên các file đó được giải nén ra "app.asar.unpacked" (xem build.asarUnpack
++ * trong package.json). Hàm này đổi đường dẫn ".../app.asar/..." thành ".../app.asar.unpacked/..." để truyền cho
++ * chương trình ngoài. Chạy từ mã nguồn (không có "app.asar" trong đường dẫn) => trả về NGUYÊN VẸN, máy dev không đổi gì.
++ */
++function unpackedPath(p) {
++    if (typeof p !== "string") return p;
++    return p.replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2");
++}
++
++module.exports = { PROJECT_ROOT, isPackaged, writableDir, bundledDir, unpackedPath };
+diff --git a/package.json b/package.json
+index 6c0942f..641f5ed 100644
+--- a/package.json
++++ b/package.json
+@@ -84,7 +84,13 @@
+   "build": {
+     "appId": "com.automenu.ai",
+     "productName": "AutoMenuAI",
+-    "asar": false,
++    "asar": true,
++    "asarUnpack": [
++      "ahk/**/*",
++      "core/key_detector.py",
++      "core/fast_key_detector.py",
++      "core/integration/smtc-daemon.ps1"
++    ],
+     "npmRebuild": false,
+     "directories": {
+       "output": "dist"
+@@ -105,7 +111,20 @@
+       "!**/__pycache__/**",
+       "!**/*.pyc",
+       "!core/command-engine-ts/**",
+-      "!app/app.zip"
++      "!app/app.zip",
++      "!**/*.rar",
++      "!**/*.example.js",
++      "!core/ai/driver/**",
++      "!core/ai/events/**",
++      "!core/ai/kernel/**",
++      "!core/ai/memory/**",
++      "!core/drivers/**",
++      "!core/kernel/**",
++      "!core/models/**",
++      "!core/services/**",
++      "!app/bootstrap.js",
++      "!app/ipc.js",
++      "!app/windows.js"
+     ],
+     "win": {
+       "target": [
+diff --git a/tests/unit/ExeProtect01.verify.js b/tests/unit/ExeProtect01.verify.js
+new file mode 100644
+index 0000000..e83a96a
+--- /dev/null
++++ b/tests/unit/ExeProtect01.verify.js
+@@ -0,0 +1,97 @@
++// EXE-PROTECT-01 (Đợt 1) — chạy: node tests/unit/ExeProtect01.verify.js
++// Kiểm tra TĨNH cấu hình đóng gói .exe: bật asar, giải nén đúng file cần cho chương trình ngoài,
++// loại bỏ đúng file chết (không loại nhầm file đang dùng), đường dẫn "app.asar.unpacked" đúng.
++// KHÔNG build .exe, KHÔNG mở Electron.
++const fs = require('fs'), path = require('path');
++const ROOT = path.join(__dirname, '..', '..');
++const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
++const RuntimePaths = require(path.join(ROOT, 'core/shared/RuntimePaths.js'));
++let pass = 0, fail = 0;
++const ok = (c, m) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m); } };
++const rd = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
++
++const b = pkg.build;
++const files = b.files;
++
++// 1) asar bật + danh sách giải nén
++ok(b.asar === true, 'build.asar = true (code không còn là file rời đọc được)');
++const unpack = b.asarUnpack || [];
++['ahk/**/*', 'core/key_detector.py', 'core/fast_key_detector.py', 'core/integration/smtc-daemon.ps1']
++    .forEach((u) => ok(unpack.includes(u), 'asarUnpack có ' + u));
++ok(unpack.length === 4, 'asarUnpack chỉ gồm đúng 4 mục cần cho chương trình ngoài (không giải nén thừa)');
++
++// 2) Mọi file mà chương trình ngoài đọc đều tồn tại thật + nằm trong asarUnpack
++['ahk/AHK.ahk', 'ahk/click.ahk', 'core/key_detector.py', 'core/fast_key_detector.py', 'core/integration/smtc-daemon.ps1']
++    .forEach((f) => ok(fs.existsSync(path.join(ROOT, f)), 'file tồn tại: ' + f));
++
++// 3) unpackedPath: bản cài -> app.asar.unpacked; chạy từ mã nguồn -> giữ nguyên
++const up = RuntimePaths.unpackedPath;
++ok(up('C:\\Users\\A\\AppData\\Local\\Programs\\AutoMenuAI\\resources\\app.asar\\ahk\\AHK.ahk') ===
++   'C:\\Users\\A\\AppData\\Local\\Programs\\AutoMenuAI\\resources\\app.asar.unpacked\\ahk\\AHK.ahk', 'Windows: app.asar -> app.asar.unpacked');
++ok(up('/x/resources/app.asar/core/key_detector.py') === '/x/resources/app.asar.unpacked/core/key_detector.py', 'dạng / cũng đúng');
++ok(up('G:\\AUTO_MENU_AI\\ahk\\AHK.ahk') === 'G:\\AUTO_MENU_AI\\ahk\\AHK.ahk', 'chạy từ mã nguồn: giữ nguyên đường dẫn');
++ok(up('C:\\r\\app.asar.unpacked\\ahk\\a.ahk') === 'C:\\r\\app.asar.unpacked\\ahk\\a.ahk', 'đã là unpacked thì không đổi lần nữa');
++ok(up(undefined) === undefined, 'không phải chuỗi -> trả nguyên');
++
++// 4) Các chỗ truyền đường dẫn cho chương trình ngoài đều đi qua unpackedPath
++ok(/RuntimePaths\.unpackedPath\(path\.join\(__dirname, "\.\.", "ahk", "AHK\.ahk"\)\)/.test(rd('app/main.js')), 'main.js: AHK.ahk dùng unpackedPath');
++ok(/RuntimePaths\.unpackedPath\(path\.join\(__dirname, "\.\.", "ahk", "click\.ahk"\)\)/.test(rd('app/main.js')), 'main.js: click.ahk dùng unpackedPath');
++ok(/unpackedPath\(path\.join\(__dirname, "\.\.", "core", "key_detector\.py"\)\)/.test(rd('app/keyAnalyzer.js')), 'keyAnalyzer: key_detector.py dùng unpackedPath');
++ok(/unpackedPath\(path\.join\(__dirname, "\.\.", "core", "fast_key_detector\.py"\)\)/.test(rd('app/keyAnalyzer.js')), 'keyAnalyzer: fast_key_detector.py dùng unpackedPath');
++ok(/unpackedPath\(path\.resolve\(__dirname, "smtc-daemon\.ps1"\)\)/.test(rd('core/integration/WindowsMediaSession.js')), 'WindowsMediaSession: smtc-daemon.ps1 dùng unpackedPath');
++
++// 5) Loại file: không loại nhầm file đang dùng thật (quét require từ main.js / preload.js / <script> của ui/*.html)
++const seen = new Set();
++const resolveReq = (from, req) => {
++    if (!req.startsWith('.')) return null;
++    const base = path.resolve(path.dirname(from), req);
++    for (const c of [base, base + '.js', base + '.json', path.join(base, 'index.js')]) if (fs.existsSync(c) && fs.statSync(c).isFile()) return c;
++    return null;
++};
++const visit = (f) => {
++    if (seen.has(f)) return; seen.add(f);
++    if (!f.endsWith('.js')) return;
++    let s; try { s = fs.readFileSync(f, 'utf8'); } catch (e) { return; }
++    for (const m of s.matchAll(/require\(\s*['"`]([^'"`]+)['"`]\s*\)/g)) { const r = resolveReq(f, m[1]); if (r) visit(r); }
++    for (const m of s.matchAll(/path\.(?:join|resolve)\(\s*__dirname\s*,([^)]*)\)/g)) {
++        const parts = [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((x) => x[1]);
++        const p = path.resolve(path.dirname(f), ...parts);
++        if (fs.existsSync(p) && fs.statSync(p).isFile()) visit(p);
++    }
++};
++const entries = [path.join(ROOT, 'app/main.js'), path.join(ROOT, 'app/preload.js'), path.join(ROOT, 'docs/d1/semanticValidate.js')];
++for (const h of fs.readdirSync(path.join(ROOT, 'ui')).filter((x) => x.endsWith('.html'))) {
++    for (const m of fs.readFileSync(path.join(ROOT, 'ui', h), 'utf8').matchAll(/<script[^>]+src=["']([^"']+)["']/g)) {
++        const p = path.resolve(ROOT, 'ui', m[1]); if (fs.existsSync(p)) entries.push(p);
++    }
++}
++entries.forEach(visit);
++
++const excludedDirs = files.filter((x) => /^!(core|app)\/.+\/\*\*$/.test(x) && !/command-engine-ts/.test(x)).map((x) => x.slice(1, -3));
++const excludedFiles = files.filter((x) => /^!app\/[^*]+\.js$/.test(x)).map((x) => x.slice(1));
++ok(excludedDirs.length === 8, 'loại thêm 8 thư mục code chết (ai/driver, ai/events, ai/kernel, ai/memory, drivers, kernel, models, services)');
++const hit = [];
++for (const f of seen) {
++    const rel = path.relative(ROOT, f).split(path.sep).join('/');
++    if (excludedDirs.some((d) => rel === d || rel.startsWith(d + '/')) || excludedFiles.includes(rel)) hit.push(rel);
++}
++ok(hit.length === 0, 'KHÔNG loại nhầm file đang được require thật' + (hit.length ? ' — nhầm: ' + hit.join(', ') : ''));
++ok(seen.size > 60, 'quét được ' + seen.size + ' file đang dùng (kiểm chứng bộ quét hoạt động)');
++
++// 6) Loại file rác nặng + giữ lại thứ bắt buộc
++ok(files.includes('!**/*.rar'), 'loại *.rar (ui/ui.rar ~35MB đang bị đóng nhầm vào bản cài)');
++ok(files.includes('!**/*.example.js'), 'loại *.example.js');
++['app/**/*', 'core/**/*', 'ui/**/*', 'ahk/**/*', 'data/songs.json', 'docs/d1/midi-mapping.xml', 'docs/d1/midi-mapping.xsd', 'docs/d1/semanticValidate.js']
++    .forEach((x) => ok(files.includes(x), 'vẫn đóng gói: ' + x));
++ok(fs.existsSync(path.join(ROOT, 'app/license-public-key.txt')), 'app/license-public-key.txt vẫn còn (đọc được qua asar)');
++
++// 7) DevTools chỉ bị chặn khi đóng gói; không đụng giao diện
++const main = rd('app/main.js');
++ok(/if \(app\.isPackaged\) \{[\s\S]*?devtools-opened[\s\S]*?Menu\.setApplicationMenu\(null\)/.test(main), 'main.js: chặn DevTools + bỏ menu mặc định, chỉ khi app.isPackaged');
++ok(!/openDevTools\(/.test(main), 'main.js: không có chỗ nào tự mở DevTools');
++
++// 8) Ghi file vẫn nằm ngoài thư mục cài (asar chỉ đọc)
++ok(RuntimePaths.writableDir('data', { app: { isPackaged: true, getPath: () => 'C:\\U\\AppData\\Roaming\\automenu-ai' } }).indexOf('automenu-ai') >= 0, 'bản cài ghi data/logs vào AppData (không ghi vào asar)');
++
++console.log(`\n${pass} PASS / ${fail} FAIL`);
++process.exit(fail ? 1 : 0);
+diff --git a/tests/unit/InstalledUpdater02.verify.js b/tests/unit/InstalledUpdater02.verify.js
+index d121cc0..e3ec98e 100644
+--- a/tests/unit/InstalledUpdater02.verify.js
++++ b/tests/unit/InstalledUpdater02.verify.js
+@@ -85,7 +85,8 @@ function fakeApp(version) {
+   ok(/app\.isPackaged[\s\S]{0,200}require\("electron-updater"\)[\s\S]{0,200}createInstalledUpdater/.test(main) && main.includes('createAppUpdater'), 'main.js: bản cài dùng electron-updater, máy dev vẫn dùng git');
+   ok(!/app\.relaunch\(/.test(main), 'main.js vẫn KHÔNG gọi app.relaunch trực tiếp (A104)');
+   ok(pkg.dependencies['electron-updater'] && pkg.devDependencies['electron-builder'], 'package.json: có electron-updater (runtime) + electron-builder (dev)');
+-  ok(pkg.scripts.dist && pkg.scripts.release && pkg.build && pkg.build.asar === false, 'package.json: có lệnh dist/release, asar=false (AHK/PowerShell cần file thật)');
++  // EXE-PROTECT-01: trước đây asar=false vì AHK/PowerShell/Python cần file thật. Nay asar=true + asarUnpack đúng các file đó (đường dẫn đổi qua RuntimePaths.unpackedPath).
++  ok(pkg.scripts.dist && pkg.scripts.release && pkg.build && pkg.build.asar === true && Array.isArray(pkg.build.asarUnpack) && pkg.build.asarUnpack.includes('ahk/**/*') && pkg.build.asarUnpack.includes('core/integration/smtc-daemon.ps1'), 'package.json: có lệnh dist/release, asar=true + asarUnpack AHK/PowerShell/Python (EXE-PROTECT-01)');
+   ok(pkg.build.npmRebuild === false, 'package.json: npmRebuild=false (MIDI dùng bản N-API dựng sẵn, máy build không cần Visual Studio)');
+   ok(/^dist\/?$/m.test(rd('.gitignore')), '.gitignore có dist/ (sync.bat dùng git add . — tránh đẩy file cài 145MB lên GitHub)');
+   // AUDIO-AUTOSTART-01 — Menu phải tự nghe âm thanh khi mở, không chờ người dùng bấm.
+-- 
+2.43.0
+

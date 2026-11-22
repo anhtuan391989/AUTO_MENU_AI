@@ -84,7 +84,13 @@
   "build": {
     "appId": "com.automenu.ai",
     "productName": "AutoMenuAI",
-    "asar": false,
+    "asar": true,
+    "asarUnpack": [
+      "ahk/**/*",
+      "core/key_detector.py",
+      "core/fast_key_detector.py",
+      "core/integration/smtc-daemon.ps1"
+    ],
     "npmRebuild": false,
     "directories": {
       "output": "dist"
@@ -105,7 +111,20 @@
       "!**/__pycache__/**",
       "!**/*.pyc",
       "!core/command-engine-ts/**",
-      "!app/app.zip"
+      "!app/app.zip",
+      "!**/*.rar",
+      "!**/*.example.js",
+      "!core/ai/driver/**",
+      "!core/ai/events/**",
+      "!core/ai/kernel/**",
+      "!core/ai/memory/**",
+      "!core/drivers/**",
+      "!core/kernel/**",
+      "!core/models/**",
+      "!core/services/**",
+      "!app/bootstrap.js",
+      "!app/ipc.js",
+      "!app/windows.js"
     ],
     "win": {
       "target": [

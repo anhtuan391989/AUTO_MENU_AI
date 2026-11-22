@@ -9,6 +9,22 @@ const fs = require("fs");
 const { execFile, spawn } = require("child_process"); // A120: spawn dùng ở openYoutubeRobust/spawnOpen (module-level); trước đây chỉ khai báo trong callback whenReady => "spawn is not defined"
 const https = require("https");
 const os = require("os");
+const RuntimePaths = require("../core/shared/RuntimePaths"); // EXE-PROTECT-01
+
+// EXE-PROTECT-01 — CHỈ bản cài .exe: bỏ menu mặc định của Electron và chặn DevTools (F12 / Ctrl+Shift+I/J/C), để người dùng không mở được
+// công cụ xem/sửa code khi app đang chạy. Chạy từ mã nguồn (npm start) KHÔNG bị ảnh hưởng. Không đổi giao diện/HTML.
+if (app.isPackaged) {
+    app.on("web-contents-created", (event, wc) => {
+        try {
+            wc.on("devtools-opened", () => { try { wc.closeDevTools(); } catch (err) { /* bỏ qua */ } });
+            wc.on("before-input-event", (ev, input) => {
+                const k = String(input && input.key || "").toLowerCase();
+                if (input && input.type === "keyDown" && (k === "f12" || (input.control && input.shift && (k === "i" || k === "j" || k === "c")))) ev.preventDefault();
+            });
+        } catch (err) { console.error("EXE-PROTECT-01 chặn DevTools lỗi (bỏ qua):", err); }
+    });
+    app.whenReady().then(() => { try { Menu.setApplicationMenu(null); } catch (err) { console.error("EXE-PROTECT-01 bỏ menu lỗi (bỏ qua):", err); } });
+}
 
 let mainWin = null;
 let setupWin = null;
@@ -1762,7 +1778,7 @@ ipcMain.handle("find-ahk-path", () => findAhkExecutable());
 
 function runAhkCapture(totalPoints, ahkExePath, screenMode) { // screenMode=true: toạ độ TUYỆT ĐỐI trên màn hình (SILENT-CLICK-01); mặc định giữ nguyên cách cũ
     return new Promise((resolve, reject) => {
-        const scriptPath = path.join(__dirname, "..", "ahk", "AHK.ahk");
+        const scriptPath = RuntimePaths.unpackedPath(path.join(__dirname, "..", "ahk", "AHK.ahk")); // EXE-PROTECT-01
         const outputFile = path.join(getDownloadTempDir(), `capture_${Date.now()}.txt`);
         const cancelFile = outputFile + ".cancelled";
 
@@ -1839,7 +1855,7 @@ ipcMain.handle("setup-capture", async (event, { name, points }) => {
 // ================================
 function runAhkClick(x, y, ahkExePath) {
     return new Promise((resolve, reject) => {
-        const scriptPath = path.join(__dirname, "..", "ahk", "click.ahk");
+        const scriptPath = RuntimePaths.unpackedPath(path.join(__dirname, "..", "ahk", "click.ahk")); // EXE-PROTECT-01
         execFile(ahkExePath, [scriptPath, String(x), String(y)], (err) => {
             if (err) {
                 reject(new Error("Không click được qua AutoHotkey: " + err.message));

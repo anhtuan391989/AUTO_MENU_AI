@@ -33,7 +33,7 @@ const SnapshotCache = require("./SnapshotCache");
  */
 
 const DEFAULT_CONFIG = require("./config.default.json");
-const DEFAULT_SCRIPT_PATH = path.resolve(__dirname, "smtc-daemon.ps1");
+const DEFAULT_SCRIPT_PATH = require("../shared/RuntimePaths").unpackedPath(path.resolve(__dirname, "smtc-daemon.ps1")); // EXE-PROTECT-01: PowerShell -File đọc ở app.asar.unpacked
 
 class WindowsMediaSession extends EventEmitter {
 

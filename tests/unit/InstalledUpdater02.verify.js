@@ -85,7 +85,8 @@ function fakeApp(version) {
   ok(/app\.isPackaged[\s\S]{0,200}require\("electron-updater"\)[\s\S]{0,200}createInstalledUpdater/.test(main) && main.includes('createAppUpdater'), 'main.js: bản cài dùng electron-updater, máy dev vẫn dùng git');
   ok(!/app\.relaunch\(/.test(main), 'main.js vẫn KHÔNG gọi app.relaunch trực tiếp (A104)');
   ok(pkg.dependencies['electron-updater'] && pkg.devDependencies['electron-builder'], 'package.json: có electron-updater (runtime) + electron-builder (dev)');
-  ok(pkg.scripts.dist && pkg.scripts.release && pkg.build && pkg.build.asar === false, 'package.json: có lệnh dist/release, asar=false (AHK/PowerShell cần file thật)');
+  // EXE-PROTECT-01: trước đây asar=false vì AHK/PowerShell/Python cần file thật. Nay asar=true + asarUnpack đúng các file đó (đường dẫn đổi qua RuntimePaths.unpackedPath).
+  ok(pkg.scripts.dist && pkg.scripts.release && pkg.build && pkg.build.asar === true && Array.isArray(pkg.build.asarUnpack) && pkg.build.asarUnpack.includes('ahk/**/*') && pkg.build.asarUnpack.includes('core/integration/smtc-daemon.ps1'), 'package.json: có lệnh dist/release, asar=true + asarUnpack AHK/PowerShell/Python (EXE-PROTECT-01)');
   ok(pkg.build.npmRebuild === false, 'package.json: npmRebuild=false (MIDI dùng bản N-API dựng sẵn, máy build không cần Visual Studio)');
   ok(/^dist\/?$/m.test(rd('.gitignore')), '.gitignore có dist/ (sync.bat dùng git add . — tránh đẩy file cài 145MB lên GitHub)');
   // AUDIO-AUTOSTART-01 — Menu phải tự nghe âm thanh khi mở, không chờ người dùng bấm.

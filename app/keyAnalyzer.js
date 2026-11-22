@@ -45,8 +45,8 @@ function createKeyAnalyzer(deps) {
     const spawnFn = d.spawn || childProcess.spawn;
     const fsx = d.fs || fs;
     const log = d.logger || { log() {}, error() {} };
-    const scriptPath = d.scriptPath || path.join(__dirname, "..", "core", "key_detector.py");
-    const fastScriptPath = d.fastScriptPath || path.join(__dirname, "..", "core", "fast_key_detector.py");
+    const scriptPath = d.scriptPath || require("../core/shared/RuntimePaths").unpackedPath(path.join(__dirname, "..", "core", "key_detector.py")); // EXE-PROTECT-01: Python đọc file ở app.asar.unpacked
+    const fastScriptPath = d.fastScriptPath || require("../core/shared/RuntimePaths").unpackedPath(path.join(__dirname, "..", "core", "fast_key_detector.py"));
     const timeoutMs = Number.isFinite(d.timeoutMs) ? d.timeoutMs : DEFAULT_TIMEOUT_MS;
     const tmpDir = d.tmpDir || os.tmpdir();
 

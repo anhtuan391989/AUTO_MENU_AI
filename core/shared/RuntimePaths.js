@@ -49,4 +49,15 @@ function bundledDir(name, opts) {
     return path.join(o.projectRoot || PROJECT_ROOT, name);
 }
 
-module.exports = { PROJECT_ROOT, isPackaged, writableDir, bundledDir };
+/**
+ * EXE-PROTECT-01 — Bản cài .exe đóng gói code vào app.asar. Chương trình BÊN NGOÀI (AutoHotkey, Python, PowerShell)
+ * không đọc được file nằm trong .asar, nên các file đó được giải nén ra "app.asar.unpacked" (xem build.asarUnpack
+ * trong package.json). Hàm này đổi đường dẫn ".../app.asar/..." thành ".../app.asar.unpacked/..." để truyền cho
+ * chương trình ngoài. Chạy từ mã nguồn (không có "app.asar" trong đường dẫn) => trả về NGUYÊN VẸN, máy dev không đổi gì.
+ */
+function unpackedPath(p) {
+    if (typeof p !== "string") return p;
+    return p.replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2");
+}
+
+module.exports = { PROJECT_ROOT, isPackaged, writableDir, bundledDir, unpackedPath };
