@@ -41,7 +41,7 @@ console.log("== A. Lưu Cubase => MIDI tự điền đúng bảng Cubase ==");
     const e = env({ selectedDAW: "Cubase 13" });
     const r = apply(e, "Cubase 13");
     const m = e.st.dawMidiOutMappings["Cubase 13"] || {};
-    ok(r.status === "APPLIED" && r.written === 16 && Object.keys(m).length === 16, "Cubase 13: 16 mapping được ghi vào đúng khoá DAW", r);
+    ok(r.status === "APPLIED" && r.written === 59 && Object.keys(m).length === 59, "Cubase 13: 59 mapping được ghi vào đúng khoá DAW", r);
     ok(Object.entries(CUBASE).every(([a, [cc, v]]) => m[a] && m[a].kind === "cc" && m[a].channel === 1 && m[a].number === cc && m[a].value === v), "mọi action Cubase = đúng CC/giá trị kênh 1 trong bảng C63");
     ok(Object.values(m).every((x) => x.source === "USER_DEFINED"), "mapping lưu có source USER_DEFINED (giống nút điền tay)");
     ok(e.log.midi === 0, "KHÔNG gửi MIDI nào tới DAW khi lưu");
@@ -60,7 +60,7 @@ console.log("== B. Đổi DAW qua lại: mỗi DAW giữ bộ MIDI riêng, khôn
     const expectN = e.X.dawProfileAllInOne(e.X.DAW_MIDI_PROFILES["studio-one"]).bundles[e.X.DAW_QF_ALL].count;
     ok(r2.status === "APPLIED" && Object.keys(s1).length === expectN && expectN > 16, `Studio One 7: ${expectN} mapping của bộ Studio One`, r2);
     ok(Object.values(s1).every((x) => x.channel === 15 || x.channel === 16), "Studio One dùng kênh 15/16 như cũ, không dính kênh 1 của Cubase");
-    ok(Object.keys(e.st.dawMidiOutMappings["Cubase 13"]).length === 16 && e.st.dawMidiOutMappings["Cubase 13"].BEAT_INPUT_VOLUME.number === 4, "Cubase 13 vẫn nguyên sau khi lưu Studio One");
+    ok(Object.keys(e.st.dawMidiOutMappings["Cubase 13"]).length === 59 && e.st.dawMidiOutMappings["Cubase 13"].BEAT_INPUT_VOLUME.number === 4, "Cubase 13 vẫn nguyên sau khi lưu Studio One");
     e.st.selectedDAW = "Cubase 12";
     apply(e, "Cubase 12");
     ok(e.st.dawMidiOutMappings["Cubase 12"].BEAT_INPUT_VOLUME.number === 4 && Object.keys(e.st.dawMidiOutMappings).length === 3, "mọi phiên bản Cubase (10-15) đều nhận bộ Cubase; 3 DAW = 3 khoá riêng");
@@ -73,14 +73,14 @@ console.log("== C. Mapping người dùng đã chỉnh tay không bị ghi đè 
     const r1 = apply(e1, "Cubase 13", { confirmFn: (m) => { e1.log.confirms.push(m); return false; } });
     ok(e1.log.confirms.length === 1 && /TUNE_BYPASS/.test(e1.log.confirms[0]), "có mapping chỉnh tay khác chuẩn -> hỏi đúng 1 lần, nêu tên action");
     ok(e1.st.dawMidiOutMappings["Cubase 13"].TUNE_BYPASS.number === 99 && e1.st.dawMidiOutMappings["Cubase 13"].TUNE_BYPASS.channel === 5, "chọn Hủy -> giữ nguyên mapping tay của người dùng");
-    ok(r1.keptManual === 1 && r1.written === 15 && e1.st.dawMidiOutMappings["Cubase 13"].BEAT_INPUT_VOLUME.number === 4, "Hủy -> vẫn điền 15 mapping còn lại", r1);
+    ok(r1.keptManual === 1 && r1.written === 58 && e1.st.dawMidiOutMappings["Cubase 13"].BEAT_INPUT_VOLUME.number === 4, "Hủy -> vẫn điền 58 mapping còn lại", r1);
     const e2 = mk();
     const r2 = apply(e2, "Cubase 13", { confirmFn: () => true });
-    ok(e2.st.dawMidiOutMappings["Cubase 13"].TUNE_BYPASS.number === 22 && e2.st.dawMidiOutMappings["Cubase 13"].TUNE_BYPASS.channel === 1 && r2.written === 16, "chọn OK -> ghi đè bằng bộ chuẩn (CC22 kênh 1)", r2);
+    ok(e2.st.dawMidiOutMappings["Cubase 13"].TUNE_BYPASS.number === 22 && e2.st.dawMidiOutMappings["Cubase 13"].TUNE_BYPASS.channel === 1 && r2.written === 59, "chọn OK -> ghi đè bằng bộ chuẩn (CC22 kênh 1)", r2);
     const e3 = env({ selectedDAW: "Cubase 13" });
     apply(e3, "Cubase 13"); const before = JSON.stringify(e3.st.dawMidiOutMappings);
     const r3 = apply(e3, "Cubase 13");
-    ok(e3.log.confirms.length === 0 && JSON.stringify(e3.st.dawMidiOutMappings) === before && r3.written === 16, "bấm Lưu DAW lần 2 (đã đúng chuẩn) -> không hỏi, không đổi gì (idempotent)");
+    ok(e3.log.confirms.length === 0 && JSON.stringify(e3.st.dawMidiOutMappings) === before && r3.written === 59, "bấm Lưu DAW lần 2 (đã đúng chuẩn) -> không hỏi, không đổi gì (idempotent)");
 }
 
 console.log("== D. Trùng CC với action khác: bỏ qua đúng action trùng, không ghi nửa vời ==");
@@ -88,7 +88,7 @@ console.log("== D. Trùng CC với action khác: bỏ qua đúng action trùng, 
     const e = env({ selectedDAW: "Cubase 13", dawMidiOutMappings: { "Cubase 13": { MONITOR_FX: { kind: "cc", channel: 1, number: 4, value: 127, source: "USER_DEFINED" } } } });
     const r = apply(e, "Cubase 13");
     const m = e.st.dawMidiOutMappings["Cubase 13"];
-    ok(r.skippedConflicts.length === 1 && r.skippedConflicts[0] === "BEAT_INPUT_VOLUME" && r.written === 15 && !m.BEAT_INPUT_VOLUME, "BEAT_INPUT_VOLUME (CC4) trùng MONITOR_FX -> bỏ qua đúng 1 action, ghi 15 action còn lại", r);
+    ok(r.skippedConflicts.length === 1 && r.skippedConflicts[0] === "BEAT_INPUT_VOLUME" && r.written === 58 && !m.BEAT_INPUT_VOLUME, "BEAT_INPUT_VOLUME (CC4) trùng MONITOR_FX -> bỏ qua đúng 1 action, ghi 58 action còn lại", r);
     ok(m.MONITOR_FX && m.MONITOR_FX.number === 4, "mapping MONITOR_FX của người dùng nguyên vẹn");
     ok(/trùng CC/.test(r.message), "thông báo nói rõ có mapping bị bỏ qua vì trùng", r.message);
 }

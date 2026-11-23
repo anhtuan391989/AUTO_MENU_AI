@@ -62,7 +62,7 @@ function makeAR(daw, saved) {
     { const A = makeAR('Studio Pro 8'); const g = (n) => A.getMidiOutMapping(n);
       const want = { KEY_SCALE_MAJOR_AT3: [34, 0], KEY_SCALE_MINOR_AT3: [34, 5], KEY_ROOT_AT3: [35, 0], KEY_SCALE_MAJOR_AT4: [36, 0], KEY_SCALE_MINOR_AT4: [36, 5], KEY_ROOT_AT4: [37, 0] };
       for (const k of Object.keys(want)) { const m = g(k); ok(m && m.kind === 'cc' && m.channel === 15 && m.number === want[k][0] && m.value === want[k][1], k + ' -> CC' + want[k][0] + ' giá trị ' + want[k][1]); }
-      const C = makeAR('Cubase 14'); ok(!C.getMidiOutMapping('KEY_ROOT_AT3'), 'Cubase: không tự gán (giống MIC 2)'); }
+      const C = makeAR('Cubase 14'); { const m = C.getMidiOutMapping('KEY_ROOT_AT3'); ok(m && m.channel === 2 && m.number === 59, 'Cubase (C65): KEY_ROOT_AT3 = CC59 kênh 2'); }; }
     console.log('== 5. A94: nút TUNE gửi bypass cho CẢ 4 Auto-Tune (CC113 kênh 16 + CC89/90/91 kênh 15) ==');
     { let A = makeAR('Studio Pro 8'); let r = await A.setDawControlState('TUNE', true, {});
       ok(r.ok && JSON.stringify(A.__sent) === JSON.stringify([[113, 127, 15], [89, 127, 14], [90, 127, 14], [91, 127, 14]]), 'TUNE bật -> CC113=127 rồi CC89/90/91=127', A.__sent);

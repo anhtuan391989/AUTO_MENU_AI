@@ -33,7 +33,7 @@ console.log('== 2. Studio One 7 cũng dùng cùng bộ; Cubase giữ các nút r
 {
   ok(env({ selectedDAW: 'Studio One 7' }).click().done === true, 'Studio One 7 -> lưu được');
   const c = env({ selectedDAW: 'Cubase 13' }); const r = c.click();
-  ok(r.done && Object.keys(c.st.dawMidiOutMappings['Cubase 13']).length === 16, 'Cubase (hàm gộp, C63) -> 16 mapping (2 MIC1 + 3 KNOB + 4 FX BUS + 3 KEY/SCALE + 1 TUNE + 1 LOFI + 1 REMIX + 1 BÈ)');
+  ok(r.done && Object.keys(c.st.dawMidiOutMappings['Cubase 13']).length === 59, 'Cubase (hàm gộp, C63+C65) -> 59 mapping = bằng Studio One (16 kênh 1 + 43 kênh 2; 2 MIC1 + 3 KNOB + 4 FX BUS + 3 KEY/SCALE + 1 TUNE + 1 LOFI + 1 REMIX + 1 BÈ)');
   ok(env({ selectedDAW: 'Logic' }).click().blocked === 'no-profile', 'DAW không có bộ -> chặn');
 }
 console.log('== 3. All-or-nothing, không đụng mapping khác, idempotent ==');

@@ -51,7 +51,7 @@ console.log('--- C. Cubase không bị đổi');
 {
   const { sb } = boot('Cubase 13', {});
   ok(sb.getMidiOutMapping('FX_BUS_DELAY_VOLUME').number === 1 && sb.getMidiOutMapping('FX_BUS_DELAY_VOLUME').channel === 1, 'Cubase: FX bus vẫn theo bảng C63 (kênh 1, CC1)');
-  ok(sb.getMidiOutMapping('BE_STATE_2') === null, 'Cubase: BÈ phụ chưa có CC kiểm chứng => không tự bịa (null)');
+  { const m = sb.getMidiOutMapping('BE_STATE_2'); ok(m && m.channel === 2, 'Cubase (C65): BÈ phụ có CC kênh 2'); };
   ok(sb.getMidiOutMapping('BE_STATE').number === 14, 'Cubase: BÈ chính vẫn CC14');
 }
 console.log('--- D. Bấm BÈ gửi đủ 4 Auto-Tune');
@@ -70,8 +70,8 @@ console.log('--- D. Bấm BÈ gửi đủ 4 Auto-Tune');
   {
     const { AR, sent } = boot('Cubase 13', {});
     const r = await AR.setDawControlState('BE', true, { reason: 'menu-button' });
-    ok(r && r.ok && sent.length === 1, 'Cubase: CC chính vẫn gửi, 3 CC phụ NOT_CONFIGURED không gây lỗi', { ok: r && r.ok, n: sent.length, extra: r && r.beExtra });
-    ok(r && r.beExtra && r.beExtra.BE_STATE_2 === 'NOT_CONFIGURED', 'Cubase: beExtra = NOT_CONFIGURED');
+    ok(r && r.ok && sent.length === 4, 'Cubase (C65): CC chính + 3 CC phụ kênh 2 đều gửi', { ok: r && r.ok, n: sent.length, extra: r && r.beExtra });
+    ok(r && r.beExtra && r.beExtra.BE_STATE_2 === 'OK', 'Cubase (C65): beExtra = OK');
   }
   // Núm FX bus gửi đúng CC mặc định, không cần mapping đã lưu
   {

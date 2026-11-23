@@ -61,7 +61,7 @@ const EXPECT = { // action -> [CC, value]  (bảng C63)
         for (const [a, [cc, val]] of Object.entries(EXPECT)) { const k = cc + "|" + (/^(MIC1_(ON|OFF)|KEY_SCALE_(MAJOR|MINOR))$/.test(a) ? val : "x"); (nums[k] = nums[k] || []).push(a); }
         ok(Object.values(nums).every((l) => l.length === 1), "không có 2 action Cubase nào trùng CC (trừ MIC1 ON/OFF = CC24 và Scale Major/Minor = CC16: cùng CC, khác giá trị)");
     }
-    ok(AR.getMidiOutMapping("MASTER_OUTPUT_VOLUME") === null && AR.getMidiOutMapping("MIC2_VOLUME") === null, "Master / MIC 2 chưa có núm trong Cubase -> KHÔNG tự bịa CC (null)");
+    { const a = AR.getMidiOutMapping("MASTER_OUTPUT_VOLUME"), b = AR.getMidiOutMapping("MIC2_VOLUME"); ok(a && a.channel === 2 && b && b.channel === 2, "Master / MIC 2: C65 đặt ở kênh 2 (không đụng bảng kênh 1)"); }
 
     console.log("== C. Mapping người dùng đã lưu luôn thắng; DAW khác không bị ảnh hưởng ==");
     {
@@ -107,13 +107,14 @@ const EXPECT = { // action -> [CC, value]  (bảng C63)
         vm.createContext(sb);
         vm.runInContext(setup.slice(a1, a2) + "\nthis.P = DAW_MIDI_PROFILES; this.v = validateDawProfileBundle; this.all = dawProfileAllInOne;", sb);
         const prof = sb.P.cubase, all = sb.all(prof).bundles.all;
-        ok(Object.keys(all.mappings).length === 16 && all.count === 16, "gộp tất cả: 16 mapping, khớp bảng C63");
+        const c1 = Object.values(all.mappings).filter((m) => m.channel === 1);
+        ok(c1.length === 16, "gộp tất cả: đúng 16 mapping kênh 1 khớp bảng C63 (C65 thêm kênh 2 riêng)");
         const errs = sb.v(all);
         ok(errs.length === 0, "validateDawProfileBundle(Cubase) không có lỗi (kể cả MIC1 ON/OFF dùng chung CC24 khác giá trị)", errs);
         let allMatch = true;
         for (const [a, [cc, val]] of Object.entries(EXPECT)) { const m = all.mappings[a]; if (!m || m.number !== cc || m.channel !== 1 || (a.startsWith("KEY_SCALE") || /^(MIC1_ON|MIC1_OFF|REMIX_PLUGIN_1|KEY_ROOT)$/.test(a) ? m.value !== val : false)) allMatch = false; }
         ok(allMatch, "bộ điền nhanh khớp bảng CC của Menu");
-        ok(Object.values(all.mappings).every((m) => SURF && SURF.ccs.has(m.number)), "mọi CC trong bộ điền nhanh đều là núm có thật trong file MIDI Remote");
+        ok(Object.values(all.mappings).filter((m) => m.channel === 1).every((m) => SURF && SURF.ccs.has(m.number)), "mọi CC kênh 1 trong bộ điền nhanh đều là núm có thật trong file MIDI Remote");
     }
 
     console.log("== G. SoundShifter (MOD) theo DAW ==");

@@ -297,6 +297,20 @@ function getMidiOutMapping(action) {
             KEY_ROOT: [15, 0], KEY_SCALE_MAJOR: [16, 0], KEY_SCALE_MINOR: [16, 5], LOFI_STATE: [20, 127], REMIX_PLUGIN_1: [21, 0], BE_STATE: [14, 127], TUNE_BYPASS: [22, 127], MIC1_ON: [24, 0], MIC1_OFF: [24, 127] };
         if (Object.prototype.hasOwnProperty.call(CUBASE_C63, action)) return { kind: "cc", channel: 1, number: CUBASE_C63[action][0], value: CUBASE_C63[action][1], source: "DEFAULT_PRESET" };
     }
+    // C65 — CUBASE bổ sung ĐỦ nút như bộ Studio One, đặt ở KÊNH 2 (CC 20–61, bỏ CC 32/38) để không đụng 16 CC kênh 1 của file MIDI Remote (C63).
+    // Cubase CHƯA có núm cho các CC này: phải thêm núm trong MIDI Remote (kênh 2) rồi gán. Chưa chạy thật trên Cubase = UNVERIFIED.
+    if (/^cubase/i.test(String(daw).trim())) {
+        const CUBASE_C65 = {
+            MASTER_OUTPUT_VOLUME: [20, 127], RETUNE_SPEED_MIC2: [21, 127], MIC2_VOLUME: [22, 127], MUSIC_ON: [23, 127], MUSIC_OFF: [24, 127], MIC2_ON: [25, 127],
+            MIC2_OFF: [26, 127], FX_ON: [27, 127], FX_OFF: [28, 127], MUSIC_SELECT: [29, 127], MIC1_SELECT: [30, 127], MIC2_SELECT: [31, 127],
+            TUNE_BYPASS_2: [33, 127], TUNE_BYPASS_3: [34, 127], TUNE_BYPASS_4: [35, 127], BE_STATE_2: [36, 127], BE_STATE_3: [37, 127], BE_STATE_4: [39, 127],
+            PRESET_NORM: [40, 127], PRESET_LOFI: [41, 127], PRESET_RAP: [42, 127], PRESET_REMIX: [43, 127], REMIX_PLUGIN_2: [44, 0], FX_SENDS_1: [45, 127],
+            FX_SENDS_2: [46, 127], FX_SENDS_3: [47, 127], FX_SENDS_4: [48, 127], FX_SENDS_5: [49, 127], FX_SENDS_6: [50, 127], INSERTS_MIC1: [51, 127],
+            INSERTS_MIC2: [52, 127], INSERTS_ALL: [53, 127], AUTOKEY_DETECT: [54, 127], AUTOKEY_SEND: [55, 127], KEY_SCALE_MAJOR_MIC2: [56, 0], KEY_SCALE_MINOR_MIC2: [56, 5],
+            KEY_ROOT_MIC2: [57, 0], KEY_SCALE_MAJOR_AT3: [58, 0], KEY_SCALE_MINOR_AT3: [58, 5], KEY_ROOT_AT3: [59, 0], KEY_SCALE_MAJOR_AT4: [60, 0], KEY_SCALE_MINOR_AT4: [60, 5],
+            KEY_ROOT_AT4: [61, 0], AUDIO_CHILL_STATE: [62, 127], AUDIO_CHILL_KNOB: [63, 64] };
+        if (Object.prototype.hasOwnProperty.call(CUBASE_C65, action)) return { kind: "cc", channel: 2, number: CUBASE_C65[action][0], value: CUBASE_C65[action][1], source: "DEFAULT_PRESET" };
+    }
     if (/^TUNE_BYPASS_[234]$/.test(String(action))) { // A94 — bypass riêng Auto-Tune 2/3/4: kênh 15, CC 89/90/91 (không trùng bộ KNOB 85-88)
         return { kind: "cc", channel: 15, number: 87 + Number(String(action).slice(-1)), value: 127, source: "DEFAULT_PRESET" };
     }

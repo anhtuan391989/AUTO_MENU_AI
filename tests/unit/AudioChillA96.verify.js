@@ -13,9 +13,12 @@ function makeAR(daw, saved) {
 }
 (async () => {
     console.log('== 1. MIDI mặc định + gửi ==');
-    for (const daw of ['Studio Pro 8', 'Cubase 14']) { const { AR } = makeAR(daw);
+    { const { AR } = makeAR('Studio Pro 8');
         const a = AR.getMidiOutMapping('AUDIO_CHILL_STATE'), b = AR.getMidiOutMapping('AUDIO_CHILL_KNOB');
-        ok(a && b && a.channel === 15 && a.number === 94 && b.channel === 15 && b.number === 95, daw + ': nút = CC94, knob = CC95 (kênh 15) mặc định', [a, b]); }
+        ok(a && b && a.channel === 15 && a.number === 94 && b.channel === 15 && b.number === 95, 'Studio Pro 8: nút = CC94, knob = CC95 (kênh 15) mặc định', [a, b]); }
+    { const { AR } = makeAR('Cubase 14'); // C65: Cubase dùng bảng kênh 2
+        const a = AR.getMidiOutMapping('AUDIO_CHILL_STATE'), b = AR.getMidiOutMapping('AUDIO_CHILL_KNOB');
+        ok(a && b && a.channel === 2 && a.number === 62 && b.channel === 2 && b.number === 63, 'Cubase 14 (C65): nút = CC62, knob = CC63 (kênh 2)', [a, b]); }
     { const { AR, sent } = makeAR('Studio Pro 8');
       let r = await AR.setDawControlState('AUDIO_CHILL', true, {}); ok(r.ok && JSON.stringify(sent[0]) === JSON.stringify([94, 0, 14]), 'nút SÁNG (ON) -> CC94 = 0 (kiểu bypass như LOFI, AUDIO-CHILL-FIX-01)', sent);
       r = await AR.setDawControlState('AUDIO_CHILL', false, {}); ok(JSON.stringify(sent[1]) === JSON.stringify([94, 127, 14]), 'nút TẮT (OFF) -> CC94 = 127 (kiểu bypass)', sent);

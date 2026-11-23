@@ -185,7 +185,7 @@ const KNOB_S1 = { BEAT_INPUT_VOLUME: 20, MASTER_OUTPUT_VOLUME: 21, RETUNE_SPEED_
   ok(r.done && m.MUSIC_SELECT.number === 110 && m.MIC1_SELECT.number === 111 && m.MIC2_SELECT.number === 112 && m.MIC1_SELECT.channel === 16 && Object.keys(m).length === 11, '[13] Studio One: bộ CHỌN TRACK = CC110/111/112 ch16, thêm đúng 3 mapping');
   ok(Object.entries(JSON.parse(before)).every(([k, v]) => snap(m[k]) === snap(v)), '[13] bộ LIVE đã lưu không bị đổi');
   const c = env({ selectedDAW: 'Cubase 13' });
-  ok(c.click('select').blocked === 'errors' && c.st.dawMidiOutMappings === undefined, '[13] Cubase không có bộ CHỌN TRACK -> không ghi');
+  { const rc = c.click('select'); const mc = (c.st.dawMidiOutMappings || {})['Cubase 13'] || {}; ok(rc.done && mc.MUSIC_SELECT && mc.MUSIC_SELECT.channel === 2, '[13] Cubase (C65): bộ CHỌN TRACK ghi ở kênh 2'); }
   const k = env({ selectedDAW: 'Studio One 7', dawMidiOutMappings: { 'Studio One 7': { BEAT_INPUT_VOLUME: { kind: 'cc', channel: 16, number: 111, value: 100 } } } });
   ok(k.click('select').blocked === 'conflict', '[13] CHỌN TRACK trùng CC của Knob -> chặn');
 }

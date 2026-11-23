@@ -66,7 +66,7 @@ const SP = (v) => ({ 'Studio Pro 8': { ...FX_SAVED } });
     AR = makeAR('Studio Pro 8', { 'Studio Pro 8': { ...FX_SAVED, FX_SENDS_2: { kind: 'cc', channel: 15, number: 77, value: 127 } } }); await AR.setDawControlState('FX', true, {});
     ok(AR.__sent.some((m) => m[0] === 77 && m[1] === 127) && !AR.__sent.some((m) => m[0] === 41), 'mapping người dùng đã lưu cho FX_SENDS_2 thắng mặc định (CC77 thay CC41)');
     AR = makeAR('Cubase 14', { 'Cubase 14': { FX_ON: { kind: 'cc', channel: 1, number: 50, value: 127 } } }); r = await AR.setDawControlState('FX', true, {});
-    ok(AR.__sent.length === 1 && Object.values(r.sendsExtra || {}).every((x) => x === 'NOT_CONFIGURED'), 'Cubase: không có mặc định Sends (chưa kiểm chứng) => không gửi');
+    ok(AR.__sent.length === 7 && Object.values(r.sendsExtra || {}).every((x) => x === 'OK'), 'Cubase (C65): có mặc định Sends kênh 2 => gửi FX_ON + 6 Sends');
 
     console.log('== 4. Surface Studio One + Setup khớp ==');
     const xml = rd('studio_one/AutoMenuAI.surface.xml');

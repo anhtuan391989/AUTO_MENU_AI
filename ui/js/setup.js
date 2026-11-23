@@ -803,6 +803,20 @@ function getDawMidiOutMapping(action) {
             KEY_ROOT: [15, 0], KEY_SCALE_MAJOR: [16, 0], KEY_SCALE_MINOR: [16, 5], LOFI_STATE: [20, 127], REMIX_PLUGIN_1: [21, 0], BE_STATE: [14, 127], TUNE_BYPASS: [22, 127], MIC1_ON: [24, 0], MIC1_OFF: [24, 127] };
         if (Object.prototype.hasOwnProperty.call(CUBASE_C63, action)) return { kind: "cc", channel: 1, number: CUBASE_C63[action][0], value: CUBASE_C63[action][1], source: "DEFAULT_PRESET" };
     }
+    // C65 — CUBASE bổ sung ĐỦ nút như bộ Studio One, đặt ở KÊNH 2 (CC 20–61, bỏ CC 32/38) để không đụng 16 CC kênh 1 của file MIDI Remote (C63).
+    // Cubase CHƯA có núm cho các CC này: phải thêm núm trong MIDI Remote (kênh 2) rồi gán. Chưa chạy thật trên Cubase = UNVERIFIED.
+    if (/^cubase/i.test(String(daw).trim())) {
+        const CUBASE_C65 = {
+            MASTER_OUTPUT_VOLUME: [20, 127], RETUNE_SPEED_MIC2: [21, 127], MIC2_VOLUME: [22, 127], MUSIC_ON: [23, 127], MUSIC_OFF: [24, 127], MIC2_ON: [25, 127],
+            MIC2_OFF: [26, 127], FX_ON: [27, 127], FX_OFF: [28, 127], MUSIC_SELECT: [29, 127], MIC1_SELECT: [30, 127], MIC2_SELECT: [31, 127],
+            TUNE_BYPASS_2: [33, 127], TUNE_BYPASS_3: [34, 127], TUNE_BYPASS_4: [35, 127], BE_STATE_2: [36, 127], BE_STATE_3: [37, 127], BE_STATE_4: [39, 127],
+            PRESET_NORM: [40, 127], PRESET_LOFI: [41, 127], PRESET_RAP: [42, 127], PRESET_REMIX: [43, 127], REMIX_PLUGIN_2: [44, 0], FX_SENDS_1: [45, 127],
+            FX_SENDS_2: [46, 127], FX_SENDS_3: [47, 127], FX_SENDS_4: [48, 127], FX_SENDS_5: [49, 127], FX_SENDS_6: [50, 127], INSERTS_MIC1: [51, 127],
+            INSERTS_MIC2: [52, 127], INSERTS_ALL: [53, 127], AUTOKEY_DETECT: [54, 127], AUTOKEY_SEND: [55, 127], KEY_SCALE_MAJOR_MIC2: [56, 0], KEY_SCALE_MINOR_MIC2: [56, 5],
+            KEY_ROOT_MIC2: [57, 0], KEY_SCALE_MAJOR_AT3: [58, 0], KEY_SCALE_MINOR_AT3: [58, 5], KEY_ROOT_AT3: [59, 0], KEY_SCALE_MAJOR_AT4: [60, 0], KEY_SCALE_MINOR_AT4: [60, 5],
+            KEY_ROOT_AT4: [61, 0], AUDIO_CHILL_STATE: [62, 127], AUDIO_CHILL_KNOB: [63, 64] };
+        if (Object.prototype.hasOwnProperty.call(CUBASE_C65, action)) return { kind: "cc", channel: 2, number: CUBASE_C65[action][0], value: CUBASE_C65[action][1], source: "DEFAULT_PRESET" };
+    }
     // TASK A81 — preset MIDI mặc định cho nút TUNE (khớp getDefaultPresetMapping() ở actionRegistry.js): Setup hiển thị đúng thứ Menu sẽ gửi.
     if (action === "TUNE_BYPASS") {
         const cubase = /^cubase/i.test(String(daw).trim());
@@ -935,9 +949,9 @@ const DAW_MIDI_PROFILES = Object.freeze({
     "cubase": Object.freeze({
         id: "cubase",
         name: "Cubase",
-        quickFillLabel: "Cubase MIDI Remote (loopMIDI Port, kênh 1)", // QUICKFILL-ALL-01: 1 nút điền toàn bộ
+        quickFillLabel: "Cubase MIDI Remote (loopMIDI Port, kênh 1 + 2)", // QUICKFILL-ALL-01: 1 nút điền toàn bộ
         match: /^cubase/i,
-        origin: "C63 — bảng CC lấy từ file .midiremote THẬT của người dùng (Ảnh/PDL TOOL AI S1): cổng 'loopMIDI Port', kênh 1, 19 núm CC (1-5, 8-12, 14-18, 20-22, 24). Chỉ gồm các núm Cubase ĐÃ có; Master/MIC 2/MUSIC/FX on-off/Preset NORM-RAP/Auto-Key/Audio Chill chưa có núm nên chưa có CC.",
+        origin: "C63 — bảng CC lấy từ file .midiremote THẬT của người dùng (Ảnh/PDL TOOL AI S1): cổng 'loopMIDI Port', kênh 1, 19 núm CC (1-5, 8-12, 14-18, 20-22, 24). Kênh 1 = 16 núm Cubase ĐÃ có. C65: kênh 2 (CC 20–61) = các nút còn lại cho ĐỦ như Studio One (Master, Mic 2, Nhạc/FX on-off, chọn track, TUNE/BÈ 2-4, Preset, FX Sends, Inserts, Auto-Key, Key Mic 2/AT3/AT4) — Cubase CHƯA có núm, cần thêm trong MIDI Remote.",
         versionStatus: Object.freeze({ "cubase 13": "CC khớp file MIDI Remote; CHƯA chạy thật trên Cubase" }),
         defaultStatus: "UNVERIFIED",
         bundles: Object.freeze({
@@ -958,6 +972,70 @@ const DAW_MIDI_PROFILES = Object.freeze({
             lofi: Object.freeze({ title: "LOFI ON/OFF", count: 1, mappings: dawQfMake(1, 127, { LOFI_STATE: 20 }) }),
             preset: Object.freeze({ title: "REMIX (Bypass)", count: 1, mappings: dawQfMake(1, 0, { REMIX_PLUGIN_1: 21 }) }),
             be: Object.freeze({ title: "BÈ ON/OFF", count: 1, mappings: dawQfMake(1, 127, { BE_STATE: 14 }) }),
+            // C65 — các bộ dưới đây bổ sung cho ĐỦ NÚT như Studio One, kênh 2 (xem CUBASE_C65 ở getDawMidiOutMapping). Cubase chưa có núm: thêm trong MIDI Remote rồi gán.
+            knob2: Object.freeze({ title: "KNOB (Master, Retune 2, Mic 2)", count: 3, mappings: Object.freeze({
+                MASTER_OUTPUT_VOLUME: Object.freeze({ kind: "cc", channel: 2, number: 20, value: 127 }),
+                RETUNE_SPEED_MIC2: Object.freeze({ kind: "cc", channel: 2, number: 21, value: 127 }),
+                MIC2_VOLUME: Object.freeze({ kind: "cc", channel: 2, number: 22, value: 127 }),
+            }) }),
+            live2: Object.freeze({ title: "LIVE ON/OFF (Nhạc, Mic 2, FX)", count: 6, mappings: Object.freeze({
+                MUSIC_ON: Object.freeze({ kind: "cc", channel: 2, number: 23, value: 127 }),
+                MUSIC_OFF: Object.freeze({ kind: "cc", channel: 2, number: 24, value: 127 }),
+                MIC2_ON: Object.freeze({ kind: "cc", channel: 2, number: 25, value: 127 }),
+                MIC2_OFF: Object.freeze({ kind: "cc", channel: 2, number: 26, value: 127 }),
+                FX_ON: Object.freeze({ kind: "cc", channel: 2, number: 27, value: 127 }),
+                FX_OFF: Object.freeze({ kind: "cc", channel: 2, number: 28, value: 127 }),
+            }) }),
+            select: Object.freeze({ title: "CHỌN TRACK", count: 3, mappings: Object.freeze({
+                MUSIC_SELECT: Object.freeze({ kind: "cc", channel: 2, number: 29, value: 127 }),
+                MIC1_SELECT: Object.freeze({ kind: "cc", channel: 2, number: 30, value: 127 }),
+                MIC2_SELECT: Object.freeze({ kind: "cc", channel: 2, number: 31, value: 127 }),
+            }) }),
+            tune2: Object.freeze({ title: "TUNE BYPASS 2/3/4", count: 3, mappings: Object.freeze({
+                TUNE_BYPASS_2: Object.freeze({ kind: "cc", channel: 2, number: 33, value: 127 }),
+                TUNE_BYPASS_3: Object.freeze({ kind: "cc", channel: 2, number: 34, value: 127 }),
+                TUNE_BYPASS_4: Object.freeze({ kind: "cc", channel: 2, number: 35, value: 127 }),
+            }) }),
+            be2: Object.freeze({ title: "BÈ ON/OFF 2/3/4", count: 3, mappings: Object.freeze({
+                BE_STATE_2: Object.freeze({ kind: "cc", channel: 2, number: 36, value: 127 }),
+                BE_STATE_3: Object.freeze({ kind: "cc", channel: 2, number: 37, value: 127 }),
+                BE_STATE_4: Object.freeze({ kind: "cc", channel: 2, number: 39, value: 127 }),
+            }) }),
+            preset2: Object.freeze({ title: "PRESET NORM/LOFI/RAP/REMIX + REMIX 2", count: 5, mappings: Object.freeze({
+                PRESET_NORM: Object.freeze({ kind: "cc", channel: 2, number: 40, value: 127 }),
+                PRESET_LOFI: Object.freeze({ kind: "cc", channel: 2, number: 41, value: 127 }),
+                PRESET_RAP: Object.freeze({ kind: "cc", channel: 2, number: 42, value: 127 }),
+                PRESET_REMIX: Object.freeze({ kind: "cc", channel: 2, number: 43, value: 127 }),
+                REMIX_PLUGIN_2: Object.freeze({ kind: "cc", channel: 2, number: 44, value: 0 }),
+            }) }),
+            fxsends: Object.freeze({ title: "FX → SENDS (6 nút nguồn)", count: 6, mappings: Object.freeze({
+                FX_SENDS_1: Object.freeze({ kind: "cc", channel: 2, number: 45, value: 127 }),
+                FX_SENDS_2: Object.freeze({ kind: "cc", channel: 2, number: 46, value: 127 }),
+                FX_SENDS_3: Object.freeze({ kind: "cc", channel: 2, number: 47, value: 127 }),
+                FX_SENDS_4: Object.freeze({ kind: "cc", channel: 2, number: 48, value: 127 }),
+                FX_SENDS_5: Object.freeze({ kind: "cc", channel: 2, number: 49, value: 127 }),
+                FX_SENDS_6: Object.freeze({ kind: "cc", channel: 2, number: 50, value: 127 }),
+            }) }),
+            inserts: Object.freeze({ title: "INSERTS (Mic 1, Mic 2, chung)", count: 3, mappings: Object.freeze({
+                INSERTS_MIC1: Object.freeze({ kind: "cc", channel: 2, number: 51, value: 127 }),
+                INSERTS_MIC2: Object.freeze({ kind: "cc", channel: 2, number: 52, value: 127 }),
+                INSERTS_ALL: Object.freeze({ kind: "cc", channel: 2, number: 53, value: 127 }),
+            }) }),
+            autokey: Object.freeze({ title: "AUTO-KEY (dò Key + Send)", count: 2, mappings: Object.freeze({
+                AUTOKEY_DETECT: Object.freeze({ kind: "cc", channel: 2, number: 54, value: 127 }),
+                AUTOKEY_SEND: Object.freeze({ kind: "cc", channel: 2, number: 55, value: 127 }),
+            }) }),
+            scale2: Object.freeze({ title: "KEY + SCALE (Mic 2, Auto-Tune 3, 4)", count: 9, mappings: Object.freeze({
+                KEY_SCALE_MAJOR_MIC2: Object.freeze({ kind: "cc", channel: 2, number: 56, value: 0 }),
+                KEY_SCALE_MINOR_MIC2: Object.freeze({ kind: "cc", channel: 2, number: 56, value: 5 }),
+                KEY_ROOT_MIC2: Object.freeze({ kind: "cc", channel: 2, number: 57, value: 0 }),
+                KEY_SCALE_MAJOR_AT3: Object.freeze({ kind: "cc", channel: 2, number: 58, value: 0 }),
+                KEY_SCALE_MINOR_AT3: Object.freeze({ kind: "cc", channel: 2, number: 58, value: 5 }),
+                KEY_ROOT_AT3: Object.freeze({ kind: "cc", channel: 2, number: 59, value: 0 }),
+                KEY_SCALE_MAJOR_AT4: Object.freeze({ kind: "cc", channel: 2, number: 60, value: 0 }),
+                KEY_SCALE_MINOR_AT4: Object.freeze({ kind: "cc", channel: 2, number: 60, value: 5 }),
+                KEY_ROOT_AT4: Object.freeze({ kind: "cc", channel: 2, number: 61, value: 0 }),
+            }) }),
         }),
     }),
 });
