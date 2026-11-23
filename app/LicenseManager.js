@@ -279,7 +279,16 @@ function createLicenseManager(opts) {
         return { ok: true };
     }
 
-    return { init, getMachineCode, getStatus, isLicensed, activate, refresh, startWatcher, stopWatcher, relaunch };
+    // EXE-PROTECT-07 — bằng chứng license để gắn kèm khi gọi SERVER KHÁC (vd Key Server /list?all=1).
+    // Trả { payloadB64, sig } khi máy đang có license hợp lệ (bản đã được MENU-LICENSE-SERVER ký Ed25519); null nếu chưa/không còn licensed.
+    // Server kia tự xác minh chữ ký bằng CÙNG khoá công khai (app/license-public-key.txt) — không cần tin app, không cần hỏi lại License Server.
+    function getProof() {
+        if (!isLicensed() || !cache) return null;
+        try { return { payloadB64: Buffer.from(cache.payload, 'utf8').toString('base64'), sig: cache.sig }; }
+        catch (_) { return null; }
+    }
+
+    return { init, getMachineCode, getStatus, isLicensed, activate, refresh, startWatcher, stopWatcher, relaunch, getProof };
 }
 
 module.exports = { createLicenseManager, normalizeKey, machineCodeFromRaw, DEFAULT_SERVER_URL, GRACE_MS, RECHECK_MS };

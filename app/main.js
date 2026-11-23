@@ -288,7 +288,10 @@ const keyServerSync = new KeyServerSync({
     isEnabled: () => {
         const s = readSettingsFile();
         return !(s && s.keyServerAutoSync === false);
-    }
+    },
+    // EXE-PROTECT-07: gắn kèm bằng chứng license (nếu máy đang có) vào mọi request lên Key Server.
+    // licenseManager được khai báo PHÍA DƯỚI nhưng hàm này chỉ chạy lúc có request thật (sau khi app đã nạp xong) nên an toàn.
+    getLicenseProof: () => (typeof licenseManager !== "undefined" ? licenseManager.getProof() : null)
 });
 // DB-MATCH-ID-02: { title, sec } của bài đang phát, cập nhật ngay khi nhận sự kiện (trước khi tra Database/Server).
 let nowPlayingDurationHint = null;

@@ -1,0 +1,343 @@
+From 9ef91eb3e9acf74a3847bf18a5cd6fb5b9c64796 Mon Sep 17 00:00:00 2001
+From: Claude A <noreply@anthropic.com>
+Date: Mon, 23 Nov 2026 07:39:52 +0000
+Subject: [PATCH] EXE-PROTECT-07: License phia Server (tuy chon, TAT mac dinh)
+ cho Key Server /list?all=1
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Y3Me4YGLz39DbK1HnaR9zx
+---
+ app/LicenseManager.js             |  11 +-
+ app/main.js                       |   5 +-
+ core/integration/KeyServerSync.js |  16 ++-
+ server/worker.js                  |  50 +++++++++-
+ tests/unit/ExeProtect07.verify.js | 161 ++++++++++++++++++++++++++++++
+ 5 files changed, 238 insertions(+), 5 deletions(-)
+ create mode 100644 tests/unit/ExeProtect07.verify.js
+
+diff --git a/app/LicenseManager.js b/app/LicenseManager.js
+index 61c6f4e..ad36023 100644
+--- a/app/LicenseManager.js
++++ b/app/LicenseManager.js
+@@ -279,7 +279,16 @@ function createLicenseManager(opts) {
+         return { ok: true };
+     }
+ 
+-    return { init, getMachineCode, getStatus, isLicensed, activate, refresh, startWatcher, stopWatcher, relaunch };
++    // EXE-PROTECT-07 — bằng chứng license để gắn kèm khi gọi SERVER KHÁC (vd Key Server /list?all=1).
++    // Trả { payloadB64, sig } khi máy đang có license hợp lệ (bản đã được MENU-LICENSE-SERVER ký Ed25519); null nếu chưa/không còn licensed.
++    // Server kia tự xác minh chữ ký bằng CÙNG khoá công khai (app/license-public-key.txt) — không cần tin app, không cần hỏi lại License Server.
++    function getProof() {
++        if (!isLicensed() || !cache) return null;
++        try { return { payloadB64: Buffer.from(cache.payload, 'utf8').toString('base64'), sig: cache.sig }; }
++        catch (_) { return null; }
++    }
++
++    return { init, getMachineCode, getStatus, isLicensed, activate, refresh, startWatcher, stopWatcher, relaunch, getProof };
+ }
+ 
+ module.exports = { createLicenseManager, normalizeKey, machineCodeFromRaw, DEFAULT_SERVER_URL, GRACE_MS, RECHECK_MS };
+diff --git a/app/main.js b/app/main.js
+index fe9658d..729ac52 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -288,7 +288,10 @@ const keyServerSync = new KeyServerSync({
+     isEnabled: () => {
+         const s = readSettingsFile();
+         return !(s && s.keyServerAutoSync === false);
+-    }
++    },
++    // EXE-PROTECT-07: gắn kèm bằng chứng license (nếu máy đang có) vào mọi request lên Key Server.
++    // licenseManager được khai báo PHÍA DƯỚI nhưng hàm này chỉ chạy lúc có request thật (sau khi app đã nạp xong) nên an toàn.
++    getLicenseProof: () => (typeof licenseManager !== "undefined" ? licenseManager.getProof() : null)
+ });
+ // DB-MATCH-ID-02: { title, sec } của bài đang phát, cập nhật ngay khi nhận sự kiện (trước khi tra Database/Server).
+ let nowPlayingDurationHint = null;
+diff --git a/core/integration/KeyServerSync.js b/core/integration/KeyServerSync.js
+index 8ebe551..e01db58 100644
+--- a/core/integration/KeyServerSync.js
++++ b/core/integration/KeyServerSync.js
+@@ -143,6 +143,9 @@ class KeyServerSync {
+         // LIVE-SUBMIT-GATE-01: ngưỡng cho Key nghe trực tiếp (xem ghi chú ở đầu file). Test có thể truyền số khác.
+         this.liveMinListenMs = Number.isFinite(opts.liveMinListenMs) ? opts.liveMinListenMs : LIVE_MIN_LISTEN_MS;
+         this.liveKeyHoldMs = Number.isFinite(opts.liveKeyHoldMs) ? opts.liveKeyHoldMs : LIVE_KEY_HOLD_MS;
++        // EXE-PROTECT-07: () => { payloadB64, sig } | null — bằng chứng license hiện tại (vd licenseManager.getProof).
++        // Không truyền = hành vi cũ (không gắn gì thêm vào request).
++        this.getLicenseProof = typeof opts.getLicenseProof === 'function' ? opts.getLicenseProof : null;
+ 
+         this._cache = new Map();           // cacheKey -> { at, ttl, value }
+         this._lookupInflight = new Map();  // cacheKey -> Promise
+@@ -236,6 +239,16 @@ class KeyServerSync {
+         return v && v.found ? v : null;
+     }
+ 
++    // EXE-PROTECT-07: { X-License-Payload, X-License-Sig } nếu máy đang có license hợp lệ, ngược lại {} (không gắn gì).
++    // Không bao giờ throw — lỗi ở đây không được chặn request chính.
++    _licenseHeaders() {
++        try {
++            const p = this.getLicenseProof && this.getLicenseProof();
++            if (p && p.payloadB64 && p.sig) return { 'X-License-Payload': p.payloadB64, 'X-License-Sig': p.sig };
++        } catch (e) { /* bỏ qua */ }
++        return {};
++    }
++
+     // Gọi mạng có timeout. Không bao giờ throw: lỗi -> { ok:false, error }.
+     async _request(pathAndQuery, init, timeoutMs) {
+         if (!this.fetchFn) return { ok: false, error: 'no-fetch' };
+@@ -243,7 +256,8 @@ class KeyServerSync {
+         try {
+             const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+             if (ctrl) timer = setTimeout(() => ctrl.abort(), timeoutMs);
+-            const res = await this.fetchFn(this.serverUrl + pathAndQuery, Object.assign({}, init || {}, ctrl ? { signal: ctrl.signal } : {}));
++            const headers = Object.assign({}, (init && init.headers) || {}, this._licenseHeaders());
++            const res = await this.fetchFn(this.serverUrl + pathAndQuery, Object.assign({}, init || {}, { headers }, ctrl ? { signal: ctrl.signal } : {}));
+             let json = null;
+             try { json = await res.json(); } catch (e) { json = null; }
+             return { ok: !!res.ok, status: res.status, json };
+diff --git a/server/worker.js b/server/worker.js
+index 7148824..ce0e198 100644
+--- a/server/worker.js
++++ b/server/worker.js
+@@ -8,8 +8,45 @@
+ //  [A97] Thêm: nút "Xoa bai Chua dat ten" (xoá hàng loạt) ở tab Tat Ca Bai Da Luu.
+ //  [A96] Giảm số dòng ĐỌC D1 (gói miễn phí chỉ 5 triệu dòng/ngày, hết là /list, /find... lỗi tới 7h sáng giờ VN): nhớ tạm kết quả /find, /list, /count
+ //        trong bộ nhớ Worker vài chục giây; mọi thao tác ghi đều xoá cache. Trang dùng &fresh=1 sau khi sửa/xoá để thấy dữ liệu mới ngay.
++//  [EXE-PROTECT-07] Thêm: /list?all=1 (toàn bộ bài) có thể yêu cầu License hợp lệ — TẮT theo mặc định, chỉ bật khi đặt biến
++//        Cloudflare REQUIRE_LICENSE_FOR_LIST=1 (Settings > Variables and Secrets). Đang TẮT thì mọi thứ y như cũ, không ai bị ảnh hưởng.
+ // ============================================================
+ 
++// EXE-PROTECT-07 — khoá CÔNG KHAI dùng để xác minh License (CÙNG khoá app/license-public-key.txt trong app; không phải bí mật).
++// Có thể đổi khoá mà không cần sửa code: đặt biến Cloudflare LICENSE_PUBLIC_KEY (Settings > Variables and Secrets) để ghi đè giá trị dưới đây.
++const KHOA_CONG_KHAI_LICENSE_MAC_DINH = "MCowBQYDK2VwAyEA43IqLIW9FjnNF10nKAJspt+Ou8/hpPXggq7H2I6T4PA=";
++
++// Giải mã 1 chuỗi base64 thành byte thật (không qua Buffer — Worker không có Buffer của Node).
++function base64ThanhByte(b64) {
++  const nhiPhan = atob(b64.replace(/\s+/g, ""));
++  const mang = new Uint8Array(nhiPhan.length);
++  for (let i = 0; i < nhiPhan.length; i++) mang[i] = nhiPhan.charCodeAt(i);
++  return mang;
++}
++
++// EXE-PROTECT-07 — xác minh bằng chứng License gắn kèm request (header X-License-Payload/X-License-Sig, đều base64).
++// Trả true khi chữ ký Ed25519 đúng VÀ license còn hạn (status=active, expiresAt > hiện tại). Mọi lỗi (thiếu header, sai
++// định dạng, Ed25519 không chạy được...) đều trả false — KHÔNG BAO GIỜ throw, không được làm hỏng response chính.
++// Tham số khoaCongKhaiB64 chỉ dùng khi TEST (truyền khoá khác để thử với cặp khoá giả); production luôn bỏ trống.
++async function kiemTraLicense(request, env, khoaCongKhaiB64) {
++  try {
++    const payloadB64 = request.headers.get("X-License-Payload");
++    const sigB64 = request.headers.get("X-License-Sig");
++    if (!payloadB64 || !sigB64) return false;
++    const khoa = khoaCongKhaiB64 || (env && env.LICENSE_PUBLIC_KEY) || KHOA_CONG_KHAI_LICENSE_MAC_DINH;
++    const payloadBytes = base64ThanhByte(payloadB64);
++    const sigBytes = base64ThanhByte(sigB64);
++    const derBytes = base64ThanhByte(khoa);
++    const key = await crypto.subtle.importKey("spki", derBytes, { name: "Ed25519" }, false, ["verify"]);
++    const hopLeChuKy = await crypto.subtle.verify("Ed25519", key, sigBytes, payloadBytes);
++    if (!hopLeChuKy) return false;
++    const p = JSON.parse(new TextDecoder("utf-8").decode(payloadBytes));
++    return !!(p && p.v === 1 && p.status === "active" && typeof p.expiresAt === "number" && p.expiresAt > Date.now());
++  } catch (e) {
++    return false; // Ed25519 không hỗ trợ, header hỏng, JSON lỗi... -> coi như KHÔNG có license, không chặn request.
++  }
++}
++
+ export default {
+   async fetch(request, env, ctx) {
+     const url = new URL(request.url);
+@@ -18,7 +55,7 @@ export default {
+       "Content-Type": "application/json",
+       "Access-Control-Allow-Origin": "*",
+       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+-      "Access-Control-Allow-Headers": "Content-Type, Authorization"
++      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-License-Payload, X-License-Sig"
+     };
+ 
+     if (request.method === "OPTIONS") {
+@@ -292,7 +329,16 @@ export default {
+     if (url.pathname === "/list") {
+       try {
+         // OLD-KEY-02: ?all=1 = xem TOAN BO bai (toi da 5000); ?q=ten = loc theo ten bai. Khong tham so = nhu cu (100 bai moi nhat).
+-        const xemHet = url.searchParams.get("all") === "1";
++        let xemHet = url.searchParams.get("all") === "1";
++        // [EXE-PROTECT-07] Bật biến Cloudflare REQUIRE_LICENSE_FOR_LIST=1 thì ?all=1 CẦN License hợp lệ (app gắn kèm tự động khi đã kích
++        // hoạt) hoặc mật khẩu quản trị (ADMIN_TOKEN, như sửa/xoá bài) mới được xem toàn bộ; không có thì vẫn trả 100 bài gần nhất như cũ
++        // (không lỗi, không chặn — chỉ không có thêm phần thưởng "xem hết"). Mặc định biến này CHƯA đặt -> y như trước, không đổi gì.
++        if (xemHet && env.REQUIRE_LICENSE_FOR_LIST === "1") {
++          const auth = request.headers.get("Authorization") || "";
++          const tokenQuanTri = auth.startsWith("Bearer ") ? auth.slice(7) : (request.headers.get("X-Admin-Token") || "");
++          const laQuanTri = !!(env.ADMIN_TOKEN && soSanhAnToan(tokenQuanTri, env.ADMIN_TOKEN));
++          if (!laQuanTri && !(await kiemTraLicense(request, env))) xemHet = false;
++        }
+         const gioiHan = xemHet ? 5000 : 100;
+         const tuKhoa = chuanHoaTen(url.searchParams.get("q") || "");
+ 
+diff --git a/tests/unit/ExeProtect07.verify.js b/tests/unit/ExeProtect07.verify.js
+new file mode 100644
+index 0000000..3fa3927
+--- /dev/null
++++ b/tests/unit/ExeProtect07.verify.js
+@@ -0,0 +1,161 @@
++/**
++ * EXE-PROTECT-07 — License phía Server cho Key Server /list?all=1 (chạy: node tests/unit/ExeProtect07.verify.js)
++ * Chạy code THẬT của server/worker.js (D1 giả) + LicenseManager.js + KeyServerSync.js thật.
++ * KHÔNG gọi mạng, KHÔNG đụng Cloudflare thật.
++ */
++'use strict';
++const fs = require('fs'), os = require('os'), path = require('path'), crypto = require('crypto'), vm = require('vm');
++const ROOT = path.join(__dirname, '..', '..');
++let pass = 0, fail = 0;
++const ok = (c, m) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m); } };
++
++// ---------- 1) Khoá công khai trong worker.js phải KHỚP ĐÚNG app/license-public-key.txt (lệch là hỏng toàn bộ xác minh) ----------
++const workerSrc = fs.readFileSync(path.join(ROOT, 'server/worker.js'), 'utf8');
++const pubKeyApp = fs.readFileSync(path.join(ROOT, 'app/license-public-key.txt'), 'utf8').replace(/\s+/g, '');
++const mKhoa = /KHOA_CONG_KHAI_LICENSE_MAC_DINH\s*=\s*"([^"]+)"/.exec(workerSrc);
++ok(!!mKhoa && mKhoa[1] === pubKeyApp, 'server/worker.js: khoá công khai License khớp đúng app/license-public-key.txt');
++ok(/Access-Control-Allow-Headers"\s*:\s*"[^"]*X-License-Payload[^"]*X-License-Sig/.test(workerSrc), 'CORS: cho phép header X-License-Payload/X-License-Sig');
++ok(/REQUIRE_LICENSE_FOR_LIST\s*===\s*"1"/.test(workerSrc), 'cổng chỉ bật khi biến Cloudflare REQUIRE_LICENSE_FOR_LIST=1 (mặc định TẮT)');
++ok(!/env\.REQUIRE_LICENSE_FOR_LIST\s*=[^=]/.test(workerSrc), 'không có chỗ nào tự GHI biến này (chỉ ĐỌC env.REQUIRE_LICENSE_FOR_LIST — phải do Khói tự đặt trên Cloudflare)');
++
++// ---------- 2) Nạp worker.js THẬT (cùng cách KeyServerDurationA88.verify.js đã dùng) ----------
++function loadWorker(file) {
++    const src = fs.readFileSync(file, 'utf8').replace(/^export default/m, 'module.exports =');
++    const m = { exports: {} };
++    new Function('module', 'exports', src)(m, m.exports);
++    return m.exports;
++}
++const worker = loadWorker(path.join(ROOT, 'server/worker.js'));
++
++// ---------- 3) D1 giả: đủ để trả lời đúng truy vấn /list (tôn trọng LIMIT) ----------
++function makeDb(n) {
++    const songs = [];
++    for (let i = 0; i < n; i++) songs.push({ songId: 'bai_' + i, title: 'Bai ' + i, total_duration_sec: 200, updated_at: 1000 + i });
++    return {
++        prepare(sql) {
++            const q = sql.replace(/\s+/g, ' ').trim();
++            return {
++                bind() { return this; },
++                async all() {
++                    const m = /LIMIT (\d+)\s*$/.exec(q); // LẤY LIMIT CUỐI CÂU (truy vấn còn 2 LIMIT 1 ở subquery key1/mode1)
++                    const limit = m ? Number(m[1]) : songs.length;
++                    if (q.startsWith('SELECT i.song_id as songId, i.title, i.total_duration_sec as tongGiay')) {
++                        const sorted = [...songs].sort((a, b) => b.updated_at - a.updated_at).slice(0, limit)
++                            .map((s) => ({ songId: s.songId, title: s.title, tongGiay: s.total_duration_sec, soDoan: 1, updated_at: s.updated_at, ngayDoanDau: s.updated_at, key1: 'C', mode1: 'major' }));
++                        return { results: sorted };
++                    }
++                    throw new Error('all: không hỗ trợ trong D1 giả: ' + q.slice(0, 60));
++                },
++                async first() { throw new Error('first: không hỗ trợ: ' + q.slice(0, 60)); },
++                async run() { throw new Error('run: không hỗ trợ: ' + q.slice(0, 60)); }
++            };
++        }
++    };
++}
++const ctx = { waitUntil() {} }; // bỏ qua việc tự điền thời lượng nền (không liên quan test này)
++
++async function goiList(env, headers) {
++    const req = new Request('https://x/list?all=1', { headers: headers || {} });
++    const res = await worker.fetch(req, env, ctx);
++    return res.json();
++}
++
++// ---------- 4) Cặp khoá Ed25519 RIÊNG cho test (không phải khoá thật của Khói) ----------
++const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
++const pubTestB64 = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
++function kySan(payloadObj) {
++    const payloadStr = JSON.stringify(payloadObj);
++    const sig = crypto.sign(null, Buffer.from(payloadStr, 'utf8'), privateKey);
++    return { 'X-License-Payload': Buffer.from(payloadStr, 'utf8').toString('base64'), 'X-License-Sig': sig.toString('base64') };
++}
++const licenseConHan = kySan({ v: 1, status: 'active', expiresAt: Date.now() + 999999999, machine: 'TEST' });
++const licenseHetHan = kySan({ v: 1, status: 'active', expiresAt: Date.now() - 1000, machine: 'TEST' });
++
++(async () => {
++    const N = 150;
++    const envTat = { DB: makeDb(N) }; // REQUIRE_LICENSE_FOR_LIST chưa đặt
++    const envBat = { DB: makeDb(N), REQUIRE_LICENSE_FOR_LIST: '1', LICENSE_PUBLIC_KEY: pubTestB64, ADMIN_TOKEN: 'mat-khau-quan-tri-test' };
++
++    // Biến CHƯA bật -> y như cũ, ai gọi ?all=1 cũng thấy hết (không đổi hành vi hiện có).
++    ok((await goiList(envTat)).tongBai === N, 'biến REQUIRE_LICENSE_FOR_LIST chưa đặt: ?all=1 trả đủ ' + N + ' bài như trước (không đổi gì)');
++
++    // Biến ĐÃ bật, KHÔNG có license, KHÔNG có admin -> KHÔNG lỗi, chỉ hạ xuống 100 bài gần nhất (y như không có ?all=1).
++    const khongLicense = await goiList(envBat);
++    ok(khongLicense.tongBai === 100 && !khongLicense.error, 'bật cổng: không có License -> hạ về 100 bài (không lỗi, không chặn tính năng miễn phí)');
++
++    // Có License hợp lệ, còn hạn, ký đúng bằng khoá test -> được xem đủ.
++    ok((await goiList(envBat, licenseConHan)).tongBai === N, 'bật cổng: License hợp lệ còn hạn -> xem đủ ' + N + ' bài');
++
++    // License CHỮ KÝ ĐÚNG nhưng ĐÃ HẾT HẠN -> vẫn bị hạ về 100 (không được xem đủ).
++    ok((await goiList(envBat, licenseHetHan)).tongBai === 100, 'bật cổng: License đã hết hạn -> vẫn hạ về 100, không được đi vòng');
++
++    // Chữ ký SAI (giả mạo payload) -> hạ về 100.
++    const gia = Object.assign({}, licenseConHan, { 'X-License-Payload': kySan({ v: 1, status: 'active', expiresAt: Date.now() + 999999999, machine: 'KHAC' })['X-License-Payload'] });
++    // ghép payload KHÁC với chữ ký CŨ -> chữ ký không khớp payload
++    const falsify = { 'X-License-Payload': gia['X-License-Payload'], 'X-License-Sig': licenseConHan['X-License-Sig'] };
++    ok((await goiList(envBat, falsify)).tongBai === 100, 'bật cổng: payload bị đổi (chữ ký không khớp) -> hạ về 100, không được đi vòng');
++
++    // Thiếu header hoàn toàn (như scraper gọi thẳng curl) -> hạ về 100.
++    ok((await goiList(envBat, {})).tongBai === 100, 'bật cổng: gọi thẳng không kèm gì (vd curl) -> hạ về 100');
++
++    // Mật khẩu quản trị (ADMIN_TOKEN) đi vòng được, không cần License -> trang quản trị của Khói không bị ảnh hưởng.
++    ok((await goiList(envBat, { Authorization: 'Bearer mat-khau-quan-tri-test' })).tongBai === N, 'bật cổng: có mật khẩu quản trị (ADMIN_TOKEN) -> vẫn xem đủ, không cần License');
++    ok((await goiList(envBat, { Authorization: 'Bearer sai' })).tongBai === 100, 'bật cổng: mật khẩu quản trị SAI -> hạ về 100 (không đi vòng được)');
++
++    // /list KHÔNG kèm ?all=1 thì không liên quan gì tới cổng này — vẫn như cũ.
++    {
++        const res = await worker.fetch(new Request('https://x/list'), envBat, ctx);
++        const j = await res.json();
++        ok(j.tongBai === 100, '/list (không all=1) không bị ảnh hưởng, vẫn 100 bài như trước');
++    }
++
++    // ---------- 5) LicenseManager.getProof() ----------
++    const { createLicenseManager } = require(path.join(ROOT, 'app/LicenseManager.js'));
++    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'exe07-'));
++    try {
++        const lm = createLicenseManager({ userDataDir: tmp, publicKeyText: pubTestB64 });
++        await lm.init();
++        ok(lm.getProof() === null, 'getProof(): chưa kích hoạt -> null');
++
++        // Giả lập 1 license đã kích hoạt + hợp lệ bằng cách ghi thẳng license.json (giống cache nội bộ của LicenseManager).
++        const { machine } = { machine: await lm.getMachineCode() };
++        const payloadObj = { v: 1, status: 'active', expiresAt: Date.now() + 999999999, machine: String(machine).replace(/-/g, ''), plan: '1y', activatedAt: Date.now() };
++        const payloadStr = JSON.stringify(payloadObj);
++        const sig = crypto.sign(null, Buffer.from(payloadStr, 'utf8'), privateKey).toString('base64');
++        fs.writeFileSync(path.join(tmp, 'license.json'), JSON.stringify({ v: 1, key: 'MENU-TESTT-ESTTE-STTES-TTEST', payload: payloadStr, sig, lastOkLocal: Date.now(), maxLocal: Date.now() }), 'utf8');
++        const lm2 = createLicenseManager({ userDataDir: tmp, publicKeyText: pubTestB64, machineIdProvider: lm.getMachineCode ? undefined : undefined });
++        // machineIdProvider không cần set lại vì machineCodeFromRaw là hàm thuần (cùng input -> cùng mã máy); nạp lại bằng init() để đọc license.json vừa ghi.
++        await lm2.init();
++        const proof = lm2.getProof();
++        ok(!!proof && typeof proof.payloadB64 === 'string' && typeof proof.sig === 'string', 'getProof(): đã kích hoạt hợp lệ -> trả {payloadB64, sig}');
++        if (proof) {
++            const decoded = JSON.parse(Buffer.from(proof.payloadB64, 'base64').toString('utf8'));
++            ok(decoded.status === 'active' && decoded.v === 1, 'getProof(): payloadB64 giải mã lại đúng JSON đã ký');
++            ok(proof.sig === sig, 'getProof(): sig giữ nguyên, không đổi');
++            // Worker thật phải xác minh được proof này bằng ĐÚNG khoá công khai test.
++            const okWorker = await goiList(envBat, { 'X-License-Payload': proof.payloadB64, 'X-License-Sig': proof.sig });
++            ok(okWorker.tongBai === N, 'liên thông: bằng chứng từ LicenseManager.getProof() được worker.js xác minh hợp lệ -> xem đủ');
++        }
++    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
++
++    // ---------- 6) KeyServerSync._request() gắn kèm header khi có getLicenseProof ----------
++    const { KeyServerSync } = require(path.join(ROOT, 'core/integration/KeyServerSync.js'));
++    {
++        let seenHeaders = null;
++        const fakeFetch = async (u, init) => { seenHeaders = (init && init.headers) || {}; return { ok: true, status: 200, json: async () => ({}) }; };
++        const kss = new KeyServerSync({ fetchFn: fakeFetch, getLicenseProof: () => ({ payloadB64: 'AAA', sig: 'BBB' }) });
++        await kss._request('/list', { method: 'GET' }, 1000);
++        ok(seenHeaders['X-License-Payload'] === 'AAA' && seenHeaders['X-License-Sig'] === 'BBB', '_request(): gắn kèm X-License-Payload/X-License-Sig khi getLicenseProof trả bằng chứng');
++
++        const kss2 = new KeyServerSync({ fetchFn: fakeFetch, getLicenseProof: () => null });
++        await kss2._request('/set-song-info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }, 1000);
++        ok(seenHeaders['Content-Type'] === 'application/json' && !seenHeaders['X-License-Payload'], '_request(): chưa có license -> không gắn gì, header cũ (Content-Type) vẫn giữ nguyên');
++
++        const kss3 = new KeyServerSync({ fetchFn: fakeFetch }); // không truyền getLicenseProof (hành vi cũ)
++        await kss3._request('/list', { method: 'GET' }, 1000);
++        ok(!seenHeaders['X-License-Payload'], '_request(): không truyền getLicenseProof -> hành vi y như cũ, không gắn gì');
++    }
++
++    console.log(`\n${pass} PASS / ${fail} FAIL`);
++    process.exit(fail ? 1 : 0);
++})().catch((e) => { console.error('LỖI KHÔNG BẮT ĐƯỢC:', e && e.stack || e); process.exit(1); });
+-- 
+2.43.0
+

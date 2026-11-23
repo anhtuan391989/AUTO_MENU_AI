@@ -143,6 +143,9 @@ class KeyServerSync {
         // LIVE-SUBMIT-GATE-01: ngưỡng cho Key nghe trực tiếp (xem ghi chú ở đầu file). Test có thể truyền số khác.
         this.liveMinListenMs = Number.isFinite(opts.liveMinListenMs) ? opts.liveMinListenMs : LIVE_MIN_LISTEN_MS;
         this.liveKeyHoldMs = Number.isFinite(opts.liveKeyHoldMs) ? opts.liveKeyHoldMs : LIVE_KEY_HOLD_MS;
+        // EXE-PROTECT-07: () => { payloadB64, sig } | null — bằng chứng license hiện tại (vd licenseManager.getProof).
+        // Không truyền = hành vi cũ (không gắn gì thêm vào request).
+        this.getLicenseProof = typeof opts.getLicenseProof === 'function' ? opts.getLicenseProof : null;
 
         this._cache = new Map();           // cacheKey -> { at, ttl, value }
         this._lookupInflight = new Map();  // cacheKey -> Promise
@@ -236,6 +239,16 @@ class KeyServerSync {
         return v && v.found ? v : null;
     }
 
+    // EXE-PROTECT-07: { X-License-Payload, X-License-Sig } nếu máy đang có license hợp lệ, ngược lại {} (không gắn gì).
+    // Không bao giờ throw — lỗi ở đây không được chặn request chính.
+    _licenseHeaders() {
+        try {
+            const p = this.getLicenseProof && this.getLicenseProof();
+            if (p && p.payloadB64 && p.sig) return { 'X-License-Payload': p.payloadB64, 'X-License-Sig': p.sig };
+        } catch (e) { /* bỏ qua */ }
+        return {};
+    }
+
     // Gọi mạng có timeout. Không bao giờ throw: lỗi -> { ok:false, error }.
     async _request(pathAndQuery, init, timeoutMs) {
         if (!this.fetchFn) return { ok: false, error: 'no-fetch' };
@@ -243,7 +256,8 @@ class KeyServerSync {
         try {
             const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
             if (ctrl) timer = setTimeout(() => ctrl.abort(), timeoutMs);
-            const res = await this.fetchFn(this.serverUrl + pathAndQuery, Object.assign({}, init || {}, ctrl ? { signal: ctrl.signal } : {}));
+            const headers = Object.assign({}, (init && init.headers) || {}, this._licenseHeaders());
+            const res = await this.fetchFn(this.serverUrl + pathAndQuery, Object.assign({}, init || {}, { headers }, ctrl ? { signal: ctrl.signal } : {}));
             let json = null;
             try { json = await res.json(); } catch (e) { json = null; }
             return { ok: !!res.ok, status: res.status, json };

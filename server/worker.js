@@ -8,7 +8,44 @@
 //  [A97] Thêm: nút "Xoa bai Chua dat ten" (xoá hàng loạt) ở tab Tat Ca Bai Da Luu.
 //  [A96] Giảm số dòng ĐỌC D1 (gói miễn phí chỉ 5 triệu dòng/ngày, hết là /list, /find... lỗi tới 7h sáng giờ VN): nhớ tạm kết quả /find, /list, /count
 //        trong bộ nhớ Worker vài chục giây; mọi thao tác ghi đều xoá cache. Trang dùng &fresh=1 sau khi sửa/xoá để thấy dữ liệu mới ngay.
+//  [EXE-PROTECT-07] Thêm: /list?all=1 (toàn bộ bài) có thể yêu cầu License hợp lệ — TẮT theo mặc định, chỉ bật khi đặt biến
+//        Cloudflare REQUIRE_LICENSE_FOR_LIST=1 (Settings > Variables and Secrets). Đang TẮT thì mọi thứ y như cũ, không ai bị ảnh hưởng.
 // ============================================================
+
+// EXE-PROTECT-07 — khoá CÔNG KHAI dùng để xác minh License (CÙNG khoá app/license-public-key.txt trong app; không phải bí mật).
+// Có thể đổi khoá mà không cần sửa code: đặt biến Cloudflare LICENSE_PUBLIC_KEY (Settings > Variables and Secrets) để ghi đè giá trị dưới đây.
+const KHOA_CONG_KHAI_LICENSE_MAC_DINH = "MCowBQYDK2VwAyEA43IqLIW9FjnNF10nKAJspt+Ou8/hpPXggq7H2I6T4PA=";
+
+// Giải mã 1 chuỗi base64 thành byte thật (không qua Buffer — Worker không có Buffer của Node).
+function base64ThanhByte(b64) {
+  const nhiPhan = atob(b64.replace(/\s+/g, ""));
+  const mang = new Uint8Array(nhiPhan.length);
+  for (let i = 0; i < nhiPhan.length; i++) mang[i] = nhiPhan.charCodeAt(i);
+  return mang;
+}
+
+// EXE-PROTECT-07 — xác minh bằng chứng License gắn kèm request (header X-License-Payload/X-License-Sig, đều base64).
+// Trả true khi chữ ký Ed25519 đúng VÀ license còn hạn (status=active, expiresAt > hiện tại). Mọi lỗi (thiếu header, sai
+// định dạng, Ed25519 không chạy được...) đều trả false — KHÔNG BAO GIỜ throw, không được làm hỏng response chính.
+// Tham số khoaCongKhaiB64 chỉ dùng khi TEST (truyền khoá khác để thử với cặp khoá giả); production luôn bỏ trống.
+async function kiemTraLicense(request, env, khoaCongKhaiB64) {
+  try {
+    const payloadB64 = request.headers.get("X-License-Payload");
+    const sigB64 = request.headers.get("X-License-Sig");
+    if (!payloadB64 || !sigB64) return false;
+    const khoa = khoaCongKhaiB64 || (env && env.LICENSE_PUBLIC_KEY) || KHOA_CONG_KHAI_LICENSE_MAC_DINH;
+    const payloadBytes = base64ThanhByte(payloadB64);
+    const sigBytes = base64ThanhByte(sigB64);
+    const derBytes = base64ThanhByte(khoa);
+    const key = await crypto.subtle.importKey("spki", derBytes, { name: "Ed25519" }, false, ["verify"]);
+    const hopLeChuKy = await crypto.subtle.verify("Ed25519", key, sigBytes, payloadBytes);
+    if (!hopLeChuKy) return false;
+    const p = JSON.parse(new TextDecoder("utf-8").decode(payloadBytes));
+    return !!(p && p.v === 1 && p.status === "active" && typeof p.expiresAt === "number" && p.expiresAt > Date.now());
+  } catch (e) {
+    return false; // Ed25519 không hỗ trợ, header hỏng, JSON lỗi... -> coi như KHÔNG có license, không chặn request.
+  }
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -18,7 +55,7 @@ export default {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization"
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-License-Payload, X-License-Sig"
     };
 
     if (request.method === "OPTIONS") {
@@ -292,7 +329,16 @@ export default {
     if (url.pathname === "/list") {
       try {
         // OLD-KEY-02: ?all=1 = xem TOAN BO bai (toi da 5000); ?q=ten = loc theo ten bai. Khong tham so = nhu cu (100 bai moi nhat).
-        const xemHet = url.searchParams.get("all") === "1";
+        let xemHet = url.searchParams.get("all") === "1";
+        // [EXE-PROTECT-07] Bật biến Cloudflare REQUIRE_LICENSE_FOR_LIST=1 thì ?all=1 CẦN License hợp lệ (app gắn kèm tự động khi đã kích
+        // hoạt) hoặc mật khẩu quản trị (ADMIN_TOKEN, như sửa/xoá bài) mới được xem toàn bộ; không có thì vẫn trả 100 bài gần nhất như cũ
+        // (không lỗi, không chặn — chỉ không có thêm phần thưởng "xem hết"). Mặc định biến này CHƯA đặt -> y như trước, không đổi gì.
+        if (xemHet && env.REQUIRE_LICENSE_FOR_LIST === "1") {
+          const auth = request.headers.get("Authorization") || "";
+          const tokenQuanTri = auth.startsWith("Bearer ") ? auth.slice(7) : (request.headers.get("X-Admin-Token") || "");
+          const laQuanTri = !!(env.ADMIN_TOKEN && soSanhAnToan(tokenQuanTri, env.ADMIN_TOKEN));
+          if (!laQuanTri && !(await kiemTraLicense(request, env))) xemHet = false;
+        }
         const gioiHan = xemHet ? 5000 : 100;
         const tuKhoa = chuanHoaTen(url.searchParams.get("q") || "");
 
