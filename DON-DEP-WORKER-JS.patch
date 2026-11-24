@@ -1,0 +1,2465 @@
+diff --git a/MENU-KEY-SERVER/HUONG-DAN-SERVER.md b/MENU-KEY-SERVER/HUONG-DAN-SERVER.md
+deleted file mode 100644
+index 965e00d..0000000
+--- a/MENU-KEY-SERVER/HUONG-DAN-SERVER.md
++++ /dev/null
+@@ -1,68 +0,0 @@
+-# Hướng dẫn dựng server Key cho MENU (Cloudflare, miễn phí)
+-
+-Dành cho Khói. Chỉ cần bấm chuột và copy-paste, không gõ lệnh.
+-Tên nút trên Cloudflare có thể khác đôi chút theo thời gian; nếu khác, tìm nút có ý nghĩa tương tự.
+-
+-**Gói gồm:** `schema.sql` (cấu trúc bảng), `worker.js` (mã server), `thu-server.html` (trang thử), file này.
+-**Đã kiểm tra:** logic server chạy đúng 23/23 bài thử trên máy mình với cơ sở dữ liệu giả lập. **Chưa kiểm tra trên Cloudflare thật**, nên làm bước 6 để xác nhận.
+-
+----
+-
+-## Bước 1. Tạo cơ sở dữ liệu
+-1. Đăng nhập Cloudflare.
+-2. Menu bên trái: **Storage & Databases → D1 SQL Database**.
+-3. Bấm **Create Database**, đặt tên `menu-key-db`, bấm tạo.
+-
+-## Bước 2. Tạo bảng
+-1. Bấm vào `menu-key-db`, chọn thẻ **Console**.
+-2. Mở file `schema.sql` bằng Notepad, copy toàn bộ, dán vào ô Console.
+-3. Bấm **Execute**. Thấy báo thành công là xong (có thể chạy lại, không hỏng gì).
+-
+-## Bước 3. Tạo server
+-1. Menu bên trái: **Compute (Workers) → Workers & Pages**.
+-2. Bấm **Create application** → **Start with Hello World** → đặt tên `menu-key-server` → **Deploy**.
+-3. Bấm **Edit code**. Xóa hết mã có sẵn (Ctrl+A rồi Delete).
+-4. Mở `worker.js` bằng Notepad, copy toàn bộ, dán vào. Bấm **Deploy**.
+-
+-## Bước 4. Nối server với cơ sở dữ liệu (rất quan trọng)
+-1. Vào server `menu-key-server`, mở thẻ **Bindings**.
+-2. Bấm **Add binding** → chọn **D1 database**.
+-3. Ô **Variable name** gõ đúng: `DB` (viết hoa, không dấu cách).
+-4. Ô database chọn `menu-key-db`. Bấm **Add binding**.
+-5. Nếu Cloudflare yêu cầu deploy lại thì bấm **Deploy**.
+-
+-## Bước 5. Đặt mật khẩu quản trị (chỉ cần khi nạp hàng loạt `songdata`)
+-1. Vào server → **Settings → Variables and Secrets → Add**.
+-2. Type chọn **Secret**, Name gõ `ADMIN_TOKEN`, Value là một chuỗi dài ngẫu nhiên (20 ký tự trở lên). **Tự cất kỹ, không gửi cho ai, kể cả mình.**
+-3. Bấm Deploy.
+-
+-## Bước 6. Kiểm tra server chạy đúng
+-1. Trên trang server, tìm địa chỉ dạng `https://menu-key-server.TEN-BAN.workers.dev`.
+-2. Mở địa chỉ đó thêm `/health` (ví dụ `.../health`) trên trình duyệt. Phải thấy `{"ok":true}`.
+-3. Mở file `thu-server.html` bằng trình duyệt, dán địa chỉ server (không có dấu `/` cuối).
+-4. Bấm **Tra Key** với ID `dQw4w9WgXcQ`: lần đầu phải báo `404` và `found:false`.
+-5. Bấm **Gửi phiếu thử**, rồi bấm **Tra Key** lại: phải ra Key `C`, trạng thái `provisional` (tạm).
+-6. Xong. Gửi mình **địa chỉ server** (không cần gửi gì khác).
+-
+-## Cách server chốt Key
+-- Mỗi máy chỉ có 1 phiếu cho mỗi bài. Gửi lại thì thay phiếu cũ.
+-- `provisional` (tạm): chưa đủ phiếu. `confirmed` (đã xác nhận): đủ trọng số và từ 60% phiếu đồng thuận. `disputed` (tranh chấp): từ 3 phiếu trở lên nhưng không đồng thuận.
+-- C Major và A Minor tính chung một nhóm (cùng bộ nốt).
+-- Dữ liệu `songdata` do Khói nạp (nguồn `curated`) có trọng số rất cao, thắng phiếu của người dùng.
+-- Mỗi địa chỉ mạng gửi tối đa 300 phiếu/ngày.
+-
+-## Nếu gặp lỗi
+-| Triệu chứng | Cách xử lý |
+-|---|---|
+-| `/health` không mở được | Chưa Deploy ở bước 3. Làm lại bước 3.4 |
+-| Lỗi `server_error` khi tra Key | Chưa nối DB hoặc chưa chạy bước 2. Kiểm tra tên biến đúng là `DB` |
+-| `thu-server.html` báo không kết nối | Địa chỉ sai hoặc có dấu `/` ở cuối |
+-| `rate_limited` | Đã gửi quá 300 phiếu hôm nay từ cùng mạng, đợi qua ngày |
+-
+-## Giới hạn miễn phí (kiểm lại trên trang giá Cloudflare)
+-Theo các bài tổng hợp tháng 7–9/2026: 100.000 request/ngày cho Workers, 5 triệu lượt đọc và 100.000 lượt ghi/ngày cho D1. Hết hạn mức thì lỗi tới 00:00 UTC, nên MENU phải giữ bản lưu trên máy.
+-
+-## Bước kế tiếp (làm cùng Claude)
+-1. Nối MENU vào server: tra theo ID trước, dò cục bộ nếu chưa có, rồi gửi phiếu lên. Cần đọc `keyEngine.js` và file `songdata` thật.
+-2. Nạp `songdata` đã có vào server bằng `ADMIN_TOKEN`.
+-3. Thêm thông báo xin phép người dùng trước khi gửi dữ liệu lên server.
+diff --git a/MENU-KEY-SERVER/schema.sql b/MENU-KEY-SERVER/schema.sql
+deleted file mode 100644
+index fd30f2b..0000000
+--- a/MENU-KEY-SERVER/schema.sql
++++ /dev/null
+@@ -1,23 +0,0 @@
+-CREATE TABLE IF NOT EXISTS song_keys (
+-    id TEXT PRIMARY KEY,
+-    key TEXT NOT NULL,
+-    mode TEXT NOT NULL,
+-    status TEXT DEFAULT 'provisional',
+-    total_weight REAL DEFAULT 0,
+-    confirmed_at INTEGER
+-);
+-
+-CREATE TABLE IF NOT EXISTS votes (
+-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+-    song_id TEXT NOT NULL,
+-    key TEXT NOT NULL,
+-    mode TEXT NOT NULL,
+-    weight REAL DEFAULT 1.0,
+-    source TEXT DEFAULT 'user',
+-    ip_hash TEXT,
+-    created_at INTEGER DEFAULT (unixepoch()),
+-    FOREIGN KEY (song_id) REFERENCES song_keys(id)
+-);
+-
+-CREATE INDEX IF NOT EXISTS idx_song_id ON votes(song_id);
+-CREATE INDEX IF NOT EXISTS idx_ip ON votes(ip_hash);
+\ No newline at end of file
+diff --git a/MENU-KEY-SERVER/thu-server.html b/MENU-KEY-SERVER/thu-server.html
+deleted file mode 100644
+index 625c1f5..0000000
+--- a/MENU-KEY-SERVER/thu-server.html
++++ /dev/null
+@@ -1,71 +0,0 @@
+-<!DOCTYPE html>
+-<html lang="vi">
+-<head>
+-  <meta charset="UTF-8">
+-  <title>Kiểm tra Server Key</title>
+-  <style>
+-    body { font-family: Arial; max-width: 600px; margin: 30px auto; padding: 20px; background: #f5f5f5; }
+-    input, button { padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; font-size: 16px; }
+-    button { background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
+-    button:hover { background: #1d4ed8; }
+-    #result { margin-top: 20px; padding: 15px; background: white; border-radius: 8px; white-space: pre-wrap; min-height: 60px; }
+-    .ok { color: green; font-weight: bold; }
+-    .err { color: red; font-weight: bold; }
+-  </style>
+-</head>
+-<body>
+-  <h1>🔍 Kiểm tra Server Key</h1>
+-  <label>Địa chỉ server:</label>
+-  <input type="text" id="serverUrl" placeholder="https://menu-key-server.ten-ban.workers.dev">
+-  
+-  <label>ID bài hát:</label>
+-  <input type="text" id="songId" value="dQw4w9WgXcQ">
+-  
+-  <button onclick="traKey()">Tra Key</button>
+-  <button onclick="guiPhieuThu()">Gửi phiếu thử (Key=C, Major)</button>
+-  
+-  <div id="result">Đang chờ...</div>
+-
+-  <script>
+-    function getUrl() {
+-      const u = document.getElementById('serverUrl').value.trim();
+-      if (!u) { alert('Điền địa chỉ server!'); return null; }
+-      return u;
+-    }
+-    
+-    async function traKey() {
+-      const url = getUrl();
+-      if (!url) return;
+-      const id = document.getElementById('songId').value.trim();
+-      document.getElementById('result').textContent = 'Đang tra...';
+-      try {
+-        const res = await fetch(`${url}/key?id=${encodeURIComponent(id)}`);
+-        const data = await res.json();
+-        document.getElementById('result').innerHTML = 
+-          `<b>Trạng thái:</b> ${res.status} ${res.ok ? '✅' : '❌'}\n${JSON.stringify(data, null, 2)}`;
+-      } catch (e) {
+-        document.getElementById('result').innerHTML = `<b class=err>LỖI:</b> ${e.message}`;
+-      }
+-    }
+-    
+-    async function guiPhieuThu() {
+-      const url = getUrl();
+-      if (!url) return;
+-      const id = document.getElementById('songId').value.trim();
+-      document.getElementById('result').textContent = 'Đang gửi...';
+-      try {
+-        const res = await fetch(`${url}/vote`, {
+-          method: 'POST',
+-          headers: { 'Content-Type': 'application/json' },
+-          body: JSON.stringify({ songId: id, key: 'C', mode: 'major', weight: 1.0 })
+-        });
+-        const data = await res.json();
+-        document.getElementById('result').innerHTML = 
+-          `<b>Gửi phiếu:</b> ${res.ok ? '<span class=ok>THÀNH CÔNG ✅</span>' : '<span class=err>THẤT BẠI ❌</span>'}\n${JSON.stringify(data, null, 2)}`;
+-      } catch (e) {
+-        document.getElementById('result').innerHTML = `<b class=err>LỖI:</b> ${e.message}`;
+-      }
+-    }
+-  </script>
+-</body>
+-</html>
+\ No newline at end of file
+diff --git a/MENU-KEY-SERVER/worker.js b/MENU-KEY-SERVER/worker.js
+deleted file mode 100644
+index eba7ea4..0000000
+--- a/MENU-KEY-SERVER/worker.js
++++ /dev/null
+@@ -1,105 +0,0 @@
+-export default {
+-  async fetch(request, env) {
+-    const url = new URL(request.url);
+-    
+-    // === CORS FIX — cho phép gọi từ file cục bộ ===
+-    const corsHeaders = {
+-      'Access-Control-Allow-Origin': '*',
+-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+-      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+-    };
+-    
+-    if (request.method === 'OPTIONS') {
+-      return new Response(null, { headers: corsHeaders });
+-    }
+-    // ==============================================
+-
+-    if (url.pathname === '/health') {
+-      return Response.json({ ok: true, time: Date.now() }, { headers: corsHeaders });
+-    }
+-
+-    if (url.pathname === '/key') {
+-      const songId = url.searchParams.get('id');
+-      if (!songId) return Response.json({ error: 'missing_id' }, { status: 400, headers: corsHeaders });
+-      
+-      const { results } = await env.DB.prepare(`
+-        SELECT id, key, mode, status, total_weight as weight
+-        FROM song_keys WHERE id = ?
+-      `).bind(songId).all();
+-      
+-      if (!results.length) {
+-        return Response.json({ found: false, status: 'not_found' }, { status: 404, headers: corsHeaders });
+-      }
+-      return Response.json({ found: true, data: results[0] }, { headers: corsHeaders });
+-    }
+-
+-    if (url.pathname === '/vote' && request.method === 'POST') {
+-      const body = await request.json();
+-      const { songId, key, mode, weight = 1.0, source = 'user' } = body;
+-      
+-      if (!songId || !key || !mode) {
+-        return Response.json({ error: 'missing_fields' }, { status: 400, headers: corsHeaders });
+-      }
+-      
+-      const ipHash = btoa(Math.random().toString()).slice(0, 16);
+-      
+-      const existing = await env.DB.prepare(`
+-        SELECT 1 FROM votes WHERE song_id = ? AND ip_hash = ?
+-      `).bind(songId, ipHash).first();
+-      
+-      if (existing) {
+-        await env.DB.prepare(`
+-          UPDATE votes SET key = ?, mode = ?, weight = ?, created_at = ?
+-          WHERE song_id = ? AND ip_hash = ?
+-        `).bind(key, mode, weight, Date.now(), songId, ipHash).run();
+-      } else {
+-        await env.DB.prepare(`
+-          INSERT INTO votes (song_id, key, mode, weight, source, ip_hash)
+-          VALUES (?, ?, ?, ?, ?, ?)
+-        `).bind(songId, key, mode, weight, source, ipHash).run();
+-      }
+-      
+-      await recalculateSong(env, songId);
+-      return Response.json({ ok: true }, { headers: corsHeaders });
+-    }
+-
+-    if (url.pathname === '/admin/batch' && request.method === 'POST') {
+-      const auth = request.headers.get('Authorization');
+-      if (!env.ADMIN_TOKEN || auth !== `Bearer ${env.ADMIN_TOKEN}`) {
+-        return Response.json({ error: 'unauthorized' }, { status: 401, headers: corsHeaders });
+-      }
+-      const { songs } = await request.json();
+-      for (const s of songs) {
+-        await env.DB.prepare(`
+-          INSERT OR REPLACE INTO song_keys (id, key, mode, status, total_weight)
+-          VALUES (?, ?, ?, 'confirmed', 999)
+-        `).bind(s.id, s.key, s.mode).run();
+-      }
+-      return Response.json({ ok: true, count: songs.length }, { headers: corsHeaders });
+-    }
+-
+-    return new Response('Not found', { status: 404, headers: corsHeaders });
+-  }
+-};
+-
+-async function recalculateSong(env, songId) {
+-  const { results } = await env.DB.prepare(`
+-    SELECT key, mode, SUM(weight) as total
+-    FROM votes WHERE song_id = ? GROUP BY key, mode ORDER BY total DESC
+-  `).bind(songId).all();
+-  
+-  if (!results.length) return;
+-  
+-  const totalAll = results.reduce((s, r) => s + r.total, 0);
+-  const top = results[0];
+-  const ratio = top.total / totalAll;
+-  
+-  let status = 'provisional';
+-  if (ratio >= 0.6 && totalAll >= 3) status = 'confirmed';
+-  if (results.length >= 3 && ratio < 0.6) status = 'disputed';
+-  
+-  await env.DB.prepare(`
+-    INSERT OR REPLACE INTO song_keys (id, key, mode, status, total_weight, confirmed_at)
+-    VALUES (?, ?, ?, ?, ?, ?)
+-  `).bind(songId, top.key, top.mode, status, totalAll, status === 'confirmed' ? Date.now() : null).run();
+-}
+\ No newline at end of file
+diff --git a/tests/unit/KeyEditAndDisplayC.verify.js b/tests/unit/KeyEditAndDisplayC.verify.js
+deleted file mode 100644
+index bc788f7..0000000
+--- a/tests/unit/KeyEditAndDisplayC.verify.js
++++ /dev/null
+@@ -1,527 +0,0 @@
+-/**
+- * ==========================================================
+- * Auto Menu AI — Kiểm chứng "Sửa Key trên server" + "Hiện Key cạnh tên bài" (Task C)
+- * Chạy bằng: node tests/unit/KeyEditAndDisplayC.verify.js
+- *
+- * ⚠️ ĐỌC KỸ: chạy trên Linux sandbox, KHÔNG gọi Cloudflare thật, KHÔNG mở Electron.
+- *  - Server: chạy code THẬT của worker.js với D1 giả trong bộ nhớ (chỉ hỗ trợ đúng các câu SQL worker dùng).
+- *  - Menu: trích đoạn code THẬT của renderer.js (phần NOW PLAYING + hàm syncNowPlayingKeyText)
+- *    chạy trong sandbox vm với DOM giả. KHÔNG chứng minh giao diện Electron thật hiển thị đúng.
+- * ==========================================================
+- */
+-'use strict';
+-
+-const assert = require('assert');
+-const fs = require('fs');
+-const path = require('path');
+-const vm = require('vm');
+-
+-const ROOT = path.join(__dirname, '..', '..');
+-const { KeyServerSync } = require(path.join(ROOT, 'core', 'integration', 'KeyServerSync.js'));
+-
+-let failCount = 0;
+-function check(cond, msg) {
+-    try { assert.ok(cond, msg); console.log('  ✅ ' + msg); }
+-    catch (e) { failCount++; console.log('  ❌ ' + msg); }
+-}
+-
+-function loadWorker(file) {
+-    const src = fs.readFileSync(file, 'utf8').replace(/^export default/m, 'module.exports =')
+-        + '\n;module.exports.__page = taoTrangChu;';
+-    const m = { exports: {} };
+-    new Function('module', 'exports', src)(m, m.exports);
+-    return m.exports;
+-}
+-
+-// ---------- D1 giả (đủ cho /find, /list, /key-at, /set-key) ----------
+-function makeFakeDb(seed) {
+-    const songs = ((seed && seed.songs) || []).map((s) => ({ ...s }));
+-    const segs = ((seed && seed.segs) || []).map((s) => ({ ...s }));
+-    let tick = 100;
+-    const log = []; // lịch sử câu ghi
+-    function stmt(sql) {
+-        const q = sql.replace(/\s+/g, ' ').trim();
+-        let args = [];
+-        const api = {
+-            bind(...a) { args = a; return api; },
+-            async first() {
+-                if (q.startsWith('SELECT song_id as songId, total_duration_sec as totalSec FROM song_info WHERE song_id = ?')) {
+-                    const s = songs.find((x) => x.songId === args[0]);
+-                    return s ? { songId: s.songId, totalSec: s.dur || null } : null;
+-                }
+-                if (q.startsWith('SELECT song_id as songId, title FROM song_info WHERE song_id = ?')) {
+-                    const s = songs.find((x) => x.songId === args[0]);
+-                    return s ? { songId: s.songId, title: s.title } : null;
+-                }
+-                if (q.startsWith('SELECT COUNT(*) as n, MIN(created_at) as dauTien FROM song_key_segments WHERE song_id = ?')) { // A83
+-                    const mine = segs.filter((x) => x.songId === args[0]);
+-                    const ts = mine.map((s) => s.createdAt).filter((x) => Number.isFinite(x));
+-                    return { n: mine.length, dauTien: ts.length ? Math.min(...ts) : null };
+-                }
+-                if (q.startsWith('SELECT COUNT(*) as n FROM song_key_segments WHERE song_id = ?')) {
+-                    return { n: segs.filter((x) => x.songId === args[0]).length };
+-                }
+-                throw new Error('FakeDb.first: SQL chưa hỗ trợ: ' + q.slice(0, 70));
+-            },
+-            async run() {
+-                log.push(q.slice(0, 40));
+-                if (dbObj._failOn && q.startsWith(dbObj._failOn)) throw new Error('D1 giả: lỗi cố ý ở ' + dbObj._failOn);
+-                if (q.startsWith('DELETE FROM song_key_segments WHERE song_id = ? AND start_sec = ?')) { // A83
+-                    let n = 0;
+-                    for (let i = segs.length - 1; i >= 0; i--) if (segs[i].songId === args[0] && segs[i].startSec === args[1]) { segs.splice(i, 1); n++; }
+-                    return { success: true, meta: { changes: n } };
+-                }
+-                if (q.startsWith('DELETE FROM song_key_segments WHERE song_id = ?')) {
+-                    let n = 0;
+-                    for (let i = segs.length - 1; i >= 0; i--) if (segs[i].songId === args[0]) { segs.splice(i, 1); n++; }
+-                    return { success: true, meta: { changes: n } };
+-                }
+-                if (q.startsWith('DELETE FROM song_info WHERE song_id = ?')) {
+-                    let n = 0;
+-                    for (let i = songs.length - 1; i >= 0; i--) if (songs[i].songId === args[0]) { songs.splice(i, 1); n++; }
+-                    return { success: true, meta: { changes: n } };
+-                }
+-                if (q.startsWith('INSERT INTO song_key_segments') && q.includes('VALUES (?, 0, ?, ?, ?, 1.0)')) {
+-                    const [songId, endSec, key, mode] = args;
+-                    segs.push({ songId, startSec: 0, endSec, key, mode });
+-                    return { success: true, meta: { changes: 1 } };
+-                }
+-                if (q.startsWith('INSERT INTO song_key_segments')) {
+-                    const [songId, startSec, endSec, key, mode, , createdAt] = args;
+-                    segs.push({ songId, startSec, endSec, key, mode, createdAt });
+-                    return { success: true, meta: { changes: 1 } };
+-                }
+-                if (q.startsWith('INSERT OR REPLACE INTO song_info')) {
+-                    const [songId, title, dur] = args;
+-                    const i = songs.findIndex((s) => s.songId === songId);
+-                    const row = { songId, title, dur, updated: ++tick };
+-                    if (i >= 0) songs[i] = row; else songs.push(row);
+-                    return { success: true, meta: { changes: 1 } };
+-                }
+-                if (q.startsWith('UPDATE song_key_segments SET key = ?, mode = ? WHERE song_id = ? AND start_sec = ?')) {
+-                    const [key, mode, songId, start] = args; let n = 0;
+-                    segs.forEach((s) => { if (s.songId === songId && s.startSec === start) { s.key = key; s.mode = mode; n++; } });
+-                    return { success: true, meta: { changes: n } };
+-                }
+-                if (q.startsWith('UPDATE song_key_segments SET key = ?, mode = ? WHERE song_id = ?')) {
+-                    const [key, mode, songId] = args; let n = 0;
+-                    segs.forEach((s) => { if (s.songId === songId) { s.key = key; s.mode = mode; n++; } });
+-                    return { success: true, meta: { changes: n } };
+-                }
+-                if (q.startsWith('UPDATE song_info SET updated_at')) {
+-                    const s = songs.find((x) => x.songId === args[0]); if (s) s.updated = ++tick;
+-                    return { success: true, meta: { changes: s ? 1 : 0 } };
+-                }
+-                throw new Error('FakeDb.run: SQL chưa hỗ trợ: ' + q.slice(0, 70));
+-            },
+-            async all() {
+-                if (q.includes('GROUP BY i.song_id')) {
+-                    const rows = songs.slice().sort((a, b) => (b.updated || 0) - (a.updated || 0)).map((s) => {
+-                        const mine = segs.filter((g) => g.songId === s.songId).sort((a, b) => a.startSec - b.startSec);
+-                        return { songId: s.songId, title: s.title, tongGiay: s.dur || null, soDoan: mine.length, updated_at: s.updated,
+-                            key1: mine.length ? mine[0].key : null, mode1: mine.length ? mine[0].mode : null };
+-                    });
+-                    return { results: rows };
+-                }
+-                if (q.includes('FROM song_info ORDER BY updated_at')) {
+-                    return { results: songs.slice().sort((a, b) => (b.updated || 0) - (a.updated || 0)).map((s) => ({ songId: s.songId, title: s.title })) };
+-                }
+-                if (q.includes('FROM song_key_segments WHERE song_id = ? ORDER BY start_sec ASC LIMIT 200')) {
+-                    return { results: segs.filter((s) => s.songId === args[0]).sort((a, b) => a.startSec - b.startSec).map((s) => ({ key: s.key, mode: s.mode, startSec: s.startSec, endSec: s.endSec })) };
+-                }
+-                if (q.includes('WHERE song_id = ? AND start_sec <= ? AND end_sec >= ?')) {
+-                    const [id, g1, g2] = args;
+-                    const hit = segs.filter((s) => s.songId === id && s.startSec <= g1 && s.endSec >= g2).sort((a, b) => b.startSec - a.startSec).slice(0, 1);
+-                    return { results: hit.map((s) => ({ key: s.key, mode: s.mode, startSec: s.startSec, endSec: s.endSec })) };
+-                }
+-                throw new Error('FakeDb.all: SQL chưa hỗ trợ: ' + q.slice(0, 70));
+-            }
+-        };
+-        return api;
+-    }
+-    // batch = 1 giao dịch như D1 thật: có câu lỗi thì KHÔNG câu nào có hiệu lực (khôi phục lại trạng thái trước).
+-    const dbObj = {
+-        prepare: stmt, _songs: songs, _segs: segs, _log: log, _failOn: null,
+-        async batch(list) {
+-            const s0 = songs.map((x) => ({ ...x })), g0 = segs.map((x) => ({ ...x }));
+-            const out = [];
+-            try { for (const s of list) out.push(await s.run()); }
+-            catch (e) { songs.length = 0; s0.forEach((x) => songs.push(x)); segs.length = 0; g0.forEach((x) => segs.push(x)); throw e; }
+-            return out;
+-        }
+-    };
+-    return dbObj;
+-}
+-
+-const TOKEN = 'mat-khau-thu-nghiem-123456';
+-function seed() {
+-    return makeFakeDb({
+-        songs: [
+-            { songId: 'one', title: 'Xin Đừng Rời Xa Anh', dur: 293, updated: 3 },
+-            { songId: 'multi', title: 'Bài Đổi Giọng Nhiều Đoạn', dur: 300, updated: 2 },
+-            { songId: 'empty', title: 'Viên Đá Nhỏ', dur: 200, updated: 1 }
+-        ],
+-        segs: [
+-            { songId: 'one', startSec: 0, endSec: 293, key: 'D', mode: 'minor' },
+-            { songId: 'multi', startSec: 0, endSec: 100, key: 'C', mode: 'major' },
+-            { songId: 'multi', startSec: 100, endSec: 200, key: 'D', mode: 'major' },
+-            { songId: 'multi', startSec: 200, endSec: 300, key: 'E', mode: 'major' }
+-        ]
+-    });
+-}
+-
+-async function call(worker, db, method, p, body, headers = {}, envExtra = {}) {
+-    const init = { method, headers: { 'Content-Type': 'application/json', ...headers } };
+-    if (body !== undefined) init.body = JSON.stringify(body);
+-    const r = await worker.fetch(new Request('https://x.test' + p, init), { DB: db, ...envExtra });
+-    let json = null; try { json = await r.json(); } catch (e) {}
+-    return { status: r.status, json, headers: r.headers };
+-}
+-const AUTH = { Authorization: 'Bearer ' + TOKEN };
+-const ENV = { ADMIN_TOKEN: TOKEN };
+-const snap = (db) => JSON.stringify(db._segs) + '|' + JSON.stringify(db._songs);
+-
+-// ---------- trích code thật từ renderer.js ----------
+-function extractFn(src, name) {
+-    const st = src.indexOf(`function ${name}(`);
+-    if (st < 0) throw new Error('không thấy hàm ' + name);
+-    let i = src.indexOf('{', st), d = 0;
+-    for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}') { d--; if (d === 0) { i++; break; } } }
+-    return src.slice(st, i);
+-}
+-function extractNowPlayingIife(src) {
+-    const st = src.indexOf('(function setupNowPlaying() {');
+-    if (st < 0) throw new Error('không thấy setupNowPlaying');
+-    return src.slice(st, src.indexOf('\n})();', st) + 6);
+-}
+-
+-(async () => {
+-    const worker = loadWorker(path.join(ROOT, 'worker.js'));
+-
+-    console.log('\n[1] Hai bản worker.js giống hệt nhau');
+-    check(fs.readFileSync(path.join(ROOT, 'worker.js'), 'utf8') === fs.readFileSync(path.join(ROOT, 'server', 'worker.js'), 'utf8'), 'worker.js == server/worker.js');
+-
+-    console.log('\n[2] /set-key — quyền sửa (mật khẩu quản trị)');
+-    {
+-        let db = seed(); const before = snap(db);
+-        let r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, AUTH, {});
+-        check(r.status === 403 && r.json.error === 'chua_cai_ADMIN_TOKEN', 'Chưa cài ADMIN_TOKEN trên server -> TỪ CHỐI (403), không ai sửa được');
+-        check(snap(db) === before, 'Bị từ chối -> dữ liệu không đổi');
+-
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, {}, ENV);
+-        check(r.status === 401 && r.json.error === 'sai_mat_khau', 'Không gửi mật khẩu -> 401');
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { Authorization: 'Bearer sai' }, ENV);
+-        check(r.status === 401, 'Sai mật khẩu -> 401');
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { Authorization: 'Bearer ' + TOKEN + 'x' }, ENV);
+-        check(r.status === 401, 'Mật khẩu đúng + thừa 1 ký tự -> 401');
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { Authorization: 'Bearer ' + TOKEN.slice(0, -1) }, ENV);
+-        check(r.status === 401, 'Mật khẩu đúng nhưng thiếu 1 ký tự -> 401');
+-        const sameLenWrong = TOKEN.slice(0, -1) + (TOKEN.slice(-1) === 'x' ? 'y' : 'x');
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { Authorization: 'Bearer ' + sameLenWrong }, ENV);
+-        check(sameLenWrong.length === TOKEN.length && r.status === 401, 'Mật khẩu SAI nhưng CÙNG độ dài (đổi 1 ký tự cuối) -> 401');
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { Authorization: 'Bearer ' + TOKEN.toUpperCase() }, ENV);
+-        check(r.status === 401, 'Mật khẩu đúng nhưng khác chữ hoa/thường -> 401');
+-        check(snap(db) === before, 'Sai mật khẩu -> dữ liệu không đổi');
+-
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, { 'X-Admin-Token': TOKEN }, ENV);
+-        check(r.status === 200 && r.json.ok === true, 'Mật khẩu đúng qua header X-Admin-Token -> thành công');
+-        db = seed();
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'major' }, AUTH, ENV);
+-        check(r.status === 200 && r.json.ok === true, 'Mật khẩu đúng qua Authorization: Bearer -> thành công');
+-
+-        r = await call(worker, db, 'GET', '/set-key', undefined, AUTH, ENV);
+-        check(r.status === 404, 'GET /set-key (không phải POST) -> 404, không sửa được bằng đường dẫn thường');
+-
+-        const pre = await worker.fetch(new Request('https://x.test/set-key', { method: 'OPTIONS' }), { DB: db });
+-        check(/Authorization/.test(pre.headers.get('Access-Control-Allow-Headers') || ''), 'CORS cho phép header Authorization (trang quản lý gửi được mật khẩu)');
+-    }
+-
+-    console.log('\n[3] /set-key — sửa đúng Key');
+-    {
+-        let db = seed();
+-        let r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'Bb', mode: 'Minor' }, AUTH, ENV);
+-        check(r.json.ok === true && r.json.daSua === 1 && r.json.key === 'A#' && r.json.mode === 'minor' && r.json.keyHienThi === 'A# Minor', 'Bài 1 đoạn: sửa Bb Minor -> lưu A# minor (giáng đổi sang thăng)');
+-        check(db._segs.filter((s) => s.songId === 'one').length === 1 && db._segs.find((s) => s.songId === 'one').key === 'A#', 'D1: vẫn đúng 1 đoạn, Key đã đổi (không nhân đôi)');
+-        check(db._segs.find((s) => s.songId === 'one').startSec === 0 && db._segs.find((s) => s.songId === 'one').endSec === 293, 'Mốc thời gian đoạn giữ nguyên');
+-
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'multi', key: 'F', mode: 'major' }, AUTH, ENV);
+-        check(r.status === 409 && r.json.error === 'nhieu_doan' && r.json.tongDoan === 3, 'Bài 3 đoạn, không chỉ định đoạn -> 409, hỏi lại (không đoán bừa)');
+-        check(db._segs.filter((s) => s.songId === 'multi').map((s) => s.key).join() === 'C,D,E', '409 -> không đoạn nào bị sửa');
+-
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'multi', key: 'F', mode: 'minor', startSec: 100 }, AUTH, ENV);
+-        check(r.json.ok === true && r.json.daSua === 1, 'Chỉ định startSec=100 -> sửa đúng 1 đoạn');
+-        check(db._segs.filter((s) => s.songId === 'multi').map((s) => s.key + ':' + s.mode).join() === 'C:major,F:minor,E:major', 'Chỉ đoạn giữa đổi sang F minor, hai đoạn còn lại giữ nguyên');
+-
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'multi', key: 'G', mode: 'major', startSec: 999 }, AUTH, ENV);
+-        check(r.status === 404 && r.json.error === 'khong_co_doan', 'startSec không tồn tại -> 404');
+-
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'multi', key: 'G', mode: 'major', all: true }, AUTH, ENV);
+-        check(r.json.ok === true && r.json.daSua === 3 && db._segs.filter((s) => s.songId === 'multi').every((s) => s.key === 'G' && s.mode === 'major'), 'all:true -> cả 3 đoạn đổi sang G major');
+-        check(db._segs.filter((s) => s.songId === 'multi').map((s) => s.startSec + '-' + s.endSec).join() === '0-100,100-200,200-300', 'all:true -> mốc thời gian giữ nguyên');
+-
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'empty', key: 'E', mode: 'minor' }, AUTH, ENV);
+-        const emptySeg = db._segs.filter((s) => s.songId === 'empty');
+-        check(r.json.ok === true && emptySeg.length === 1 && emptySeg[0].key === 'E' && emptySeg[0].mode === 'minor' && emptySeg[0].startSec === 0 && emptySeg[0].endSec === 200, 'Bài chưa có đoạn nào ("Viên Đá Nhỏ") -> tạo 1 đoạn cho cả bài theo độ dài bài (200s)');
+-
+-        const before = snap(db);
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'khong-co', key: 'C', mode: 'major' }, AUTH, ENV);
+-        check(r.status === 404 && r.json.error === 'khong_co_bai', 'Bài không tồn tại -> 404, không tự tạo bài rác');
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'H', mode: 'major' }, AUTH, ENV);
+-        check(r.status === 400 && r.json.error === 'key_khong_hop_le', 'Key "H" -> 400');
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'C', mode: 'dorian' }, AUTH, ENV);
+-        check(r.status === 400 && r.json.error === 'mode_khong_hop_le', 'Mode "dorian" -> 400');
+-        r = await call(worker, db, 'POST', '/set-key', { key: 'C', mode: 'major' }, AUTH, ENV);
+-        check(r.status === 400, 'Thiếu songId -> 400');
+-        r = await call(worker, db, 'POST', '/set-key', { songId: 'one', key: '<script>', mode: 'major' }, AUTH, ENV);
+-        check(r.status === 400, 'Key chứa mã lạ -> 400');
+-        check(snap(db) === before, 'Các yêu cầu sai -> dữ liệu không đổi');
+-
+-        let bad = await worker.fetch(new Request('https://x.test/set-key', { method: 'POST', headers: { ...AUTH }, body: '{rác' }), { DB: db, ...ENV });
+-        check(bad.status === 500 || bad.status === 400, 'Body không phải JSON -> báo lỗi, không crash (' + bad.status + ')');
+-    }
+-
+-    console.log('\n[4] Vòng khép kín: sửa trên server -> Menu tra được Key mới');
+-    {
+-        const db = seed();
+-        const bridge = async (url, init = {}) => worker.fetch(new Request(url, init), { DB: db, ...ENV });
+-        let t = 1_000_000; const now = () => t;
+-        const c = new KeyServerSync({ fetchFn: bridge, now, logger: { log() {}, error() {}, warn() {} } });
+-        let r = await c.lookup('Xin Đừng Rời Xa Anh', 'Lê Gia Bảo');
+-        check(r.found && r.key === 'D Minor', 'Trước khi sửa: Menu tra ra D Minor');
+-
+-        await call(worker, db, 'POST', '/set-key', { songId: 'one', key: 'F#', mode: 'major' }, AUTH, ENV);
+-        r = await c.lookup('Xin Đừng Rời Xa Anh', 'Lê Gia Bảo');
+-        check(r.found && r.key === 'D Minor', 'Ngay sau khi sửa: Menu vẫn dùng bản nhớ tạm (đúng thiết kế, tránh hỏi liên tục)');
+-        t += 2 * 60 * 1000 + 1000;
+-        r = await c.lookup('Xin Đừng Rời Xa Anh', 'Lê Gia Bảo');
+-        check(r.found && r.key === 'F# Major', 'Sau 2 phút: Menu hỏi lại và nhận Key đã sửa -> "F# Major"');
+-
+-        const k = await call(worker, db, 'GET', '/key-at?id=one&sec=10');
+-        check(k.json.found && k.json.key === 'F#' && k.json.mode === 'major', '/key-at (extension/Auto-Tune dùng) cũng thấy Key mới');
+-
+-        // Menu không ghi đè Key đã sửa: bài đã có trên server -> không gửi
+-        const f = await c.submit({ title: 'Xin Đừng Rời Xa Anh', artist: 'Lê Gia Bảo', key: 'C Major', confidence: 0.95 });
+-        check(f.ok === true && f.reason === 'server-already-has' && db._segs.find((s) => s.songId === 'one').key === 'F#', 'Menu tự dò Key khác -> KHÔNG ghi đè Key mà bạn đã sửa trên server');
+-    }
+-
+-    console.log('\n[5] /list — hiện Key cạnh tên bài');
+-    {
+-        const db = seed();
+-        const r = await call(worker, db, 'GET', '/list');
+-        const byId = Object.fromEntries(r.json.danhSach.map((x) => [x.songId, x]));
+-        check(r.json.tongBai === 3, '/list vẫn trả đủ 3 bài');
+-        check(byId.one.keyHienThi === 'D Minor' && byId.one.key === 'D' && byId.one.mode === 'minor', 'Bài 1 đoạn: keyHienThi = "D Minor"');
+-        check(byId.multi.keyHienThi === 'C Major' && byId.multi.soDoan === 3, 'Bài nhiều đoạn: hiện Key của đoạn ĐẦU TIÊN (C Major), soDoan=3');
+-        check(byId.empty.keyHienThi === null && byId.empty.key === null, 'Bài chưa có đoạn: keyHienThi = null');
+-        check(['songId', 'title', 'tongThoiLuong', 'soDoan'].every((k) => k in byId.one), 'Các trường cũ (songId, title, tongThoiLuong, soDoan) còn nguyên -> extension yt-key không bị ảnh hưởng');
+-    }
+-
+-    console.log('\n[6] Trang quản lý của server');
+-    {
+-        const html = worker.__page();
+-        const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+-        let parsed = true; try { new vm.Script(script); } catch (e) { parsed = false; }
+-        check(parsed, 'Script trong trang quản lý đúng cú pháp');
+-        check(/id="btnSuaKey"/.test(html) && /id="suaKey"/.test(html) && /id="suaMode"/.test(html) && /id="adminToken"/.test(html) && /type="password" id="adminToken"/.test(html), 'Có khung "Sửa Key": chọn Key, chọn Trưởng/Phụ, ô mật khẩu (ẩn ký tự), nút Lưu');
+-        check(/\/set-key/.test(script) && /'Authorization': 'Bearer '/.test(script), 'Nút Lưu gọi /set-key kèm mật khẩu');
+-        check(/keyHienThi/.test(script) && /tag-minor/.test(script), 'Danh sách bài hiện Key cạnh tên bài');
+-        // Chống chèn mã: không còn nối thẳng dữ liệu từ server vào innerHTML
+-        const raw = [/\+ bai\.title \+/, /\+ bai\.songId \+/, /\+ d\.khoa \+/, /\+ d\.tu \+/, /\+ d\.den \+/, /\+ d\.cheDo \+/, /\+ ct\.fromDisplay \+/, /\+ ct\.toDisplay \+/, /\+ data\.key \+/, /\+ bai\.keyHienThi \+/];
+-        check(raw.every((re) => !re.test(script)), 'Không còn nối thẳng dữ liệu server (tên bài, Key...) vào innerHTML');
+-        const escSrc = extractFn(script, 'esc');
+-        const sb = {}; vm.createContext(sb); vm.runInContext(escSrc + ';this.esc=esc;', sb);
+-        check(sb.esc('<img src=x onerror=alert(1)>') === '&lt;img src=x onerror=alert(1)&gt;', 'esc() chặn thẻ HTML trong tên bài');
+-        check(sb.esc('a"b\'c&') === 'a&quot;b&#39;c&amp;' && sb.esc(null) === '' && sb.esc(5) === '5', 'esc() xử lý nháy, &, null, số');
+-        check(!/`/.test(script) && !/\$\{/.test(script), 'Script trong trang không chứa dấu ` hay ${ (không vỡ chuỗi mẫu của worker)');
+-    }
+-
+-    console.log('\n[7] Menu: hiện Key cạnh tên bài (chạy code THẬT của renderer.js)');
+-    {
+-        const rend = fs.readFileSync(path.join(ROOT, 'ui', 'js', 'renderer.js'), 'utf8');
+-        const iife = extractNowPlayingIife(rend);
+-
+-        function makeEnv() {
+-            let writes = 0;
+-            const copyA = { scrollWidth: 10, _t: '' };
+-            Object.defineProperty(copyA, 'textContent', { get() { return this._t; }, set(v) { this._t = v; writes++; } });
+-            const els = {
+-                nowPlayingViewport: { clientWidth: 1000 },
+-                nowPlayingTrack: { classList: { add() {}, remove() {} }, style: {} },
+-                nowPlayingCopyA: copyA,
+-                nowPlayingCopyB: { style: {}, textContent: '' }
+-            };
+-            const win = { addEventListener() {} };
+-            const sb = { document: { getElementById: (id) => els[id] || null }, window: win, requestAnimationFrame: (f) => f(), ResizeObserver: undefined };
+-            vm.createContext(sb);
+-            vm.runInContext(iife, sb);
+-            return { api: win.AutoMenuAI, text: () => copyA.textContent, writes: () => writes };
+-        }
+-
+-        const S = (title, artist) => ({ title, artist });
+-        let e = makeEnv();
+-        check(e.text() === 'Unavailable', 'Mặc định: "Unavailable" (không kèm Key)');
+-
+-        e.api.updateNowPlaying(S('Xin Đừng Rời Xa Anh', 'Lê Gia Bảo'));
+-        check(e.text() === 'Xin Đừng Rời Xa Anh - Lê Gia Bảo', 'Bài mới, chưa có Key: chỉ hiện tên bài (chưa bịa Key)');
+-        e.api.setNowPlayingKey('D Minor');
+-        check(e.text() === 'Xin Đừng Rời Xa Anh - Lê Gia Bảo  •  Key: D Minor', 'Có Key -> hiện "… •  Key: D Minor" cạnh tên bài');
+-        const w = e.writes();
+-        e.api.setNowPlayingKey('D Minor');
+-        check(e.writes() === w, 'Key không đổi -> không vẽ lại (chữ chạy không bị giật)');
+-        e.api.setNowPlayingKey('F# Major');
+-        check(/Key: F# Major$/.test(e.text()) && !/D Minor/.test(e.text()), 'Key đổi -> cập nhật ngay, không còn Key cũ');
+-
+-        e.api.updateNowPlaying(S('Xin Đừng Rời Xa Anh', 'Lê Gia Bảo'));
+-        check(/Key: F# Major$/.test(e.text()), 'Cùng bài gửi lại (vd. cập nhật thứ 2 kèm Key từ server) -> GIỮ Key đang hiện');
+-
+-        e.api.updateNowPlaying(S('Cơ Hội Cuối', 'Ca sĩ B'));
+-        check(e.text() === 'Cơ Hội Cuối - Ca sĩ B', 'Đổi sang bài khác -> Key bài trước bị xoá ngay (không hiện nhầm Key)');
+-        e.api.setNowPlayingKey('A Minor');
+-        check(e.text() === 'Cơ Hội Cuối - Ca sĩ B  •  Key: A Minor', 'Key bài mới hiện đúng');
+-
+-        e.api.updateNowPlaying(S('Bài Không Ca Sĩ', ''));
+-        e.api.setNowPlayingKey('C Major');
+-        check(e.text() === 'Bài Không Ca Sĩ  •  Key: C Major', 'Bài không có ca sĩ vẫn hiện Key');
+-
+-        e.api.setNowPlayingKey('');
+-        check(e.text() === 'Bài Không Ca Sĩ', 'Key rỗng (AI đang dò lại) -> ẩn Key');
+-        e.api.setNowPlayingKey(null);
+-        check(e.text() === 'Bài Không Ca Sĩ', 'Key null -> không lỗi, không hiện');
+-
+-        e.api.updateNowPlaying(null);
+-        e.api.setNowPlayingKey('C Major');
+-        check(e.text() === 'No media', '"No media" không bao giờ kèm Key');
+-        e.api.setNowPlayingUnavailable();
+-        e.api.setNowPlayingKey('C Major');
+-        check(e.text() === 'Unavailable', '"Unavailable" không bao giờ kèm Key');
+-        e.api.updateNowPlaying({ title: '', artist: 'Chỉ có ca sĩ' });
+-        e.api.setNowPlayingKey('C Major');
+-        check(e.text() === 'No media', 'Không có tên bài -> "No media", không kèm Key');
+-
+-        // syncNowPlayingKeyText: chọn đúng Key đang áp dụng
+-        const getSrcName = extractFn(rend, 'getActiveSourceName');
+-        const getKeyVal = extractFn(rend, 'getActiveKeyValue');
+-        const syncFn = extractFn(rend, 'syncNowPlayingKeyText');
+-        const calls = [];
+-        const ctx = { window: { AutoMenuAI: { setNowPlayingKey: (k) => calls.push(k) } } };
+-        vm.createContext(ctx);
+-        vm.runInContext('let keyEverDetected = false; const keySource = { manual: { active: false, committedKey: null }, songDb: { active: false, value: null }, ai: { value: "C Major" } };'
+-            + getSrcName + getKeyVal + syncFn, ctx);
+-        const run = (js) => { calls.length = 0; vm.runInContext(js + ';syncNowPlayingKeyText();', ctx); return calls[calls.length - 1]; };
+-
+-        check(run('') === '', 'AI chưa chốt Key (LISTENING) -> KHÔNG hiện Key hạt giống "C Major"');
+-        check(run('keyEverDetected = true; keySource.ai.value = "G# Minor"') === 'G# Minor', 'AI đã chốt Key -> hiện Key AI');
+-        check(run('keySource.songDb.active = true; keySource.songDb.value = "D Minor"') === 'D Minor', 'Database/Server có bài -> hiện Key đó (ưu tiên hơn AI)');
+-        check(run('keySource.manual.active = true; keySource.manual.committedKey = "A Major"') === 'A Major', 'Manual đang chọn -> hiện Key Manual (ưu tiên cao nhất)');
+-        check(run('keySource.manual.active = false; keySource.songDb.active = false; keyEverDetected = false') === '', 'Quay về AI chưa chốt -> ẩn Key');
+-        check(run('keySource.manual.active = true; keySource.manual.committedKey = null') === '', 'Manual chưa có Key -> không hiện "null"');
+-        let threw = false; try { vm.runInContext('keySource.ai = null; keySource.manual.active = false; keyEverDetected = true; syncNowPlayingKeyText();', ctx); } catch (er) { threw = true; }
+-        check(!threw, 'State hỏng -> không ném lỗi (không phá luồng Key)');
+-
+-        // Nối dây (kiểm tra mã nguồn)
+-        const rfn = extractFn(rend, 'refreshKeySourceDisplay');
+-        check(/^function refreshKeySourceDisplay\(\) \{\s*\n\s*if \(typeof syncNowPlayingKeyText === "function"\) syncNowPlayingKeyText\(\);/.test(rfn), 'refreshKeySourceDisplay() gọi syncNowPlayingKeyText() ngay đầu hàm');
+-        check(/dispatchNowPlayingPayload\(payload\);[^\n]*\n\s*if \(typeof syncNowPlayingKeyText === "function"\) syncNowPlayingKeyText\(\);/.test(rend), 'Sau khi nhận bài mới (IPC), Key đang áp dụng được đẩy vào dòng tên bài');
+-        check(!/syncNowPlayingKeyText[\s\S]{0,400}keySource\.\w+(\.\w+)* = /.test(syncFn), 'syncNowPlayingKeyText chỉ ĐỌC keySource, không ghi');
+-    }
+-
+-    console.log('\n[7b] /delete-song — xoá bài hát (cần mật khẩu + xác nhận)');
+-    {
+-        let db = seed(); const before = snap(db);
+-        const body = { songId: 'one', xacNhan: true };
+-
+-        let r = await call(worker, db, 'POST', '/delete-song', body, AUTH, {});
+-        check(r.status === 403 && r.json.error === 'chua_cai_ADMIN_TOKEN', 'Chưa cài ADMIN_TOKEN -> TỪ CHỐI (403), không ai xoá được');
+-        r = await call(worker, db, 'POST', '/delete-song', body, {}, ENV);
+-        check(r.status === 401, 'Không gửi mật khẩu -> 401');
+-        r = await call(worker, db, 'POST', '/delete-song', body, { Authorization: 'Bearer sai' }, ENV);
+-        check(r.status === 401, 'Sai mật khẩu -> 401');
+-        const sameLen = TOKEN.slice(0, -1) + (TOKEN.slice(-1) === 'x' ? 'y' : 'x');
+-        r = await call(worker, db, 'POST', '/delete-song', body, { Authorization: 'Bearer ' + sameLen }, ENV);
+-        check(r.status === 401, 'Mật khẩu sai nhưng CÙNG độ dài -> 401');
+-        check(snap(db) === before, 'Bị từ chối -> KHÔNG xoá gì');
+-
+-        r = await call(worker, db, 'POST', '/delete-song', { songId: 'one' }, AUTH, ENV);
+-        check(r.status === 400 && r.json.error === 'can_xac_nhan', 'Thiếu xacNhan -> 400, chưa xoá (chống lỡ tay)');
+-        r = await call(worker, db, 'POST', '/delete-song', { songId: 'one', xacNhan: 'true' }, AUTH, ENV);
+-        check(r.status === 400, 'xacNhan là chữ "true" (không phải true thật) -> 400');
+-        r = await call(worker, db, 'POST', '/delete-song', { xacNhan: true }, AUTH, ENV);
+-        check(r.status === 400, 'Thiếu songId -> 400');
+-        r = await call(worker, db, 'GET', '/delete-song', undefined, AUTH, ENV);
+-        check(r.status === 404, 'GET /delete-song (không phải POST) -> 404, không xoá được bằng đường dẫn thường');
+-        check(snap(db) === before, 'Các yêu cầu sai -> dữ liệu không đổi');
+-
+-        r = await call(worker, db, 'POST', '/delete-song', { songId: 'multi', xacNhan: true }, AUTH, ENV);
+-        check(r.status === 200 && r.json.ok === true && r.json.daXoaDoan === 3 && r.json.daXoaBai === 1 && r.json.title === 'Bài Đổi Giọng Nhiều Đoạn', 'Xoá bài 3 đoạn -> báo đã xoá 3 đoạn + 1 bài, kèm tên bài');
+-        check(!db._songs.some((s) => s.songId === 'multi') && !db._segs.some((s) => s.songId === 'multi'), 'D1: bài và mọi đoạn Key của bài đã mất');
+-        check(db._songs.length === 2 && db._segs.length === 1 && db._segs[0].songId === 'one', 'Các bài KHÁC nguyên vẹn');
+-
+-        let f = await call(worker, db, 'GET', '/find?title=' + encodeURIComponent('Bài Đổi Giọng Nhiều Đoạn'));
+-        check(f.json.found === false, '/find không còn thấy bài đã xoá');
+-        f = await call(worker, db, 'GET', '/key-at?id=multi&sec=50');
+-        check(f.json.found === false, '/key-at không còn thấy bài đã xoá');
+-        f = await call(worker, db, 'GET', '/list');
+-        check(f.json.tongBai === 2 && !f.json.danhSach.some((x) => x.songId === 'multi'), '/list không còn bài đã xoá');
+-
+-        r = await call(worker, db, 'POST', '/delete-song', { songId: 'multi', xacNhan: true }, AUTH, ENV);
+-        check(r.status === 404 && r.json.error === 'khong_co_bai', 'Xoá lần 2 (bài đã mất) -> 404, không lỗi');
+-
+-        r = await call(worker, db, 'POST', '/delete-song', { songId: 'empty', xacNhan: true }, AUTH, ENV);
+-        check(r.json.ok === true && r.json.daXoaDoan === 0 && r.json.daXoaBai === 1, 'Bài có thông tin nhưng chưa có đoạn Key ("Viên Đá Nhỏ") xoá được');
+-
+-        db._segs.push({ songId: 'mo-coi', startSec: 0, endSec: 100, key: 'C', mode: 'major' });
+-        r = await call(worker, db, 'POST', '/delete-song', { songId: 'mo-coi', xacNhan: true }, AUTH, ENV);
+-        check(r.json.ok === true && r.json.daXoaDoan === 1 && r.json.daXoaBai === 0 && !db._segs.some((s) => s.songId === 'mo-coi'), 'Đoạn Key "mồ côi" (không có thông tin bài) cũng xoá được');
+-
+-        const before2 = snap(db);
+-        r = await call(worker, db, 'POST', '/delete-song', { songId: "one' OR '1'='1", xacNhan: true }, AUTH, ENV);
+-        check(r.status === 404 && snap(db) === before2, 'ID chứa ký tự SQL lạ -> 404, không xoá nhầm bài nào (truy vấn có tham số)');
+-
+-        // Giao dịch: lỗi giữa chừng -> không mất gì
+-        const db2 = seed(); const b2 = snap(db2);
+-        db2._failOn = 'DELETE FROM song_info';
+-        r = await call(worker, db2, 'POST', '/delete-song', { songId: 'one', xacNhan: true }, AUTH, ENV);
+-        check(r.status === 500, 'Lỗi giữa chừng khi xoá -> báo 500');
+-        check(snap(db2) === b2, 'Lỗi giữa chừng -> KHÔNG mất đoạn Key nào (xoá theo giao dịch: hoặc hết hoặc không)');
+-
+-        // Vòng khép kín với Menu
+-        const db3 = seed();
+-        const bridge = async (url, init = {}) => worker.fetch(new Request(url, init), { DB: db3, ...ENV });
+-        let t = 5_000_000; const now = () => t;
+-        const c = new KeyServerSync({ fetchFn: bridge, now, logger: { log() {}, error() {}, warn() {} } });
+-        let m = await c.lookup('Xin Đừng Rời Xa Anh', 'A');
+-        check(m.found && m.key === 'D Minor', 'Trước khi xoá: Menu tra ra D Minor');
+-        await call(worker, db3, 'POST', '/delete-song', { songId: 'one', xacNhan: true }, AUTH, ENV);
+-        t += 2 * 60 * 1000 + 1000;
+-        m = await c.lookup('Xin Đừng Rời Xa Anh', 'A');
+-        check(m.found === false && !m.error, 'Sau khi xoá (hết 2 phút nhớ tạm): Menu hỏi lại -> server không còn bài, Menu tự dò Key như thường');
+-        const s = await c.submit({ title: 'Xin Đừng Rời Xa Anh', artist: 'A', key: 'F Major', confidence: 0.9 });
+-        check(s.ok === true && s.reason === 'submitted' && db3._segs.some((x) => x.key === 'F' && x.mode === 'major'), 'Bài đã xoá: khi AI dò xong Menu sẽ gửi lại Key MỚI (đúng thiết kế — xoá Key sai để Menu dò lại cho đúng)');
+-    }
+-
+-    console.log('\n[7c] Trang quản lý: nút xoá bài');
+-    {
+-        const html = worker.__page();
+-        const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+-        let parsed = true; try { new vm.Script(script); } catch (e) { parsed = false; }
+-        check(parsed, 'Script trang quản lý (có nút xoá) đúng cú pháp');
+-        check(/id="btnXoaBai"/.test(html) && /Xoa bai nay/.test(html), 'Có nút "Xoa bai nay"');
+-        check(/\/delete-song/.test(script) && /xacNhan: true/.test(script) && /'Authorization': 'Bearer '/.test(script), 'Nút xoá gọi /delete-song, gửi xacNhan:true và mật khẩu');
+-        check(/confirm\('XOA bai/.test(script), 'Có hộp hỏi xác nhận trước khi xoá (không xoá ngay khi bấm)');
+-        const iConfirm = script.indexOf("confirm('XOA bai"), iFetch = script.indexOf("'/delete-song'");
+-        check(iConfirm > 0 && iFetch > iConfirm, 'Hộp xác nhận nằm TRƯỚC lệnh gọi xoá');
+-        check(/Chua nhap mat khau quan tri/.test(script.slice(script.indexOf('async function xoaBai'))), 'Chưa nhập mật khẩu -> báo, không gọi server');
+-    }
+-
+-    console.log('\n[8] Phạm vi: không đụng HTML/CSS');
+-    {
+-        const { execFileSync } = require('child_process');
+-        let changed = '';
+-        try { changed = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT }).toString(); } catch (e) { changed = ''; }
+-        const touched = changed.split('\n').filter((l) => /\.(html|css)$/i.test(l.trim()));
+-        check(touched.length === 0, 'Không có file .html/.css nào bị sửa' + (touched.length ? ': ' + touched.join(',') : ''));
+-    }
+-
+-    console.log('\n' + (failCount === 0 ? '✅ TẤT CẢ ĐỀU PASS' : '❌ CÓ ' + failCount + ' LỖI'));
+-    process.exit(failCount === 0 ? 0 : 1);
+-})().catch((e) => { console.error('TEST CRASH:', e); process.exit(2); });
+diff --git a/tests/unit/KeyServerDurationA88.verify.js b/tests/unit/KeyServerDurationA88.verify.js
+deleted file mode 100644
+index e1e0790..0000000
+--- a/tests/unit/KeyServerDurationA88.verify.js
++++ /dev/null
+@@ -1,118 +0,0 @@
+-/**
+- * KeyServerDurationA88.verify.js — TASK A88: server lấy thời lượng bài theo ID + sửa thời lượng bài đã có.
+- * Chạy code THẬT của worker.js với D1 giả + fetch YouTube giả. Chạy: node tests/unit/KeyServerDurationA88.verify.js
+- */
+-'use strict';
+-const fs = require('fs'), path = require('path');
+-const ROOT = path.join(__dirname, '..', '..');
+-let fails = 0;
+-const check = (c, m) => { if (c) console.log('  ✅ ' + m); else { fails++; console.log('  ❌ ' + m); } };
+-function loadWorker(file) {
+-    const src = fs.readFileSync(file, 'utf8').replace(/^export default/m, 'module.exports =');
+-    const m = { exports: {} }; new Function('module', 'exports', src)(m, m.exports); return m.exports;
+-}
+-function makeDb(seed) {
+-    const songs = (seed || []).map((s) => ({ ...s }));
+-    return { _songs: songs, prepare(sql) {
+-        const q = sql.replace(/\s+/g, ' ').trim(); let a = [];
+-        const api = { bind(...x) { a = x; return api; },
+-            async first() {
+-                if (q.startsWith('SELECT song_id as songId, title, total_duration_sec as totalSec FROM song_info WHERE song_id = ?')) return songs.find((s) => s.songId === a[0]) || null;
+-                throw new Error('first: ' + q.slice(0, 70));
+-            },
+-            async all() {
+-                if (q.includes('WHERE total_duration_sec IS NULL OR total_duration_sec = 0')) return { results: songs.filter((s) => !s.totalSec).map((s) => ({ songId: s.songId, title: s.title })) };
+-                throw new Error('all: ' + q.slice(0, 70));
+-            },
+-            async run() {
+-                if (q.startsWith('UPDATE song_info SET total_duration_sec = ?')) { songs.find((s) => s.songId === a[1]).totalSec = a[0]; return {}; }
+-                if (q.startsWith('INSERT INTO song_info (song_id, total_duration_sec')) { songs.push({ songId: a[0], title: null, totalSec: a[1] }); return {}; }
+-                throw new Error('run: ' + q.slice(0, 70));
+-            } };
+-        return api; } };
+-}
+-let ytCalls = [];
+-const ytTable = { abcDEF12345: 215, zzzzzzzzzz1: 3601 };
+-globalThis.fetch = async (u) => {
+-    const id = /v=([^&]+)/.exec(u)[1]; ytCalls.push(id);
+-    if (ytTable[id]) return new Response('<html>..."lengthSeconds":"' + ytTable[id] + '"...</html>', { status: 200 });
+-    if (id === 'blockedBlk1') return new Response('no', { status: 429 });
+-    return new Response('<html>no data</html>', { status: 200 });
+-};
+-const call = (w, env, p, method, body, token) => w.fetch(new Request('https://x' + p, { method, headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { Authorization: 'Bearer ' + token } : {}), body: body ? JSON.stringify(body) : undefined }), env);
+-const J = async (r) => ({ status: r.status, j: await r.json() });
+-
+-(async () => {
+-    const w = loadWorker(path.join(ROOT, 'worker.js'));
+-    check(fs.readFileSync(path.join(ROOT, 'worker.js'), 'utf8') === fs.readFileSync(path.join(ROOT, 'server', 'worker.js'), 'utf8'), 'worker.js == server/worker.js');
+-
+-    console.log('\n== 1. GET /song-duration ==');
+-    {
+-        const db = makeDb([{ songId: 'have0000001', title: 'Có sẵn', totalSec: 180 }]), env = { DB: db, ADMIN_TOKEN: 'sec' };
+-        let r = await J(await call(w, env, '/song-duration?id=have0000001', 'GET'));
+-        check(r.status === 200 && r.j.durationSec === 180 && r.j.format === '03:00' && r.j.source === 'server' && ytCalls.length === 0, 'bài đã có thời lượng -> trả từ server, KHÔNG gọi YouTube');
+-        r = await J(await call(w, env, '/song-duration?id=abcDEF12345', 'GET'));
+-        check(r.status === 200 && r.j.durationSec === 215 && r.j.source === 'youtube' && r.j.daLuu === true, 'bài chưa có -> lấy từ YouTube theo ID');
+-        check(db._songs.find((s) => s.songId === 'abcDEF12345').totalSec === 215, 'và đã LƯU vào server');
+-        r = await J(await call(w, env, '/song-duration?id=abcDEF12345', 'GET'));
+-        check(r.j.source === 'server' && ytCalls.length === 1, 'lần sau lấy từ server, không gọi lại YouTube');
+-        r = await J(await call(w, env, '/song-duration?id=app_1234567890abcdef', 'GET'));
+-        check(r.status === 404 && r.j.error === 'chua_co_thoi_luong', 'ID app_xxx (không phải YouTube) -> 404 báo rõ');
+-        r = await J(await call(w, env, '/song-duration?id=blockedBlk1', 'GET'));
+-        check(r.status === 502 && r.j.error === 'khong_lay_duoc_tu_youtube', 'YouTube chặn/lỗi -> 502 báo rõ, không lưu bậy');
+-        check(!db._songs.find((s) => s.songId === 'blockedBlk1'), 'không tạo dòng khi lấy lỗi');
+-        r = await J(await call(w, env, '/song-duration', 'GET'));
+-        check(r.status === 400, 'thiếu id -> 400');
+-        r = await J(await call(w, env, '/song-duration?id=abcDEF12345&refresh=1', 'GET'));
+-        check(r.status === 401, 'refresh=1 trên bài đã có thời lượng -> cần mật khẩu');
+-        ytTable.abcDEF12345 = 220;
+-        r = await J(await new Promise((res) => call(w, env, '/song-duration?id=abcDEF12345&refresh=1', 'GET', null, 'sec').then(res)));
+-        check(r.status === 200 && r.j.durationSec === 220 && db._songs.find((s) => s.songId === 'abcDEF12345').totalSec === 220, 'refresh=1 + mật khẩu đúng -> ghi đè 220');
+-    }
+-
+-    console.log('\n== 2. POST /set-duration ==');
+-    {
+-        const db = makeDb([{ songId: 'blank000001', title: 'Trống', totalSec: null }, { songId: 'known000001', title: 'Đã có', totalSec: 200 }]), env = { DB: db, ADMIN_TOKEN: 'sec' };
+-        let r = await J(await call(w, env, '/set-duration', 'POST', { songId: 'blank000001', totalDurationSec: 245 }));
+-        check(r.status === 200 && db._songs[0].totalSec === 245 && db._songs[0].title === 'Trống', 'bài thời lượng trống -> điền được không cần mật khẩu, giữ nguyên tên');
+-        r = await J(await call(w, env, '/set-duration', 'POST', { songId: 'known000001', totalDurationSec: 230 }));
+-        check(r.status === 401 && db._songs[1].totalSec === 200, 'bài đã có thời lượng, không mật khẩu -> 401, không đổi');
+-        r = await J(await call(w, env, '/set-duration', 'POST', { songId: 'known000001', totalDurationSec: 230 }, 'sai'));
+-        check(r.status === 401 && db._songs[1].totalSec === 200, 'sai mật khẩu -> 401');
+-        r = await J(await call(w, env, '/set-duration', 'POST', { songId: 'known000001', totalDurationSec: 230 }, 'sec'));
+-        check(r.status === 200 && r.j.truoc === 200 && db._songs[1].totalSec === 230, 'đúng mật khẩu -> sửa 200 -> 230');
+-        r = await J(await call(w, env, '/set-duration', 'POST', { songId: 'known000001', totalDurationSec: 0 }, 'sec'));
+-        check(r.status === 400 && r.j.error === 'thoi_luong_khong_hop_le', 'thời lượng 0 -> 400');
+-        r = await J(await call(w, env, '/set-duration', 'POST', { songId: 'known000001', totalDurationSec: 'abc' }, 'sec'));
+-        check(r.status === 400, 'chữ -> 400');
+-        r = await J(await call(w, env, '/set-duration', 'POST', { songId: 'new00000001', totalDurationSec: 100 }));
+-        check(r.status === 200 && db._songs.some((s) => s.songId === 'new00000001' && s.totalSec === 100), 'bài chưa có dòng -> tạo mới');
+-        r = await J(await call(w, { DB: db }, '/set-duration', 'POST', { songId: 'known000001', totalDurationSec: 111 }));
+-        check(r.status === 403 && r.j.error === 'chua_cai_ADMIN_TOKEN', 'server chưa cài ADMIN_TOKEN -> từ chối sửa bài đã có');
+-    }
+-
+-    console.log('\n== 3. POST /refresh-durations (hàng loạt) ==');
+-    {
+-        ytCalls = [];
+-        const db = makeDb([
+-            { songId: 'abcDEF12345', title: 'A', totalSec: null },
+-            { songId: 'zzzzzzzzzz1', title: 'B', totalSec: 0 },
+-            { songId: 'blockedBlk1', title: 'C', totalSec: null },
+-            { songId: 'app_1234567890abcdef', title: 'D', totalSec: null },
+-            { songId: 'okok0000001', title: 'E', totalSec: 99 },
+-        ]), env = { DB: db, ADMIN_TOKEN: 'sec' };
+-        ytTable.abcDEF12345 = 215;
+-        let r = await J(await call(w, env, '/refresh-durations', 'POST', {}));
+-        check(r.status === 401, 'không mật khẩu -> 401');
+-        r = await J(await call(w, env, '/refresh-durations', 'POST', { limit: 10 }, 'sec'));
+-        check(r.status === 200 && r.j.daDienDuoc === 2 && r.j.thatBai === 1 && r.j.boQuaKhongPhaiYouTube === 1 && r.j.conLai === 0, 'điền 2 bài, 1 lỗi, bỏ qua 1 ID app_, còn lại 0');
+-        check(db._songs[0].totalSec === 215 && db._songs[1].totalSec === 3601, 'thời lượng đã ghi đúng');
+-        check(db._songs[4].totalSec === 99 && !ytCalls.includes('okok0000001'), 'bài đã có thời lượng KHÔNG bị gọi lại/ghi đè');
+-        ytCalls = [];
+-        r = await J(await call(w, env, '/refresh-durations', 'POST', { limit: 1 }, 'sec'));
+-        check(r.status === 200 && ytCalls.length === 1, 'limit=1 -> chỉ xử lý 1 bài mỗi lần');
+-    }
+-
+-    console.log(fails ? '\n❌ ' + fails + ' lỗi' : '\n✅ TẤT CẢ ĐẠT');
+-    process.exit(fails ? 1 : 0);
+-})().catch((e) => { console.error(e); process.exit(1); });
+diff --git a/tests/unit/KeyServerManualA83.verify.js b/tests/unit/KeyServerManualA83.verify.js
+deleted file mode 100644
+index a48ecd9..0000000
+--- a/tests/unit/KeyServerManualA83.verify.js
++++ /dev/null
+@@ -1,122 +0,0 @@
+-/**
+- * KeyServerManualA83.verify.js — TASK A83: server nhận tone nhập tay.
+- *  - Bài MỚI: lưu ngay, không cần mật khẩu.
+- *  - Bài ĐÃ BIẾT: thêm/sửa bằng tay cần mật khẩu admin (ADMIN_TOKEN).
+- *  - Key nhập tự do ("Am", "Eb", "F#m"...) được chuẩn hoá; Key lạ bị từ chối rõ ràng.
+- * Chạy code THẬT của worker.js với D1 giả trong bộ nhớ (không gọi Cloudflare thật).
+- * Chạy: node tests/unit/KeyServerManualA83.verify.js
+- */
+-'use strict';
+-const fs = require('fs'), path = require('path');
+-const ROOT = path.join(__dirname, '..', '..');
+-let fails = 0;
+-const check = (c, m) => { if (c) console.log('  ✅ ' + m); else { fails++; console.log('  ❌ ' + m); } };
+-
+-function loadWorker(file) {
+-    const src = fs.readFileSync(file, 'utf8').replace(/^export default/m, 'module.exports =') + '\n;module.exports.__tim = timBaiKhopNhat; module.exports.__ct = chuanHoaTen;';
+-    const m = { exports: {} }; new Function('module', 'exports', src)(m, m.exports); return m.exports;
+-}
+-function makeDb(seed) {
+-    const songs = [], segs = (seed || []).map((s) => ({ ...s }));
+-    const db = { _segs: segs, _songs: songs, prepare(sql) {
+-        const q = sql.replace(/\s+/g, ' ').trim(); let a = [];
+-        const api = { bind(...x) { a = x; return api; },
+-            async first() {
+-                if (q.startsWith('SELECT song_id as songId, title FROM song_info WHERE song_id = ?')) { const s = songs.find((x) => x.songId === a[0]); return s || null; }
+-                if (q.startsWith('SELECT COUNT(*) as n, MIN(created_at) as dauTien FROM song_key_segments WHERE song_id = ?')) {
+-                    const mine = segs.filter((s) => s.songId === a[0]); const ts = mine.map((s) => s.createdAt).filter(Number.isFinite);
+-                    return { n: mine.length, dauTien: ts.length ? Math.min(...ts) : null };
+-                }
+-                throw new Error('first: ' + q.slice(0, 60));
+-            },
+-            async run() {
+-                if (q.startsWith('DELETE FROM song_key_segments WHERE song_id = ? AND start_sec = ?')) { for (let i = segs.length - 1; i >= 0; i--) if (segs[i].songId === a[0] && segs[i].startSec === a[1]) segs.splice(i, 1); return {}; }
+-                if (q.startsWith('INSERT INTO song_key_segments')) { segs.push({ songId: a[0], startSec: a[1], endSec: a[2], key: a[3], mode: a[4], createdAt: a[6] }); return {}; }
+-                if (q.startsWith('INSERT OR REPLACE INTO song_info')) { songs.push({ songId: a[0], title: a[1] }); return {}; }
+-                throw new Error('run: ' + q.slice(0, 60));
+-            } };
+-        return api; } };
+-    return db;
+-}
+-const post = (w, env, p, body, token) => w.fetch(new Request('https://x' + p, { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { Authorization: 'Bearer ' + token } : {}), body: JSON.stringify(body) }), env);
+-const J = async (r) => ({ status: r.status, j: await r.json() });
+-
+-(async () => {
+-    const w = loadWorker(path.join(ROOT, 'worker.js'));
+-    check(fs.readFileSync(path.join(ROOT, 'worker.js'), 'utf8') === fs.readFileSync(path.join(ROOT, 'server', 'worker.js'), 'utf8'), 'worker.js == server/worker.js');
+-
+-    console.log('\n== 1. Bài MỚI: lưu ngay, không mật khẩu ==');
+-    {
+-        const db = makeDb(), env = { DB: db, ADMIN_TOKEN: 'secret123' };
+-        let r = await J(await post(w, env, '/add-segment', { songId: 'vid1', startSec: 0, endSec: 100, key: 'Am', mode: 'major' }));
+-        check(r.status === 200 && r.j.ok === true && r.j.baiDaBiet === false, 'bài mới -> 200 không cần mật khẩu');
+-        check(db._segs[0].key === 'A' && db._segs[0].mode === 'minor', 'Key "Am" -> A + minor (chuẩn hoá, bất chấp mode major)');
+-        r = await J(await post(w, env, '/add-segment', { songId: 'vid1', startSec: 101, endSec: 200, key: 'Eb', mode: 'major' }));
+-        check(r.status === 200 && db._segs[1].key === 'D#' && db._segs[1].mode === 'major', 'đoạn 2 của bài MỚI vẫn thêm được (cửa sổ bài mới); "Eb" -> D#');
+-        r = await J(await post(w, env, '/add-segment', { songId: 'vid1', startSec: 101, endSec: 200, key: 'F#m' }));
+-        check(r.status === 200 && db._segs.filter((s) => s.startSec === 101).length === 1 && db._segs.find((s) => s.startSec === 101).key === 'F#', 'cùng startSec -> thay, không nhân đôi');
+-        r = await J(await post(w, env, '/add-segment', { songId: 'vid2', startSec: 0, endSec: 50, key: 'H', mode: 'major' }));
+-        check(r.status === 400 && r.j.error === 'key_khong_hop_le', 'Key lạ -> 400 key_khong_hop_le (không lưu sai)');
+-        r = await J(await post(w, env, '/set-song-info', { songId: 'vid1', title: 'Bài thử' }));
+-        check(r.status === 200, 'set-song-info bài mới -> được');
+-    }
+-
+-    console.log('\n== 1b. Thêm đoạn mà CHƯA bấm "Lưu Thông Tin Bài": server tự tạo thông tin để Menu tra được ==');
+-    {
+-        const db = makeDb(), env = { DB: db, ADMIN_TOKEN: 'secret123' };
+-        let r = await J(await post(w, env, '/add-segment', { songId: 'noinfo', startSec: 0, endSec: 90, key: 'G', mode: 'major', title: 'Thương Em', totalDurationSec: 250 }));
+-        check(r.status === 200 && r.j.taoThongTinBai === true && db._songs.length === 1 && db._songs[0].title === 'Thương Em', 'chưa có thông tin bài -> server tự tạo (có tên để /find tra được)');
+-        r = await J(await post(w, env, '/add-segment', { songId: 'noinfo', startSec: 91, endSec: 150, key: 'C', mode: 'major', title: 'Thương Em' }));
+-        check(r.status === 200 && r.j.taoThongTinBai === false && db._songs.length === 1, 'đã có thông tin -> không tạo trùng');
+-        r = await J(await post(w, env, '/add-segment', { songId: 'notitle', startSec: 0, endSec: 90, key: 'G' }));
+-        check(r.status === 200 && db._songs.length === 1, 'không gửi tên (Menu tự dò) -> không đụng bảng thông tin bài như cũ');
+-    }
+-
+-    console.log('\n== 2. Bài ĐÃ BIẾT (cũ): cần mật khẩu admin ==');
+-    {
+-        const old = Date.now() - 31 * 60 * 1000;
+-        const db = makeDb([{ songId: 'known', startSec: 0, endSec: 200, key: 'C', mode: 'major', createdAt: old }]);
+-        const env = { DB: db, ADMIN_TOKEN: 'secret123' };
+-        let r = await J(await post(w, env, '/add-segment', { songId: 'known', startSec: 0, endSec: 200, key: 'D', mode: 'minor' }));
+-        check(r.status === 401 && r.j.error === 'can_mat_khau_admin', 'không mật khẩu -> 401 can_mat_khau_admin');
+-        check(db._segs.length === 1 && db._segs[0].key === 'C', 'dữ liệu cũ KHÔNG bị đổi khi bị từ chối');
+-        r = await J(await post(w, env, '/add-segment', { songId: 'known', startSec: 0, endSec: 200, key: 'D', mode: 'minor' }, 'sai'));
+-        check(r.status === 401 && r.j.error === 'sai_mat_khau', 'sai mật khẩu -> 401 sai_mat_khau');
+-        r = await J(await post(w, env, '/add-segment', { songId: 'known', startSec: 0, endSec: 200, key: 'D', mode: 'minor' }, 'secret123'));
+-        check(r.status === 200 && r.j.ok && db._segs.length === 1 && db._segs[0].key === 'D' && db._segs[0].mode === 'minor', 'đúng mật khẩu -> cập nhật luôn (thay đoạn cùng startSec)');
+-        r = await J(await post(w, env, '/set-song-info', { songId: 'known', title: 'Đổi tên' }));
+-        check(r.status === 401 && r.j.error === 'can_mat_khau_admin', 'set-song-info bài đã biết không mật khẩu -> 401');
+-        r = await J(await post(w, env, '/set-song-info', { songId: 'known', title: 'Đổi tên' }, 'secret123'));
+-        check(r.status === 200, 'set-song-info bài đã biết + đúng mật khẩu -> được');
+-        r = await J(await post(w, { DB: db }, '/add-segment', { songId: 'known', startSec: 5, endSec: 9, key: 'E' }));
+-        check(r.status === 403 && r.j.error === 'chua_cai_ADMIN_TOKEN', 'chưa cài ADMIN_TOKEN -> 403 (không để ai cũng sửa)');
+-    }
+-    console.log('\n== 3. Extension yt-key: gửi mật khẩu khi bài đã biết (kiểm tĩnh) ==');
+-    {
+-        const pj = fs.readFileSync(path.join(ROOT, 'yt-key', 'popup.js'), 'utf8');
+-        const ph = fs.readFileSync(path.join(ROOT, 'yt-key', 'popup.html'), 'utf8');
+-        const mf = JSON.parse(fs.readFileSync(path.join(ROOT, 'yt-key', 'manifest.json'), 'utf8'));
+-        check(/headers\["Authorization"\] = "Bearer " \+ mk/.test(pj), 'popup.js gửi Authorization: Bearer <mật khẩu>');
+-        check(/title: document\.getElementById\("tenBai"\)/.test(pj), 'add-segment gửi kèm tên + thời lượng');
+-        check(/guiServer\("\/add-segment"/.test(pj) && /guiServer\("\/set-song-info"/.test(pj), 'cả set-song-info và add-segment đi qua guiServer');
+-        check(/can_mat_khau_admin/.test(pj) && /hienOMatKhau\(\)/.test(pj) && /id = "khoiMatKhau"/.test(pj) && /id="matKhauAdmin"/.test(pj), 'ô nhập mật khẩu tạo bằng JS, tự hiện khi server báo bài đã biết');
+-        check(!/khoiMatKhau|matKhauAdmin/.test(ph), 'popup.html KHÔNG bị sửa (không đổi HTML)');
+-        check(mf.permissions.includes('storage'), 'manifest có quyền storage (nhớ mật khẩu tới khi đóng trình duyệt)');
+-    }
+-    console.log('\n== 4. Menu tra bài theo TÊN: tên YouTube có chữ chen thêm vẫn khớp (ca thật: "Karaoke") ==');
+-    {
+-        const songs = [
+-            { songId: 'tB1abwou1Aw', title: 'Thương Ly Biệt Karaoke Tone Nữ Nhạc Trẻ Rumba 2025 Mới Nhất' },
+-            { songId: 'app_9a3d', title: 'Em Thua Cô Ta (R&B Synth-Pop Version) - QuanFM x MiAn x KAi | Nhạc Hot Tiktok' },
+-            { songId: 'other', title: 'Thương Em Karaoke Tone Nam' }
+-        ];
+-        const menu = w.__ct('Thương Ly Biệt Tone Nữ Nhạc Trẻ Rumba 2025 Mới Nhất');
+-        const hit = w.__tim(songs, menu, w.__ct('SONG NHIEN'));
+-        check(hit && hit.songId === 'tB1abwou1Aw', 'Menu "Thương Ly Biệt Tone Nữ…" khớp bài "Thương Ly Biệt Karaoke Tone Nữ…" (trước đây trượt)');
+-        check(!w.__tim(songs, w.__ct('Thương Em Quá Nhiều Rồi'), ''), 'bài khác tên (chỉ trùng 1–2 từ) KHÔNG bị khớp nhầm');
+-        const exact = w.__tim([{ songId: 'a', title: 'Thương Ly Biệt Karaoke Tone Nữ Nhạc Trẻ Rumba 2025 Mới Nhất' }, { songId: 'b', title: 'Thương Ly Biệt Tone Nữ Nhạc Trẻ Rumba 2025 Mới Nhất' }], menu, '');
+-        check(exact && exact.songId === 'b', 'khớp đúng hẳn vẫn thắng khớp mờ');
+-    }
+-    console.log(fails ? `\n❌ ${fails} LỖI` : '\n✅ TẤT CẢ ĐẠT');
+-    process.exit(fails ? 1 : 0);
+-})().catch((e) => { console.error('CRASH', e); process.exit(2); });
+diff --git a/tests/unit/KeyServerSyncC.verify.js b/tests/unit/KeyServerSyncC.verify.js
+deleted file mode 100644
+index be272ce..0000000
+--- a/tests/unit/KeyServerSyncC.verify.js
++++ /dev/null
+@@ -1,457 +0,0 @@
+-/**
+- * ==========================================================
+- * Auto Menu AI — Kiểm chứng KeyServerSync + route /find của worker.js (Task C)
+- * Chạy bằng: node tests/unit/KeyServerSyncC.verify.js
+- *
+- * ⚠️ ĐỌC KỸ: bộ test chạy trên Linux sandbox, KHÔNG gọi Cloudflare thật.
+- * Client (KeyServerSync) được nối THẲNG vào code thật của worker.js, còn
+- * D1 là bản giả trong bộ nhớ (chỉ hỗ trợ đúng các câu SQL mà worker dùng).
+- * => Chứng minh LOGIC đúng (tra theo tên, gửi 1 lần, không nhân đôi, lỗi
+- * mạng không throw). KHÔNG chứng minh: Cloudflare thật đã dán code mới,
+- * D1 thật có dữ liệu, mạng Windows thật — phải thử trên máy thật.
+- * ==========================================================
+- */
+-'use strict';
+-
+-const assert = require('assert');
+-const fs = require('fs');
+-const path = require('path');
+-
+-const ROOT = path.join(__dirname, '..', '..');
+-const KSS = require(path.join(ROOT, 'core', 'integration', 'KeyServerSync.js'));
+-const { KeyServerSync } = KSS;
+-
+-let failCount = 0;
+-function check(cond, msg) {
+-    try { assert.ok(cond, msg); console.log('  ✅ ' + msg); }
+-    catch (e) { failCount++; console.log('  ❌ ' + msg); }
+-}
+-
+-// ---------- Nạp worker.js thật (ESM `export default` -> CommonJS) ----------
+-function loadWorker(file) {
+-    const src = fs.readFileSync(file, 'utf8').replace(/^export default/m, 'module.exports =')
+-        + '\n;module.exports.__chuanHoaTen = chuanHoaTen;';
+-    const m = { exports: {} };
+-    new Function('module', 'exports', src)(m, m.exports);
+-    return m.exports;
+-}
+-
+-// ---------- D1 giả trong bộ nhớ ----------
+-function makeFakeDb(seed) {
+-    const songs = (seed && seed.songs) ? seed.songs.map((s) => ({ ...s })) : [];
+-    const segs = (seed && seed.segs) ? seed.segs.map((s) => ({ ...s })) : [];
+-    let tick = 0;
+-    function stmt(sql) {
+-        const q = sql.replace(/\s+/g, ' ').trim();
+-        let args = [];
+-        const api = {
+-            bind(...a) { args = a; return api; },
+-            async first() { // A83: trạng thái bài (bài mới/bài đã biết)
+-                if (q.startsWith('SELECT COUNT(*) as n, MIN(created_at) as dauTien FROM song_key_segments WHERE song_id = ?')) {
+-                    const mine = segs.filter((s) => s.songId === args[0]);
+-                    const ts = mine.map((s) => s.createdAt).filter((x) => Number.isFinite(x));
+-                    return { n: mine.length, dauTien: ts.length ? Math.min(...ts) : null };
+-                }
+-                throw new Error('FakeDb.first: SQL chưa hỗ trợ: ' + q.slice(0, 60));
+-            },
+-            async run() {
+-                if (q.startsWith('DELETE FROM song_key_segments WHERE song_id = ? AND start_sec = ?')) { // A83
+-                    for (let i = segs.length - 1; i >= 0; i--) if (segs[i].songId === args[0] && segs[i].startSec === args[1]) segs.splice(i, 1);
+-                    return { success: true };
+-                }
+-                if (q.startsWith('INSERT OR REPLACE INTO song_info')) {
+-                    const [songId, title, dur, note] = args;
+-                    const i = songs.findIndex((s) => s.songId === songId);
+-                    const row = { songId, title, dur, note, updated: ++tick };
+-                    if (i >= 0) songs[i] = row; else songs.push(row);
+-                    return { success: true };
+-                }
+-                if (q.startsWith('INSERT INTO song_key_segments')) {
+-                    const [songId, startSec, endSec, key, mode, weight, createdAt] = args;
+-                    segs.push({ songId, startSec, endSec, key, mode, weight, createdAt });
+-                    return { success: true };
+-                }
+-                throw new Error('FakeDb.run: SQL chưa hỗ trợ: ' + q.slice(0, 60));
+-            },
+-            async all() {
+-                if (q.includes('FROM song_info ORDER BY updated_at')) {
+-                    return { results: songs.slice().sort((a, b) => (b.updated || 0) - (a.updated || 0)).map((s) => ({ songId: s.songId, title: s.title })) };
+-                }
+-                if (q.includes('FROM song_key_segments WHERE song_id = ? ORDER BY start_sec ASC LIMIT 200')) {
+-                    return { results: segs.filter((s) => s.songId === args[0]).sort((a, b) => a.startSec - b.startSec).map((s) => ({ key: s.key, mode: s.mode, startSec: s.startSec, endSec: s.endSec })) };
+-                }
+-                throw new Error('FakeDb.all: SQL chưa hỗ trợ: ' + q.slice(0, 60));
+-            }
+-        };
+-        return api;
+-    }
+-    return { prepare: stmt, _songs: songs, _segs: segs };
+-}
+-
+-// fetchFn nối thẳng client vào worker thật; ghi lại mọi lời gọi.
+-function makeBridge(worker, db, opts = {}) {
+-    const calls = [];
+-    const env = { DB: db };
+-    const fn = async (url, init = {}) => {
+-        const u = new URL(url);
+-        calls.push({ method: init.method || 'GET', path: u.pathname, search: u.search, body: init.body ? JSON.parse(init.body) : null });
+-        if (opts.failWith) return opts.failWith(u, init);
+-        return worker.fetch(new Request(url, init), env);
+-    };
+-    fn.calls = calls;
+-    return fn;
+-}
+-
+-function clock(start = 1_000_000) {
+-    let t = start;
+-    const now = () => t;
+-    now.advance = (ms) => { t += ms; };
+-    return now;
+-}
+-
+-const SILENT = { log() {}, error() {}, warn() {} };
+-const YT_TITLE = 'Karaoke 2 Trong 1 | QUÊN MỘT LỜI THỀ - Tone Nam';
+-
+-(async () => {
+-    const worker = loadWorker(path.join(ROOT, 'worker.js'));
+-
+-    console.log('\n[1] Hai bản worker.js phải giống hệt nhau (root + server/)');
+-    check(fs.readFileSync(path.join(ROOT, 'worker.js'), 'utf8') === fs.readFileSync(path.join(ROOT, 'server', 'worker.js'), 'utf8'), 'worker.js == server/worker.js');
+-
+-    console.log('\n[2] Chuẩn hoá tên: client và worker PHẢI cho kết quả giống nhau');
+-    const samples = ['Quên Một Lời Thề', 'ĐÊM NAY Đừng Ngủ!!', '  Hello,   World (Official MV) ', 'Café — Müller', 'A', '', null, 'Tình ca 2 | 3'];
+-    check(samples.every((s) => KSS.normalizeTitle(s) === worker.__chuanHoaTen(s)), 'normalizeTitle(client) == chuanHoaTen(worker) trên ' + samples.length + ' mẫu');
+-    check(KSS.normalizeTitle('Quên Một Lời Thề') === 'quen mot loi the', 'Bỏ dấu + chữ thường đúng');
+-
+-    console.log('\n[3] Đổi Key app <-> server');
+-    check(KSS.serverKeyToAppKey('C', 'major') === 'C Major', 'C major -> "C Major"');
+-    check(KSS.serverKeyToAppKey('G#', 'minor') === 'G# Minor', 'G# minor -> "G# Minor"');
+-    check(KSS.serverKeyToAppKey('Bb', 'Minor') === 'A# Minor', 'Bb Minor -> "A# Minor" (giáng đổi sang thăng)');
+-    check(KSS.serverKeyToAppKey('d', 'MAJ') === 'D Major', 'chữ thường / viết tắt vẫn đọc được');
+-    check(KSS.serverKeyToAppKey('H', 'major') === null && KSS.serverKeyToAppKey('C', 'dorian') === null, 'Key/mode lạ -> null');
+-    const k1 = KSS.appKeyToServerKey('F# Minor');
+-    check(k1 && k1.key === 'F#' && k1.mode === 'minor', '"F# Minor" -> {F#, minor}');
+-    check(KSS.appKeyToServerKey('C') === null && KSS.appKeyToServerKey('X Major') === null && KSS.appKeyToServerKey('') === null, 'Key app không hợp lệ -> null');
+-    check(KSS.makeSongId('Quên Một Lời Thề', 'A') === KSS.makeSongId('quen mot loi the', 'a'), 'songId ổn định, không phụ thuộc dấu/hoa thường');
+-    check(KSS.makeSongId('Bài 1', 'X') !== KSS.makeSongId('Bài 2', 'X'), 'songId khác nhau cho bài khác nhau');
+-
+-    console.log('\n[4] Route /find của worker.js thật (D1 giả)');
+-    {
+-        const db = makeFakeDb({
+-            songs: [
+-                { songId: 'vid1', title: YT_TITLE, updated: 2 },
+-                { songId: 'vid2', title: 'Hello World Karaoke', updated: 1 },
+-                { songId: 'vid3', title: 'Bai chua co doan nao', updated: 3 }
+-            ],
+-            segs: [
+-                { songId: 'vid1', startSec: 60, endSec: 120, key: 'E', mode: 'major' },
+-                { songId: 'vid1', startSec: 0, endSec: 59, key: 'D', mode: 'minor' },
+-                { songId: 'vid2', startSec: 0, endSec: 200, key: 'C', mode: 'major' }
+-            ]
+-        });
+-        const call = async (qs) => { const r = await worker.fetch(new Request('https://x.test/find' + qs), { DB: db }); return { status: r.status, json: await r.json() }; };
+-
+-        let r = await call('?title=' + encodeURIComponent('Quên Một Lời Thề') );
+-        check(r.status === 200 && r.json.found === true && r.json.songId === 'vid1', 'Tên Menu nằm TRONG tên YouTube -> tìm đúng bài');
+-        check(r.json.key === 'D' && r.json.mode === 'minor' && r.json.startSec === 0, 'Trả Key của đoạn ĐẦU TIÊN (start nhỏ nhất)');
+-        check(r.json.tongDoan === 2, 'Báo đúng tổng số đoạn');
+-
+-        r = await call('?title=' + encodeURIComponent(YT_TITLE.toUpperCase()));
+-        check(r.json.found === true && r.json.songId === 'vid1', 'Không phân biệt hoa/thường, khớp đúng hẳn');
+-
+-        r = await call('?title=' + encodeURIComponent('hello world karaoke 2024 official'));
+-        check(r.json.found === true && r.json.songId === 'vid2', 'Tên Menu DÀI hơn tên server (chứa tên server) -> vẫn khớp');
+-
+-        r = await call('?title=' + encodeURIComponent('Một bài hát không tồn tại'));
+-        check(r.status === 200 && r.json.found === false, 'Bài không có -> found:false (200)');
+-
+-        r = await call('?title=' + encodeURIComponent('Bai chua co doan nao'));
+-        check(r.json.found === false, 'Bài có info nhưng CHƯA có đoạn Key -> found:false');
+-
+-        r = await call('?title=ab');
+-        check(r.status === 400 && r.json.found === false, 'Tên quá ngắn -> 400, found:false');
+-
+-        r = await call('');
+-        check(r.status === 400, 'Thiếu title -> 400');
+-
+-        r = await call('?title=' + encodeURIComponent('Hello'));
+-        check(r.json.found === false, 'Tên ngắn (<8 ký tự) KHÔNG khớp kiểu "chứa" (tránh nhầm bài)');
+-
+-        // Route cũ vẫn chạy
+-        const old = await worker.fetch(new Request('https://x.test/nonexistent'), { DB: db });
+-        check(old.status === 404, 'Route lạ vẫn trả 404 như cũ');
+-        const opt = await worker.fetch(new Request('https://x.test/find', { method: 'OPTIONS' }), { DB: db });
+-        check(opt.status === 200, 'OPTIONS (CORS) vẫn chạy');
+-    }
+-
+-    console.log('\n[5] Client: lookup');
+-    {
+-        const db = makeFakeDb({ songs: [{ songId: 'vid1', title: YT_TITLE, updated: 1 }], segs: [{ songId: 'vid1', startSec: 0, endSec: 258, key: 'D', mode: 'minor' }] });
+-        const f = makeBridge(worker, db);
+-        const now = clock();
+-        const c = new KeyServerSync({ fetchFn: f, now, logger: SILENT });
+-
+-        let r = await c.lookup('Quên Một Lời Thề', 'Ca sĩ A');
+-        check(r.found === true && r.key === 'D Minor' && r.songId === 'vid1' && r.source === 'server', 'Trúng: key đã đổi sang định dạng app ("D Minor")');
+-        check(f.calls.length === 1 && f.calls[0].path === '/find', 'Gọi đúng 1 lần /find');
+-        check(c.peek('Quên Một Lời Thề', 'Ca sĩ A') && c.peek('Quên Một Lời Thề', 'Ca sĩ A').key === 'D Minor', 'peek() thấy kết quả trong cache (không gọi mạng)');
+-        await c.lookup('Quên Một Lời Thề', 'Ca sĩ A');
+-        check(f.calls.length === 1, 'Hỏi lại cùng bài -> dùng cache, KHÔNG gọi mạng');
+-
+-        now.advance(11 * 60 * 1000);
+-        check(c.peek('Quên Một Lời Thề', 'Ca sĩ A') === null, 'Hết hạn cache (2 phút) -> peek() trả null');
+-        await c.lookup('Quên Một Lời Thề', 'Ca sĩ A');
+-        check(f.calls.length === 2, 'Hết hạn -> hỏi lại server');
+-
+-        const m1 = await c.lookup('Bài Không Có Trên Server', 'X');
+-        check(m1.found === false && !m1.error, 'Server không có bài -> found:false, không lỗi');
+-        const n = f.calls.length;
+-        await c.lookup('Bài Không Có Trên Server', 'X');
+-        check(f.calls.length === n, 'Trượt cũng được nhớ (không dội server mỗi sự kiện)');
+-        now.advance(61 * 1000);
+-        await c.lookup('Bài Không Có Trên Server', 'X');
+-        check(f.calls.length === n + 1, 'Sau 60 giây hỏi lại bài trượt (phòng có người vừa gửi)');
+-
+-        // Hỏi đồng thời cùng bài -> chỉ 1 lời gọi
+-        const f2 = makeBridge(worker, db);
+-        const c2 = new KeyServerSync({ fetchFn: f2, now: clock(), logger: SILENT });
+-        const [a, b] = await Promise.all([c2.lookup('Quên Một Lời Thề', 'A'), c2.lookup('Quên Một Lời Thề', 'A')]);
+-        check(f2.calls.length === 1 && a.found && b.found, 'Hai lần hỏi ĐỒNG THỜI -> chỉ 1 lời gọi mạng');
+-
+-        check((await c.lookup('ab', '')).found === false && f.calls.length === n + 1, 'Tên quá ngắn -> không gọi mạng');
+-    }
+-
+-    console.log('\n[6] Client: lỗi mạng KHÔNG ĐƯỢC throw, app tiếp tục dò Key như cũ');
+-    {
+-        const dbEmpty = makeFakeDb();
+-        // 6a. fetch ném lỗi
+-        let c = new KeyServerSync({ fetchFn: async () => { throw new Error('ECONNREFUSED'); }, now: clock(), logger: SILENT });
+-        let r = await c.lookup('Bài Bất Kỳ Nào Đó', 'A');
+-        check(r.found === false && !!r.error, 'fetch ném lỗi -> {found:false, error}, không throw');
+-
+-        // 6b. timeout thật (fetch treo, chỉ dừng khi bị abort)
+-        c = new KeyServerSync({
+-            lookupTimeoutMs: 40, now: clock(), logger: SILENT,
+-            fetchFn: (url, init) => new Promise((_, rej) => { init.signal.addEventListener('abort', () => { const e = new Error('aborted'); e.name = 'AbortError'; rej(e); }); })
+-        });
+-        const t0 = Date.now();
+-        r = await c.lookup('Bài Bất Kỳ Nào Đó', 'A');
+-        check(r.found === false && r.error === 'timeout' && (Date.now() - t0) < 1500, 'Server treo -> timeout nhanh, found:false');
+-
+-        // 6c. Server CŨ chưa có /find (404 not_found)
+-        const oldWorkerFetch = makeBridge(worker, dbEmpty, { failWith: async () => new Response(JSON.stringify({ error: 'not_found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }) });
+-        c = new KeyServerSync({ fetchFn: oldWorkerFetch, now: clock(), logger: SILENT });
+-        r = await c.lookup('Bài Bất Kỳ Nào Đó', 'A');
+-        check(r.found === false && r.error === 'http-404', 'Server cũ (chưa dán code mới) -> báo lỗi nhẹ, không throw');
+-
+-        // 6d. Trả về không phải JSON
+-        c = new KeyServerSync({ fetchFn: async () => new Response('<html>oops</html>', { status: 200 }), now: clock(), logger: SILENT });
+-        r = await c.lookup('Bài Bất Kỳ Nào Đó', 'A');
+-        check(r.found === false, 'Trả HTML thay vì JSON -> found:false');
+-
+-        // 6e. Server trả Key lạ
+-        c = new KeyServerSync({ fetchFn: async () => new Response(JSON.stringify({ found: true, key: 'ZZ', mode: 'major', songId: 'x' }), { status: 200 }), now: clock(), logger: SILENT });
+-        r = await c.lookup('Bài Bất Kỳ Nào Đó', 'A');
+-        check(r.found === false && r.error === 'bad-key-from-server', 'Server trả Key không hợp lệ -> bỏ, không dùng');
+-
+-        // 6f. Lỗi được nhớ ngắn hạn (15s) rồi thử lại
+-        let calls = 0; const now = clock();
+-        c = new KeyServerSync({ fetchFn: async () => { calls++; throw new Error('x'); }, now, logger: SILENT });
+-        await c.lookup('Bài Bất Kỳ Nào Đó', 'A'); await c.lookup('Bài Bất Kỳ Nào Đó', 'A');
+-        check(calls === 1, 'Lỗi mạng: không thử dồn dập (nhớ lỗi 15 giây)');
+-        now.advance(16 * 1000); await c.lookup('Bài Bất Kỳ Nào Đó', 'A');
+-        check(calls === 2, 'Sau 15 giây thử lại');
+-    }
+-
+-    console.log('\n[7] Cờ tắt đồng bộ (keyServerAutoSync=false)');
+-    {
+-        const f = makeBridge(worker, makeFakeDb());
+-        const c = new KeyServerSync({ fetchFn: f, now: clock(), isEnabled: () => false, logger: SILENT });
+-        const r = await c.lookup('Quên Một Lời Thề', 'A');
+-        const s = await c.submit({ title: 'Quên Một Lời Thề', artist: 'A', key: 'C Major', confidence: 0.9 });
+-        check(r.disabled === true && r.found === false, 'lookup khi tắt -> disabled, không gọi mạng');
+-        check(s.ok === false && s.reason === 'disabled', 'submit khi tắt -> disabled');
+-        check(f.calls.length === 0 && c.peek('Quên Một Lời Thề', 'A') === null, 'Tắt -> TUYỆT ĐỐI không có lời gọi mạng nào');
+-    }
+-
+-    console.log('\n[8] Client: submit (gửi Key sau khi dò xong)');
+-    {
+-        const db = makeFakeDb();
+-        const f = makeBridge(worker, db);
+-        const now = clock();
+-        const c = new KeyServerSync({ fetchFn: f, now, logger: SILENT });
+-        const song = { title: 'Đêm Nay Đừng Ngủ', artist: 'Ca sĩ B', key: 'G# Minor', confidence: 0.85 };
+-
+-        let s = await c.submit({ ...song });
+-        check(s.ok === true && s.reason === 'submitted', 'Bài mới -> gửi thành công');
+-        const seq = f.calls.map((x) => x.method + ' ' + x.path).join(' | ');
+-        check(seq === 'GET /find | POST /set-song-info | POST /add-segment', 'Thứ tự: hỏi server -> lưu thông tin -> lưu đoạn Key (' + seq + ')');
+-        const seg = f.calls[2].body, info = f.calls[1].body;
+-        check(seg.key === 'G#' && seg.mode === 'minor' && seg.startSec === 0 && seg.endSec === KSS.WHOLE_SONG_END_SEC, 'Đoạn Key đúng: G# minor, 0 -> cả bài');
+-        check(info.songId === seg.songId && info.songId === KSS.makeSongId(song.title, song.artist) && info.title === song.title, 'songId/title đúng');
+-        check(/Ca sĩ B/.test(info.note) && info.totalDurationSec === null, 'Ca sĩ nằm trong note; chưa biết độ dài -> null');
+-        check(db._segs.length === 1 && db._songs.length === 1, 'D1 giả có đúng 1 bài + 1 đoạn');
+-
+-        s = await c.submit({ ...song });
+-        check(s.ok === true && s.reason === 'already-submitted' && f.calls.length === 3, 'Gửi lại cùng bài -> không gọi mạng thêm');
+-
+-        // Sau khi gửi, tra theo tên phải thấy bài (vòng khép kín: gửi -> tra)
+-        const f2 = makeBridge(worker, db);
+-        const c2 = new KeyServerSync({ fetchFn: f2, now: clock(), logger: SILENT });
+-        const r = await c2.lookup('Đêm Nay Đừng Ngủ', 'Ca sĩ B');
+-        check(r.found === true && r.key === 'G# Minor', 'Máy KHÁC hỏi tên bài -> nhận đúng Key vừa được gửi');
+-
+-        // Máy khác dò cùng bài: server đã có -> không gửi trùng
+-        const s2 = await c2.submit({ ...song, key: 'C Major' });
+-        check(s2.ok === true && s2.reason === 'server-already-has' && db._segs.length === 1 && f2.calls.every((x) => x.method === 'GET'), 'Server đã có bài -> KHÔNG gửi trùng (không POST)');
+-
+-        // Có độ dài thì dùng độ dài thật
+-        const db3 = makeFakeDb(); const f3 = makeBridge(worker, db3);
+-        const c3 = new KeyServerSync({ fetchFn: f3, now: clock(), logger: SILENT });
+-        await c3.submit({ title: 'Bài Có Độ Dài Biết Trước', artist: '', key: 'A Major', confidence: 0.9, durationSec: 215.4 });
+-        check(f3.calls[2].body.endSec === 215 && f3.calls[1].body.totalDurationSec === 215, 'Biết độ dài (MPC-HC) -> dùng độ dài thật');
+-    }
+-
+-    console.log('\n[9] Client: submit — từ chối / lỗi / gửi đồng thời');
+-    {
+-        const f = makeBridge(worker, makeFakeDb());
+-        const c = new KeyServerSync({ fetchFn: f, now: clock(), logger: SILENT });
+-        check(KSS.MIN_SUBMIT_CONFIDENCE === 0.55, 'Ngưỡng gửi = 55%, khớp KeyEngine.MIN_CONFIDENCE (0.55)');
+-        check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'C Major', confidence: 0.3 })).reason === 'low-confidence', 'Độ tin cậy thấp (<55%) -> không gửi');
+-        check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'C Major', confidence: 0.54 })).reason === 'low-confidence', '54% -> không gửi');
+-        check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'C Major' })).reason === 'low-confidence', 'Thiếu độ tin cậy -> không gửi');
+-        check((await c.submit({ title: 'Bài Đủ Dài Nhé', key: 'rác', confidence: 0.9 })).reason === 'bad-key', 'Key rác -> không gửi');
+-        check((await c.submit({ title: '', key: 'C Major', confidence: 0.9 })).reason === 'no-title', 'Không có tên bài -> không gửi');
+-        check(f.calls.length === 0, 'Các trường hợp bị từ chối KHÔNG gọi mạng');
+-
+-        // Lookup trước khi gửi bị lỗi (vd server cũ chưa có /find) -> KHÔNG gửi (tránh nhân đôi dữ liệu)
+-        const dbOld = makeFakeDb();
+-        const fOld = makeBridge(worker, dbOld, { failWith: async (u) => (u.pathname === '/find' ? new Response('{"error":"not_found"}', { status: 404 }) : new Response('{"ok":true}', { status: 200 })) });
+-        const now = clock();
+-        const cOld = new KeyServerSync({ fetchFn: fOld, now, logger: SILENT });
+-        const so = await cOld.submit({ title: 'Bài Cho Server Cũ', artist: 'A', key: 'C Major', confidence: 0.9 });
+-        check(so.ok === false && so.reason === 'lookup-failed' && fOld.calls.every((x) => x.method === 'GET'), 'Không xác minh được server -> KHÔNG gửi (an toàn)');
+-        const so2 = await cOld.submit({ title: 'Bài Cho Server Cũ', artist: 'A', key: 'C Major', confidence: 0.9 });
+-        check(so2.reason === 'cooldown' && fOld.calls.length === 1, 'Lỗi vừa xảy ra -> nghỉ 30 giây, không dội server');
+-
+-        // POST thông tin lỗi 500
+-        const dbE = makeFakeDb();
+-        const fE = makeBridge(worker, dbE, { failWith: async (u, init) => (u.pathname === '/set-song-info' ? new Response('{"error":"boom"}', { status: 500 }) : worker.fetch(new Request(u.toString(), init), { DB: dbE })) });
+-        const cE = new KeyServerSync({ fetchFn: fE, now: clock(), logger: SILENT });
+-        const se = await cE.submit({ title: 'Bài Lỗi Khi Lưu Info', artist: '', key: 'C Major', confidence: 0.9 });
+-        check(se.ok === false && se.reason === 'info-failed' && !fE.calls.some((x) => x.path === '/add-segment'), 'Lưu thông tin lỗi -> dừng, không gửi đoạn Key');
+-
+-        // Phục hồi sau cooldown: lần sau gửi thành công
+-        let failNext = true;
+-        const dbR = makeFakeDb();
+-        const fR = makeBridge(worker, dbR, { failWith: async (u, init) => { if (u.pathname === '/add-segment' && failNext) { failNext = false; return new Response('{"error":"x"}', { status: 500 }); } return worker.fetch(new Request(u.toString(), init), { DB: dbR }); } });
+-        const nowR = clock();
+-        const cR = new KeyServerSync({ fetchFn: fR, now: nowR, logger: SILENT });
+-        const sr1 = await cR.submit({ title: 'Bài Phục Hồi Sau Lỗi', artist: 'Z', key: 'D Major', confidence: 0.9 });
+-        check(sr1.ok === false && sr1.reason === 'segment-failed', 'Lưu đoạn Key lỗi -> báo segment-failed');
+-        nowR.advance(31 * 1000);
+-        const sr2 = await cR.submit({ title: 'Bài Phục Hồi Sau Lỗi', artist: 'Z', key: 'D Major', confidence: 0.9 });
+-        check(sr2.ok === true && dbR._segs.length === 1, 'Sau 30 giây thử lại -> thành công, đúng 1 đoạn (không trùng)');
+-
+-        // Gửi ĐỒNG THỜI cùng bài (renderer lock nhiều lần liên tiếp)
+-        const dbC = makeFakeDb(); const fC = makeBridge(worker, dbC);
+-        const cC = new KeyServerSync({ fetchFn: fC, now: clock(), logger: SILENT });
+-        const p = { title: 'Bài Gửi Đồng Thời', artist: 'Q', key: 'E Minor', confidence: 0.9 };
+-        const rs = await Promise.all([cC.submit(p), cC.submit(p), cC.submit(p)]);
+-        check(rs.every((x) => x.ok) && dbC._segs.length === 1 && dbC._songs.length === 1, '3 lần gửi đồng thời -> D1 chỉ có 1 bài + 1 đoạn');
+-    }
+-
+-    console.log('\n[10] Nối dây trong app (kiểm tra mã nguồn)');
+-    {
+-        const main = fs.readFileSync(path.join(ROOT, 'app', 'main.js'), 'utf8');
+-        const pre = fs.readFileSync(path.join(ROOT, 'app', 'preload.js'), 'utf8');
+-        const rend = fs.readFileSync(path.join(ROOT, 'ui', 'js', 'renderer.js'), 'utf8');
+-
+-        check(/require\("\.\.\/core\/integration\/KeyServerSync"\)/.test(main), 'main.js require KeyServerSync');
+-        check(/ipcMain\.handle\("server-submit-key"/.test(main), 'main.js có IPC server-submit-key');
+-        check(/keyServerAutoSync === false/.test(main), 'main.js đọc cờ keyServerAutoSync (mặc định BẬT)');
+-        check(/SongMatcher\.findReference\(resolved\.title, resolved\.artist\)/.test(main) && /Database Miss \(source=\$\{source\}\)/.test(main), 'Đường tra Database cục bộ cũ còn nguyên');
+-        check(/keyServerSync\.lookup\(askedTitle, askedArtist\)/.test(main) && /keyServerSync\.peek\(/.test(main), 'dispatchUnifiedNowPlaying hỏi server khi Database cục bộ trượt');
+-        // Tên bài gửi lên server phải do main tự biết
+-        const h = main.slice(main.indexOf('ipcMain.handle("server-submit-key"'), main.indexOf('ipcMain.handle("server-submit-key"') + 1500);
+-        check(/title: cur\.title/.test(h) && !/title: d\./.test(h), 'IPC gửi Key dùng tên bài của main, không tin tên do renderer khai');
+-        check(/submitDetectedKey: \(data\) => ipcRenderer\.invoke\("server-submit-key", data\)/.test(pre), 'preload.js bắc cầu submitDetectedKey');
+-        check(/try \{\s*if \(keySource\.songDb && !keySource\.songDb\.active\) \{[\s\S]{0,200}submitDetectedKey[\s\S]{0,200}\} catch \(e\) \{\}/.test(rend), 'renderer chỉ gửi khi Key do AI tự dò (Database/Server chưa có bài), nằm trong try/catch');
+-        check(/reportAiResult\("key", \{ key: result\.key, confidence: result\.confidence \}\);/.test(rend), 'Dòng reportAiResult cũ còn nguyên');
+-    }
+-
+-    console.log('\n[11] Ngưỡng 55% và log báo rõ lý do (mỗi lý do 1 lần / 60 giây)');
+-    {
+-        const lines = [];
+-        const LOGGER = { log: (s) => lines.push(String(s)), error() {}, warn() {} };
+-        const mk = (extra = {}) => { const now = clock(); const db = makeFakeDb(); const f = makeBridge(worker, db, extra.bridge); return { now, db, f, c: new KeyServerSync({ fetchFn: f, now, logger: LOGGER }) }; };
+-
+-        // 55% được gửi, đúng ngưỡng
+-        let t = mk();
+-        const ok55 = await t.c.submit({ title: 'Bài Đúng Ngưỡng 55', artist: 'A', key: 'C Major', confidence: 0.55 });
+-        check(ok55.ok === true && ok55.reason === 'submitted' && t.db._segs.length === 1, 'Độ tin cậy đúng 55% -> ĐƯỢC gửi');
+-        check(lines.some((l) => /ĐÃ GỬI Key lên server/.test(l) && /C Major/.test(l) && /app_/.test(l)), 'Log "ĐÃ GỬI Key lên server" có tên bài, Key và id');
+-        check(lines.every((l) => l.startsWith('[KeyServer] ')), 'Mọi dòng log đều có tiền tố [KeyServer]');
+-
+-        // Độ tin cậy thấp: log nêu % và ngưỡng, và chỉ 1 lần / 60 giây
+-        lines.length = 0; t = mk();
+-        for (let i = 0; i < 5; i++) await t.c.submit({ title: 'Bài Độ Tin Cậy Thấp', artist: 'A', key: 'C Major', confidence: 0.4 });
+-        check(lines.length === 1 && /40%/.test(lines[0]) && /55%/.test(lines[0]) && /Bài Độ Tin Cậy Thấp/.test(lines[0]), 'Độ tin cậy thấp: log nêu 40% < ngưỡng 55% và tên bài');
+-        check(lines.length === 1, '5 lần gọi liên tiếp -> chỉ 1 dòng log (không spam)');
+-        t.now.advance(61 * 1000);
+-        await t.c.submit({ title: 'Bài Độ Tin Cậy Thấp', artist: 'A', key: 'C Major', confidence: 0.4 });
+-        check(lines.length === 2, 'Qua 60 giây -> ghi log lại 1 lần');
+-
+-        // Các lý do khác
+-        lines.length = 0; t = mk();
+-        await t.c.submit({ title: '', key: 'C Major', confidence: 0.9 });
+-        check(lines.some((l) => /chưa biết tên bài/.test(l)), 'Không có tên bài -> log nêu rõ');
+-        lines.length = 0;
+-        await t.c.submit({ title: 'Bài Key Rác Nhé', key: 'rác', confidence: 0.9 });
+-        check(lines.some((l) => /không hợp lệ/.test(l)), 'Key rác -> log nêu rõ');
+-        lines.length = 0; t = new KeyServerSync({ fetchFn: t.f, now: clock(), isEnabled: () => false, logger: LOGGER });
+-        await t.submit({ title: 'Bài Đồng Bộ Đang Tắt', key: 'C Major', confidence: 0.9 });
+-        check(lines.some((l) => /đang TẮT/.test(l) && /keyServerAutoSync/.test(l)), 'Đồng bộ tắt -> log nêu rõ cách bật lại');
+-
+-        // Server cũ chưa có /find (404): log gợi ý đúng nguyên nhân
+-        lines.length = 0;
+-        const old = mk({ bridge: { failWith: async () => new Response('{"error":"not_found"}', { status: 404 }) } });
+-        await old.c.lookup('Bài Cho Server Cũ Nè', 'A');
+-        check(lines.length === 1 && /404/.test(lines[0]) && /chưa có code mới/.test(lines[0]), 'Server cũ (404) -> log gợi ý "server chưa có code mới /find?"');
+-        lines.length = 0;
+-        await old.c.submit({ title: 'Bài Cho Server Cũ Nè', artist: 'A', key: 'C Major', confidence: 0.9 });
+-        check(lines.some((l) => /lookup-failed/.test(l) && /không gửi để tránh trùng/.test(l)), 'Không xác minh được server -> log nêu rõ vì sao không gửi');
+-
+-        // Tra server: trúng / trượt đều có log
+-        lines.length = 0;
+-        const dbS = makeFakeDb({ songs: [{ songId: 'v1', title: 'Xin Đừng Rời Xa Anh', updated: 1 }], segs: [{ songId: 'v1', startSec: 0, endSec: 293, key: 'D', mode: 'minor' }] });
+-        const cS = new KeyServerSync({ fetchFn: makeBridge(worker, dbS), now: clock(), logger: LOGGER });
+-        await cS.lookup('Xin Đừng Rời Xa Anh', 'A'); await cS.lookup('Một Bài Chưa Có Trên Server', 'A');
+-        check(lines.some((l) => /Server CÓ bài/.test(l) && /D Minor/.test(l)), 'Tra trúng -> log "Server CÓ bài ... D Minor"');
+-        check(lines.some((l) => /Server CHƯA có bài/.test(l)), 'Tra trượt -> log "Server CHƯA có bài"');
+-
+-        // Server đã có bài khi định gửi
+-        lines.length = 0;
+-        await cS.submit({ title: 'Xin Đừng Rời Xa Anh', artist: 'A', key: 'C Major', confidence: 0.9 });
+-        check(lines.some((l) => /server ĐÃ có bài/.test(l)), 'Server đã có bài -> log nêu rõ vì sao không gửi');
+-
+-        // Lỗi lưu từ server: log nêu mã lỗi
+-        lines.length = 0;
+-        const dbF = makeFakeDb();
+-        const tf = new KeyServerSync({ now: clock(), logger: LOGGER, fetchFn: makeBridge(worker, dbF, { failWith: async (u, init) => (u.pathname === '/add-segment' ? new Response('{"error":"x"}', { status: 500 }) : worker.fetch(new Request(u.toString(), init), { DB: dbF })) }) });
+-        await tf.submit({ title: 'Bài Lỗi Khi Lưu Đoạn', artist: 'A', key: 'C Major', confidence: 0.9 });
+-        check(lines.some((l) => /segment-failed/.test(l) && /http-500/.test(l)), 'Lỗi lưu đoạn Key -> log nêu segment-failed và mã http-500');
+-
+-        // Logger hỏng không được làm hỏng luồng chính
+-        const tb = new KeyServerSync({ now: clock(), fetchFn: makeBridge(worker, makeFakeDb()), logger: { log() { throw new Error('logger hỏng'); } } });
+-        const rb = await tb.submit({ title: 'Bài Logger Bị Hỏng', artist: 'A', key: 'C Major', confidence: 0.9 });
+-        check(rb.ok === true, 'Logger ném lỗi -> việc gửi Key vẫn thành công');
+-
+-        // main.js có log báo "AI đã khóa Key" và "chưa biết tên bài"
+-        const mainSrc = fs.readFileSync(path.join(ROOT, 'app', 'main.js'), 'utf8');
+-        check(/AI đã khóa Key \$\{d\.key\}/.test(mainSrc) && /CHƯA BIẾT TÊN BÀI/.test(mainSrc), 'main.js ghi log khi nhận Key đã khóa từ AI (kể cả khi chưa biết tên bài)');
+-    }
+-
+-    console.log('\n' + (failCount === 0 ? '✅ TẤT CẢ ĐỀU PASS' : '❌ CÓ ' + failCount + ' LỖI'));
+-    process.exit(failCount === 0 ? 0 : 1);
+-})().catch((e) => { console.error('TEST CRASH:', e); process.exit(2); });
+diff --git a/tests/unit/KeyServerYtSearchA91.verify.js b/tests/unit/KeyServerYtSearchA91.verify.js
+deleted file mode 100644
+index 356bc75..0000000
+--- a/tests/unit/KeyServerYtSearchA91.verify.js
++++ /dev/null
+@@ -1,35 +0,0 @@
+-/**
+- * KeyServerYtSearchA91.verify.js — TASK A91: server tim thoi luong theo TEN bai (ID app_xxx) + trang chu co o nhap/tim thoi luong.
+- * Chay code THAT cua worker.js voi D1 gia + trang tim kiem YouTube gia. Chay: node tests/unit/KeyServerYtSearchA91.verify.js
+- */
+-'use strict';
+-const fs = require('fs'), path = require('path');
+-const ROOT = path.join(__dirname, '..', '..');
+-let fails = 0;
+-const check = (c, m) => { if (c) console.log('  ✅ ' + m); else { fails++; console.log('  ❌ ' + m); } };
+-const src = fs.readFileSync(path.join(ROOT, 'worker.js'), 'utf8').replace(/^export default/m, 'module.exports =') + '\n;module.exports.__parse = phanTichKetQuaTimYouTube;';
+-const mod = { exports: {} }; new Function('module', 'exports', src)(mod, mod.exports); const w = mod.exports;
+-check(fs.readFileSync(path.join(ROOT, 'worker.js'), 'utf8') === fs.readFileSync(path.join(ROOT, 'server', 'worker.js'), 'utf8'), 'worker.js == server/worker.js');
+-const vr = (id, title, len) => '{"videoRenderer":{"videoId":"' + id + '","thumbnail":{},"title":{"runs":[{"text":"' + title + '"}],"accessibility":{}},"lengthText":{"accessibility":{"accessibilityData":{"label":"x"}},"simpleText":"' + len + '"},"viewCountText":{}}}';
+-const page = '<html>' + vr('aaaaaaaaaa1', 'Anh Chưa Đủ Tư Cách \\"Karaoke\\"', '4:25') + vr('bbbbbbbbbb2', 'Live', '1:02:03') + '{"videoRenderer":{"videoId":"cccccccccc3","title":{"runs":[{"text":"Dang live"}]}}}' + vr('aaaaaaaaaa1', 'trung', '4:25') + '</html>';
+-const ds = w.__parse(page);
+-check(ds.length === 2 && ds[0].videoId === 'aaaaaaaaaa1' && ds[0].durationSec === 265 && ds[0].title === 'Anh Chưa Đủ Tư Cách "Karaoke"', 'doc dung video 1: 4:25 = 265 s, tieu de bo escape');
+-check(ds[1].durationSec === 3723, '1:02:03 = 3723 s; bo video khong co thoi luong va video trung');
+-let fetched = [];
+-globalThis.fetch = async (u) => { fetched.push(u); if (/results/.test(u)) return new Response(page, { status: 200 }); return new Response('"lengthSeconds":"200"', { status: 200 }); };
+-const db = { prepare(sql) { const q = sql.replace(/\s+/g, ' '); let a = []; const api = { bind(...x) { a = x; return api; }, async first() { if (a[0] === 'app_1234567890abcdef') return { songId: a[0], title: 'Anh Chưa Đủ Tư Cách - Lý Tuấn Kiệt', totalSec: null }; if (a[0] === 'app_noname00000000') return { songId: a[0], title: null }; return null; } }; return api; } };
+-const J = async (r) => ({ status: r.status, j: await r.json() });
+-(async () => {
+-    let r = await J(await w.fetch(new Request('https://x/youtube-search-duration?id=app_1234567890abcdef'), { DB: db }));
+-    check(r.status === 200 && r.j.cach === 'ten' && r.j.ungVien.length === 2 && /search_query=Anh/.test(fetched[0]), 'ID app_ -> tim theo TEN da luu, tra ung vien (khong luu)');
+-    r = await J(await w.fetch(new Request('https://x/youtube-search-duration?id=app_noname00000000'), { DB: db }));
+-    check(r.status === 404 && r.j.error === 'khong_co_ten_bai', 'bai khong co ten -> 404 bao ro');
+-    r = await J(await w.fetch(new Request('https://x/youtube-search-duration?id=abcDEF12345'), { DB: db }));
+-    check(r.status === 200 && r.j.cach === 'id' && r.j.ungVien[0].durationSec === 200, 'ID YouTube that -> lay dung video do');
+-    globalThis.fetch = async () => new Response('<html>nothing</html>', { status: 200 });
+-    r = await J(await w.fetch(new Request('https://x/youtube-search-duration?id=app_1234567890abcdef'), { DB: db }));
+-    check(r.status === 502 && r.j.error === 'khong_tim_duoc_tren_youtube', 'YouTube khong co ket qua -> 502 bao ro (nhap tay)');
+-    const home = await (await w.fetch(new Request('https://x/'), { DB: {} })).text();
+-    check(/tg-luu/.test(home) && /Tim tren YouTube/.test(home) && /tgChiTiet/.test(home), 'trang chu co o nhap thoi luong + nut Tim tren YouTube (danh sach + chi tiet)');
+-    console.log(fails ? '\n❌ ' + fails + ' loi' : '\n✅ TAT CA DAT'); process.exit(fails ? 1 : 0);
+-})();
+diff --git a/tests/unit/LicenseManager01.verify.js b/tests/unit/LicenseManager01.verify.js
+deleted file mode 100644
+index 8b1628e..0000000
+--- a/tests/unit/LicenseManager01.verify.js
++++ /dev/null
+@@ -1,200 +0,0 @@
+-// LICENSE-01 — kiểm thử app/LicenseManager.js nối thẳng với MENU-LICENSE-SERVER/worker.js (D1 giả lập bằng SQLite thật).
+-// Không chạm mạng. Đồng hồ và "mất mạng" được giả lập. Chạy: node tests/unit/LicenseManager01.verify.js
+-const fs = require('fs'), path = require('path'), os = require('os'), crypto = require('crypto');
+-const { DatabaseSync } = require('node:sqlite');
+-const { createLicenseManager, normalizeKey, machineCodeFromRaw } = require('../../app/LicenseManager.js');
+-let pass = 0, fail = 0;
+-const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m, x === undefined ? '' : JSON.stringify(x)); } };
+-const root = path.join(__dirname, '..', '..');
+-const H = 3600 * 1000;
+-
+-function fakeD1(db) {
+-  return { prepare(sql) { let params = []; const st = {
+-    bind(...p) { params = p; return st; },
+-    async first() { return db.prepare(sql).get(...params) || null; },
+-    async all() { return { results: db.prepare(sql).all(...params) }; },
+-    async run() { const r = db.prepare(sql).run(...params); return { meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }; } }; return st; } };
+-}
+-const pubOf = (kp) => kp.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+-const privOf = (kp) => kp.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
+-
+-(async () => {
+-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'licmgr-'));
+-  fs.copyFileSync(path.join(root, 'MENU-LICENSE-SERVER', 'worker.js'), path.join(tmp, 'worker.mjs'));
+-  const worker = (await import('file://' + path.join(tmp, 'worker.mjs'))).default;
+-  const db = new DatabaseSync(':memory:');
+-  db.exec(fs.readFileSync(path.join(root, 'MENU-LICENSE-SERVER', 'schema.sql'), 'utf8'));
+-  const kp = crypto.generateKeyPairSync('ed25519');
+-  const env = { DB: fakeD1(db), ADMIN_TOKEN: 'admin-token-for-test-0123456789', LICENSE_SIGN_KEY: privOf(kp) };
+-
+-  let netDown = false, fetchCalls = 0, forceEnv = null;
+-  const fetchFn = async (url, init) => {
+-    fetchCalls++;
+-    if (netDown) throw new Error('mất mạng');
+-    return worker.fetch(new Request(url, init), forceEnv || env);
+-  };
+-  const admin = async (p, body) => (await (await worker.fetch(new Request('https://x.test' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + env.ADMIN_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), env)).json());
+-  const newKey = async (plan, machine) => (await admin('/admin/license/create', { plan, machine })).keys[0].key;
+-
+-  let clock = Date.now();
+-  const mk = (dir, extra) => createLicenseManager(Object.assign({ userDataDir: dir, appDir: tmp, publicKeyText: pubOf(kp), fetchFn, now: () => clock, machineIdProvider: async () => 'may-A', getServerUrl: () => 'https://lic.test' }, extra || {}));
+-  const dirA = path.join(tmp, 'userA'); fs.mkdirSync(dirA);
+-
+-  console.log('== khoá công khai (fail-closed)');
+-  const noKey = createLicenseManager({ userDataDir: dirA, appDir: tmp, now: () => clock, fetchFn, machineIdProvider: async () => 'may-A' }); // tmp không có license-public-key.txt
+-  await noKey.init();
+-  ok(!noKey.isLicensed() && noKey.getStatus().code === 'NO_PUBLIC_KEY', 'thiếu license-public-key.txt -> KHOÁ, báo rõ lý do');
+-  const badKey = createLicenseManager({ userDataDir: dirA, appDir: tmp, publicKeyText: 'abc', now: () => clock, fetchFn, machineIdProvider: async () => 'may-A' });
+-  await badKey.init();
+-  ok(!badKey.isLicensed() && badKey.getStatus().code === 'INVALID_PUBLIC_KEY', 'khoá công khai hỏng -> KHOÁ');
+-  ok((await noKey.activate('MENU-AAAAA-AAAAA-AAAAA-AAAAA')).reason === 'NO_PUBLIC_KEY', 'thiếu khoá công khai thì không cho kích hoạt');
+-  fs.writeFileSync(path.join(tmp, 'license-public-key.txt'), pubOf(kp) + '\n');
+-  const fromFile = createLicenseManager({ userDataDir: dirA, appDir: tmp, now: () => clock, fetchFn, machineIdProvider: async () => 'may-A' });
+-  await fromFile.init();
+-  ok(fromFile.getStatus().code === 'UNLICENSED', 'đọc được khoá công khai từ file (có xuống dòng cuối)');
+-  fs.unlinkSync(path.join(tmp, 'license-public-key.txt'));
+-
+-  console.log('== mã máy');
+-  const mcRe = /^[A-HJKMNP-TV-Z2-9]{5}(-[A-HJKMNP-TV-Z2-9]{5}){3}$/;
+-  ok(mcRe.test(machineCodeFromRaw('x')) && machineCodeFromRaw('x') === machineCodeFromRaw('x') && machineCodeFromRaw('x') !== machineCodeFromRaw('y'), 'mã máy đúng định dạng, ổn định, khác máy thì khác mã');
+-  const regOut = 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\r\n    MachineGuid    REG_SZ    4C4C4544-0042-4A10-8058-B5C04F4D4D32\r\n';
+-  let regArgs = null;
+-  const winMgr = createLicenseManager({ userDataDir: dirA, appDir: tmp, platform: 'win32', exec: async (c, a) => { regArgs = [c].concat(a); return { code: 0, stdout: regOut }; } });
+-  ok((await winMgr.getMachineCode()) === machineCodeFromRaw('win:4c4c4544-0042-4a10-8058-b5c04f4d4d32') && regArgs[0] === 'reg', 'Windows: đọc MachineGuid từ registry');
+-  const winFail = createLicenseManager({ userDataDir: dirA, appDir: tmp, platform: 'win32', exec: async () => ({ code: 1, stdout: '' }) });
+-  ok(mcRe.test(await winFail.getMachineCode()), 'registry lỗi -> dùng dự phòng, vẫn ra mã hợp lệ');
+-
+-  console.log('== chưa kích hoạt / nhập key');
+-  const m1 = mk(dirA); await m1.init();
+-  ok(!m1.isLicensed() && m1.getStatus().code === 'UNLICENSED' && mcRe.test(m1.getStatus().machineCode), 'chưa kích hoạt -> KHOÁ, có mã máy để gửi cho bạn');
+-  fetchCalls = 0;
+-  ok((await m1.activate('abc')).reason === 'INVALID_KEY' && fetchCalls === 0, 'key sai định dạng bị chặn ngay, không gọi mạng');
+-  const k3m = await newKey('3m');
+-  netDown = true;
+-  ok((await m1.activate(k3m)).reason === 'NETWORK' && !m1.isLicensed(), 'mất mạng lúc kích hoạt -> báo lỗi mạng, vẫn khoá');
+-  netDown = false;
+-  const r1 = await m1.activate(k3m.toLowerCase());
+-  ok(r1.ok && m1.isLicensed(), 'kích hoạt thành công -> mở khoá');
+-  const st1 = m1.getStatus();
+-  ok(st1.plan === '3m' && st1.daysLeft >= 88 && st1.keyHint === k3m.slice(-4) && !JSON.stringify(st1).includes(k3m), 'trạng thái: gói 3 tháng, ~90 ngày, chỉ lộ 4 số cuối key');
+-  ok(fs.existsSync(path.join(dirA, 'license.json')), 'đã lưu license trên máy');
+-
+-  console.log('== mở lại app / sao chép sang máy khác / sửa file');
+-  netDown = true;
+-  const m2 = mk(dirA); await m2.init();
+-  ok(m2.isLicensed(), 'mở lại app khi mất mạng vẫn dùng được (còn trong hạn 72 giờ)');
+-  netDown = false;
+-  const dirB = path.join(tmp, 'userB'); fs.mkdirSync(dirB); fs.copyFileSync(path.join(dirA, 'license.json'), path.join(dirB, 'license.json'));
+-  const mB = mk(dirB, { machineIdProvider: async () => 'may-B' }); await mB.init();
+-  ok(!mB.isLicensed() && mB.getStatus().code === 'MACHINE_MISMATCH', 'chép license.json sang máy khác -> KHOÁ');
+-  const dirC = path.join(tmp, 'userC'); fs.mkdirSync(dirC);
+-  const j = JSON.parse(fs.readFileSync(path.join(dirA, 'license.json'), 'utf8'));
+-  const pj = JSON.parse(j.payload); pj.expiresAt += 400 * 24 * H; j.payload = JSON.stringify(pj);
+-  fs.writeFileSync(path.join(dirC, 'license.json'), JSON.stringify(j));
+-  const mC = mk(dirC); await mC.init();
+-  ok(!mC.isLicensed() && mC.getStatus().code === 'TAMPERED', 'sửa ngày hết hạn trong file -> chữ ký sai -> KHOÁ');
+-  const kp2 = crypto.generateKeyPairSync('ed25519');
+-  const mFake = mk(path.join(tmp, 'userF'), { fetchFn: async (u, i) => worker.fetch(new Request(u, i), Object.assign({}, env, { LICENSE_SIGN_KEY: privOf(kp2) })) });
+-  await mFake.init();
+-  const rf = await mFake.activate(await newKey('1y'));
+-  ok(rf.reason === 'BAD_SIGNATURE' && !mFake.isLicensed(), 'server giả/ký bằng khoá khác -> từ chối, vẫn khoá');
+-
+-  console.log('== 72 giờ offline & lùi đồng hồ');
+-  const t0 = clock;
+-  netDown = true;
+-  clock = t0 + 71 * H;
+-  ok(m1.isLicensed(), 'offline 71 giờ -> vẫn dùng được');
+-  clock = t0 + 73 * H;
+-  ok(!m1.isLicensed() && m1.getStatus().code === 'NEED_ONLINE', 'offline 73 giờ -> KHOÁ, cần mạng');
+-  ok((await m1.refresh()).reason === 'NETWORK' && m1.getStatus().code === 'NEED_ONLINE', 'thử kiểm tra khi vẫn mất mạng -> vẫn khoá');
+-  netDown = false;
+-  ok((await m1.refresh()).ok && m1.isLicensed(), 'có mạng + kiểm tra lại -> mở khoá lại');
+-  const t1 = clock;
+-  clock = t1 + 10 * H; await m1.refresh();            // app chạy tới +10 giờ, kiểm tra server thành công
+-  clock = t1 + 20 * H; await mk(dirA).init();          // mở lại ở +20 giờ: quá 6 giờ nên tự kiểm tra lại, mốc thời gian lớn nhất = +20 giờ
+-  clock = t1 + 12 * H; // lùi đồng hồ 8 giờ so với lần dùng trước
+-  netDown = true;
+-  const mRoll = mk(dirA); await mRoll.init();
+-  ok(!mRoll.isLicensed() && mRoll.getStatus().code === 'NEED_ONLINE', 'lùi đồng hồ -> bắt buộc kiểm tra online, offline thì KHOÁ');
+-  netDown = false;
+-  const mRoll2 = mk(dirA); await mRoll2.init();
+-  ok(mRoll2.isLicensed(), 'có mạng: tự kiểm tra lại lúc mở app -> hợp lệ (đồng hồ đã chỉnh đúng cũng không bị kẹt)');
+-  clock = t0;
+-
+-  console.log('== hết hạn');
+-  const dirE = path.join(tmp, 'userE'); fs.mkdirSync(dirE);
+-  const mE = mk(dirE); await mE.init();
+-  await mE.activate(await newKey('3d'));
+-  clock = t0 + 3 * 24 * H + 1000;
+-  ok(!mE.isLicensed() && mE.getStatus().code === 'EXPIRED', 'hết hạn 3 ngày -> KHOÁ (đánh giá cục bộ, không cần mạng)');
+-  clock = t0;
+-
+-  console.log('== server thu hồi / hết hạn / lỗi tạm thời');
+-  const dirR = path.join(tmp, 'userR'); fs.mkdirSync(dirR);
+-  const mR = mk(dirR); await mR.init();
+-  const kR = await newKey('6m');
+-  await mR.activate(kR);
+-  const idR = db.prepare('SELECT id FROM licenses ORDER BY id DESC LIMIT 1').get().id;
+-  const bad500 = async () => new Response(JSON.stringify({ ok: false, reason: 'SERVER_ERROR', message: 'Lỗi server' }), { status: 500 });
+-  const mT = mk(dirR, { fetchFn: bad500 }); await mT.init();
+-  ok((await mT.refresh()).reason === 'SERVER_ERROR' && mT.isLicensed() && fs.existsSync(path.join(dirR, 'license.json')), 'server lỗi tạm thời (500) -> KHÔNG khoá, không xoá license');
+-  const garbage = async () => new Response('<html>502</html>', { status: 502 });
+-  const mG = mk(dirR, { fetchFn: garbage }); await mG.init();
+-  ok((await mG.refresh()).reason === 'NETWORK' && mG.isLicensed(), 'server trả rác (không phải JSON) -> coi như lỗi mạng, không khoá');
+-  await admin('/admin/license/revoke', { id: idR });
+-  const rv = await mR.refresh();
+-  ok(rv.reason === 'REVOKED' && !mR.isLicensed() && mR.getStatus().code === 'REVOKED' && !fs.existsSync(path.join(dirR, 'license.json')), 'server thu hồi -> KHOÁ ngay lần kiểm tra kế tiếp, xoá license, báo lý do');
+-  await admin('/admin/license/restore', { id: idR });
+-  ok((await mR.activate(kR)).ok && mR.isLicensed(), 'khôi phục -> nhập lại key dùng được');
+-  db.prepare('UPDATE licenses SET expires_at = ? WHERE id = ?').run(Date.now() - 1000, idR);
+-  ok((await mR.refresh()).reason === 'EXPIRED' && !mR.isLicensed(), 'server báo hết hạn -> KHOÁ');
+-
+-  console.log('== gia hạn bằng key mới');
+-  const dirN = path.join(tmp, 'userN'); fs.mkdirSync(dirN);
+-  const mN = mk(dirN); await mN.init();
+-  await mN.activate(await newKey('3d'));
+-  ok(mN.getStatus().plan === '3d', 'đang dùng gói 3 ngày');
+-  const kOther = await newKey('1y', 'ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ');
+-  ok((await mN.activate(kOther)).reason === 'MACHINE_MISMATCH' && mN.isLicensed() && mN.getStatus().plan === '3d', 'key gắn máy khác: bị từ chối và license đang dùng KHÔNG bị mất');
+-  ok((await mN.activate(await newKey('1y'))).ok && mN.getStatus().plan === '1y', 'nhập key mới hợp lệ -> chuyển sang gói 1 năm');
+-
+-  console.log('== watcher');
+-  const dirW = path.join(tmp, 'userW'); fs.mkdirSync(dirW);
+-  const mWt = mk(dirW, { tickMs: 20 }); await mWt.init();
+-  await mWt.activate(await newKey('6m'));
+-  const idW = db.prepare('SELECT id FROM licenses ORDER BY id DESC LIMIT 1').get().id;
+-  let lost = 0, lostStatus = null;
+-  mWt.startWatcher({ onLost: (s) => { lost++; lostStatus = s; } });
+-  await new Promise((r) => setTimeout(r, 80));
+-  ok(lost === 0, 'còn hiệu lực -> watcher không báo mất');
+-  await admin('/admin/license/revoke', { id: idW });
+-  clock = t0 + 7 * H; // quá chu kỳ kiểm tra lại 6 giờ -> watcher hỏi server
+-  await new Promise((r) => setTimeout(r, 150));
+-  ok(lost === 1 && lostStatus.code === 'REVOKED', 'bị thu hồi lúc đang chạy -> watcher báo mất đúng 1 lần', { lost, code: lostStatus && lostStatus.code });
+-  mWt.stopWatcher(); clock = t0;
+-
+-  console.log('== gói vĩnh viễn');
+-  const dirL = path.join(tmp, 'userL'); fs.mkdirSync(dirL);
+-  const mL = mk(dirL); await mL.init();
+-  await mL.activate(await newKey('life'));
+-  const stL = mL.getStatus();
+-  ok(mL.isLicensed() && stL.plan === 'life' && stL.planLabel === 'Vĩnh viễn' && stL.daysLeft === null && /Vĩnh viễn/.test(stL.message), 'gói Vĩnh viễn: mở khoá, hiện "Vĩnh viễn", không đếm ngày');
+-  clock = t0 + 5 * 365 * 24 * H; netDown = true;
+-  ok(!mL.isLicensed() && mL.getStatus().code === 'NEED_ONLINE', 'vĩnh viễn vẫn phải xác minh online (offline quá 72 giờ -> khoá)');
+-  netDown = false; clock = t0 + 3 * H;
+-  const idL = db.prepare('SELECT id FROM licenses ORDER BY id DESC LIMIT 1').get().id;
+-  await admin('/admin/license/revoke', { id: idL });
+-  ok((await mL.refresh()).reason === 'REVOKED' && !mL.isLicensed(), 'THU HỒI key vĩnh viễn -> app khoá ở lần kiểm tra kế tiếp');
+-  clock = t0;
+-
+-  console.log('== khởi động lại');
+-  const rl = []; m1.relaunch({ relaunch: () => rl.push('relaunch'), quit: () => rl.push('quit') });
+-  ok(rl.join() === 'relaunch,quit', 'relaunch(app) = app.relaunch() rồi app.quit()');
+-
+-  console.log('== tiện ích');
+-  ok(normalizeKey('menu-aaaaa-bbbbb-ccccc-dddd0') === null && normalizeKey('menu-aaaaa-bbbbb-ccccc-ddddO') === null && normalizeKey('menu 22222 33333 44444 55555') === 'MENU-22222-33333-44444-55555' && normalizeKey(' menu-aaaaa-bbbbb-ccccc-ddddd ') === 'MENU-AAAAA-BBBBB-CCCCC-DDDDD', 'chuẩn hoá key: bỏ khoảng trắng, chấp nhận chữ thường; ký tự ngoài bảng (0, O) bị loại');
+-
+-  console.log('\nLicenseManager01: ' + pass + ' đạt, ' + fail + ' lỗi');
+-  fs.rmSync(tmp, { recursive: true, force: true });
+-  process.exit(fail ? 1 : 0);
+-})().catch((e) => { console.error('LỖI TEST:', e); process.exit(2); });
+diff --git a/tests/unit/LicenseServer01.verify.js b/tests/unit/LicenseServer01.verify.js
+deleted file mode 100644
+index 3bc891c..0000000
+--- a/tests/unit/LicenseServer01.verify.js
++++ /dev/null
+@@ -1,140 +0,0 @@
+-// LICENSE-01 — kiểm thử server License (MENU-LICENSE-SERVER/worker.js) với D1 giả lập bằng SQLite thật (node:sqlite).
+-// Không chạm mạng/Cloudflare. Chạy: node tests/unit/LicenseServer01.verify.js
+-const fs = require('fs'), path = require('path'), os = require('os'), crypto = require('crypto');
+-const { DatabaseSync } = require('node:sqlite');
+-let pass = 0, fail = 0;
+-const ok = (c, m, x) => { if (c) { pass++; console.log('  OK  ', m); } else { fail++; console.log('  FAIL', m, x === undefined ? '' : JSON.stringify(x)); } };
+-const root = path.join(__dirname, '..', '..');
+-
+-function fakeD1(db) {
+-  return { prepare(sql) {
+-    let params = [];
+-    const st = {
+-      bind(...p) { params = p; return st; },
+-      async first() { return db.prepare(sql).get(...params) || null; },
+-      async all() { return { results: db.prepare(sql).all(...params) }; },
+-      async run() { const r = db.prepare(sql).run(...params); return { meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }; }
+-    };
+-    return st;
+-  } };
+-}
+-
+-(async () => {
+-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lic-'));
+-  const mjs = path.join(tmp, 'worker.mjs');
+-  fs.copyFileSync(path.join(root, 'MENU-LICENSE-SERVER', 'worker.js'), mjs);
+-  const W = await import('file://' + mjs);
+-  const worker = W.default;
+-
+-  const db = new DatabaseSync(':memory:');
+-  db.exec(fs.readFileSync(path.join(root, 'MENU-LICENSE-SERVER', 'schema.sql'), 'utf8'));
+-  db.exec(fs.readFileSync(path.join(root, 'MENU-LICENSE-SERVER', 'schema.sql'), 'utf8')); // chạy lại không hỏng
+-  const kp = crypto.generateKeyPairSync('ed25519');
+-  const env = {
+-    DB: fakeD1(db), ADMIN_TOKEN: 'admin-token-for-test-0123456789',
+-    LICENSE_SIGN_KEY: kp.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64')
+-  };
+-  const verify = (r) => crypto.verify(null, Buffer.from(r.payload), kp.publicKey, Buffer.from(r.sig, 'base64'));
+-
+-  const call = async (p, body, admin) => {
+-    const headers = { 'Content-Type': 'application/json' };
+-    if (admin !== undefined) headers.Authorization = 'Bearer ' + admin;
+-    const res = await worker.fetch(new Request('https://x.test' + p, { method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body) }), env);
+-    return { status: res.status, body: await res.json() };
+-  };
+-  const adm = (p, b) => call(p, b === undefined ? undefined : b, env.ADMIN_TOKEN);
+-  const M1 = 'AAAAA-BBBBB-CCCCC-DDDDD', M2 = 'EEEEE-FFFFF-GGGGG-HHHHH';
+-
+-  console.log('== cơ bản & quyền quản trị');
+-  ok((await call('/health')).body.ok === true, '/health ok');
+-  ok((await call('/admin/license/list')).status === 401, 'không có token -> 401');
+-  ok((await call('/admin/license/list', undefined, 'sai')).status === 401, 'sai token -> 401');
+-  ok((await call('/license/khac', {})).status === 404, 'đường dẫn lạ -> 404');
+-  const noAdmin = await worker.fetch(new Request('https://x.test/admin/license/list'), { DB: env.DB });
+-  ok(noAdmin.status === 500, 'server chưa đặt ADMIN_TOKEN -> từ chối (không mở toang)');
+-
+-  console.log('== tạo key');
+-  ok((await adm('/admin/license/create', { plan: 'xx' })).body.ok === false, 'gói sai bị từ chối');
+-  ok((await adm('/admin/license/create', { plan: '3d', machine: '!!' })).body.ok === false, 'mã máy sai bị từ chối');
+-  const c1 = await adm('/admin/license/create', { plan: '3d', note: 'khach A' });
+-  const key1 = c1.body.keys && c1.body.keys[0].key;
+-  ok(/^MENU(-[A-HJKMNP-TV-Z2-9]{5}){4}$/.test(key1), 'key đúng định dạng MENU-XXXXX-XXXXX-XXXXX-XXXXX', key1);
+-  const list = (await adm('/admin/license/list')).body.licenses;
+-  ok(list.length === 1 && list[0].hint === key1.slice(-4) && !JSON.stringify(list).includes(key1), 'danh sách chỉ có 4 số cuối, không lộ key đầy đủ');
+-  ok(!db.prepare('SELECT key_hash FROM licenses').get().key_hash.includes(key1.slice(5, 10)), 'DB chỉ lưu băm');
+-  const many = await adm('/admin/license/create', { plan: '1y', count: 999 });
+-  ok(many.body.keys.length === 50, 'số lượng tối đa 50/lần');
+-  ok(new Set(many.body.keys.map((k) => k.key)).size === 50, '50 key không trùng nhau');
+-
+-  console.log('== kích hoạt');
+-  ok((await call('/license/activate', { key: 'MENU-AAAAA-AAAAA-AAAAA-AAAAA', machine: M1 })).body.reason === 'INVALID_KEY', 'key không tồn tại/sai ký tự -> INVALID_KEY');
+-  ok((await call('/license/activate', { key: key1, machine: 'x' })).body.reason === 'BAD_REQUEST', 'mã máy sai -> BAD_REQUEST');
+-  ok((await call('/license/activate', 'rac')).body.reason === 'INVALID_KEY', 'body rác không làm sập server');
+-  const t0 = Date.now();
+-  const a1 = (await call('/license/activate', { key: key1.toLowerCase().replace(/-/g, ' '), machine: M1.toLowerCase() })).body;
+-  ok(a1.ok === true, 'kích hoạt OK (chấp nhận gõ thường/khoảng trắng)', a1);
+-  const p1 = JSON.parse(a1.payload);
+-  ok(verify(a1), 'chữ ký Ed25519 hợp lệ');
+-  ok(p1.machine === M1.replace(/-/g, '') && p1.plan === '3d', 'payload gắn đúng mã máy + gói');
+-  ok(p1.expiresAt - p1.activatedAt === 3 * 86400000 && p1.activatedAt >= t0, 'hạn = 3 ngày tính từ lúc kích hoạt');
+-  ok(!verify({ payload: a1.payload.replace('3d', '1y'), sig: a1.sig }), 'sửa payload thì chữ ký sai');
+-  const a1b = (await call('/license/activate', { key: key1, machine: M1 })).body;
+-  ok(a1b.ok && JSON.parse(a1b.payload).expiresAt === p1.expiresAt, 'kích hoạt lại cùng máy: giữ nguyên hạn (cài lại app không lợi gì)');
+-  ok((await call('/license/activate', { key: key1, machine: M2 })).body.reason === 'MACHINE_MISMATCH', 'máy khác dùng key đã gắn -> MACHINE_MISMATCH');
+-
+-  console.log('== kiểm tra định kỳ');
+-  ok((await call('/license/check', { key: key1, machine: M1 })).body.ok === true, 'check đúng máy OK');
+-  ok((await call('/license/check', { key: key1, machine: M2 })).body.reason === 'MACHINE_MISMATCH', 'check sai máy bị chặn');
+-  const k2 = (await adm('/admin/license/create', { plan: '3m' })).body.keys[0].key;
+-  ok((await call('/license/check', { key: k2, machine: M1 })).body.reason === 'NOT_ACTIVATED', 'check key chưa kích hoạt -> NOT_ACTIVATED');
+-
+-  console.log('== thu hồi / khôi phục / đổi máy / hết hạn');
+-  const id1 = list[0].id;
+-  await adm('/admin/license/revoke', { id: id1 });
+-  ok((await call('/license/check', { key: key1, machine: M1 })).body.reason === 'REVOKED', 'thu hồi -> check báo REVOKED');
+-  ok((await call('/license/activate', { key: key1, machine: M1 })).body.reason === 'REVOKED', 'thu hồi -> không kích hoạt lại được');
+-  await adm('/admin/license/restore', { id: id1 });
+-  ok((await call('/license/check', { key: key1, machine: M1 })).body.ok === true, 'khôi phục -> dùng lại được, giữ trạng thái active');
+-  await adm('/admin/license/unbind', { id: id1 });
+-  const a2 = (await call('/license/activate', { key: key1, machine: M2 })).body;
+-  ok(a2.ok && JSON.parse(a2.payload).expiresAt === p1.expiresAt, 'đổi máy: máy mới kích hoạt được, GIỮ NGUYÊN hạn cũ');
+-  ok((await call('/license/check', { key: key1, machine: M1 })).body.reason === 'MACHINE_MISMATCH', 'máy cũ bị chặn sau khi đổi máy');
+-  db.prepare('UPDATE licenses SET expires_at = ? WHERE id = ?').run(Date.now() - 1000, id1);
+-  ok((await call('/license/check', { key: key1, machine: M2 })).body.reason === 'EXPIRED', 'quá hạn -> EXPIRED');
+-  ok((await call('/license/activate', { key: key1, machine: M2 })).body.reason === 'EXPIRED', 'quá hạn -> không kích hoạt lại để lấy thêm hạn');
+-
+-  console.log('== key gắn sẵn mã máy & tranh chấp');
+-  const kb = (await adm('/admin/license/create', { plan: '6m', machine: M1 })).body.keys[0].key;
+-  ok((await call('/license/activate', { key: kb, machine: M2 })).body.reason === 'MACHINE_MISMATCH', 'key gắn sẵn máy A: máy B không kích hoạt được');
+-  ok((await call('/license/activate', { key: kb, machine: M1 })).body.ok === true, 'key gắn sẵn máy A: máy A kích hoạt được');
+-  const kr = (await adm('/admin/license/create', { plan: '1y' })).body.keys[0].key;
+-  const rs = await Promise.all([call('/license/activate', { key: kr, machine: M1 }), call('/license/activate', { key: kr, machine: M2 })]);
+-  ok(rs.filter((r) => r.body.ok).length === 1 && rs.filter((r) => r.body.reason === 'MACHINE_MISMATCH').length === 1, '2 máy kích hoạt cùng lúc 1 key: đúng 1 máy thắng');
+-
+-  console.log('== gói vĩnh viễn (life)');
+-  const kl = (await adm('/admin/license/create', { plan: 'life', note: 'vinh vien' })).body.keys[0].key;
+-  const al = (await call('/license/activate', { key: kl, machine: M1 })).body;
+-  ok(al.ok && JSON.parse(al.payload).plan === 'life' && JSON.parse(al.payload).expiresAt === W.FOREVER_TS && verify(al), 'key vĩnh viễn kích hoạt được, hạn = năm 3000, chữ ký hợp lệ');
+-  ok((await call('/license/check', { key: kl, machine: M1 })).body.ok === true, 'key vĩnh viễn check OK');
+-  ok((await call('/license/check', { key: kl, machine: M2 })).body.reason === 'MACHINE_MISMATCH', 'key vĩnh viễn vẫn chỉ 1 máy');
+-  const idl = db.prepare('SELECT id FROM licenses ORDER BY id DESC LIMIT 1').get().id;
+-  await adm('/admin/license/revoke', { id: idl });
+-  ok((await call('/license/check', { key: kl, machine: M1 })).body.reason === 'REVOKED', 'THU HỒI key vĩnh viễn -> REVOKED');
+-  await adm('/admin/license/restore', { id: idl });
+-  ok((await call('/license/check', { key: kl, machine: M1 })).body.ok === true, 'khôi phục key vĩnh viễn -> dùng lại được');
+-  await adm('/admin/license/unbind', { id: idl });
+-  ok((await call('/license/activate', { key: kl, machine: M2 })).body.ok === true, 'đổi máy key vĩnh viễn OK');
+-
+-  console.log('== tính hạn theo tháng');
+-  const d = (iso) => Date.parse(iso);
+-  ok(W.addPlan(d('2026-01-31T00:00:00Z'), '3m') === d('2026-04-30T00:00:00Z'), '31/01 + 3 tháng = 30/04');
+-  ok(W.addPlan(d('2026-08-31T00:00:00Z'), '6m') === d('2027-02-28T00:00:00Z'), '31/08 + 6 tháng = 28/02');
+-  ok(W.addPlan(d('2028-02-29T00:00:00Z'), '1y') === d('2029-02-28T00:00:00Z'), '29/02 + 1 năm = 28/02');
+-  ok(W.addPlan(d('2026-11-10T00:00:00Z'), '3d') === d('2026-11-13T00:00:00Z'), '3 ngày');
+-  ok(W.addPlan(0, 'abc') === null, 'gói lạ -> null');
+-  ok(W.addPlan(123, 'life') === W.FOREVER_TS, 'gói life -> không hết hạn');
+-
+-  console.log('\nLicenseServer01: ' + pass + ' đạt, ' + fail + ' lỗi');
+-  fs.rmSync(tmp, { recursive: true, force: true });
+-  process.exit(fail ? 1 : 0);
+-})().catch((e) => { console.error('LỖI TEST:', e); process.exit(2); });
+diff --git a/worker.js b/worker.js
+deleted file mode 100644
+index cd65622..0000000
+--- a/worker.js
++++ /dev/null
+@@ -1,523 +0,0 @@
+-// ============================================================
+-//   AUTO_MENU_AI — Key Server (Cloudflare Worker + D1)
+-//   Phiên bản hoàn chỉnh: Giữ nguyên giao diện & tính năng cũ + Cập nhật thời lượng
+-// ============================================================
+-
+-export default {
+-  async fetch(request, env, ctx) {
+-    const url = new URL(request.url);
+-
+-    const corsHeaders = {
+-      "Content-Type": "application/json",
+-      "Access-Control-Allow-Origin": "*",
+-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+-      "Access-Control-Allow-Headers": "Content-Type, Authorization"
+-    };
+-
+-    if (request.method === "OPTIONS") {
+-      return new Response(null, { headers: corsHeaders });
+-    }
+-
+-    // ========== [1] TỰ ĐỘNG TẠO BẢNG ==========
+-    if (url.pathname === "/init") {
+-      try {
+-        await env.DB.prepare(`
+-          CREATE TABLE IF NOT EXISTS song_info (
+-            song_id TEXT PRIMARY KEY,
+-            title TEXT,
+-            total_duration_sec INTEGER,
+-            note TEXT,
+-            created_at INTEGER DEFAULT (strftime('%s','now') * 1000),
+-            updated_at INTEGER DEFAULT (strftime('%s','now') * 1000)
+-          )
+-        `).run();
+-
+-        await env.DB.prepare(`
+-          CREATE TABLE IF NOT EXISTS song_key_segments (
+-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+-            song_id TEXT NOT NULL,
+-            start_sec INTEGER NOT NULL,
+-            end_sec INTEGER NOT NULL,
+-            key TEXT NOT NULL,
+-            mode TEXT NOT NULL DEFAULT 'major',
+-            weight REAL DEFAULT 1.0,
+-            created_at INTEGER DEFAULT (strftime('%s','now') * 1000)
+-          )
+-        `).run();
+-
+-        await env.DB.prepare(`
+-          CREATE INDEX IF NOT EXISTS idx_segments_song ON song_key_segments(song_id)
+-        `).run();
+-
+-        return Response.json({ ok: true, message: "Da tao bang thanh cong!" }, { headers: corsHeaders });
+-      } catch (e) {
+-        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
+-      }
+-    }
+-
+-    // ========== [2] TRANG CHỦ — GIAO DIỆN GỐC ==========
+-    if (url.pathname === "/" || url.pathname === "/index.html") {
+-      return new Response(taoTrangChuGoc(), {
+-        headers: { "Content-Type": "text/html; charset=utf-8" }
+-      });
+-    }
+-
+-    // ========== [3] LƯU / CẬP NHẬT THÔNG TIN BÀI HÁT & THỜI LƯỢNG ==========
+-    if (url.pathname === "/set-song-info" && request.method === "POST") {
+-      try {
+-        const body = await request.json();
+-        const { songId, title, totalDurationSec, note } = body;
+-        if (!songId) {
+-          return Response.json({ error: "thieu songId" }, { status: 400, headers: corsHeaders });
+-        }
+-
+-        let giayLuu = parseInt(totalDurationSec, 10);
+-        if (!Number.isFinite(giayLuu) || giayLuu <= 0) {
+-          giayLuu = null;
+-          if (laIdYouTube(String(songId))) {
+-            try { 
+-              const kq = await layThoiLuongYouTube(String(songId), env); 
+-              if (kq.ok) giayLuu = kq.giay; 
+-            } catch (_) {}
+-          }
+-        }
+-
+-        await env.DB.prepare(`
+-          INSERT INTO song_info (song_id, title, total_duration_sec, note, updated_at)
+-          VALUES (?, ?, ?, ?, strftime('%s','now') * 1000)
+-          ON CONFLICT(song_id) DO UPDATE SET
+-            title = COALESCE(EXCLUDED.title, title),
+-            total_duration_sec = CASE WHEN COALESCE(EXCLUDED.total_duration_sec, 0) > 0 THEN EXCLUDED.total_duration_sec ELSE total_duration_sec END,
+-            note = COALESCE(EXCLUDED.note, note),
+-            updated_at = strftime('%s','now') * 1000
+-        `).bind(songId, title || null, giayLuu, note || null).run();
+-
+-        return Response.json({ ok: true, message: "da cap nhat thong tin", durationSaved: giayLuu }, { headers: corsHeaders });
+-      } catch (e) {
+-        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
+-      }
+-    }
+-
+-    // ========== [4] THÊM 1 ĐOẠN KHÓA ==========
+-    if (url.pathname === "/add-segment" && request.method === "POST") {
+-      try {
+-        const body = await request.json();
+-        const songId = String((body && body.songId) || "").trim();
+-        const startSec = body ? body.startSec : undefined;
+-        const endSec = body ? body.endSec : undefined;
+-        const weight = (body && body.weight !== undefined) ? body.weight : 1.0;
+-        
+-        if (!songId || startSec === undefined || !endSec || !body.key) {
+-          return Response.json({ error: "thieu thong tin" }, { status: 400, headers: corsHeaders });
+-        }
+-        
+-        const kq = phanTichKeyNhap(body.key, body.mode);
+-        if (!kq) {
+-          return Response.json({ error: "key_khong_hop_le" }, { status: 400, headers: corsHeaders });
+-        }
+-
+-        await env.DB.prepare(`DELETE FROM song_key_segments WHERE song_id = ? AND start_sec = ?`).bind(songId, startSec).run();
+-        await env.DB.prepare(`
+-          INSERT INTO song_key_segments (song_id, start_sec, end_sec, key, mode, weight, created_at)
+-          VALUES (?, ?, ?, ?, ?, ?, ?)
+-        `).bind(songId, startSec, endSec, kq.key, kq.mode, weight, Date.now()).run();
+-
+-        const tenBai = body && typeof body.title === "string" ? body.title.trim() : "";
+-        const dur = parseInt(body.totalDurationSec, 10);
+-        if (tenBai || Number.isFinite(dur)) {
+-          await env.DB.prepare(`
+-            INSERT INTO song_info (song_id, title, total_duration_sec, updated_at)
+-            VALUES (?, ?, ?, strftime('%s','now') * 1000)
+-            ON CONFLICT(song_id) DO UPDATE SET
+-              title = COALESCE(EXCLUDED.title, title),
+-              total_duration_sec = CASE WHEN COALESCE(EXCLUDED.total_duration_sec, 0) > 0 THEN EXCLUDED.total_duration_sec ELSE total_duration_sec END,
+-              updated_at = strftime('%s','now') * 1000
+-          `).bind(songId, tenBai || null, Number.isFinite(dur) && dur > 0 ? dur : null).run();
+-        }
+-
+-        return Response.json({ ok: true, message: "da them doan" }, { headers: corsHeaders });
+-      } catch (e) {
+-        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
+-      }
+-    }
+-
+-    // ========== [5] XEM ĐẦY ĐỦ 1 BÀI ==========
+-    if (url.pathname === "/song-full") {
+-      const songId = url.searchParams.get("id");
+-      if (!songId) return Response.json({ error: "thieu id" }, { status: 400, headers: corsHeaders });
+-
+-      const info = await env.DB.prepare(`
+-        SELECT song_id as songId, title, total_duration_sec as totalSec, note
+-        FROM song_info WHERE song_id = ?
+-      `).bind(songId).first();
+-
+-      if (info && !(Number(info.totalSec) > 0) && laIdYouTube(songId)) {
+-        try {
+-          const kq = await layThoiLuongYouTube(songId, env);
+-          if (kq.ok) { 
+-            await luuThoiLuong(env, songId, kq.giay, true); 
+-            info.totalSec = kq.giay; 
+-          }
+-        } catch (_) {}
+-      }
+-
+-      const { results: segments } = await env.DB.prepare(`
+-        SELECT start_sec as startSec, end_sec as endSec, key, mode
+-        FROM song_key_segments WHERE song_id = ? ORDER BY start_sec ASC
+-      `).bind(songId).all();
+-
+-      return Response.json({
+-        songId,
+-        thongTin: info ? Object.assign({}, info, { tongThoiLuong: info.totalSec ? giaySangPhutGiay(info.totalSec) : null }) : null,
+-        tongDoan: segments.length,
+-        doans: segments
+-      }, { headers: corsHeaders });
+-    }
+-
+-    // ========== [6] TRA KHÓA TẠI GIÂY ==========
+-    if (url.pathname === "/key-at") {
+-      const songId = url.searchParams.get("id");
+-      const giay = parseInt(url.searchParams.get("sec") || "0");
+-      if (!songId) return Response.json({ error: "thieu tham so" }, { status: 400, headers: corsHeaders });
+-
+-      const { results } = await env.DB.prepare(`
+-        SELECT key, mode, start_sec as startSec, end_sec as endSec
+-        FROM song_key_segments
+-        WHERE song_id = ? AND start_sec <= ? AND end_sec >= ?
+-        ORDER BY start_sec DESC LIMIT 1
+-      `).bind(songId, giay, giay).all();
+-
+-      if (results.length === 0) {
+-        return Response.json({ found: false, giay }, { headers: corsHeaders });
+-      }
+-
+-      return Response.json({
+-        found: true,
+-        giay,
+-        thoiGian: giaySangPhutGiay(giay),
+-        key: results[0].key,
+-        mode: results[0].mode,
+-        modeDisplay: results[0].mode === 'major' ? 'Truong' : 'Phu',
+-        startSec: results[0].startSec,
+-        endSec: results[0].endSec
+-      }, { headers: corsHeaders });
+-    }
+-
+-    // ========== [7] DANH SÁCH TẤT CẢ BÀI ==========
+-    if (url.pathname === "/list") {
+-      const { results } = await env.DB.prepare(`
+-        SELECT i.song_id as songId, i.title, i.total_duration_sec as tongGiay,
+-               COUNT(s.id) as soDoan, i.updated_at,
+-               (SELECT s2.key FROM song_key_segments s2 WHERE s2.song_id = i.song_id ORDER BY s2.start_sec ASC LIMIT 1) as key1,
+-               (SELECT s3.mode FROM song_key_segments s3 WHERE s3.song_id = i.song_id ORDER BY s3.start_sec ASC LIMIT 1) as mode1
+-        FROM song_info i
+-        LEFT JOIN song_key_segments s ON i.song_id = s.song_id
+-        GROUP BY i.song_id ORDER BY i.updated_at DESC LIMIT 200
+-      `).all();
+-
+-      return Response.json({
+-        tongBai: results.length,
+-        danhSach: results.map(r => ({
+-          songId: r.songId,
+-          title: r.title || "Chua dat ten",
+-          tongThoiLuong: r.tongGiay ? giaySangPhutGiay(r.tongGiay) : "Chua cap nhat",
+-          soDoan: r.soDoan,
+-          key: r.key1 || null,
+-          mode: r.mode1 || null,
+-          keyHienThi: r.key1 ? (r.key1 + " " + (r.mode1 === "minor" ? "Minor" : "Major")) : null
+-        }))
+-      }, { headers: corsHeaders });
+-    }
+-
+-    // ========== [8] TÌM BÀI THEO TÊN ==========
+-    if (url.pathname === "/find") {
+-      const title = url.searchParams.get("title") || "";
+-      const artist = url.searchParams.get("artist") || "";
+-      const q = chuanHoaTen(title);
+-      if (q.length < 3) {
+-        return Response.json({ found: false }, { status: 400, headers: corsHeaders });
+-      }
+-
+-      try {
+-        const { results: songs } = await env.DB.prepare(`
+-          SELECT song_id as songId, title FROM song_info ORDER BY updated_at DESC LIMIT 1000
+-        `).all();
+-
+-        const best = timBaiKhopNhat(songs || [], q);
+-        if (!best) return Response.json({ found: false }, { headers: corsHeaders });
+-
+-        const { results: segs } = await env.DB.prepare(`
+-          SELECT key, mode, start_sec as startSec, end_sec as endSec
+-          FROM song_key_segments WHERE song_id = ? ORDER BY start_sec ASC LIMIT 200
+-        `).bind(best.songId).all();
+-
+-        if (!segs || segs.length === 0) return Response.json({ found: false }, { headers: corsHeaders });
+-
+-        return Response.json({
+-          found: true,
+-          songId: best.songId,
+-          title: best.title,
+-          key: segs[0].key,
+-          mode: segs[0].mode,
+-          startSec: segs[0].startSec,
+-          endSec: segs[0].endSec
+-        }, { headers: corsHeaders });
+-      } catch (e) {
+-        return Response.json({ found: false, error: e.message }, { status: 500, headers: corsHeaders });
+-      }
+-    }
+-
+-    // ========== [9] COUNT (Thống kê số lượng bài cho giao diện) ==========
+-    if (url.pathname === "/count" && request.method === "GET") {
+-      try {
+-        const a = await env.DB.prepare(`SELECT COUNT(*) as n FROM song_info`).first();
+-        const c = await env.DB.prepare(`SELECT COUNT(*) as n FROM song_info WHERE total_duration_sec > 0`).first();
+-        return Response.json({
+-          ok: true,
+-          tongBai: (a && a.n) || 0,
+-          baiCoThoiLuong: (c && c.n) || 0
+-        }, { headers: corsHeaders });
+-      } catch (e) {
+-        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
+-      }
+-    }
+-
+-    // POST /set-duration (API cập nhật thời lượng)
+-    if (url.pathname === "/set-duration" && request.method === "POST") {
+-      try {
+-        const body = await request.json();
+-        const songId = String((body && body.songId) || "").trim();
+-        const giay = parseInt(body && body.totalDurationSec, 10);
+-        if (!songId || !Number.isFinite(giay)) return Response.json({ error: "thieu thong tin" }, { status: 400, headers: corsHeaders });
+-        
+-        await env.DB.prepare(`
+-          UPDATE song_info SET total_duration_sec = ?, updated_at = strftime('%s','now') * 1000 WHERE song_id = ?
+-        `).bind(giay, songId).run();
+-
+-        return Response.json({ ok: true, durationSec: giay, format: giaySangPhutGiay(giay) }, { headers: corsHeaders });
+-      } catch (e) {
+-        return Response.json({ error: e.message }, { status: 500, headers: corsHeaders });
+-      }
+-    }
+-
+-    return Response.json({ error: "Not found" }, { status: 404, headers: corsHeaders });
+-  }
+-};
+-
+-// --- CÁC HÀM PHỤ TRỢ ---
+-function giaySangPhutGiay(sec) {
+-  const m = Math.floor(sec / 60);
+-  const s = sec % 60;
+-  return m + ":" + (s < 10 ? "0" : "") + s;
+-}
+-
+-function laIdYouTube(id) {
+-  return /^[a-zA-Z0-9_-]{11}$/.test(id);
+-}
+-
+-async function layThoiLuongYouTube(videoId, env) {
+-  if (!env.YOUTUBE_API_KEY) return { ok: false };
+-  try {
+-    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoId}&key=${env.YOUTUBE_API_KEY}`);
+-    const data = await res.json();
+-    if (data.items && data.items.length > 0) {
+-      const iso = data.items[0].contentDetails.duration;
+-      const match = iso.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+-      if (!match) return { ok: false };
+-      const h = parseInt(match[1]) || 0;
+-      const m = parseInt(match[2]) || 0;
+-      const s = parseInt(match[3]) || 0;
+-      return { ok: true, giay: h * 3600 + m * 60 + s };
+-    }
+-    return { ok: false };
+-  } catch (_) {
+-    return { ok: false };
+-  }
+-}
+-
+-async function luuThoiLuong(env, songId, giay, daCo) {
+-  if (daCo) {
+-    await env.DB.prepare(`UPDATE song_info SET total_duration_sec = ? WHERE song_id = ?`).bind(giay, songId).run();
+-  } else {
+-    await env.DB.prepare(`INSERT OR REPLACE INTO song_info (song_id, total_duration_sec) VALUES (?, ?)`).bind(songId, giay).run();
+-  }
+-}
+-
+-function phanTichKeyNhap(keyStr, modeStr) {
+-  if (!keyStr) return null;
+-  const clean = keyStr.trim();
+-  const match = clean.match(/^([A-G][#b]?)\s*(major|minor|Truong|Phu|m)?$/i);
+-  if (!match) return { key: clean, mode: modeStr || 'major' };
+-  return { key: match[1], mode: (/minor|phu|m/i.test(match[2] || "")) ? 'minor' : 'major' };
+-}
+-
+-function chuanHoaTen(s) {
+-  return (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+-}
+-
+-function timBaiKhopNhat(songs, q) {
+-  for (const s of songs) {
+-    if (chuanHoaTen(s.title).includes(q)) return s;
+-  }
+-  return null;
+-}
+-
+-// Giao diện HTML gốc đầy đủ tính năng + hiển thị tổng số bài
+-function taoTrangChuGoc() {
+-  return `<!DOCTYPE html>
+-<html>
+-<head>
+-  <meta charset="utf-8">
+-  <title>AUTO_MENU_AI - Quan Ly Khoa Theo Doan</title>
+-  <style>
+-    body { background: #111318; color: #fff; font-family: sans-serif; margin: 0; padding: 20px; }
+-    h2 { text-align: center; color: #ffd700; margin-bottom: 20px; }
+-    .nav { display: flex; justify-content: center; gap: 20px; margin-bottom: 20px; }
+-    .nav a { color: #8ab4f8; text-decoration: none; font-weight: bold; cursor: pointer; }
+-    .nav a.active { color: #ffd700; border-bottom: 2px solid #ffd700; }
+-    .card { background: #1e222d; padding: 15px 20px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #00c853; }
+-    .title { font-weight: bold; font-size: 16px; margin-bottom: 5px; display: flex; align-items: center; gap: 10px; }
+-    .meta { font-size: 12px; color: #aaa; margin-bottom: 10px; }
+-    .badge { background: #00c853; color: #000; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+-    .controls { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+-    select, input, button { background: #2a2e3d; color: #fff; border: 1px solid #444; padding: 6px 12px; border-radius: 4px; outline: none; }
+-    button.save { background: #ffd700; color: #000; font-weight: bold; border: none; cursor: pointer; }
+-    button.delete { background: #ff5252; color: #fff; border: none; cursor: pointer; }
+-    button.yt { background: #2979ff; color: #fff; border: none; cursor: pointer; }
+-  </style>
+-</head>
+-<body>
+-  <h2>AUTO_MENU_AI - Quan Ly Khoa Theo Doan</h2>
+-  <div style="background: #332b00; border: 1px solid #ffd700; color: #ffd700; padding: 10px; text-align: center; border-radius: 5px; margin-bottom: 20px; font-size: 14px;">
+-    <b>LAN DAU SU DUNG?</b> Mo link: <a href="/init" target="_blank" style="color: #8ab4f8;">/init</a> de tu dong tao bang du lieu, sau do quay lai day!
+-  </div>
+-  <div style="text-align:center; margin-bottom: 15px; font-weight: bold; color: #8ab4f8;" id="count-info">Tất cả bài hát đã lưu (Đang tải thống kê...)</div>
+-  <div class="nav">
+-    <a class="active">Tat Ca Bai</a>
+-  </div>
+-  <div id="list-container">Đang tải danh sách bài hát...</div>
+-
+-  <script>
+-    async function loadData() {
+-      try {
+-        const countRes = await fetch('/count');
+-        const countData = await countRes.json();
+-        if(countData.ok) {
+-          document.getElementById('count-info').innerText = "Tất cả bài hát đã lưu (Tổng số: " + countData.tongBai + " bài | Đã có thời lượng: " + countData.baiCoThoiLuong + " bài)";
+-        }
+-
+-        const res = await fetch('/list');
+-        const data = await res.json();
+-        const container = document.getElementById('list-container');
+-        if (!data.danhSach || data.danhSach.length === 0) {
+-          container.innerHTML = "<p style='text-align:center; color:#aaa;'>Chưa có bài hát nào trên server.</p>";
+-          return;
+-        }
+-
+-        let html = "";
+-        data.danhSach.forEach(song => {
+-          html += \`<div class="card">
+-            <div class="title">
+-              \${song.title} 
+-              \${song.keyHienThi ? '<span class="badge">' + song.keyHienThi + '</span>' : ''}
+-            </div>
+-            <div class="meta">ID: \${song.songId} | Thời lượng: \${song.tongThoiLuong} | Số đoạn: \${song.soDoan}</div>
+-            <div class="controls">
+-              <select id="key-\${song.songId}">
+-                <option value="C" \${song.key === 'C' ? 'selected' : ''}>C</option>
+-                <option value="C#" \${song.key === 'C#' ? 'selected' : ''}>C#</option>
+-                <option value="D" \${song.key === 'D' ? 'selected' : ''}>D</option>
+-                <option value="D#" \${song.key === 'D#' ? 'selected' : ''}>D#</option>
+-                <option value="E" \${song.key === 'E' ? 'selected' : ''}>E</option>
+-                <option value="F" \${song.key === 'F' ? 'selected' : ''}>F</option>
+-                <option value="F#" \${song.key === 'F#' ? 'selected' : ''}>F#</option>
+-                <option value="G" \${song.key === 'G' ? 'selected' : ''}>G</option>
+-                <option value="G#" \${song.key === 'G#' ? 'selected' : ''}>G#</option>
+-                <option value="A" \${song.key === 'A' ? 'selected' : ''}>A</option>
+-                <option value="A#" \${song.key === 'A#' ? 'selected' : ''}>A#</option>
+-                <option value="B" \${song.key === 'B' ? 'selected' : ''}>B</option>
+-              </select>
+-              <select id="mode-\${song.songId}">
+-                <option value="major" \${song.mode === 'major' ? 'selected' : ''}>Trường</option>
+-                <option value="minor" \${song.mode === 'minor' ? 'selected' : ''}>Phụ</option>
+-              </select>
+-              <button class="save" onclick="saveKey('\${song.songId}')">Lưu Key</button>
+-              <button class="delete" onclick="deleteSong('\${song.songId}')">Xóa</button>
+-            </div>
+-            <div class="controls" style="margin-top: 8px;">
+-              <input type="text" id="dur-\${song.songId}" placeholder="Thoi luong mm:ss" value="\${song.tongThoiLuong !== 'Chua cap nhat' ? song.tongThoiLuong : ''}" style="width:130px;" />
+-              <button class="save" style="background:#00c853; color:#fff;" onclick="updateDuration('\${song.songId}')">Lưu TG</button>
+-            </div>
+-          </div>\`;
+-        });
+-        container.innerHTML = html;
+-      } catch (e) {
+-        document.getElementById('list-container').innerHTML = "<p style='color:red; text-align:center;'>Lỗi tải danh sách bài hát.</p>";
+-      }
+-    }
+-
+-    async function saveKey(songId) {
+-      const key = document.getElementById('key-' + songId).value;
+-      const mode = document.getElementById('mode-' + songId).value;
+-      const res = await fetch('/set-key', {
+-        method: 'POST',
+-        headers: { 'Content-Type': 'application/json' },
+-        body: JSON.stringify({ songId, key, mode, all: true })
+-      });
+-      const data = await res.json();
+-      if (data.ok) {
+-        alert("Đã lưu Key thành công!");
+-        loadData();
+-      } else {
+-        alert("Lỗi: " + (data.message || data.error));
+-      }
+-    }
+-
+-    async function deleteSong(songId) {
+-      if (!confirm("Bạn có chắc chắn muốn xóa bài này không?")) return;
+-      const res = await fetch('/delete-song', {
+-        method: 'POST',
+-        headers: { 'Content-Type': 'application/json' },
+-        body: JSON.stringify({ songId, xacNhan: true })
+-      });
+-      const data = await res.json();
+-      if (data.ok) {
+-        alert("Đã xóa thành công!");
+-        loadData();
+-      } else {
+-        alert("Lỗi: " + (data.message || data.error));
+-      }
+-    }
+-
+-    async function updateDuration(songId) {
+-      const val = document.getElementById('dur-' + songId).value.trim();
+-      let totalSec = 0;
+-      if (val.includes(':')) {
+-        const parts = val.split(':');
+-        totalSec = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+-      } else {
+-        totalSec = parseInt(val, 10);
+-      }
+-      if (!totalSec || isNaN(totalSec)) {
+-        alert("Vui lòng nhập thời lượng hợp lệ (VD: 3:30 hoặc 210)");
+-        return;
+-      }
+-      const res = await fetch('/set-duration', {
+-        method: 'POST',
+-        headers: { 'Content-Type': 'application/json' },
+-        body: JSON.stringify({ songId, totalDurationSec: totalSec })
+-      });
+-      const data = await res.json();
+-      if (data.ok) {
+-        alert("Đã cập nhật thời lượng thành công (" + data.format + ")!");
+-        loadData();
+-      } else {
+-        alert("Lỗi: " + (data.error || "Không thể cập nhật"));
+-      }
+-    }
+-
+-    loadData();
+-  </script>
+-</body>
+-</html>`;
+-}
+\ No newline at end of file
