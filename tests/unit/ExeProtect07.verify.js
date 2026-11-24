@@ -156,6 +156,43 @@ const licenseHetHan = kySan({ v: 1, status: 'active', expiresAt: Date.now() - 10
         ok(!seenHeaders['X-License-Payload'], '_request(): không truyền getLicenseProof -> hành vi y như cũ, không gắn gì');
     }
 
+    // ---------- 7) EXE-PROTECT-07b: trang quản trị tự gửi mật khẩu quản trị (nếu ĐÃ TỪNG nhập) khi xem "tất cả bài" ----------
+    // Không prompt (không hỏi) khi xem — chỉ gắn kèm nếu đã có sẵn. Test bằng cách chạy đúng đoạn JS nhúng trong worker.js (vm), không giả lập lại logic.
+    {
+        const htmlSrc = fs.readFileSync(path.join(ROOT, 'server/worker.js'), 'utf8');
+        const scriptMatch = /<script>([\s\S]*?)<\/script>/.exec(htmlSrc);
+        ok(!!scriptMatch, 'tìm thấy khối <script> của trang quản trị trong server/worker.js');
+        const scriptSrc = scriptMatch ? scriptMatch[1] : '';
+        ok(/var mkQuanTri = layMatKhauNeuCo\(\);/.test(scriptSrc) && /fetch\(SERVER \+ '\/list\?all=1'[\s\S]*?headers: tieuDeXin/.test(scriptSrc),
+            'taiDanhSach(): gắn Authorization từ layMatKhauNeuCo() vào fetch /list?all=1');
+
+        const fnMatch = /function layMatKhauNeuCo\(\) \{[\s\S]*?\n    \}/.exec(scriptSrc);
+        ok(!!fnMatch, 'tìm thấy hàm layMatKhauNeuCo() để chạy thử riêng');
+        if (fnMatch) {
+            const sandbox = { sessionStorage: null, document: { getElementById: () => null }, console };
+            vm.createContext(sandbox);
+            new vm.Script(fnMatch[0] + '\nthis.__ket_qua__ = layMatKhauNeuCo;').runInContext(sandbox);
+            const layMatKhauNeuCo = sandbox.__ket_qua__;
+
+            // Chưa có gì -> trả '' (KHÔNG prompt, vì sandbox không có prompt — nếu lỡ gọi sẽ ném lỗi ReferenceError, test tự fail).
+            sandbox.sessionStorage = { getItem: () => null };
+            ok(layMatKhauNeuCo() === '', 'layMatKhauNeuCo(): chưa từng nhập -> trả rỗng, không hỏi gì (không prompt)');
+
+            // Có trong sessionStorage (đã nhập lúc sửa/xoá 1 bài trước đó) -> trả đúng giá trị đó.
+            sandbox.sessionStorage = { getItem: (k) => (k === 'menuAdminToken' ? 'tu-nho-truoc-do' : null) };
+            ok(layMatKhauNeuCo() === 'tu-nho-truoc-do', 'layMatKhauNeuCo(): có sẵn trong sessionStorage -> dùng lại, không hỏi');
+
+            // Có trong ô nhập (chưa kịp lưu sessionStorage) -> vẫn lấy được.
+            sandbox.sessionStorage = { getItem: () => null };
+            sandbox.document = { getElementById: (id) => (id === 'adminToken' ? { value: 'go-trong-o-nhap' } : null) };
+            ok(layMatKhauNeuCo() === 'go-trong-o-nhap', 'layMatKhauNeuCo(): có trong ô nhập mật khẩu quản trị -> dùng được');
+        }
+
+        // Hành vi CŨ (sửa/xoá 1 bài) không bị đụng: layMatKhau() vẫn hỏi (prompt) khi chưa có sẵn.
+        ok(/function layMatKhau\(\) \{[\s\S]*?prompt\(/.test(scriptSrc), 'layMatKhau() (dùng khi sửa/xoá bài) vẫn hỏi mật khẩu như cũ, không bị đổi');
+        ok(/goiAdmin\(path, body, token\)/.test(scriptSrc), 'goiAdmin() (sửa/xoá bài) không bị đụng tới');
+    }
+
     console.log(`\n${pass} PASS / ${fail} FAIL`);
     process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('LỖI KHÔNG BẮT ĐƯỢC:', e && e.stack || e); process.exit(1); });

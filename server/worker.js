@@ -1629,7 +1629,12 @@ function taoTrangChu() {
       var div = document.getElementById('bangBai');
       if (!imLang) div.innerHTML = '<p class="empty">Dang tai...</p>';
       try {
-        var res = await fetch(SERVER + '/list?all=1' + ((imLang || lamMoi) ? '&fresh=1' : ''));
+        // [EXE-PROTECT-07b] Nếu đã từng nhập mật khẩu quản trị trong phiên này (vd để sửa/xoá 1 bài) thì gửi kèm luôn khi
+        // xem danh sách — để không bị giới hạn 100 bài nếu anh đã bật REQUIRE_LICENSE_FOR_LIST trên Cloudflare.
+        // Chưa từng nhập thì KHÔNG hỏi gì cả (không prompt), trang vẫn xem được như trước.
+        var mkQuanTri = layMatKhauNeuCo();
+        var tieuDeXin = mkQuanTri ? { Authorization: 'Bearer ' + mkQuanTri } : {};
+        var res = await fetch(SERVER + '/list?all=1' + ((imLang || lamMoi) ? '&fresh=1' : ''), { headers: tieuDeXin });
         var data = await res.json();
         if (!res.ok || data.error) throw new Error(data.error || ('HTTP ' + res.status));
         var ds = data.danhSach || [], rows = [], keyGt = {};
@@ -1748,6 +1753,15 @@ function taoTrangChu() {
       try { t = sessionStorage.getItem('menuAdminToken') || ''; } catch (e) {}
       if (!t) { var o = document.getElementById('adminToken'); if (o && o.value) t = o.value; }
       if (!t) t = prompt('Nhap mat khau quan tri (ADMIN_TOKEN):') || '';
+      return t;
+    }
+    // [EXE-PROTECT-07b] Giống layMatKhau() nhưng KHÔNG hỏi (không prompt) — dùng khi chỉ XEM danh sách, để không làm phiền
+    // nếu chưa từng nhập mật khẩu quản trị trong phiên này. Có sẵn thì gửi kèm (để xem đủ khi anh đã bật REQUIRE_LICENSE_FOR_LIST);
+    // chưa có thì trả '', trang vẫn xem được (chỉ không có "đặc quyền xem hết" nếu cổng License server đang bật).
+    function layMatKhauNeuCo() {
+      var t = '';
+      try { t = sessionStorage.getItem('menuAdminToken') || ''; } catch (e) {}
+      if (!t) { var o = document.getElementById('adminToken'); if (o && o.value) t = o.value; }
       return t;
     }
     function nhoMatKhau(t) {
