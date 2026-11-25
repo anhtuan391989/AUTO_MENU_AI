@@ -1,0 +1,139 @@
+diff --git a/.gitignore b/.gitignore
+index 044d330..96a7f92 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,4 +1,4 @@
+-node_modules/ 
++node_modules/
+ ?nh/QuangLuuStudio.zip
+ ?nh/QuangLuuStudio/QuangLuuStudio.exe
+ dist/
+diff --git a/core/shared/TelemetryLogger.js b/core/shared/TelemetryLogger.js
+index 9196ad1..48c617e 100644
+--- a/core/shared/TelemetryLogger.js
++++ b/core/shared/TelemetryLogger.js
+@@ -14,11 +14,18 @@ const path = require("path");
+  * Mỗi phiên (kể từ lần đầu write() được gọi) tạo 1 file mới, đặt tên
+  * theo thời điểm tạo (vd 2026-07-18_20-31-08.jsonl). Nếu file vượt
+  * 10MB, tự động bắt đầu file mới (rotation).
++ *
++ * RA-SOAT-BAO-MAT (theo yêu cầu của Khói): mỗi khi bắt đầu file mới, tự xoá bớt
++ * các file .jsonl CŨ NHẤT nếu tổng dung lượng thư mục logs/ vượt quá
++ * LOGS_TOTAL_CAP_BYTES — để thư mục logs/ (và repo GitHub đi kèm, vì logs/ vẫn
++ * được đồng bộ như cũ) không phình to vô hạn, nhưng vẫn luôn giữ lại dữ liệu
++ * MỚI NHẤT để xem/theo dõi khi cần.
+  * ==========================================================
+  */
+ 
+ const LOGS_DIR = require("./RuntimePaths").writableDir("logs"); // chạy từ mã nguồn: <project root>/logs (như cũ); bản cài .exe: %APPDATA%\automenu-ai\logs
+ const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB
++const LOGS_TOTAL_CAP_BYTES = 20 * 1024 * 1024; // 20MB — tổng dung lượng logs/ tối đa muốn giữ lại
+ 
+ class TelemetryLogger {
+ 
+@@ -68,6 +75,42 @@ class TelemetryLogger {
+         this.currentFilePath = fullPath;
+         this.currentFileBytes = 0;
+ 
++        this._pruneOldestIfOverCap();
++
++    }
++
++    // RA-SOAT-BAO-MAT: xoá bớt file .jsonl CŨ NHẤT (theo thời gian sửa đổi) cho tới khi tổng dung
++    // lượng thư mục logs/ không vượt quá LOGS_TOTAL_CAP_BYTES. Không bao giờ đụng tới file đang ghi
++    // dở (currentFilePath) vì nó luôn là file mới nhất, không bao giờ bị coi là "cũ nhất".
++    _pruneOldestIfOverCap() {
++
++        try {
++
++            const files = fs.readdirSync(LOGS_DIR)
++                .filter((f) => f.endsWith(".jsonl"))
++                .map((f) => {
++                    const full = path.join(LOGS_DIR, f);
++                    const st = fs.statSync(full);
++                    return { full, size: st.size, mtimeMs: st.mtimeMs };
++                })
++                .sort((a, b) => a.mtimeMs - b.mtimeMs); // cũ nhất trước
++
++            let total = files.reduce((sum, f) => sum + f.size, 0);
++
++            for (const f of files) {
++
++                if (total <= LOGS_TOTAL_CAP_BYTES) break;
++                if (f.full === this.currentFilePath) continue; // không xoá file đang ghi dở
++
++                fs.unlinkSync(f.full);
++                total -= f.size;
++
++            }
++
++        } catch (e) {
++            // Dọn dẹp thất bại không được làm gián đoạn việc ghi log — bỏ qua.
++        }
++
+     }
+ 
+     write(record) {
+diff --git a/tests/unit/TelemetryLogger.verify.js b/tests/unit/TelemetryLogger.verify.js
+index b9ad038..50ad67d 100644
+--- a/tests/unit/TelemetryLogger.verify.js
++++ b/tests/unit/TelemetryLogger.verify.js
+@@ -201,9 +201,58 @@ async function runPartB() {
+     }
+ }
+ 
++// ================================
++// PHẦN C — RA-SOAT-BAO-MAT: tự xoá file .jsonl CŨ NHẤT khi tổng dung lượng logs/ vượt 20MB
++// (theo yêu cầu của Khói: vẫn giữ logs/ được đồng bộ lên GitHub để xem từ xa, nhưng không để
++// phình to vô hạn như trước — chỉ giữ lại phần MỚI NHẤT, tự dọn phần CŨ NHẤT).
++// ================================
++async function runPartC() {
++    console.log("\n=== PHẦN C: Tự giới hạn tổng dung lượng logs/ (xoá file cũ nhất khi > 20MB) ===");
++
++    const before = filesBefore();
++    const dirExistedBefore = fs.existsSync(LOGS_DIR);
++    if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
++
++    // Tạo 3 file "giả cổ" 8MB mỗi file (tổng 24MB, đã vượt mốc 20MB), đặt mtime so le nhau
++    // để biết chắc file nào "cũ nhất" theo đúng logic (không phải theo tên).
++    const fakeOldNames = ["__test_prune_oldest_1.jsonl", "__test_prune_oldest_2.jsonl", "__test_prune_oldest_3.jsonl"];
++    const bigBuf = Buffer.alloc(8 * 1024 * 1024, 0x41); // 8MB mỗi file
++    const now = Date.now();
++    fakeOldNames.forEach((name, i) => {
++        const full = path.join(LOGS_DIR, name);
++        fs.writeFileSync(full, bigBuf);
++        // file [0] cũ nhất (cách đây 3 ngày), file [2] mới nhất trong nhóm "giả cổ" (cách đây 1 ngày)
++        const t = (now - (3 - i) * 24 * 3600 * 1000) / 1000;
++        fs.utimesSync(full, t, t);
++    });
++
++    const TelemetryLogger = freshTelemetryLogger();
++    TelemetryLogger.write({ time: 0, note: "kich hoat file moi -> kich hoat don dep" });
++    const newCurrentFile = TelemetryLogger.getCurrentFilePath();
++
++    const remaining = fs.readdirSync(LOGS_DIR).filter((f) => f.endsWith(".jsonl"));
++    const remainingTotalBytes = remaining.reduce((sum, f) => sum + fs.statSync(path.join(LOGS_DIR, f)).size, 0);
++
++    check(remainingTotalBytes <= 20 * 1024 * 1024, `Tổng dung lượng logs/ sau khi dọn <= 20MB (thực tế: ${(remainingTotalBytes / 1024 / 1024).toFixed(1)}MB)`);
++    check(!remaining.includes(fakeOldNames[0]), "File GIẢ CỔ cũ nhất (__test_prune_oldest_1) đã bị xoá");
++    check(remaining.includes(path.basename(newCurrentFile)), "File ĐANG GHI DỞ (mới nhất) KHÔNG bị xoá, dù nó cũng nằm trong logs/");
++
++    // --- Dọn dẹp: xoá sạch mọi file test (kể cả file giả cổ chưa bị xoá) khỏi logs/ thật ---
++    const after = filesBefore();
++    const newFiles = after.filter((f) => !before.includes(f));
++    for (const f of newFiles) {
++        try { fs.unlinkSync(path.join(LOGS_DIR, f)); } catch {}
++    }
++    if (!dirExistedBefore && fs.readdirSync(LOGS_DIR).length === 0) {
++        try { fs.rmdirSync(LOGS_DIR); } catch {}
++    }
++    console.log(`  (đã dọn ${newFiles.length} file test khỏi logs/)`);
++}
++
+ async function main() {
+     await runPartA();
+     await runPartB();
++    await runPartC();
+ 
+     console.log("\n========== TỔNG KẾT ==========");
+     if (failCount === 0) {

@@ -2064,10 +2064,25 @@ async function downloadAnyUrl(url, destPath) {
     return downloadFromUrl(url, destPath);
 }
 
+// RA-SOAT-BAO-MAT-02: chỉ cho mở link http(s) thật — phòng ngừa (hiện tại mọi nơi gọi tới đều
+// dùng link cố định có sẵn trong code, nên không đổi gì với cách dùng hiện tại).
+function isHttpUrl(u) {
+    try { return /^https?:$/i.test(new URL(String(u || "")).protocol); } catch (e) { return false; }
+}
+// RA-SOAT-BAO-MAT-02: lọc label chỉ còn chữ/số/-/_ trước khi dùng làm tên file installer —
+// phòng ngừa path traversal nếu sau này label không còn là chuỗi cố định trong code nữa.
+function safeInstallerLabel(label) {
+    const s = String(label || "installer").replace(/[^A-Za-z0-9_-]/g, "");
+    return s || "installer";
+}
+
 // Tải 1 file (Mega hoặc Google Drive) rồi tự mở file cài đặt lên
 ipcMain.handle("download-and-install", async (event, { url, label }) => {
     try {
-        const destPath = path.join(getDownloadTempDir(), `${label || "installer"}.exe`);
+        if (!isHttpUrl(url)) {
+            return { success: false, error: "Link tải không hợp lệ (chỉ chấp nhận link http/https)." };
+        }
+        const destPath = path.join(getDownloadTempDir(), `${safeInstallerLabel(label)}.exe`);
 
         await downloadAnyUrl(url, destPath);
 
@@ -2086,6 +2101,9 @@ ipcMain.handle("download-and-install", async (event, { url, label }) => {
 // Mở 1 URL bất kỳ bằng trình duyệt mặc định (dùng cho các trang tải không có link trực tiếp ổn định)
 ipcMain.handle("open-external-url", async (event, url) => {
     try {
+        // RA-SOAT-BAO-MAT-02: chỉ cho mở link http(s) thật, không cho mở file://, javascript:, hay
+        // giao thức ứng dụng khác — phòng ngừa (mọi nơi gọi tới hiện tại đều dùng link http(s) cố định).
+        if (!isHttpUrl(url)) return false;
         await shell.openExternal(url);
         return true;
     } catch (err) {

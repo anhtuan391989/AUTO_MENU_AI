@@ -14,11 +14,18 @@ const path = require("path");
  * Mỗi phiên (kể từ lần đầu write() được gọi) tạo 1 file mới, đặt tên
  * theo thời điểm tạo (vd 2026-07-18_20-31-08.jsonl). Nếu file vượt
  * 10MB, tự động bắt đầu file mới (rotation).
+ *
+ * RA-SOAT-BAO-MAT (theo yêu cầu của Khói): mỗi khi bắt đầu file mới, tự xoá bớt
+ * các file .jsonl CŨ NHẤT nếu tổng dung lượng thư mục logs/ vượt quá
+ * LOGS_TOTAL_CAP_BYTES — để thư mục logs/ (và repo GitHub đi kèm, vì logs/ vẫn
+ * được đồng bộ như cũ) không phình to vô hạn, nhưng vẫn luôn giữ lại dữ liệu
+ * MỚI NHẤT để xem/theo dõi khi cần.
  * ==========================================================
  */
 
 const LOGS_DIR = require("./RuntimePaths").writableDir("logs"); // chạy từ mã nguồn: <project root>/logs (như cũ); bản cài .exe: %APPDATA%\automenu-ai\logs
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB
+const LOGS_TOTAL_CAP_BYTES = 20 * 1024 * 1024; // 20MB — tổng dung lượng logs/ tối đa muốn giữ lại
 
 class TelemetryLogger {
 
@@ -67,6 +74,42 @@ class TelemetryLogger {
 
         this.currentFilePath = fullPath;
         this.currentFileBytes = 0;
+
+        this._pruneOldestIfOverCap();
+
+    }
+
+    // RA-SOAT-BAO-MAT: xoá bớt file .jsonl CŨ NHẤT (theo thời gian sửa đổi) cho tới khi tổng dung
+    // lượng thư mục logs/ không vượt quá LOGS_TOTAL_CAP_BYTES. Không bao giờ đụng tới file đang ghi
+    // dở (currentFilePath) vì nó luôn là file mới nhất, không bao giờ bị coi là "cũ nhất".
+    _pruneOldestIfOverCap() {
+
+        try {
+
+            const files = fs.readdirSync(LOGS_DIR)
+                .filter((f) => f.endsWith(".jsonl"))
+                .map((f) => {
+                    const full = path.join(LOGS_DIR, f);
+                    const st = fs.statSync(full);
+                    return { full, size: st.size, mtimeMs: st.mtimeMs };
+                })
+                .sort((a, b) => a.mtimeMs - b.mtimeMs); // cũ nhất trước
+
+            let total = files.reduce((sum, f) => sum + f.size, 0);
+
+            for (const f of files) {
+
+                if (total <= LOGS_TOTAL_CAP_BYTES) break;
+                if (f.full === this.currentFilePath) continue; // không xoá file đang ghi dở
+
+                fs.unlinkSync(f.full);
+                total -= f.size;
+
+            }
+
+        } catch (e) {
+            // Dọn dẹp thất bại không được làm gián đoạn việc ghi log — bỏ qua.
+        }
 
     }
 

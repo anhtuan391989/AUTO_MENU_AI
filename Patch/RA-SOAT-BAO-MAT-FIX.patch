@@ -1,0 +1,95 @@
+diff --git a/.gitignore b/.gitignore
+index 044d330..61a1ac9 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,4 +1,8 @@
+-node_modules/ 
++node_modules/
+ ?nh/QuangLuuStudio.zip
+ ?nh/QuangLuuStudio/QuangLuuStudio.exe
+ dist/
++
++# RA-SOAT-BAO-MAT: log thuật toán dò Key/Mod lúc biểu diễn — chỉ dùng để debug tại chỗ,
++# không cần (và không nên) tự động đồng bộ lên GitHub (đã phình tới hàng trăm MB).
++logs/
+diff --git a/app/main.js b/app/main.js
+index 729ac52..28afbd0 100644
+--- a/app/main.js
++++ b/app/main.js
+@@ -2064,10 +2064,25 @@ async function downloadAnyUrl(url, destPath) {
+     return downloadFromUrl(url, destPath);
+ }
+ 
++// RA-SOAT-BAO-MAT-02: chỉ cho mở link http(s) thật — phòng ngừa (hiện tại mọi nơi gọi tới đều
++// dùng link cố định có sẵn trong code, nên không đổi gì với cách dùng hiện tại).
++function isHttpUrl(u) {
++    try { return /^https?:$/i.test(new URL(String(u || "")).protocol); } catch (e) { return false; }
++}
++// RA-SOAT-BAO-MAT-02: lọc label chỉ còn chữ/số/-/_ trước khi dùng làm tên file installer —
++// phòng ngừa path traversal nếu sau này label không còn là chuỗi cố định trong code nữa.
++function safeInstallerLabel(label) {
++    const s = String(label || "installer").replace(/[^A-Za-z0-9_-]/g, "");
++    return s || "installer";
++}
++
+ // Tải 1 file (Mega hoặc Google Drive) rồi tự mở file cài đặt lên
+ ipcMain.handle("download-and-install", async (event, { url, label }) => {
+     try {
+-        const destPath = path.join(getDownloadTempDir(), `${label || "installer"}.exe`);
++        if (!isHttpUrl(url)) {
++            return { success: false, error: "Link tải không hợp lệ (chỉ chấp nhận link http/https)." };
++        }
++        const destPath = path.join(getDownloadTempDir(), `${safeInstallerLabel(label)}.exe`);
+ 
+         await downloadAnyUrl(url, destPath);
+ 
+@@ -2086,6 +2101,9 @@ ipcMain.handle("download-and-install", async (event, { url, label }) => {
+ // Mở 1 URL bất kỳ bằng trình duyệt mặc định (dùng cho các trang tải không có link trực tiếp ổn định)
+ ipcMain.handle("open-external-url", async (event, url) => {
+     try {
++        // RA-SOAT-BAO-MAT-02: chỉ cho mở link http(s) thật, không cho mở file://, javascript:, hay
++        // giao thức ứng dụng khác — phòng ngừa (mọi nơi gọi tới hiện tại đều dùng link http(s) cố định).
++        if (!isHttpUrl(url)) return false;
+         await shell.openExternal(url);
+         return true;
+     } catch (err) {
+diff --git a/package-lock.json b/package-lock.json
+index a9f77f1..5552eaa 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -28,7 +28,6 @@
+         "es-errors": "^1.3.0",
+         "es6-error": "^4.1.1",
+         "escape-string-regexp": "^4.0.0",
+-        "extract-zip": "^2.0.1",
+         "fd-slicer": "^1.1.0",
+         "fs-extra": "^8.1.0",
+         "get-stream": "^5.2.0",
+@@ -781,6 +780,7 @@
+       "version": "2.10.3",
+       "resolved": "https://registry.npmjs.org/@types/yauzl/-/yauzl-2.10.3.tgz",
+       "integrity": "sha512-oJoftv0LSuaDZE3Le4DbKX+KS9G36NzOeSap90UIK0yMA/NhKJhqlSGtNDORNRaIbQfzjXDrQa0ytJ6mNRGz/Q==",
++      "dev": true,
+       "license": "MIT",
+       "optional": true,
+       "dependencies": {
+@@ -2180,6 +2180,7 @@
+       "version": "2.0.1",
+       "resolved": "https://registry.npmjs.org/extract-zip/-/extract-zip-2.0.1.tgz",
+       "integrity": "sha512-GDhU9ntwuKyGXdZBUgTIe+vXnWj0fppUEtMDL0+idd5Sta8TGpHssn/eusA9mrPr9qNDym6SxAYZjNvCn/9RBg==",
++      "dev": true,
+       "license": "BSD-2-Clause",
+       "dependencies": {
+         "debug": "^4.1.1",
+diff --git a/package.json b/package.json
+index 2c59879..0e9749d 100644
+--- a/package.json
++++ b/package.json
+@@ -27,7 +27,6 @@
+     "es-errors": "^1.3.0",
+     "es6-error": "^4.1.1",
+     "escape-string-regexp": "^4.0.0",
+-    "extract-zip": "^2.0.1",
+     "fd-slicer": "^1.1.0",
+     "fs-extra": "^8.1.0",
+     "get-stream": "^5.2.0",

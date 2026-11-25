@@ -201,9 +201,58 @@ async function runPartB() {
     }
 }
 
+// ================================
+// PHẦN C — RA-SOAT-BAO-MAT: tự xoá file .jsonl CŨ NHẤT khi tổng dung lượng logs/ vượt 20MB
+// (theo yêu cầu của Khói: vẫn giữ logs/ được đồng bộ lên GitHub để xem từ xa, nhưng không để
+// phình to vô hạn như trước — chỉ giữ lại phần MỚI NHẤT, tự dọn phần CŨ NHẤT).
+// ================================
+async function runPartC() {
+    console.log("\n=== PHẦN C: Tự giới hạn tổng dung lượng logs/ (xoá file cũ nhất khi > 20MB) ===");
+
+    const before = filesBefore();
+    const dirExistedBefore = fs.existsSync(LOGS_DIR);
+    if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+
+    // Tạo 3 file "giả cổ" 8MB mỗi file (tổng 24MB, đã vượt mốc 20MB), đặt mtime so le nhau
+    // để biết chắc file nào "cũ nhất" theo đúng logic (không phải theo tên).
+    const fakeOldNames = ["__test_prune_oldest_1.jsonl", "__test_prune_oldest_2.jsonl", "__test_prune_oldest_3.jsonl"];
+    const bigBuf = Buffer.alloc(8 * 1024 * 1024, 0x41); // 8MB mỗi file
+    const now = Date.now();
+    fakeOldNames.forEach((name, i) => {
+        const full = path.join(LOGS_DIR, name);
+        fs.writeFileSync(full, bigBuf);
+        // file [0] cũ nhất (cách đây 3 ngày), file [2] mới nhất trong nhóm "giả cổ" (cách đây 1 ngày)
+        const t = (now - (3 - i) * 24 * 3600 * 1000) / 1000;
+        fs.utimesSync(full, t, t);
+    });
+
+    const TelemetryLogger = freshTelemetryLogger();
+    TelemetryLogger.write({ time: 0, note: "kich hoat file moi -> kich hoat don dep" });
+    const newCurrentFile = TelemetryLogger.getCurrentFilePath();
+
+    const remaining = fs.readdirSync(LOGS_DIR).filter((f) => f.endsWith(".jsonl"));
+    const remainingTotalBytes = remaining.reduce((sum, f) => sum + fs.statSync(path.join(LOGS_DIR, f)).size, 0);
+
+    check(remainingTotalBytes <= 20 * 1024 * 1024, `Tổng dung lượng logs/ sau khi dọn <= 20MB (thực tế: ${(remainingTotalBytes / 1024 / 1024).toFixed(1)}MB)`);
+    check(!remaining.includes(fakeOldNames[0]), "File GIẢ CỔ cũ nhất (__test_prune_oldest_1) đã bị xoá");
+    check(remaining.includes(path.basename(newCurrentFile)), "File ĐANG GHI DỞ (mới nhất) KHÔNG bị xoá, dù nó cũng nằm trong logs/");
+
+    // --- Dọn dẹp: xoá sạch mọi file test (kể cả file giả cổ chưa bị xoá) khỏi logs/ thật ---
+    const after = filesBefore();
+    const newFiles = after.filter((f) => !before.includes(f));
+    for (const f of newFiles) {
+        try { fs.unlinkSync(path.join(LOGS_DIR, f)); } catch {}
+    }
+    if (!dirExistedBefore && fs.readdirSync(LOGS_DIR).length === 0) {
+        try { fs.rmdirSync(LOGS_DIR); } catch {}
+    }
+    console.log(`  (đã dọn ${newFiles.length} file test khỏi logs/)`);
+}
+
 async function main() {
     await runPartA();
     await runPartB();
+    await runPartC();
 
     console.log("\n========== TỔNG KẾT ==========");
     if (failCount === 0) {
