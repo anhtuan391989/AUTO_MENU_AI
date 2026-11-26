@@ -1539,6 +1539,22 @@ ipcMain.handle("tools-daw-hide", (event) => new Promise((resolve) => {
     try { getDawTray().note("tools-daw-hide", fromSetupWindow(event)); if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().hide(resolve); } // A101: có vết khi lệnh tới main
     catch (err) { console.error("tools-daw-hide lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
 }));
+// ASIO-LINK-01 — Setup > Audio > thẻ "ASIO Link Pro": mở / khởi động lại ASIO Link Pro khi chọn sai driver hoặc mất tiếng.
+// Chỉ cửa sổ Setup được gọi; đường dẫn lấy từ file cài đặt (asioLinkPath) chứ KHÔNG tin chuỗi renderer gửi lên. Không throw.
+function __asioLinkRun(kind, event) {
+    try {
+        if (!fromSetupWindow(event)) return Promise.resolve(DENIED);
+        const AsioLinkLauncher = require("../core/integration/AsioLinkLauncher");
+        const st = readSettingsFile();
+        const p = st && typeof st.asioLinkPath === "string" ? st.asioLinkPath : "";
+        return (kind === "restart" ? AsioLinkLauncher.restart(p) : AsioLinkLauncher.open(p)).then((r) => {
+            console.log("[AsioLink] " + kind + " ->", r && r.ok ? "OK" : (r && r.reason), r && r.message);
+            return r;
+        });
+    } catch (err) { console.error("asio-link lỗi (không ảnh hưởng app):", err); return Promise.resolve({ ok: false, reason: "error", message: String((err && err.message) || err) }); }
+}
+ipcMain.handle("asio-link-open", (event) => __asioLinkRun("open", event));
+ipcMain.handle("asio-link-restart", (event) => __asioLinkRun("restart", event));
 ipcMain.handle("tools-daw-show", (event) => new Promise((resolve) => {
     try { getDawTray().note("tools-daw-show", fromSetupWindow(event)); if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().show(resolve); } // A101: có vết khi lệnh tới main
     catch (err) { console.error("tools-daw-show lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }

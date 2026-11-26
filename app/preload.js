@@ -181,6 +181,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     aiReadinessSnapshot: () => ipcRenderer.invoke("ai-readiness-snapshot"), // A112: chỉ-đọc (Setup -> main -> đọc nhãn từ Menu chính)
     toolsDawHide: () => ipcRenderer.invoke("tools-daw-hide"),
     toolsDawShow: () => ipcRenderer.invoke("tools-daw-show"),
+    // ASIO-LINK-01 — Setup > Audio > ASIO Link Pro: mở / khởi động lại (đường dẫn lấy từ setting asioLinkPath ở main process)
+    asioLinkOpen: () => ipcRenderer.invoke("asio-link-open"),
+    asioLinkRestart: () => ipcRenderer.invoke("asio-link-restart"),
     adminAuthChangePassword: (currentPassword, newPassword) =>
         ipcRenderer.invoke("admin-auth-change-password", { currentPassword, newPassword }),
 });
