@@ -128,6 +128,7 @@ class KeyServerSync {
         this.fetchFn = opts.fetchFn || (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
         this.now = opts.now || Date.now;
         this.isEnabledFn = opts.isEnabled || (() => true);
+        this.canSubmitFn = opts.canSubmit || (() => true); // KEY-SEND-OFF-02: () => false = CHỈ ĐỌC từ server, KHÔNG gửi Key lên (ô "Tắt gửi sang Auto Tune")
         this.logger = opts.logger || console;
         this.lookupTimeoutMs = opts.lookupTimeoutMs || LOOKUP_TIMEOUT_MS;
         this.submitTimeoutMs = opts.submitTimeoutMs || SUBMIT_TIMEOUT_MS;
@@ -487,6 +488,7 @@ class KeyServerSync {
         const reject = (reason, text) => { this._log('reject|' + reason + '|' + this._cacheKey(title, artist), 'Không gửi Key: ' + text); return { ok: false, reason }; };
 
         if (!this._enabled()) return reject('disabled', 'đồng bộ đang TẮT (keyServerAutoSync=false)');
+        try { if (!this.canSubmitFn()) return reject('send-off', 'đang TẮT gửi (ô "Tắt gửi sang Auto Tune") — Menu chỉ dò, không gửi Key lên Server'); } catch (e) { /* lỗi đọc cờ -> coi như được gửi như cũ */ }
         if (normalizeTitle(title).length < 3) return reject('no-title', 'chưa biết tên bài đang phát (hoặc tên quá ngắn)');
         if (!(Number(confidence) >= MIN_SUBMIT_CONFIDENCE)) {
             return reject('low-confidence', 'độ tin cậy ' + (Number.isFinite(Number(confidence)) && confidence !== undefined && confidence !== null ? Math.round(Number(confidence) * 100) + '%' : 'không rõ')

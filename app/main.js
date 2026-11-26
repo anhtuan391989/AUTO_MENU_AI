@@ -289,6 +289,15 @@ const keyServerSync = new KeyServerSync({
         const s = readSettingsFile();
         return !(s && s.keyServerAutoSync === false);
     },
+    // KEY-SEND-OFF-02: ô chuột phải AUTO DETECT "Tắt gửi sang Auto Tune" (setting keySendToTuneOff) TÍCH -> không gửi Key lên Server (vẫn HỎI/đọc Key từ Server bình thường). Cache 2 giây vì vòng dò gọi submit liên tục.
+    canSubmit: (() => {
+        let at = 0, val = true;
+        return () => {
+            const t = Date.now();
+            if (t - at > 2000) { try { const s = readSettingsFile(); val = !(s && s.keySendToTuneOff === true); } catch (e) { val = true; } at = t; }
+            return val;
+        };
+    })(),
     // EXE-PROTECT-07: gắn kèm bằng chứng license (nếu máy đang có) vào mọi request lên Key Server.
     // licenseManager được khai báo PHÍA DƯỚI nhưng hàm này chỉ chạy lúc có request thật (sau khi app đã nạp xong) nên an toàn.
     getLicenseProof: () => (typeof licenseManager !== "undefined" ? licenseManager.getProof() : null)

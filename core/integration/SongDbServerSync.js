@@ -161,7 +161,7 @@ function createSongDbServerSync({ keyServerSync, db = SongDatabase, fetchFn = nu
                     if (!s.songId) { s.songId = makeSongId(s.title, s.artist); idsChanged = true; }
                     if (r.reason === 'submitted') pushed++;
                 }
-                else if (!r.ok && r.reason !== 'cooldown') failed++;
+                else if (!r.ok && r.reason !== 'cooldown' && r.reason !== 'send-off') failed++; // KEY-SEND-OFF-02: tắt gửi không phải lỗi mạng
             }
             if (idsChanged) db.save(songs);
             last = { at: now(), ok: true, light, pulled, filled, updated, updatedTitles, pushed, pending, failed, removed, removeBlocked, verifyLeft, serverCount: got.list.length };
