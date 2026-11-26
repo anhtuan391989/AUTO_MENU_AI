@@ -94,13 +94,15 @@
             '<div class="panel-card-title">🔊 ASIO Link Pro (khi chọn sai driver / mất tiếng)</div>'
             + '<div id="asioLinkPath" class="status-text" style="margin-bottom:8px;word-break:break-all;">❌ Chưa chọn file ASIO Link Pro</div>'
             + '<div class="row-buttons">'
-            + '<button id="asioLinkBrowse" class="setup-btn">📂 Chọn file ASIO Link Pro (.exe)</button>'
-            + '<button id="asioLinkOpen" class="setup-btn">▶ Mở ASIO Link Pro</button>'
-            + '<button id="asioLinkRestart" class="setup-btn">🔄 Khởi động lại ASIO Link Pro</button>'
+            + '<button id="asioLinkShow" class="setup-btn">🪟 Mở bảng ASIO Link Pro (bảng xanh ở khay)</button>'
+            + '<button id="asioLinkBrowse" class="setup-btn">📂 Chọn file chạy ASIO Link Pro (.exe)</button>'
+            + '<button id="asioLinkOpen" class="setup-btn">▶ Chạy chương trình</button>'
+            + '<button id="asioLinkRestart" class="setup-btn">🔄 Khởi động lại + mở bảng</button>'
             + '</div>'
             + '<div id="asioLinkMsg" class="status-text" style="margin-top:8px;"></div>'
             + '<div style="margin-top:10px;font-size:12px;line-height:1.6;opacity:.85;">'
             + '<b>Cách sửa khi mất tiếng / Studio One báo "Link Pro could not be initialized":</b><br>'
+            + '0) Bấm <b>Mở bảng ASIO Link Pro</b>: app tự bấm icon bảng xanh ở khay (icon có chữ "…2.4.2.0 - Studio Pro.exe", chỉ có khi Studio One đang chạy). Nút "Chạy chương trình / Khởi động lại" dành cho ASIO Link Pro Tool (icon tím).<br>'
             + '1) Trong ASIO Link Pro bấm <b>Pick driver</b> → chọn <b>Focusrite USB ASIO</b> (không chọn ASIO4ALL) → OK; bật <b>Enable multi-clients</b>.<br>'
             + '2) Nếu vẫn lỗi: tắt phần mềm khác đang giữ Focusrite (ASIO4ALL, OBS...), rồi bấm <b>Khởi động lại ASIO Link Pro</b> ở đây.<br>'
             + '3) Quay lại Studio One bấm <b>Retry</b>.'
@@ -128,7 +130,8 @@
                 if (p) { setSetting("asioLinkPath", p); paintPath(); msg("Đã lưu đường dẫn.", true); }
             } catch (e) { msg("Chọn file lỗi: " + ((e && e.message) || e), false); }
         });
-        $("asioLinkOpen").addEventListener("click", () => run("asioLinkOpen", "Đang mở ASIO Link Pro"));
+        $("asioLinkShow").addEventListener("click", () => run("asioLinkShow", "Đang bấm icon bảng xanh ASIO Link Pro ở khay"));
+        $("asioLinkOpen").addEventListener("click", () => run("asioLinkOpen", "Đang chạy ASIO Link Pro"));
         $("asioLinkRestart").addEventListener("click", () => run("asioLinkRestart", "Đang khởi động lại ASIO Link Pro"));
     }
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", build); else build();

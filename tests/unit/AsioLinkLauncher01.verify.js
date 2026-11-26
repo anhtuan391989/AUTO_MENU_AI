@@ -35,12 +35,58 @@ function deps(o) {
   d = deps(); r = await L.open('C:\\x\\a.txt', d); ok(!r.ok && r.reason === 'not-exe', 'File không phải .exe: từ chối');
   d = deps(); r = await L.open('relative\\a.exe', d); ok(!r.ok && r.reason === 'not-absolute', 'Đường dẫn không đầy đủ: từ chối');
   d = deps(); d.platform = 'linux'; r = await L.open(P, d); ok(!r.ok && r.reason === 'not-windows' && d.log.length === 0, 'Không phải Windows: không làm gì, không crash');
+  // ---- ASIO-LINK-02: bấm icon ở khay (PowerShell GIẢ) ----
+  function tdeps(psOutputs, o) {
+    o = o || {}; const log = []; let i = 0;
+    const d = deps(o); d.pollMs = 0; d.pollTries = 3;
+    d.execFile = (cmd, args, opt, cb) => {
+      log.push([cmd, args]);
+      if (cmd === 'powershell.exe') { const out = psOutputs[Math.min(i++, psOutputs.length - 1)]; setImmediate(() => cb(null, out, '')); }
+      else setImmediate(() => cb(o.killErr || null, '', ''));
+    };
+    d.tlog = log; return d;
+  }
+  let t = tdeps(['OK:invoke:ASIO Link Pro']); r = await L.showPanel(t);
+  ok(r.ok && t.tlog.length === 1 && t.tlog[0][0] === 'powershell.exe' && t.tlog[0][1].includes('-EncodedCommand') && t.tlog[0][1].includes('-NonInteractive'), 'Bấm icon khay: gọi PowerShell không qua shell, dùng -EncodedCommand');
+  const dec = Buffer.from(t.tlog[0][1][t.tlog[0][1].indexOf('-EncodedCommand') + 1], 'base64').toString('utf16le');
+  ok(dec === L.TRAY_PS && /Shell_TrayWnd/.test(dec) && /NotifyIconOverflowWindow/.test(dec) && /InvokePattern/.test(dec) && /mouse_event/.test(dec) && /ASIO\\s\*Link/.test(dec), 'Script giải mã đúng: tìm ở thanh tác vụ + vùng ẩn, Invoke rồi mới bấm chuột thật');
+  ok(L.parseTrayOutput('OK:click:ASIO Link Pro').how === 'click' && L.parseTrayOutput('NOTFOUND').reason === 'tray-not-found' && L.parseTrayOutput('ERR:boom').reason === 'tray-error' && L.parseTrayOutput('').reason === 'tray-unknown', 'Đọc kết quả PowerShell: OK / không thấy / lỗi / rỗng');
+  t = tdeps(['NOTFOUND']); r = await L.showPanel(t); ok(!r.ok && r.reason === 'tray-not-found' && /Không thấy bảng ASIO Link Pro/.test(r.message), 'Không thấy bảng: báo rõ ràng');
+  // ASIO-LINK-03: CHỈ bấm icon bảng XANH (tooltip "...2.4.2.0 - Studio Pro.exe"), không bấm icon Tool tím, không chạy chương trình
+  ok(/\$want=/.test(L.TRAY_PS) && /\$nm -match \$pat\) -and \(\$nm -match \$want/.test(L.TRAY_PS) && !/Link\\s\*Pro\|/.test(L.TRAY_PS) && !/O\\s\*Deus/.test(L.TRAY_PS), 'Script: tên phải có "ASIO Link" VÀ dạng "<số phiên bản> - <tên>.exe" (loại icon Tool tím); bỏ kiểu khớp rộng cũ');
+  const rx = new RegExp(/\d+(\.\d+){2,}\s*-\s*\S.*\.exe/.source), rp = /ASIO\s*Link/;
+  const green = 'O Deus ASIO Link Pro 2.4.2.0 - Studio Pro.exe';
+  ok(rp.test(green) && rx.test(green), 'Tên icon xanh trong ảnh (tooltip thật) KHỚP');
+  for (const other of ['O Deus ASIO Link Pro Tool', 'ASIO Link Pro', 'O Deus ASIO Link Pro Tool - 1 running window', 'UA Console', 'Bluetooth']) ok(!(rp.test(other) && rx.test(other)), 'Không khớp nhầm: ' + other);
+  t = tdeps(['NOTFOUND:UA Console | Bluetooth | O Deus ASIO Link Pro Tool']); r = await L.showPanel(t);
+  ok(!r.ok && r.reason === 'tray-not-found' && /Studio One đang chạy/.test(r.message) && /Bluetooth/.test(r.message), 'Không thấy bảng xanh: báo cần Studio One + liệt kê tên các nút thấy được để dò');
+  ok(L.parseTrayOutput('NOTFOUND:a | b').detail === 'a | b' && L.parseTrayOutput('NOTFOUND').detail === '', 'Đọc danh sách tên từ NOTFOUND');
+  ok(typeof L.ensureAndShow === 'undefined', 'Đã bỏ nhánh "chạy chương trình rồi bấm" (chạy Tool không tạo icon xanh)');
+  // ASIO-LINK-04: CÁCH 1 = tìm thẳng CỬA SỔ bảng xanh (kể cả đang ẩn xuống khay) rồi bắt hiện; icon khay chỉ là dự phòng
+  const ps = L.TRAY_PS, csLine = ps.split('\n').find((x) => x.startsWith('Add-Type -TypeDefinition \'using System;using System.Text;'));
+  const cs = csLine ? csLine.slice(csLine.indexOf("'") + 1, csLine.lastIndexOf("'")) : '';
+  ok(cs.length > 200 && !cs.includes("'") && (cs.match(/\{/g) || []).length === (cs.match(/\}/g) || []).length && (cs.match(/\(/g) || []).length === (cs.match(/\)/g) || []).length, 'C# nhúng trong PowerShell: không có dấu nháy đơn, ngoặc {} () cân bằng');
+  ok(ps.indexOf("[AmWin]::Show(") > 0 && ps.indexOf("[AmWin]::Show(") < ps.indexOf('UIAutomationClient'), 'Thứ tự: thử mở CỬA SỔ trước, rồi mới tới bấm icon khay');
+  ok(/ShowWindow\(hh,9\)/.test(cs) && /ShowWindow\(hh,5\)/.test(cs) && /SetForegroundWindow\(hh\)/.test(cs) && /IsIconic/.test(cs) && /EnumWindows/.test(cs), 'C#: thu nhỏ -> khôi phục, ẩn -> hiện, rồi đưa lên trước');
+  ok(/OutputEncoding=\[System\.Text\.Encoding\]::UTF8/.test(ps), 'Ép PowerShell xuất UTF-8 (hết chữ tiếng Việt lộn xộn)');
+  t = tdeps(['OK:window:1 cua so trung ten|truoc: an|khongthunho|0,0,800,600|lop: X|O Deus ASIO Link Pro 2.4.2.0 - Studio Pro.exe|sau: hien|0,0,800,600']); r = await L.showPanel(t);
+  ok(r.ok && r.how === 'window' && /Đã gửi lệnh hiện bảng ASIO Link Pro — chi tiết: 1 cua so trung ten\|truoc: an/.test(r.message), 'Tìm được cửa sổ bảng xanh: báo kèm trạng thái trước/sau để dò nếu bảng không hiện');
+  ok(/StartsWith\('SMALL:'\)/.test(ps) && /w<200 \|\| ht<100/.test(cs), 'Cửa sổ trùng tên nhưng quá nhỏ (không phải bảng thật): không coi là thành công, rơi xuống dự phòng');
+  ok(/MoveWindow\(hh,120,120/.test(cs) && /SetWindowPos\(hh,\(IntPtr\)\(-1\)/.test(cs) && /SetWindowPos\(hh,\(IntPtr\)\(-2\)/.test(cs) && /keybd_event\(0x12/.test(cs) && /BringWindowToTop/.test(cs), 'Kéo vào màn hình nếu nằm ngoài + ép lên trước mọi cửa sổ (topmost rồi bỏ topmost, mẹo phím Alt)');
+  ok(/long a=Area\(h\); if\(a>best\)/.test(cs), 'Nhiều cửa sổ trùng tên: chọn cái có diện tích lớn nhất');
+  ok(/AmWin\]::Titles\('ASIO\|O Deus\|Link Pro'\)/.test(ps), 'Khi không thấy: liệt kê cửa sổ có chữ ASIO / O Deus để dò');
+  t = tdeps(['ERR:Access denied']); r = await L.showPanel(t); ok(!r.ok && r.reason === 'tray-error' && !t.log.some((x) => x[0] === 'spawn'), 'Lỗi PowerShell thật: báo lỗi, không chạy gì thêm');
+  t = tdeps(['NOTFOUND', 'OK:invoke:ASIO Link Pro']); r = await L.restart(P, Object.assign(t, { showAfter: true }));
+  ok(r.ok && r.panel === true && t.tlog[0][0] === 'taskkill' && /\/IM ASIOLinkPro\.exe/.test(t.tlog[0][1].join(' ')), 'Khởi động lại + mở bảng: đóng -> chạy lại -> bấm icon');
+  t = tdeps(['NOTFOUND']); t.platform = 'linux'; r = await L.showPanel(t); ok(!r.ok && r.reason === 'not-windows' && t.tlog.length === 0, 'Không phải Windows: không chạy PowerShell');
   // wiring tĩnh
   const rd = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   const main = rd('app/main.js'), pre = rd('app/preload.js'), st = rd('ui/js/setupTools.js');
   ok(/ipcMain\.handle\("asio-link-open"/.test(main) && /ipcMain\.handle\("asio-link-restart"/.test(main) && /fromSetupWindow\(event\)\) return Promise\.resolve\(DENIED\)/.test(main), 'main.js: 2 kênh IPC, chỉ cửa sổ Setup được gọi');
   ok(/st\.asioLinkPath/.test(main) && !/asio-link-(open|restart)", \(event, /.test(main), 'main.js: đường dẫn đọc từ file cài đặt, KHÔNG nhận từ renderer');
-  ok(/asioLinkOpen:/.test(pre) && /asioLinkRestart:/.test(pre), 'preload.js: bắc cầu 2 kênh');
+  ok(/asioLinkOpen:/.test(pre) && /asioLinkRestart:/.test(pre) && /asioLinkShow:/.test(pre), 'preload.js: bắc cầu 3 kênh');
+  ok(/ipcMain\.handle\("asio-link-show"/.test(main) && /AsioLinkLauncher\.showPanel\(\)/.test(main) && /showAfter: true/.test(main), 'main.js: kênh asio-link-show + restart tự mở bảng');
+  ok(/id="asioLinkShow"/.test(st) && /run\("asioLinkShow"/.test(st), 'Setup: có nút Mở bảng ASIO Link Pro (icon khay)');
   ok(/getElementById\("panel-audio"\)/.test(st) && /setSetting\("asioLinkPath"/.test(st), 'Setup: thẻ nằm ở mục Audio, lưu setting asioLinkPath');
   const { execSync } = require('child_process'); let h = ''; try { h = execSync('git diff --name-only -- ui/setup.html ui/index.html ui/css', { cwd: ROOT }).toString().trim(); } catch (e) { /* */ }
   ok(h === '', 'KHÔNG sửa HTML/CSS');

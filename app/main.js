@@ -1547,7 +1547,10 @@ function __asioLinkRun(kind, event) {
         const AsioLinkLauncher = require("../core/integration/AsioLinkLauncher");
         const st = readSettingsFile();
         const p = st && typeof st.asioLinkPath === "string" ? st.asioLinkPath : "";
-        return (kind === "restart" ? AsioLinkLauncher.restart(p) : AsioLinkLauncher.open(p)).then((r) => {
+        const run = kind === "restart" ? AsioLinkLauncher.restart(p, { showAfter: true }) // chạy lại xong tự bấm icon khay để hiện bảng
+            : kind === "show" ? AsioLinkLauncher.showPanel() // ASIO-LINK-03: chỉ bấm chuột trái đúng icon BẢNG XANH ở khay (tooltip "...2.4.2.0 - Studio Pro.exe"); KHÔNG chạy chương trình, KHÔNG bấm icon Tool tím
+            : AsioLinkLauncher.open(p);
+        return run.then((r) => {
             console.log("[AsioLink] " + kind + " ->", r && r.ok ? "OK" : (r && r.reason), r && r.message);
             return r;
         });
@@ -1555,6 +1558,7 @@ function __asioLinkRun(kind, event) {
 }
 ipcMain.handle("asio-link-open", (event) => __asioLinkRun("open", event));
 ipcMain.handle("asio-link-restart", (event) => __asioLinkRun("restart", event));
+ipcMain.handle("asio-link-show", (event) => __asioLinkRun("show", event));
 ipcMain.handle("tools-daw-show", (event) => new Promise((resolve) => {
     try { getDawTray().note("tools-daw-show", fromSetupWindow(event)); if (!fromSetupWindow(event)) { resolve(DENIED); return; } getDawTray().show(resolve); } // A101: có vết khi lệnh tới main
     catch (err) { console.error("tools-daw-show lỗi:", err); resolve({ ok: false, state: "failed", message: String((err && err.message) || err) }); }
