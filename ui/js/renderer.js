@@ -668,6 +668,7 @@ function renderTuneBtn(btn, tuneOn) {
 document.querySelectorAll(".preset-btn").forEach((b) => { if (isTuneOffBtn(b)) renderTuneBtn(b, true); }); // mặc định TUNE ON (bypass tắt)
 document.querySelectorAll(".preset-btn").forEach(btn => {
     btn.addEventListener("click", (e) => {
+        if (isTuneOffBtn(e.target) && __tuneBypassLocked()) { renderTuneBtn(e.target, false); return; } // TUNE-BYPASS-LOCK-01: đang KHOÁ bypass hoàn toàn -> bấm không bật được Tune (bỏ tick ở chuột phải TUNE để mở)
         if (isTuneOffBtn(e.target)) {
             __tuneUserOverrideKey = String(lastNowPlayingKey); // TUNE-ON-LOCK-01: người dùng tự bấm -> app KHÔNG tự đổi Tune nữa cho tới khi đổi bài
             const tuneOnNow = !e.target.classList.contains("active"); // trạng thái ĐÍCH sau cú bấm
@@ -956,6 +957,60 @@ function initFxAutoMenu() {
         const t = e.target;
         if (card.contains(t)) return;
         if (t && t.closest && t.closest("#fxBtn")) return; // chuột phải mở/đóng do handler contextmenu lo
+        hide();
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+}
+
+// ==========================================================
+// TUNE-BYPASS-LOCK-01 — Bấm CHUỘT PHẢI nút TUNE -> thẻ nổi có ô tích "TUNE OFF (bypass hoàn toàn)" (tạo bằng JS, KHÔNG sửa HTML/CSS).
+// TÍCH   = Tune bị KHOÁ ở OFF: nút chuyển TUNE OFF + gửi Bypass BẬT cho cả 4 Auto-Tune; sau đó bấm nút TUNE hay Auto (Tune-On-Lock) đều KHÔNG bật được Tune.
+// BỎ TÍCH = mở khoá: dùng lại bình thường (nút vẫn ở TUNE OFF, bấm TUNE để bật lại như cũ). Không tự bật Tune khi bỏ tick.
+// Độc lập hoàn toàn với ô "Tắt gửi sang Auto Tune" bên AUTO DETECT. Luôn về BỎ TÍCH khi mở app. Tự ẩn sau 5 giây (A97).
+// ==========================================================
+function initTuneBypassLockMenu() {
+    const btn = document.querySelector('.preset-btn[data-tune-btn="1"]');
+    if (!btn || document.getElementById("tuneBypassLockCard")) return; // thiếu nút, hoặc đã tạo rồi (idempotent)
+    const card = document.createElement("div");
+    card.id = "tuneBypassLockCard";
+    card.style.cssText = "position:fixed;display:none;z-index:3000;background:#081523;border:1px solid #1f3a57;border-radius:8px;padding:8px 12px;color:#cfe3f7;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.5);";
+    card.innerHTML = '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;">'
+        + '<input type="checkbox" id="tuneBypassLockChk" style="cursor:pointer;"><span>TUNE OFF (bypass hoàn toàn)</span></label>';
+    document.body.appendChild(card);
+    const chk = card.querySelector("#tuneBypassLockChk");
+    const baseTitle = btn.title || "";
+    const syncTitle = (locked) => { btn.title = locked ? "TUNE đang KHOÁ ở OFF (bypass hoàn toàn) — chuột phải, bỏ tick để mở" : baseTitle; };
+    chk.checked = __tuneBypassLocked();
+    chk.addEventListener("change", () => {
+        const locked = !!chk.checked;
+        setSetting("tuneBypassLock", locked);
+        if (locked) { // khoá: ép TUNE OFF + Bypass BẬT ngay (CC tuyệt đối, gửi lại vô hại) cho cả 4 Auto-Tune
+            renderTuneBtn(btn, false);
+            reportDawStateResult(btn, "TUNE", window.ActionRegistry?.setDawControlState?.("TUNE", true, { reason: "tune-bypass-lock" }));
+        }
+        syncTitle(locked); // đặt SAU reportDawStateResult để chú thích khoá không bị ghi đè khi lệnh gửi xong
+        if (locked) setTimeout(() => { if (__tuneBypassLocked()) syncTitle(true); }, 300);
+    });
+    const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // A97: tự ẩn sau 5 s
+    const hide = () => { card.style.display = "none"; auto.disarm(); };
+    btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (card.style.display !== "none") { hide(); return; }
+        chk.checked = __tuneBypassLocked(); // đọc trạng thái hiện tại mỗi lần mở
+        card.style.display = "block";
+        const r = btn.getBoundingClientRect();
+        const w = card.offsetWidth, h = card.offsetHeight;
+        const left = Math.max(4, Math.min(window.innerWidth - w - 4, r.left + r.width / 2 - w / 2));
+        let top = r.top - h - 6; // ưu tiên hiện PHÍA TRÊN nút; không đủ chỗ thì hiện bên dưới
+        if (top < 4) top = r.bottom + 6;
+        card.style.left = left + "px";
+        card.style.top = top + "px";
+        auto.arm();
+    });
+    document.addEventListener("mousedown", (e) => {
+        const t = e.target;
+        if (card.contains(t)) return;
+        if (t && t.closest && t.closest('.preset-btn[data-tune-btn="1"]') && e.button === 2) return; // chuột phải mở/đóng do handler contextmenu lo
         hide();
     });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
@@ -1988,8 +2043,14 @@ function __tuneOnLockEnabled() {
     return v;
 }
 function __tuneUserOverridden() { return __tuneUserOverrideKey !== null && __tuneUserOverrideKey === String(lastNowPlayingKey); }
+// TUNE-BYPASS-LOCK-01 — chuột phải nút TUNE -> ô tích "TUNE OFF (bypass hoàn toàn)": TÍCH = Tune bị khoá ở OFF (Bypass BẬT), cả bấm tay lẫn tự động đều KHÔNG bật được; BỎ TÍCH = dùng lại bình thường.
+// Độc lập hoàn toàn với ô "Tắt gửi sang Auto Tune" (KEY-SEND-OFF-01). Cờ lưu setting tuneBypassLock, luôn về BỎ TÍCH khi mở app.
+function __tuneBypassLocked() { try { return getSetting("tuneBypassLock", false) === true; } catch (e) { return false; } }
+// KEY-SEND-OFF-01 — chuột phải AUTO DETECT -> ô tích "Tắt gửi sang Auto Tune": TÍCH = Menu CHỈ dò + hiển thị Key, KHÔNG tự gửi Key xuống Auto-Tune; BỎ TÍCH = chạy bình thường. Setting keySendToTuneOff, luôn về BỎ TÍCH khi mở app.
+function __keySendOff() { try { return getSetting("keySendToTuneOff", false) === true; } catch (e) { return false; } }
 function __setTuneAuto(on, reason) {
     try {
+        if (on && __tuneBypassLocked()) return; // TUNE-BYPASS-LOCK-01: khoá bypass -> tự động cũng không được bật Tune
         const b = document.querySelector('.preset-btn[data-tune-btn="1"]');
         if (!b || b.classList.contains("active") === on) return; // không có nút / đã đúng trạng thái -> không gửi gì
         renderTuneBtn(b, on);
@@ -2005,6 +2066,7 @@ function __keyLockedForTune() { // "đã chốt Key" = đúng điều kiện Men
 }
 function __tuneMaybeOn() {
     try {
+        if (__keySendOff()) return; // KEY-SEND-OFF-01: không gửi Key xuống Auto-Tune thì cũng không có "Key đã vào plugin" để bật Tune theo
         if (!__tuneOnLockEnabled() || __tuneUserOverridden() || !__keyLockedForTune()) return;
         Promise.resolve(__keySendInFlight).catch(() => false).then((ok) => {
             if (ok === false) return; // gửi Key xuống plugin thất bại -> không bật Tune
@@ -2075,6 +2137,11 @@ function __applyActiveKeyToPluginCore(sourceLabel) {
     }
     if (source === "ai" && typeof __aiCoreCfg === "function" && __aiCoreCfg().autoKeyMode) { // A119: Chế độ Auto-Key BẬT -> plugin Auto-Key tự dò + tự gửi Auto-Tune; Menu CHỈ hiển thị Key AI, không gửi Key AI (tránh đè nhau)
         console.log("[Auto-Key] Chế độ Auto-Key BẬT — Menu không gửi Key AI xuống Auto-Tune (Key AI chỉ để hiển thị).");
+        return;
+    }
+
+    if ((source === "ai" || source === "songDb") && __keySendOff()) { // KEY-SEND-OFF-01: ô "Tắt gửi sang Auto Tune" TÍCH -> chỉ dò + hiển thị Key, KHÔNG gửi Plugin (không ghi lastPluginKey => bỏ tick là gửi lại được). Key tay/nút SEND giữ nguyên.
+        console.log("[KeySendOff] Tắt gửi sang Auto-Tune — chỉ dò, không gửi Key xuống plugin.");
         return;
     }
 
@@ -4106,11 +4173,14 @@ document.addEventListener("DOMContentLoaded", () => {
     checkAllSystems();
     applyAudioOutputSetting(); // TASK B72 — áp dụng thiết bị đầu ra đã lưu (nếu có) lúc khởi động
     setSetting("fxAutoEnabled", true); // POPUP-RESET-01: ô tích "Auto bật FX khi có nhạc" (popup chuột phải FX) luôn về mặc định BẬT mỗi lần mở app
+    setSetting("tuneBypassLock", false); // TUNE-BYPASS-LOCK-01: ô "TUNE OFF (bypass hoàn toàn)" luôn về BỎ TÍCH khi mở app (nút TUNE mở app là TUNE ON, không gửi gì)
+    setSetting("keySendToTuneOff", false); // KEY-SEND-OFF-01: ô "Tắt gửi sang Auto Tune" luôn về BỎ TÍCH khi mở app (Menu gửi Key bình thường)
     loadData();
     ensurePresetLit(); // PRESET-LIT-01
     if (typeof initMicVolumePopups === "function") initMicVolumePopups(); // MIC-VOLUME-KNOB-01 — SAU loadData() để hiện đúng giá trị đã lưu
     if (typeof initAudioChillPopup === "function") initAudioChillPopup(); // AUDIO-CHILL-01 — chuột phải MUSIC: nút Audio chill + knob VST
     if (typeof initFxAutoMenu === "function") initFxAutoMenu(); // FX-AUTO-TOGGLE-01 — chuột phải FX: ô tích Auto bật FX khi có nhạc
+    if (typeof initTuneBypassLockMenu === "function") initTuneBypassLockMenu(); // TUNE-BYPASS-LOCK-01 — chuột phải TUNE: ô tích TUNE OFF (bypass hoàn toàn, khoá không bật được Tune)
     if (typeof initAutoKeyTempCard === "function") initAutoKeyTempCard(); // AUTOKEY-TEMP-01 — chuột phải AUTO DETECT: Dò bằng AI / Auto Key tạm thời (chọn 1)
     if (typeof initAutoDetectModePopup === "function") initAutoDetectModePopup(); // AUTODETECT-MODE-01 — chuột phải AUTO DETECT: Tự dò bằng tay / Dò bằng AI (chọn 1)
 if (typeof initKeyServerCorrectCard === "function") initKeyServerCorrectCard(); // KEY-SERVER-CORRECT-01 — chuột phải SEND (khối KEY): lưu Key đúng vào Server + songs.json
@@ -4282,6 +4352,7 @@ window.electronAPI?.onPluginCommand?.(async (message) => {
                 console.warn("[Bridge] Bỏ qua — value không phải tên Key hợp lệ:", message.value);
                 break;
             }
+            if (__keySendOff()) { console.log("[Bridge][KeySendOff] Tắt gửi sang Auto-Tune — bỏ qua", message.command, message.value); break; } // KEY-SEND-OFF-01
             const result = await sendKeyToAutotune(message.value);
             console.log("[Bridge] sendKeyToAutotune() ->", result);
             break;
@@ -4302,7 +4373,7 @@ window.electronAPI?.onPluginCommand?.(async (message) => {
             // xác nhận. Vá bằng ĐÚNG semantics Manual đang dùng: cùng delta, chạy song song,
             // không coi là thành công nếu 1 trong 2 lỗi (không báo giả tạo).
             const [autotuneResult, soundshifterResult] = await Promise.all([
-                sendToneStep(delta), // (AI-ALG-04: KHÔNG đổi — delta ở đây là tuyệt đối so với Key gốc nhưng gửi như tương đối; cùng lớp lỗi D8, chờ quyết định, xem báo cáo D12)
+                (typeof __keySendOff === "function" && __keySendOff()) ? Promise.resolve({ ok: true, skipped: "key-send-off" }) : sendToneStep(delta), // KEY-SEND-OFF-01: tắt gửi sang Auto-Tune -> bỏ phần Auto-Tune, SoundShifter giữ nguyên // (AI-ALG-04: KHÔNG đổi — delta ở đây là tuyệt đối so với Key gốc nhưng gửi như tương đối; cùng lớp lỗi D8, chờ quyết định, xem báo cáo D12)
                 sendToneStepToSoundShifter(delta),
             ]);
             console.log("[Bridge] sendToneStep() ->", autotuneResult, "(delta =", delta, ")");
@@ -4520,6 +4591,15 @@ function initAutoKeyTempCard() {
     };
     const aiChk = addRow("keyModeAiChk", "Dò bằng AI", true);
     const akChk = addRow("keyModeAutoKeyChk", "Auto Key tạm thời", false);
+    // KEY-SEND-OFF-01: ô tích ĐỘC LẬP với 2 ô trên (không thuộc nhóm chọn-một). TÍCH = Menu chỉ dò, KHÔNG gửi Key sang Auto Tune; BỎ TÍCH = Menu hoạt động bình thường.
+    const sendOffChk = addRow("keySendOffChk", "Tắt gửi sang Auto Tune", false);
+    sendOffChk.checked = typeof __keySendOff === "function" && __keySendOff();
+    sendOffChk.addEventListener("change", () => {
+        setSetting("keySendToTuneOff", !!sendOffChk.checked);
+        if (!sendOffChk.checked) { // bỏ tick -> gửi lại Key hiện tại NGAY (chỉ khi Key đã chốt thật; không gửi Key hạt giống/đang LISTENING)
+            try { if (getActiveSourceName() !== "manual" && __keyLockedForTune()) applyActiveKeyToPlugin("Bật lại gửi Auto-Tune"); } catch (e) { /* bỏ qua */ }
+        }
+    });
     document.body.appendChild(card);
     const auto = createPopupAutoHide(card, () => { card.style.display = "none"; }); // tự ẩn sau 5 giây (A97)
     const hide = () => { card.style.display = "none"; auto.disarm(); };
@@ -4545,6 +4625,7 @@ function initAutoKeyTempCard() {
         e.preventDefault();
         if (card.style.display !== "none") { hide(); return; }
         show(__akTempOn()); // đọc trạng thái hiện tại mỗi lần mở
+        sendOffChk.checked = typeof __keySendOff === "function" && __keySendOff(); // KEY-SEND-OFF-01
         card.style.display = "block";
         const r = btn.getBoundingClientRect();
         const w = card.offsetWidth, h = card.offsetHeight;

@@ -142,7 +142,7 @@ function build(opts) {
 {
     const sb = build(); const btn = sb.__els.btn; const card = sb.document.body.children[0];
     const aiChk = card.children[0].children[0], akChk = card.children[1].children[0];
-    ok(card.id === 'autoKeyTempCard' && card.children.length === 2, 'thẻ có đúng 2 ô tích');
+    ok(card.id === 'autoKeyTempCard' && card.children.length === 3 && card.children[2].children[1].textContent === 'Tắt gửi sang Auto Tune', 'thẻ có 3 ô tích (2 ô chọn-một + ô độc lập "Tắt gửi sang Auto Tune", KEY-SEND-OFF-01)');
     ok(card.children[0].children[1].textContent === 'Dò bằng AI' && card.children[1].children[1].textContent === 'Auto Key tạm thời', 'nhãn: "Dò bằng AI" và "Auto Key tạm thời"');
     ok(btn.listeners.contextmenu && btn.listeners.contextmenu.length === 1, 'chuột phải nút AUTO DETECT mở thẻ');
     let prevented = false; btn.listeners.contextmenu[0]({ preventDefault() { prevented = true; } });
