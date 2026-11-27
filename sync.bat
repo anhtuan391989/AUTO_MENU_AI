@@ -1,6 +1,11 @@
 @echo off
 cd /d "G:\AUTO_MENU_AI"
 
+:: 0. Tắt bước Git tự dọn dẹp ("gc") — ổ G: (hoặc phần mềm diệt virus) không cho xoá vài file tạm của Git,
+::    Git cứ hỏi "Should I try again? (y/n)" liên tục. KHÔNG xoá được mấy file đó không sao cả (chỉ là file
+::    trùng đã gộp xong), nhưng tắt hẳn bước này đi cho khỏi bị hỏi nữa — không ảnh hưởng gì tới việc đồng bộ.
+git config gc.auto 0
+
 :: 1. Lấy code mới nhất từ GitHub về để tránh lỗi "rejected"
 git pull origin main
 
