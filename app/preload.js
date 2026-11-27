@@ -184,6 +184,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ASIO-LINK-01 — Setup > Audio > ASIO Link Pro: mở / khởi động lại (đường dẫn lấy từ setting asioLinkPath ở main process)
     asioLinkOpen: () => ipcRenderer.invoke("asio-link-open"),
     asioLinkRestart: () => ipcRenderer.invoke("asio-link-restart"),
+    asioLinkDrivers: () => ipcRenderer.invoke("asio-link-drivers"), // ASIO-LINK-05: danh sách card ASIO trong máy
+    asioLinkPick: () => ipcRenderer.invoke("asio-link-pick"), // ASIO-LINK-04: tự bấm Pick driver + chọn driver + OK
     asioLinkShow: () => ipcRenderer.invoke("asio-link-show"), // ASIO-LINK-02: bấm icon ASIO Link Pro ở khay để hiện bảng
     adminAuthChangePassword: (currentPassword, newPassword) =>
         ipcRenderer.invoke("admin-auth-change-password", { currentPassword, newPassword }),

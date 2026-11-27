@@ -95,10 +95,12 @@
             + '<div id="asioLinkPath" class="status-text" style="margin-bottom:8px;word-break:break-all;">❌ Chưa chọn file ASIO Link Pro</div>'
             + '<div class="row-buttons">'
             + '<button id="asioLinkShow" class="setup-btn">🪟 Mở bảng ASIO Link Pro (bảng xanh ở khay)</button>'
+            + '<button id="asioLinkPick" class="setup-btn">🎛 Tự chọn driver (Pick driver → OK)</button>'
             + '<button id="asioLinkBrowse" class="setup-btn">📂 Chọn file chạy ASIO Link Pro (.exe)</button>'
             + '<button id="asioLinkOpen" class="setup-btn">▶ Chạy chương trình</button>'
             + '<button id="asioLinkRestart" class="setup-btn">🔄 Khởi động lại + mở bảng</button>'
             + '</div>'
+            + '<div style="margin-top:8px;font-size:12px;">🎛 Card âm thanh của bạn: <select id="asioDriverName" style="min-width:240px;"><option value="">Tự chọn (card đang dùng)</option></select> <button id="asioDriverScan" class="setup-btn" style="padding:2px 10px;">🔄 Quét card trong máy</button><div style="opacity:.7;margin-top:4px;">Chọn card của bạn một lần ở đây (đã lưu). Nút "Tự chọn driver" sẽ dùng đúng card này; để "Tự chọn" thì app tự bỏ qua ASIO4ALL/ASIO Link/Waves.</div></div>'
             + '<div id="asioLinkMsg" class="status-text" style="margin-top:8px;"></div>'
             + '<div style="margin-top:10px;font-size:12px;line-height:1.6;opacity:.85;">'
             + '<b>Cách sửa khi mất tiếng / Studio One báo "Link Pro could not be initialized":</b><br>'
@@ -130,6 +132,26 @@
                 if (p) { setSetting("asioLinkPath", p); paintPath(); msg("Đã lưu đường dẫn.", true); }
             } catch (e) { msg("Chọn file lỗi: " + ((e && e.message) || e), false); }
         });
+        const sel = $("asioDriverName");
+        const fillDrivers = (list) => {
+            let saved = ""; try { saved = getSetting("asioDriverName", "") || ""; } catch (e) { /* bỏ qua */ }
+            const names = (list || []).map((d) => d.name);
+            if (saved && names.indexOf(saved) < 0) names.push(saved); // card đã lưu nhưng đang không cắm vẫn hiện để không bị mất
+            sel.innerHTML = "";
+            const o0 = document.createElement("option"); o0.value = ""; o0.textContent = "Tự chọn (card đang dùng)"; sel.appendChild(o0);
+            names.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
+            sel.value = saved;
+        };
+        const scanDrivers = async (quiet) => {
+            const a = window.electronAPI;
+            if (!a || typeof a.asioLinkDrivers !== "function") { fillDrivers([]); if (!quiet) msg("Chức năng này chỉ có khi mở Setup từ app Menu (Electron).", false); return; }
+            try { const r = await a.asioLinkDrivers(); fillDrivers((r && r.drivers) || []); if (!quiet) msg((r && r.message) || "Đã quét.", !!(r && r.ok)); }
+            catch (e) { fillDrivers([]); if (!quiet) msg("Quét card lỗi: " + ((e && e.message) || e), false); }
+        };
+        fillDrivers([]); scanDrivers(true);
+        sel.addEventListener("change", () => { try { setSetting("asioDriverName", sel.value || ""); msg(sel.value ? 'Đã lưu card: "' + sel.value + '".' : "Đã lưu: tự chọn card đang dùng.", true); } catch (e) { /* bỏ qua */ } });
+        $("asioDriverScan").addEventListener("click", () => scanDrivers(false));
+        $("asioLinkPick").addEventListener("click", () => { try { setSetting("asioDriverName", sel.value || ""); } catch (e) { /* bỏ qua */ } setTimeout(() => run("asioLinkPick", "Đang bấm Pick driver và chọn driver"), 150); });
         $("asioLinkShow").addEventListener("click", () => run("asioLinkShow", "Đang bấm icon bảng xanh ASIO Link Pro ở khay"));
         $("asioLinkOpen").addEventListener("click", () => run("asioLinkOpen", "Đang chạy ASIO Link Pro"));
         $("asioLinkRestart").addEventListener("click", () => run("asioLinkRestart", "Đang khởi động lại ASIO Link Pro"));

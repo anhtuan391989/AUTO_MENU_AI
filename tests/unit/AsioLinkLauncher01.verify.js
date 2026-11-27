@@ -95,6 +95,35 @@ function deps(o) {
   ok(/ipcMain\.handle\("asio-link-show"/.test(main) && /AsioLinkLauncher\.showPanel\(\)/.test(main) && /showAfter: true/.test(main), 'main.js: kênh asio-link-show + restart tự mở bảng');
   ok(/id="asioLinkShow"/.test(st) && /run\("asioLinkShow"/.test(st), 'Setup: có nút Mở bảng ASIO Link Pro (icon khay)');
   ok(/getElementById\("panel-audio"\)/.test(st) && /setSetting\("asioLinkPath"/.test(st), 'Setup: thẻ nằm ở mục Audio, lưu setting asioLinkPath');
+  const PS = L.TRAY_PS;
+  ok(/TrayMsg\(string re\)/.test(PS) && /Shell_TrayWnd/.test(PS) && /NotifyIconOverflowWindow/.test(PS) && /0x417/.test(PS) && /PostMessage\(\(IntPtr\)hw/.test(PS), 'TrayMsg: đọc icon khay (cả hộp ẩn) từ Explorer rồi gửi cú bấm trái thẳng tới chương trình');
+  ok(PS.indexOf('$tm=[AmWin]::TrayMsg') > PS.indexOf('[AmWin]::Probe($reWin)') && PS.indexOf('$tm=[AmWin]::TrayMsg') < PS.indexOf('Get-Process explorer'), 'TrayMsg chạy sau Probe và TRƯỚC cách Win+B/UIA');
+  ok(/'OK:msg:'/.test(PS) && L.parseTrayOutput('OK:msg:O Deus ASIO Link Pro 2.4.2.0 - Studio Pro.exe').ok === true, 'kết quả OK:msg được nhận');
+  // ---- ASIO-LINK-04: tự chọn driver ----
+  const PP = L.pickPs('Focusrite USB');
+  ok(/\$drv='Focusrite USB'/.test(PP) && /\$reWin='ASIO\\s\*Link\\s\*Pro\\s\+\\d\+/.test(PP), 'pickPs: nhúng tên driver + regex bảng (1 lớp backslash)');
+  ok(L.safeDriverName("a'; calc") === '' && L.safeDriverName('Focusrite Thunderbolt') === 'Focusrite Thunderbolt' && L.safeDriverName('') === '', 'tên driver: chặn ký tự lạ; rỗng = TỰ CHỌN');
+  const AP = L.pickPs('');
+  ok(/\$drv=''/.test(AP) && /0x146/.test(AP) && /0x148/.test(AP) && /0x14E/.test(AP) && /ASIO4ALL\|ASIO Link\|Waves/.test(AP), 'tự chọn: đọc danh sách combo, bỏ driver ảo (ASIO4ALL/ASIO Link/Waves...), giữ card thật đang chọn');
+  ok(/Select ASIO Driver/.test(PP) && /0x14D/.test(PP) && /0xF5/.test(PP) && PP.indexOf('HasDlg()') < PP.indexOf('Choose($drv)'), 'chọn driver bằng CB_SELECTSTRING + BM_CLICK OK, sau khi hộp hiện');
+  ok(/ClickAt\(\$reWin,754,\$y\)/.test(PP) && /Mark\(\$reWin,343,27\)/.test(PP), 'Pick driver + Enable multi-clients theo toạ độ tỉ lệ');
+  ok(L.parsePickOutput('OK:xong').ok === true && L.parsePickOutput('ERR:hỏng').ok === false, 'parsePickOutput');
+  const calls = [];
+  const dp = (stdout) => ({ platform: 'win32', sleep: () => Promise.resolve(), afterShowMs: 0, execFile: (f, a, o, cb) => { calls.push(a.join(' ')); const enc = a[a.length - 1]; const txt = Buffer.from(enc, 'base64').toString('utf16le'); cb(null, /\$tm=\[AmWin\]::TrayMsg/.test(txt) ? 'OK:window:x' : stdout); } });
+  let pr = await L.pickDriver('Focusrite USB', dp('OK:Đã chọn driver "Focusrite USB" và bấm OK.'));
+  ok(pr.ok === true && calls.length === 2, 'pickDriver: mở bảng (1 lần PowerShell) rồi chọn driver (1 lần)');
+  pr = await L.pickDriver('Focusrite USB', dp('ERR:Không chọn được driver'));
+  ok(pr.ok === false && /Không chọn được/.test(pr.message), 'pickDriver: báo lỗi rõ ràng');
+  pr = await L.pickDriver('x', { platform: 'linux' });
+  ok(pr.ok === false && pr.reason === 'not-windows', 'pickDriver: không phải Windows -> từ chối');
+  ok(/asio-link-pick/.test(main) && /pickDriver\(st && st\.asioDriverName\)/.test(main) && /asioLinkPick:/.test(pre) && /id="asioLinkPick"/.test(st) && /id="asioDriverName"/.test(st), 'main/preload/Setup nối đủ kênh asio-link-pick + ô tên driver');
+  ok(/<select id="asioDriverName"/.test(st) && /asioLinkDrivers/.test(st) && /asio-link-drivers/.test(main) && /asioLinkDrivers:/.test(pre), 'Setup: danh sách chọn card âm thanh (quét từ máy) + lưu asioDriverName');
+  const reg = 'HKEY_LOCAL_MACHINE\\SOFTWARE\\ASIO\r\n\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\ASIO\\ASIO4ALL v2\r\n    CLSID    REG_SZ    {x}\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\ASIO\\Focusrite USB ASIO\r\n    CLSID    REG_SZ    {y}\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\ASIO\\Focusrite USB ASIO\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\ASIO\\Waves SoundGrid ASIO\r\n';
+  const dl = L.parseRegDrivers(reg);
+  ok(dl.length === 3 && dl[0].name === 'Focusrite USB ASIO' && dl[0].virtual === false && dl[1].virtual === true, 'parseRegDrivers: gộp 2 nhánh registry, không trùng, card thật lên trước');
+  const lr = await L.listDrivers({ platform: 'win32', execFile: (f, a, o, cb) => cb(null, a[1].indexOf('WOW6432Node') > 0 ? 'HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\ASIO\\Realtek ASIO\r\n' : 'HKEY_LOCAL_MACHINE\\SOFTWARE\\ASIO\\Focusrite USB ASIO\r\n') });
+  ok(lr.ok && lr.drivers.length === 2, 'listDrivers: hỏi cả 2 nhánh registry');
+  ok((await L.listDrivers({ platform: 'linux' })).ok === false, 'listDrivers: không phải Windows -> từ chối');
   const { execSync } = require('child_process'); let h = ''; try { h = execSync('git diff --name-only -- ui/setup.html ui/index.html ui/css', { cwd: ROOT }).toString().trim(); } catch (e) { /* */ }
   ok(h === '', 'KHÔNG sửa HTML/CSS');
   console.log(`\n${pass} pass, ${fail} fail`); process.exit(fail ? 1 : 0);
