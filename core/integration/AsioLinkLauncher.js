@@ -80,11 +80,15 @@ function killByName(name, deps) {
 // PowerShell + UI Automation: tìm nút có tên khớp ASIO Link / O Deus / Link Pro trong thanh tác vụ + khay (kể cả mũi tên ^ "biểu tượng ẩn"), bấm bằng Invoke;
 // không Invoke được thì bấm chuột thật vào giữa nút. Ưu tiên nút KHÔNG phải nút cửa sổ "Tool" trên thanh tác vụ.
 
-// C#: tìm CỬA SỔ (kể cả đang ẩn xuống khay) theo tiêu đề rồi bắt hiện lên. Không có dấu nháy đơn trong C# (nằm trong chuỗi PowerShell nháy đơn).
+// C#: tiện ích Win32 (KHÔNG có dấu nháy đơn vì nằm trong chuỗi PowerShell nháy đơn).
+//  Probe : tìm cửa sổ bảng theo tiêu đề (KHÔNG tác động). Front: đưa cửa sổ đang HIỆN SẴN lên trước.
+//  Click : bấm chuột trái thật tại (x,y) rồi trả con trỏ về chỗ cũ. Key: gửi 1 phím. Titles: liệt kê tiêu đề để chẩn đoán.
+// LƯU Ý: KHÔNG được ép hiện cửa sổ bảng đang ẩn bằng ShowWindow — chương trình chỉ tự vẽ nội dung khi chính nó xử lý cú bấm icon ở khay => ép hiện cho ra cửa sổ TRẮNG XÓA (đã gặp thật).
 const AMWIN_CS = [
-  'using System;using System.Text;using System.Collections.Generic;using System.Runtime.InteropServices;using System.Text.RegularExpressions;',
+  'using System;using System.Text;using System.Threading;using System.Collections.Generic;using System.Runtime.InteropServices;using System.Text.RegularExpressions;',
   'public class AmWin{',
   '[StructLayout(LayoutKind.Sequential)] public struct RECT{ public int L,T,R,B; }',
+  '[StructLayout(LayoutKind.Sequential)] public struct PT{ public int X,Y; }',
   'public delegate bool EnumProc(IntPtr h, IntPtr l);',
   '[DllImport("user32.dll")] static extern bool EnumWindows(EnumProc p, IntPtr l);',
   '[DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);',
@@ -94,60 +98,57 @@ const AMWIN_CS = [
   '[DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);',
   '[DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);',
   '[DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int c);',
-  '[DllImport("user32.dll")] static extern bool MoveWindow(IntPtr h, int x, int y, int w, int ht, bool rp);',
   '[DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);',
   '[DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);',
   '[DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);',
+  '[DllImport("user32.dll")] static extern bool GetCursorPos(out PT p);',
+  '[DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);',
+  '[DllImport("user32.dll")] static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);',
   '[DllImport("user32.dll")] static extern void keybd_event(byte vk, byte sc, uint fl, UIntPtr ex);',
   'static string Title(IntPtr h){ int n=GetWindowTextLength(h); if(n<=0) return null; StringBuilder sb=new StringBuilder(n+1); GetWindowText(h,sb,sb.Capacity); return sb.ToString(); }',
   'static string ClassOf(IntPtr h){ StringBuilder sb=new StringBuilder(256); GetClassName(h,sb,256); return sb.ToString(); }',
   'static string Rc(IntPtr h){ RECT r; GetWindowRect(h,out r); return r.L+","+r.T+","+r.R+","+r.B; }',
   'static long Area(IntPtr h){ RECT r; GetWindowRect(h,out r); return (long)(r.R-r.L)*(long)(r.B-r.T); }',
-  // Chọn cửa sổ trùng tên có diện tích lớn nhất (tránh cửa sổ ẩn nhỏ cùng tên), khôi phục/hiện, kéo vào màn hình nếu nằm ngoài, rồi đưa lên trước mọi cửa sổ.
-  'public static string Show(string re){ Regex rx=new Regex(re); List<IntPtr> hs=new List<IntPtr>();',
+  'static IntPtr Pick(string re, out int count){ Regex rx=new Regex(re); List<IntPtr> hs=new List<IntPtr>();',
   ' EnumWindows(delegate(IntPtr h, IntPtr l){ string t=Title(h); if(t!=null && rx.IsMatch(t)) hs.Add(h); return true; }, IntPtr.Zero);',
-  ' if(hs.Count==0) return null;',
-  ' IntPtr hh=hs[0]; long best=-1; foreach(IntPtr h in hs){ long a=Area(h); if(a>best){ best=a; hh=h; } }',
-  ' string before=(IsWindowVisible(hh)?"hien":"an")+"|"+(IsIconic(hh)?"thunho":"khongthunho")+"|"+Rc(hh);',
-  ' if(IsIconic(hh)) ShowWindow(hh,9); else if(!IsWindowVisible(hh)) ShowWindow(hh,5);',
-  ' RECT r; GetWindowRect(hh,out r); int w=r.R-r.L, ht=r.B-r.T;',
-  ' string info=hs.Count+" cua so trung ten|truoc: "+before+"|lop: "+ClassOf(hh)+"|"+Title(hh);',
-  ' if(w<200 || ht<100) return "SMALL:"+info+"|sau: "+Rc(hh);',
-  ' if(r.R<50 || r.B<50 || r.L>10000 || r.T>10000) MoveWindow(hh,120,120,w,ht,true);',
+  ' count=hs.Count; IntPtr best=IntPtr.Zero; long ba=-1; foreach(IntPtr x in hs){ long a=Area(x); if(a>ba){ ba=a; best=x; } } return best; }',
+  'public static string Probe(string re){ int n; IntPtr hh=Pick(re,out n); if(hh==IntPtr.Zero) return null;',
+  ' return n+"|"+(IsWindowVisible(hh)?"hien":"an")+"|"+(IsIconic(hh)?"thunho":"khongthunho")+"|"+Rc(hh)+"|"+ClassOf(hh)+"|"+Title(hh); }',
+  'public static void Front(string re){ int n; IntPtr hh=Pick(re,out n); if(hh==IntPtr.Zero) return; if(IsIconic(hh)) ShowWindow(hh,9);',
   ' keybd_event(0x12,0,0,UIntPtr.Zero); keybd_event(0x12,0,2,UIntPtr.Zero);',
-  ' SetWindowPos(hh,(IntPtr)(-1),0,0,0,0,0x43); SetWindowPos(hh,(IntPtr)(-2),0,0,0,0,0x43);',
-  ' BringWindowToTop(hh); SetForegroundWindow(hh);',
-  ' return info+"|sau: "+(IsWindowVisible(hh)?"hien":"an")+"|"+Rc(hh); }',
+  ' SetWindowPos(hh,(IntPtr)(-1),0,0,0,0,0x43); SetWindowPos(hh,(IntPtr)(-2),0,0,0,0,0x43); BringWindowToTop(hh); SetForegroundWindow(hh); }',
+  'public static void Click(int x, int y){ PT old; GetCursorPos(out old); SetCursorPos(x,y); Thread.Sleep(80);',
+  ' mouse_event(2,0,0,0,UIntPtr.Zero); Thread.Sleep(40); mouse_event(4,0,0,0,UIntPtr.Zero); Thread.Sleep(200); SetCursorPos(old.X,old.Y); }',
+  'public static void Key(int vk, bool up){ keybd_event((byte)vk,0,up?(uint)2:(uint)0,UIntPtr.Zero); }',
   'public static string Titles(string re){ Regex rx=new Regex(re); List<string> list=new List<string>();',
   ' EnumWindows(delegate(IntPtr h, IntPtr l){ string t=Title(h); if(t!=null && rx.IsMatch(t)) list.Add((IsWindowVisible(h)?"V:":"H:")+t); return true; }, IntPtr.Zero);',
   ' return string.Join(" | ", list.ToArray()); }',
   '}'
 ].join(' ');
 
+// ---- Mở bảng xanh: (1) đang HIỆN SẴN -> chỉ đưa lên trước; (2) đang ẩn -> bấm chuột THẬT vào icon xanh ở khay để chính chương trình tự hiện bảng ----
+// Icon nằm trong hộp "biểu tượng ẩn" nên: mở hộp bằng Win+B rồi Enter (CHỈ nhấn Enter khi tiêu điểm đang ở tiến trình explorer = thanh tác vụ), quét cửa sổ của explorer tìm nút
+// có tên dạng "O Deus ASIO Link Pro 2.4.2.0 - Studio Pro.exe" (KHÔNG khớp icon Tool tím), bấm chuột thật vào giữa nút, trả con trỏ về chỗ cũ.
 const TRAY_PS = [
   "$ErrorActionPreference='Stop'",
   "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8",
   "try {",
   "Add-Type -TypeDefinition '" + AMWIN_CS + "'",
-  // CÁCH 1 (chắc nhất): tìm thẳng cửa sổ bảng xanh "O Deus ASIO Link Pro 2.4.2.0 - Studio Pro.exe" (ẩn xuống khay vẫn là cửa sổ đang tồn tại) -> bắt hiện + đưa lên trước
-  "$w=[AmWin]::Show('ASIO\\s*Link\\s*Pro\\s+\\d+(\\.\\d+){2,}\\s*-\\s*\\S.*\\.exe')",
-  "if($w -and -not $w.StartsWith('SMALL:')){ 'OK:window:'+$w; exit 0 }",
-  // CÁCH 2 (dự phòng): bấm icon ở khay bằng UI Automation
   "Add-Type -AssemblyName UIAutomationClient; Add-Type -AssemblyName UIAutomationTypes",
-  "Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class AmTrayClick{[DllImport(\"user32.dll\")]public static extern bool SetCursorPos(int x,int y);[DllImport(\"user32.dll\")]public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);}'",
-  "$AE=[System.Windows.Automation.AutomationElement]; $TS=[System.Windows.Automation.TreeScope]",
-  "$pat='ASIO\\s*Link'; $want='\\d+(\\.\\d+){2,}\\s*-\\s*\\S.*\\.exe'", // CHỈ icon bảng xanh: tooltip dạng "O Deus ASIO Link Pro 2.4.2.0 - Studio Pro.exe" (KHÔNG bấm icon Tool màu tím)
-  "$btn=New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty,[System.Windows.Automation.ControlType]::Button); $all=[System.Windows.Automation.Condition]::TrueCondition",
-  "function Get-Tops { $AE::RootElement.FindAll($TS::Children,[System.Windows.Automation.Condition]::TrueCondition) | Where-Object { @('Shell_TrayWnd','Shell_SecondaryTrayWnd','NotifyIconOverflowWindow','TopLevelWindow','XamlExplorerHostIslandWindow','Windows.UI.Core.CoreWindow') -contains $_.Current.ClassName } }",
+  "$AE=[System.Windows.Automation.AutomationElement]; $TS=[System.Windows.Automation.TreeScope]; $all=[System.Windows.Automation.Condition]::TrueCondition",
+  "$pat='ASIO\\s*Link'; $want='\\d+(\\.\\d+){2,}\\s*-\\s*\\S.*\\.exe'; $reWin='ASIO\\s*Link\\s*Pro\\s+\\d+(\\.\\d+){2,}\\s*-\\s*\\S.*\\.exe'",
+  "$p=[AmWin]::Probe($reWin)",
+  "if($p){ $f=$p.Split('|'); $rc=$f[3].Split(','); if($f[1] -eq 'hien' -and $f[2] -eq 'khongthunho' -and (([int]$rc[2]-[int]$rc[0]) -ge 200) -and (([int]$rc[3]-[int]$rc[1]) -ge 100)){ [AmWin]::Front($reWin); 'OK:window:'+$p; exit 0 } }",
+  "$exp=@(Get-Process explorer -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })",
+  "function Get-Tops { $AE::RootElement.FindAll($TS::Children,$all) | Where-Object { ($exp -contains $_.Current.ProcessId) -and (@('Progman','WorkerW','CabinetWClass') -notcontains $_.Current.ClassName) } }",
   "function Find-Icon { foreach($t in @(Get-Tops)){ foreach($b in $t.FindAll($TS::Descendants,$all)){ $nm=$b.Current.Name; if(($nm -match $pat) -and ($nm -match $want)){ return $b } } }; return $null }",
-  "$el=Find-Icon",
-  "if(-not $el){ foreach($t in Get-Tops){ foreach($b in $t.FindAll($TS::Descendants,$all)){ if($b.Current.Name -match 'hidden icons|biểu tượng ẩn|Notification Chevron|overflow|Show hidden'){ try{ $b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }catch{}; Start-Sleep -Milliseconds 700; $el=Find-Icon; break } }; if($el){ break } } }",
-  "if(-not $el){ $tops=@(Get-Tops); $names=@(); $cnt=0; foreach($t in $tops){ foreach($b in $t.FindAll($TS::Descendants,$all)){ $cnt++; if($b.Current.Name){ $names+=$b.Current.Name } } }; $cls=(@($AE::RootElement.FindAll($TS::Children,$all) | ForEach-Object { $_.Current.ClassName } | Where-Object { $_ } | Select-Object -Unique | Select-Object -First 25) -join ','); 'NOTFOUND:'+$(if($w){'[cửa sổ trùng tên nhưng quá nhỏ/không phải bảng: '+$w+'] '})+'[cửa sổ có chữ ASIO/O Deus: '+[AmWin]::Titles('ASIO|O Deus|Link Pro')+'] [cửa sổ khay='+$tops.Count+', phần tử='+$cnt+'] [lớp cửa sổ gốc: '+$cls+'] '+((($names | Select-Object -Unique | Select-Object -First 30)) -join ' | '); exit 0 }",
-  "$n=$el.Current.Name",
+  "$el=Find-Icon; $fp=0; $opened=$false",
+  "if(-not $el){ [AmWin]::Key(0x5B,$false); [AmWin]::Key(0x42,$false); [AmWin]::Key(0x42,$true); [AmWin]::Key(0x5B,$true); Start-Sleep -Milliseconds 500; try{ $fp=$AE::FocusedElement.Current.ProcessId }catch{}; if($exp -contains $fp){ [AmWin]::Key(0x0D,$false); [AmWin]::Key(0x0D,$true); $opened=$true; Start-Sleep -Milliseconds 900; $el=Find-Icon } }",
+  "if(-not $el){ $tops=@(Get-Tops); $names=@(); $cnt=0; foreach($t in $tops){ foreach($b in $t.FindAll($TS::Descendants,$all)){ $cnt++; if($b.Current.Name){ $names+=$b.Current.Name } } }; 'NOTFOUND:[bảng: '+$(if($p){$p}else{'không có cửa sổ'})+'] [tiêu điểm sau Win+B thuộc explorer='+($exp -contains $fp)+', đã Enter='+$opened+'] [cửa sổ khay='+$tops.Count+', phần tử='+$cnt+'] '+((($names | Select-Object -Unique | Select-Object -First 30)) -join ' | '); exit 0 }",
+  "$n=$el.Current.Name; $r=$el.Current.BoundingRectangle",
+  "if((-not $r.IsEmpty) -and $r.Width -gt 0 -and $r.Height -gt 0 -and $r.X -gt -10000){ [AmWin]::Click([int]($r.X+$r.Width/2),[int]($r.Y+$r.Height/2)); 'OK:click:'+$n; exit 0 }",
   "try { $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); 'OK:invoke:'+$n; exit 0 } catch {}",
-  "$r=$el.Current.BoundingRectangle; $x=[int]($r.X+$r.Width/2); $y=[int]($r.Y+$r.Height/2)",
-  "[AmTrayClick]::SetCursorPos($x,$y) | Out-Null; [AmTrayClick]::mouse_event(2,0,0,0,[UIntPtr]::Zero); [AmTrayClick]::mouse_event(4,0,0,0,[UIntPtr]::Zero)",
-  "'OK:click:'+$n",
+  "'ERR:Thấy icon \"'+$n+'\" nhưng không bấm được'",
   "} catch { 'ERR:'+$_.Exception.Message }"
 ].join('\n');
 
@@ -167,7 +168,7 @@ function showPanel(deps) {
       const enc = Buffer.from(TRAY_PS, 'utf16le').toString('base64');
       ex('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc], { windowsHide: true, timeout: TRAY_TIMEOUT_MS }, (err, stdout) => {
         const r = parseTrayOutput(stdout);
-        if (r.ok) { resolve({ ok: true, found: true, how: r.how, message: r.how === 'window' ? 'Đã gửi lệnh hiện bảng ASIO Link Pro — chi tiết: ' + r.name + '. Nếu bảng vẫn không hiện, hãy chép dòng này gửi cho Claude C.' : 'Đã bấm icon "' + r.name + '" ở khay — bảng ASIO Link Pro sẽ hiện ra.' }); return; }
+        if (r.ok) { resolve({ ok: true, found: true, how: r.how, message: r.how === 'window' ? 'Bảng ASIO Link Pro đang hiện sẵn — đã đưa lên trước (' + r.name + ').' : 'Đã bấm icon "' + r.name + '" ở khay — bảng ASIO Link Pro sẽ hiện ra.' }); return; }
         if (err && !stdout) { resolve({ ok: false, found: false, reason: 'tray-error', message: 'Không chạy được PowerShell: ' + ((err && err.message) || err) }); return; }
         if (r.reason === 'tray-not-found') { resolve({ ok: false, found: false, reason: r.reason, message: 'Không thấy bảng ASIO Link Pro (bảng xanh) — bảng này chỉ có khi Studio One đang chạy.' + (r.detail ? ' Các nút thấy được: ' + r.detail : '') }); return; }
         resolve({ ok: false, found: false, reason: r.reason, message: 'Không bấm được icon ở khay' + (r.detail ? ': ' + r.detail : '.') });
