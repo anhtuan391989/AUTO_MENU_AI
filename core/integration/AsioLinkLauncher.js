@@ -247,10 +247,8 @@ async function pickDriver(name, deps) {
     if (!sh.ok) return { ok: false, reason: sh.reason || 'no-panel', message: sh.message };
     const sleep = (deps && deps.sleep) || ((ms) => new Promise((r) => setTimeout(r, ms)));
     await sleep((deps && deps.afterShowMs) != null ? deps.afterShowMs : 700);
-    const ex = (deps && deps.execFile) || childProcess.execFile;
-    const enc = Buffer.from(pickPs(name), 'utf16le').toString('base64');
     return await new Promise((resolve) => {
-      ex('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc], { windowsHide: true, timeout: PICK_TIMEOUT_MS }, (err, stdout) => {
+      runPs(pickPs(name), deps, PICK_TIMEOUT_MS, (err, stdout) => {
         if (err && !stdout) { resolve({ ok: false, reason: 'pick-error', message: 'Không chạy được PowerShell: ' + ((err && err.message) || err) }); return; }
         resolve(parsePickOutput(stdout));
       });
@@ -284,6 +282,21 @@ function listDrivers(deps) {
   })();
 }
 
+// Chạy script PowerShell bằng FILE TẠM (-File) thay vì -EncodedCommand: dòng lệnh Windows tối đa ~32.767 ký tự nên script dài bị lỗi "spawn ENAMETOOLONG".
+// File ghi UTF-8 có BOM để PowerShell 5 đọc đúng tiếng Việt; xoá ngay khi chạy xong. Không chạy qua shell.
+function runPs(script, deps, timeoutMs, cb) {
+  const ex = (deps && deps.execFile) || childProcess.execFile;
+  const fsm = (deps && deps.tmpFs) || nodeFs;
+  let f = null;
+  try {
+    f = nodePath.join(require('os').tmpdir(), 'amai_asio_' + process.pid + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.ps1');
+    fsm.writeFileSync(f, '﻿' + script, 'utf8');
+  } catch (e) { cb(e, ''); return; }
+  const done = (err, stdout) => { try { fsm.unlinkSync(f); } catch (e2) { /* bỏ qua */ } cb(err, stdout); };
+  try { ex('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', f], { windowsHide: true, timeout: timeoutMs }, done); }
+  catch (e3) { done(e3, ''); }
+}
+
 function parseTrayOutput(out) {
   const t = String(out || '').trim().split(/\r?\n/).filter(Boolean).pop() || '';
   if (/^OK:(window|invoke|click|msg):/.test(t)) return { ok: true, found: true, how: t.split(':')[1], name: t.slice(t.indexOf(':', 3) + 1) };
@@ -293,12 +306,10 @@ function parseTrayOutput(out) {
 }
 
 function showPanel(deps) {
-  const ex = (deps && deps.execFile) || childProcess.execFile;
   return new Promise((resolve) => {
     try {
       if (!isWin(deps)) { resolve({ ok: false, reason: 'not-windows', message: 'Chỉ chạy được trên Windows.' }); return; }
-      const enc = Buffer.from(TRAY_PS, 'utf16le').toString('base64');
-      ex('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc], { windowsHide: true, timeout: TRAY_TIMEOUT_MS }, (err, stdout) => {
+      runPs(TRAY_PS, deps, TRAY_TIMEOUT_MS, (err, stdout) => {
         const r = parseTrayOutput(stdout);
         if (r.ok) { resolve({ ok: true, found: true, how: r.how, message: r.how === 'window' ? 'Bảng ASIO Link Pro đang hiện sẵn — đã đưa lên trước (' + r.name + ').' : 'Đã bấm icon "' + r.name + '" ở khay — bảng ASIO Link Pro sẽ hiện ra.' }); return; }
         if (err && !stdout) { resolve({ ok: false, found: false, reason: 'tray-error', message: 'Không chạy được PowerShell: ' + ((err && err.message) || err) }); return; }
@@ -343,4 +354,4 @@ async function restart(p, deps) {
   } catch (e) { return { ok: false, reason: 'error', message: String((e && e.message) || e) }; }
 }
 
-module.exports = { validate, open, restart, killByName, showPanel, pollShow, parseTrayOutput, pickDriver, listDrivers, parseRegDrivers, pickPs, parsePickOutput, safeDriverName, DEFAULT_DRIVER, TRAY_PS, PROTECTED };
+module.exports = { runPs, validate, open, restart, killByName, showPanel, pollShow, parseTrayOutput, pickDriver, listDrivers, parseRegDrivers, pickPs, parsePickOutput, safeDriverName, DEFAULT_DRIVER, TRAY_PS, PROTECTED };

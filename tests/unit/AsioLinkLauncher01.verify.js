@@ -40,15 +40,16 @@ function deps(o) {
     o = o || {}; const log = []; let i = 0;
     const d = deps(o); d.pollMs = 0; d.pollTries = 3;
     d.execFile = (cmd, args, opt, cb) => {
-      log.push([cmd, args]);
+      let script = null; if (cmd === 'powershell.exe' && args.includes('-File')) { try { script = require('fs').readFileSync(args[args.indexOf('-File') + 1], 'utf8').replace(/^\uFEFF/, ''); } catch (e) { /* */ } }
+      log.push([cmd, args, script]);
       if (cmd === 'powershell.exe') { const out = psOutputs[Math.min(i++, psOutputs.length - 1)]; setImmediate(() => cb(null, out, '')); }
       else setImmediate(() => cb(o.killErr || null, '', ''));
     };
     d.tlog = log; return d;
   }
   let t = tdeps(['OK:invoke:ASIO Link Pro']); r = await L.showPanel(t);
-  ok(r.ok && t.tlog.length === 1 && t.tlog[0][0] === 'powershell.exe' && t.tlog[0][1].includes('-EncodedCommand') && t.tlog[0][1].includes('-NonInteractive'), 'Bấm icon khay: gọi PowerShell không qua shell, dùng -EncodedCommand');
-  const dec = Buffer.from(t.tlog[0][1][t.tlog[0][1].indexOf('-EncodedCommand') + 1], 'base64').toString('utf16le');
+  ok(r.ok && t.tlog.length === 1 && t.tlog[0][0] === 'powershell.exe' && t.tlog[0][1].includes('-File') && t.tlog[0][1].includes('-NonInteractive'), 'Bấm icon khay: gọi PowerShell không qua shell, chạy từ file tạm (-File), không bị giới hạn độ dài');
+  const dec = t.tlog[0][2];
   ok(dec === L.TRAY_PS && /Get-Process explorer/.test(dec) && /InvokePattern/.test(dec) && /\[AmWin\]::Click\(/.test(dec) && /ASIO\\s\*Link/.test(dec), 'Script giải mã đúng: quét cửa sổ của explorer (thanh tác vụ + hộp ẩn), bấm chuột thật rồi Invoke dự phòng');
   ok(L.parseTrayOutput('OK:click:ASIO Link Pro').how === 'click' && L.parseTrayOutput('NOTFOUND').reason === 'tray-not-found' && L.parseTrayOutput('ERR:boom').reason === 'tray-error' && L.parseTrayOutput('').reason === 'tray-unknown', 'Đọc kết quả PowerShell: OK / không thấy / lỗi / rỗng');
   t = tdeps(['NOTFOUND']); r = await L.showPanel(t); ok(!r.ok && r.reason === 'tray-not-found' && /Không thấy bảng ASIO Link Pro/.test(r.message), 'Không thấy bảng: báo rõ ràng');
@@ -99,6 +100,11 @@ function deps(o) {
   ok(/TrayMsg\(string re\)/.test(PS) && /Shell_TrayWnd/.test(PS) && /NotifyIconOverflowWindow/.test(PS) && /0x417/.test(PS) && /PostMessage\(\(IntPtr\)hw/.test(PS), 'TrayMsg: đọc icon khay (cả hộp ẩn) từ Explorer rồi gửi cú bấm trái thẳng tới chương trình');
   ok(PS.indexOf('$tm=[AmWin]::TrayMsg') > PS.indexOf('[AmWin]::Probe($reWin)') && PS.indexOf('$tm=[AmWin]::TrayMsg') < PS.indexOf('Get-Process explorer'), 'TrayMsg chạy sau Probe và TRƯỚC cách Win+B/UIA');
   ok(/'OK:msg:'/.test(PS) && L.parseTrayOutput('OK:msg:O Deus ASIO Link Pro 2.4.2.0 - Studio Pro.exe').ok === true, 'kết quả OK:msg được nhận');
+  // ---- ENAMETOOLONG: script dài phải chạy bằng file tạm ----
+  ok(L.TRAY_PS.length + 0 > 0 && Buffer.from(L.pickPs(''), 'utf16le').toString('base64').length > 20000, 'script đủ dài để -EncodedCommand dễ vượt 32.767 ký tự -> đã đổi sang -File');
+  { const tl = []; const fk = { writeFileSync: (f, c) => tl.push(['w', f, c.charCodeAt(0)]), unlinkSync: (f) => tl.push(['u', f]) };
+    await new Promise((res) => L.runPs('Write-Output 1', { tmpFs: fk, execFile: (c, a, o, cb) => { tl.push(['x', a.includes('-File') && !a.includes('-EncodedCommand')]); cb(null, 'ok'); } }, 1000, res));
+    ok(tl[0][0] === 'w' && tl[0][2] === 0xFEFF && tl[1][0] === 'x' && tl[1][1] === true && tl[2][0] === 'u' && tl[0][1] === tl[2][1] && /\.ps1$/.test(tl[0][1]), 'runPs: ghi file tạm UTF-8 có BOM -> chạy -File -> xoá file'); }
   // ---- ASIO-LINK-04: tự chọn driver ----
   const PP = L.pickPs('Focusrite USB');
   ok(/\$drv='Focusrite USB'/.test(PP) && /\$reWin='ASIO\\s\*Link\\s\*Pro\\s\+\\d\+/.test(PP), 'pickPs: nhúng tên driver + regex bảng (1 lớp backslash)');
@@ -109,7 +115,7 @@ function deps(o) {
   ok(/ClickAt\(\$reWin,754,\$y\)/.test(PP) && /Mark\(\$reWin,343,27\)/.test(PP), 'Pick driver + Enable multi-clients theo toạ độ tỉ lệ');
   ok(L.parsePickOutput('OK:xong').ok === true && L.parsePickOutput('ERR:hỏng').ok === false, 'parsePickOutput');
   const calls = [];
-  const dp = (stdout) => ({ platform: 'win32', sleep: () => Promise.resolve(), afterShowMs: 0, execFile: (f, a, o, cb) => { calls.push(a.join(' ')); const enc = a[a.length - 1]; const txt = Buffer.from(enc, 'base64').toString('utf16le'); cb(null, /\$tm=\[AmWin\]::TrayMsg/.test(txt) ? 'OK:window:x' : stdout); } });
+  const dp = (stdout) => ({ platform: 'win32', sleep: () => Promise.resolve(), afterShowMs: 0, execFile: (f, a, o, cb) => { calls.push(a.join(' ')); const txt = require('fs').readFileSync(a[a.indexOf('-File') + 1], 'utf8'); cb(null, /\$tm=\[AmWin\]::TrayMsg/.test(txt) ? 'OK:window:x' : stdout); } });
   let pr = await L.pickDriver('Focusrite USB', dp('OK:Đã chọn driver "Focusrite USB" và bấm OK.'));
   ok(pr.ok === true && calls.length === 2, 'pickDriver: mở bảng (1 lần PowerShell) rồi chọn driver (1 lần)');
   pr = await L.pickDriver('Focusrite USB', dp('ERR:Không chọn được driver'));
