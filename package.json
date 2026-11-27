@@ -4,8 +4,9 @@
   "main": "app/main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis --publish never",
-    "release": "electron-builder --win nsis --publish always"
+    "dist": "node tools/build-protected.js",
+    "release": "node tools/build-protected.js --release",
+    "dist:raw": "electron-builder --win nsis --publish never"
   },
   "dependencies": {
     "boolean": "^3.2.0",
@@ -74,7 +75,8 @@
   },
   "devDependencies": {
     "electron": "^41.7.1",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "javascript-obfuscator": "4.1.1"
   },
   "keywords": [],
   "author": "",

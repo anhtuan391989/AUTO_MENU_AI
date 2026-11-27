@@ -3,8 +3,10 @@
 //
 // An toàn: mọi phản hồi "được dùng" của server đều được ký Ed25519; app chỉ giữ KHOÁ CÔNG KHAI (app/license-public-key.txt),
 // nên sửa file license đã lưu hay giả lập server đều không tạo được license hợp lệ. Thiếu khoá công khai => KHOÁ app (fail-closed).
-// Mất mạng: dùng tiếp tối đa 72 giờ kể từ lần kiểm tra server thành công cuối. Lùi đồng hồ Windows bị phát hiện => bắt buộc kiểm tra lại online.
-// Giới hạn đã biết: app chạy từ mã nguồn nên người có kỹ thuật vẫn có thể sửa code bỏ đoạn kiểm tra (xem báo cáo).
+// Mất mạng: dùng tiếp tối đa 72 giờ kể từ lần kiểm tra server thành công cuối. Lùi đồng hồ Windows bị phát hiện => bắt buộc kiểm tra lại online —
+// kể cả khi lùi giờ lúc app đang TẮT (LICENSE-02: đối chiếu với "thời gian máy đã bật" os.uptime, không bị đồng hồ hệ thống ảnh hưởng).
+// Giới hạn đã biết: app chạy từ mã nguồn nên người có kỹ thuật vẫn có thể sửa code bỏ đoạn kiểm tra (xem báo cáo). Lùi giờ cũng không chặn được
+// 100% nếu máy đó vĩnh viễn không có mạng (vì có chủ đích cho dùng offline tạm thời) — xem RA-SOAT-COT-LOI-REPORT.md.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -55,6 +57,9 @@ function createLicenseManager(opts) {
     const userDataDir = opts.userDataDir;
     const appDir = opts.appDir || __dirname;
     const now = opts.now || Date.now;
+    // LICENSE-02 — "giờ máy đã bật liên tục" (os.uptime, mili-giây): KHÔNG đổi khi người dùng chỉnh lại đồng hồ hệ thống,
+    // chỉ reset về gần 0 khi máy khởi động lại thật. Dùng để phát hiện lùi đồng hồ ngay cả khi app đang TẮT (xem evaluate()).
+    const uptimeMs = opts.uptimeMs || (() => os.uptime() * 1000);
     const fetchFn = opts.fetchFn || ((u, o) => fetch(u, o));
     const run = opts.exec || realExec;
     const platform = opts.platform || process.platform;
@@ -120,7 +125,12 @@ function createLicenseManager(opts) {
         try {
             const j = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
             if (j && j.v === 1 && typeof j.key === 'string' && typeof j.payload === 'string' && typeof j.sig === 'string') {
-                cache = { v: 1, key: j.key, payload: j.payload, sig: j.sig, lastOkLocal: Number(j.lastOkLocal) || 0, maxLocal: Number(j.maxLocal) || 0 };
+                cache = {
+                    v: 1, key: j.key, payload: j.payload, sig: j.sig,
+                    lastOkLocal: Number(j.lastOkLocal) || 0, maxLocal: Number(j.maxLocal) || 0,
+                    // file license.json cũ (trước LICENSE-02) chưa có trường này => null, bỏ qua kiểm tra uptime 1 lần rồi tự có lại ở lần bump kế tiếp.
+                    maxLocalUptime: (typeof j.maxLocalUptime === 'number' && j.maxLocalUptime >= 0) ? j.maxLocalUptime : null,
+                };
             }
         } catch (_) { /* chưa có hoặc hỏng => coi như chưa kích hoạt */ }
     }
@@ -160,6 +170,19 @@ function createLicenseManager(opts) {
         const info = { plan: p.plan, planLabel: PLAN_LABEL[p.plan] || String(p.plan), activatedAt: p.activatedAt || null, expiresAt: p.expiresAt, keyHint: cache.key.slice(-4), lastCheckAt: cache.lastOkLocal || null };
         if (t >= p.expiresAt) return out(false, 'EXPIRED', 'License đã hết hạn ngày ' + fmtDate(p.expiresAt) + '. Hãy nhập key mới.', info);
         if (t < (cache.maxLocal || 0) - CLOCK_SKEW_MS) return out(false, 'NEED_ONLINE', 'Đồng hồ máy bị lùi so với lần dùng trước. Cần kết nối mạng để xác minh lại license.', info);
+        // LICENSE-02 — bắt lùi giờ ngay cả khi app đang TẮT lúc bị chỉnh (lần mở lại trông vẫn "sau" maxLocal cũ nên qua được dòng trên):
+        // so quãng thời gian đồng hồ hệ thống nói là đã trôi qua (t - maxLocal) với quãng thời gian máy THẬT SỰ đã bật (uptime).
+        // Máy không khởi động lại (uptime hiện tại >= uptime đã lưu) mà đồng hồ nói trôi qua ÍT HƠN hẳn uptime thật => đồng hồ đã bị chỉnh lùi lúc app tắt.
+        if (cache.maxLocalUptime != null) {
+            const upt = uptimeMs();
+            if (upt >= cache.maxLocalUptime) {
+                const elapsedUptime = upt - cache.maxLocalUptime;
+                const elapsedClaimed = t - cache.maxLocal;
+                if (elapsedClaimed < elapsedUptime - CLOCK_SKEW_MS) {
+                    return out(false, 'NEED_ONLINE', 'Đồng hồ máy có dấu hiệu bị chỉnh trong lúc tắt app. Cần kết nối mạng để xác minh lại license.', info);
+                }
+            }
+        }
         if (t - (cache.lastOkLocal || 0) > GRACE_MS) return out(false, 'NEED_ONLINE', 'Đã quá 72 giờ chưa xác minh được license với server. Hãy kết nối mạng rồi bấm kiểm tra lại.', info);
         const graceLeftMs = Math.max(0, GRACE_MS - (t - cache.lastOkLocal));
         if (p.plan === 'life') return out(true, 'LICENSED', 'Đã kích hoạt — gói Vĩnh viễn (không hết hạn).', Object.assign(info, { expiresAt: null, daysLeft: null, graceLeftHours: Math.floor(graceLeftMs / 3600000) }));
@@ -202,7 +225,7 @@ function createLicenseManager(opts) {
         const p = verifySigned(res.payload, res.sig);
         if (!p || p.machine !== machine.replace(/-/g, '')) return { ok: false, reason: 'BAD_SIGNATURE', message: 'Phản hồi server không hợp lệ (khoá công khai trong app không khớp khoá của server).' };
         const t = now();
-        cache = { v: 1, key, payload: res.payload, sig: res.sig, lastOkLocal: t, maxLocal: t };
+        cache = { v: 1, key, payload: res.payload, sig: res.sig, lastOkLocal: t, maxLocal: t, maxLocalUptime: uptimeMs() };
         denied = null;
         saveCache();
         return { ok: true, status: getStatus() };
@@ -221,7 +244,7 @@ function createLicenseManager(opts) {
                 const p = verifySigned(res.payload, res.sig);
                 if (!p || p.machine !== machine.replace(/-/g, '')) return { ok: false, reason: 'BAD_SIGNATURE', message: 'Phản hồi server không hợp lệ.' };
                 const t = now();
-                cache.payload = res.payload; cache.sig = res.sig; cache.lastOkLocal = t; cache.maxLocal = t; // server xác nhận => lấy mốc thời gian mới (đồng hồ đã chỉnh lại cũng hợp lệ)
+                cache.payload = res.payload; cache.sig = res.sig; cache.lastOkLocal = t; cache.maxLocal = t; cache.maxLocalUptime = uptimeMs(); // server xác nhận => lấy mốc thời gian mới (đồng hồ đã chỉnh lại cũng hợp lệ)
                 denied = null;
                 saveCache();
                 return { ok: true };
@@ -238,7 +261,7 @@ function createLicenseManager(opts) {
     }
 
     function bumpMaxLocal(t) {
-        if (cache && t > (cache.maxLocal || 0)) { cache.maxLocal = t; saveCache(); }
+        if (cache && t > (cache.maxLocal || 0)) { cache.maxLocal = t; cache.maxLocalUptime = uptimeMs(); saveCache(); }
     }
 
     async function init() {

@@ -6,6 +6,7 @@ Làm trên máy Windows có thư mục `G:\AUTO_MENU_AI`. Máy build cần Node.
 
 1. Mở CMD trong `G:\AUTO_MENU_AI`, chạy: `npm install` (chỉ cần lần đầu, hoặc khi có thư viện mới).
 2. Chạy: `npm run dist`
+   (Lệnh này tự làm 2 việc: **làm rối code** (để người khác không đọc được mã nguồn thật nếu giải nén file cài), rồi mới đóng gói .exe — không cần làm thêm bước nào, mã nguồn thật trong `G:\AUTO_MENU_AI` không hề bị đổi.)
 3. Lấy file `dist\AutoMenuAI Setup <version>.exe` (khoảng 145 MB) gửi cho máy khác, bấm đúp để cài.
    - Windows có thể hiện cảnh báo SmartScreen (vì chưa ký số): bấm **Thông tin thêm → Vẫn chạy**.
    - Máy mới vẫn cần: loopMIDI, DAW, và AutoHotkey v2 nếu dùng tính năng Lấy tọa độ.
@@ -27,6 +28,7 @@ Cách tự động (thay cho bước 3): đặt biến `GH_TOKEN` (Personal Acce
 
 - Bản cài chạy bằng `app.isPackaged`; cập nhật qua `electron-updater` + GitHub Releases (`app/InstalledUpdater.js`). Máy dev chạy `npm start` vẫn cập nhật bằng `git pull` như cũ.
 - Bản cài lưu dữ liệu ghi được (`logs`, `data/songs.json`) ở `%APPDATA%\automenu-ai\` nên cài đè bản mới không mất dữ liệu. Lần chạy đầu `songs.json` được lấy từ bản mẫu đi kèm.
-- `asar` tắt vì AutoHotkey/PowerShell cần đọc file script thật (`ahk\*.ahk`, `core\integration\smtc-daemon.ps1`).
+- `asar` đang BẬT (code được đóng gói/nén lại, không để trần); chỉ vài file đặc biệt (AutoHotkey, PowerShell) được để riêng ngoài gói nén vì cần đọc trực tiếp từ đĩa (`ahk\*.ahk`, `core\integration\smtc-daemon.ps1`).
+- `npm run dist` / `npm run release` giờ chạy qua `tools/build-protected.js`: chép dự án sang thư mục tạm, làm rối code trong bản chép đó rồi mới build — mã nguồn thật không hề bị sửa. Nếu chỉ cần build nhanh để tự kiểm tra lỗi (không phát hành), có thể dùng `npm run dist:raw` (build thẳng, KHÔNG làm rối — không dùng bản này để phát hành).
 - Thư viện MIDI (`easymidi`) dùng bản N-API dựng sẵn cho Windows x64 nên không cần Visual Studio/Python để build.
 - Thư mục `dist/` đã nằm trong `.gitignore` để `sync.bat` (`git add .`) không đẩy file cài lên GitHub.
